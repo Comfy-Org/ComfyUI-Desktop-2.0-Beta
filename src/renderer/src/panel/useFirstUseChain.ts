@@ -4,6 +4,7 @@ import { useProgressStore } from '../stores/progressStore'
 import { useLauncherPrefs } from '../composables/useLauncherPrefs'
 import { useMigrateAction } from '../composables/useMigrateAction'
 import { useOverlay } from '../composables/useOverlay'
+import { emitTelemetryAction } from '../lib/telemetry'
 import type { FieldOption, Installation, ShowProgressOpts, Source } from '../types/ipc'
 import type { ChooserLaunchOutcome } from './useChooserHandoff'
 import type { FirstUseChainHooks, PanelKey } from './usePanelOverlays'
@@ -23,7 +24,7 @@ export interface FirstUseChainOpts {
    *  watcher both reuse the chooser's launch pipeline. */
   performChooserLaunch: (
     installation: Installation,
-    onMissingLaunchAction?: () => void,
+    onMissingLaunchAction?: () => void
   ) => Promise<ChooserLaunchOutcome>
   /** Re-opens the FirstUseTakeover from the Configure → Back chain.
    *  Owned by usePanelOverlays. Pass `{ initialStep: 'localBranch' }`
@@ -48,9 +49,10 @@ export interface FirstUseChainApi {
    *  asked for an Express install (skip the Configure screen and run
    *  Standalone + recommended defaults straight through to the
    *  install-progress takeover). */
-  handleFirstUseChainLocal: (
-    payload?: { cameFromLocalBranch?: boolean; express?: boolean }
-  ) => Promise<void>
+  handleFirstUseChainLocal: (payload?: {
+    cameFromLocalBranch?: boolean
+    express?: boolean
+  }) => Promise<void>
   /** FirstUseTakeover `chain-migrate` emit. */
   handleFirstUseChainMigrate: () => Promise<void>
   /** InstallWizardModal `close` / `navigate-list` emit when mounted as a
@@ -174,7 +176,7 @@ export function useFirstUseChain(opts: FirstUseChainOpts): FirstUseChainApi {
         pendingChainedLaunch.value = false
         showOpts.chainSpan = 'launch'
       }
-    },
+    }
   }
 
   /** Shared completion helper. The Cloud-branch pick
@@ -267,9 +269,10 @@ export function useFirstUseChain(opts: FirstUseChainOpts): FirstUseChainApi {
    *  Configure pre-selects). If any step fails, fall back to opening
    *  Configure so the user sees the actual error rather than a silent
    *  dead end. */
-  async function handleFirstUseChainLocal(
-    payload?: { cameFromLocalBranch?: boolean; express?: boolean },
-  ): Promise<void> {
+  async function handleFirstUseChainLocal(payload?: {
+    cameFromLocalBranch?: boolean
+    express?: boolean
+  }): Promise<void> {
     chainingFirstUseToNewInstall.value = true
     pendingFirstUseAutoLaunchId.value = null
     pendingCameFromLocalBranch.value = payload?.cameFromLocalBranch === true
@@ -299,20 +302,30 @@ export function useFirstUseChain(opts: FirstUseChainOpts): FirstUseChainApi {
    *  knows the chain handoff is complete; `false` if any precondition
    *  failed and the caller should fall back to opening Configure. */
   async function runExpressInstall(): Promise<boolean> {
+    // Express vs Configure is the key onboarding-funnel split: express
+    // skips the Configure screen and installs with recommended defaults.
+    // The standalone install pipeline still fires its own
+    // install.standalone.* funnel events; `express.started` marks WHICH
+    // path the user took, and `express.fallback {reason}` records when
+    // express bailed to Configure (so the funnel can separate
+    // "express succeeded" from "express attempted but fell back").
+    emitTelemetryAction('desktop2.install.express.started', {})
     try {
       const hardware = await window.api.validateHardware()
       if (!hardware.supported) {
         console.warn('[firstUseChain] express: hardware unsupported', hardware)
+        emitTelemetryAction('desktop2.install.express.fallback', { reason: 'unsupported_hardware' })
         return false
       }
 
       const [installDir, sources] = await Promise.all([
         window.api.getDefaultInstallDir().catch(() => ''),
-        window.api.getSources(),
+        window.api.getSources()
       ])
       const standalone = sources.find((s: Source) => s.id === 'standalone')
       if (!standalone) {
         console.warn('[firstUseChain] express: standalone source missing', { sources })
+        emitTelemetryAction('desktop2.install.express.fallback', { reason: 'precondition_failed' })
         return false
       }
 
@@ -328,14 +341,22 @@ export function useFirstUseChain(opts: FirstUseChainOpts): FirstUseChainApi {
           standalone.id,
           field.id,
           selections,
-          field.id === 'release' ? { includeLatestStable: true } : undefined,
+          field.id === 'release' ? { includeLatestStable: true } : undefined
         )
         if (!options || options.length === 0) {
           console.warn('[firstUseChain] express: no options for field', field.id)
+          emitTelemetryAction('desktop2.install.express.fallback', {
+            reason: 'precondition_failed'
+          })
           return false
         }
         const pick = options.find((o) => o.recommended) ?? options[0]
-        if (!pick) return false
+        if (!pick) {
+          emitTelemetryAction('desktop2.install.express.fallback', {
+            reason: 'precondition_failed'
+          })
+          return false
+        }
         selections[field.id] = pick
       }
 
@@ -346,10 +367,11 @@ export function useFirstUseChain(opts: FirstUseChainOpts): FirstUseChainApi {
       const result = await window.api.addInstallation({
         name,
         installPath,
-        ...instData,
+        ...instData
       })
       if (!result.ok || !result.entry) {
         console.warn('[firstUseChain] express: addInstallation failed', result)
+        emitTelemetryAction('desktop2.install.express.fallback', { reason: 'precondition_failed' })
         return false
       }
 
@@ -362,7 +384,7 @@ export function useFirstUseChain(opts: FirstUseChainOpts): FirstUseChainApi {
         title: `Installing — ${name}`,
         apiCall: () => window.api.installInstance(result.entry!.id),
         autoLaunchOnFinish: true,
-        opKind: 'install',
+        opKind: 'install'
       })
       // `handleShowProgress` swaps the first-use takeover for the
       // install-progress takeover. Push `'post-consent'` so the file-menu
@@ -371,6 +393,7 @@ export function useFirstUseChain(opts: FirstUseChainOpts): FirstUseChainApi {
       return true
     } catch (err) {
       console.warn('[firstUseChain] express install failed; falling back to Configure', err)
+      emitTelemetryAction('desktop2.install.express.fallback', { reason: 'error' })
       chainingFirstUseToNewInstall.value = false
       pendingFirstUseAutoLaunchId.value = null
       return false
@@ -434,7 +457,7 @@ export function useFirstUseChain(opts: FirstUseChainOpts): FirstUseChainApi {
       installationId: legacy.id,
       title: `Migrating — ${legacy.name}`,
       apiCall: () => window.api.runAction(legacy!.id, 'migrate-to-standalone', result),
-      cancellable: true,
+      cancellable: true
     })
     // dismissTakeoverDirect pushed `'none'` as it cleared the first-use
     // overlay; re-assert `'post-consent'` so the file-menu builder
@@ -467,8 +490,8 @@ export function useFirstUseChain(opts: FirstUseChainOpts): FirstUseChainApi {
     // skipInstall branch — and dismissing then would clear an unrelated
     // overlay if anything else has claimed the slot in between.
     if (
-      currentOverlay.value?.kind === 'takeover'
-      && currentOverlay.value.component === 'new-install'
+      currentOverlay.value?.kind === 'takeover' &&
+      currentOverlay.value.component === 'new-install'
     ) {
       opts.dismissTakeoverDirect()
     }
@@ -524,12 +547,17 @@ export function useFirstUseChain(opts: FirstUseChainOpts): FirstUseChainApi {
         try {
           await installationStore.fetchInstallations()
         } catch {}
-        inst = installationStore.installations.find(
-          (i) => (i as unknown as { copiedFrom?: string }).copiedFrom === id,
-        ) ?? installationStore.installations
-          .filter((i) => i.sourceCategory === 'local')
-          .sort((a, b) => Date.parse(String(b.createdAt ?? '')) - Date.parse(String(a.createdAt ?? '')))[0]
-          ?? null
+        inst =
+          installationStore.installations.find(
+            (i) => (i as unknown as { copiedFrom?: string }).copiedFrom === id
+          ) ??
+          installationStore.installations
+            .filter((i) => i.sourceCategory === 'local')
+            .sort(
+              (a, b) =>
+                Date.parse(String(b.createdAt ?? '')) - Date.parse(String(a.createdAt ?? ''))
+            )[0] ??
+          null
       }
       if (inst) {
         // Mark the upcoming `show-progress` as the launch leg of the
@@ -543,7 +571,7 @@ export function useFirstUseChain(opts: FirstUseChainOpts): FirstUseChainApi {
         })
       }
     },
-    { deep: false },
+    { deep: false }
   )
 
   // File-menu Skip Onboarding entry — main forwards the click here.
@@ -568,6 +596,6 @@ export function useFirstUseChain(opts: FirstUseChainOpts): FirstUseChainApi {
     handleFirstUseChainLocal,
     handleFirstUseChainMigrate,
     handleNewInstallTakeoverClose,
-    handleNewInstallBackToLocalBranch,
+    handleNewInstallBackToLocalBranch
   }
 }

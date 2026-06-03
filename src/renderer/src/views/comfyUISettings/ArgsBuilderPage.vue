@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useDebounceFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { AlertCircle, ArrowLeft, Loader2, Search, SearchX, X } from 'lucide-vue-next'
 import BaseInput from '../../components/ui/BaseInput.vue'
@@ -7,6 +8,7 @@ import BaseSelect, { type BaseSelectOption } from '../../components/ui/BaseSelec
 import ArgsRawInput from './ArgsRawInput.vue'
 import type { ComfyArgDef } from '../../types/ipc'
 import { parseArgs, serialize, tokenize } from '../../lib/argsParser'
+import { emitTelemetryAction } from '../../lib/telemetry'
 import { scoreName } from '../../utils/fuzzyMatch'
 
 /**
@@ -58,7 +60,7 @@ watch(
     // Keep our local mirror in sync when the parent commits a value
     // we didn't originate (rare — e.g. backend default normalization).
     if (next !== localValue.value) localValue.value = next
-  },
+  }
 )
 
 async function fetchSchema(): Promise<void> {
@@ -71,7 +73,10 @@ async function fetchSchema(): Promise<void> {
     } else if (result?.error) {
       loadError.value = result.error
     } else {
-      loadError.value = t('comfyUISettings.argsSchemaUnavailable', 'Argument schema unavailable for this install.')
+      loadError.value = t(
+        'comfyUISettings.argsSchemaUnavailable',
+        'Argument schema unavailable for this install.'
+      )
     }
   } catch (err) {
     loadError.value = err instanceof Error ? err.message : String(err)
@@ -80,7 +85,27 @@ async function fetchSchema(): Promise<void> {
   }
 }
 
+// ArgsBuilder usage telemetry. The previous one-coarse-settings.changed
+// event hid ArgsBuilder usage entirely; these make "did anyone edit
+// launch args" answerable, with per-arg detail.
+//
+// Debounced 500ms: text-input args (`--listen 0.0.0.0`, `--port 8188`)
+// otherwise emit one event per keystroke, which would make `args.changed`
+// the loudest event in the dataset for no analytical gain — we only care
+// that the user edited a given arg, not the per-character intermediate
+// states.
+const emitArgsChanged = useDebounceFn((argKey: string, valueKind: ComfyArgDef['type']) => {
+  emitTelemetryAction('desktop2.args.changed', {
+    installation_id: props.installationId,
+    arg_key: argKey,
+    value_kind: valueKind
+  })
+}, 500)
+
 onMounted(() => {
+  emitTelemetryAction('desktop2.args.builder.opened', {
+    installation_id: props.installationId
+  })
   void fetchSchema()
 })
 
@@ -122,6 +147,7 @@ function toggleBoolean(def: ComfyArgDef): void {
     next.set(def.name, '')
   }
   commit(next)
+  emitArgsChanged(def.name, def.type)
 }
 
 function toggleValue(def: ComfyArgDef): void {
@@ -139,12 +165,14 @@ function toggleValue(def: ComfyArgDef): void {
     next.set(def.name, '')
   }
   commit(next)
+  emitArgsChanged(def.name, def.type)
 }
 
 function setValue(def: ComfyArgDef, value: string): void {
   const next = new Map(parsed.value.known)
   next.set(def.name, value)
   commit(next)
+  emitArgsChanged(def.name, def.type)
 }
 
 function selectExclusive(group: string, name: string): void {
@@ -156,6 +184,8 @@ function selectExclusive(group: string, name: string): void {
   }
   next.set(name, '')
   commit(next)
+  const chosen = schema.value.find((a) => a.name === name)
+  if (chosen) emitArgsChanged(chosen.name, chosen.type)
 }
 
 // Clearing an exclusive group is the affordance the native-radio version
@@ -182,9 +212,9 @@ function optionsForGroup(args: ComfyArgDef[]): BaseSelectOption[] {
     {
       value: '',
       label: t('comfyUISettings.argsExclusiveNone', 'None (default)'),
-      description: t('comfyUISettings.argsExclusiveNoneHint', 'No flag from this group is set.'),
+      description: t('comfyUISettings.argsExclusiveNoneHint', 'No flag from this group is set.')
     },
-    ...args.map((a) => ({ value: a.name, label: `--${a.name}`, description: a.help })),
+    ...args.map((a) => ({ value: a.name, label: `--${a.name}`, description: a.help }))
   ]
 }
 
@@ -297,7 +327,7 @@ const structuredGroups = computed(() => {
         if (siblings.length > 1) {
           items.push({
             item: { kind: 'exclusive', group: arg.exclusiveGroup, args: siblings },
-            score: groupScore(arg.exclusiveGroup),
+            score: groupScore(arg.exclusiveGroup)
           })
           continue
         }
@@ -307,13 +337,15 @@ const structuredGroups = computed(() => {
     if (q) items.sort((a, b) => b.score - a.score)
     result.set(
       category,
-      items.map((i) => i.item),
+      items.map((i) => i.item)
     )
   }
   return result
 })
 
-const hasResults = computed(() => Array.from(structuredGroups.value.values()).some((items) => items.length > 0))
+const hasResults = computed(() =>
+  Array.from(structuredGroups.value.values()).some((items) => items.length > 0)
+)
 
 function onRawInput(value: string): void {
   localValue.value = value
@@ -368,7 +400,9 @@ const unknownFlagsMessage = computed(() => {
     </header>
 
     <div class="args-page-raw">
-      <label class="args-page-raw-label">{{ t('comfyUISettings.argsRawLabel', 'Raw arguments') }}</label>
+      <label class="args-page-raw-label">{{
+        t('comfyUISettings.argsRawLabel', 'Raw arguments')
+      }}</label>
       <ArgsRawInput
         :model-value="localValue"
         :schema="schema"
@@ -424,15 +458,15 @@ const unknownFlagsMessage = computed(() => {
     </div>
 
     <template v-else>
-    <section
-      v-for="[category, items] in structuredGroups"
-      :key="category"
-      class="args-page-category"
-    >
-      <header class="args-page-category-title">{{ category }}</header>
+      <section
+        v-for="[category, items] in structuredGroups"
+        :key="category"
+        class="args-page-category"
+      >
+        <header class="args-page-category-title">{{ category }}</header>
 
-      <div v-for="(item, idx) in items" :key="idx" class="args-page-item">
-        <!-- Exclusive cluster: a single select picker. Members render as
+        <div v-for="(item, idx) in items" :key="idx" class="args-page-item">
+          <!-- Exclusive cluster: a single select picker. Members render as
              options (label = `--flag`, description = help text) with a
              synthetic "None" entry as the first option so the group is
              clearable — the native-radio version this replaced had no
@@ -440,64 +474,67 @@ const unknownFlagsMessage = computed(() => {
              surrounding category heading + the "Choose one" label
              below supply the human-readable context the auto-assigned
              `group_N` ID can't. -->
-        <template v-if="item.kind === 'exclusive' && item.args && item.group">
-          <div class="args-page-row args-page-row-cluster-label">
-            <span class="args-page-cluster-label">
-              {{ t('comfyUISettings.argsExclusiveLabel', 'Choose one') }}
-            </span>
-          </div>
-          <!-- BaseSelect has two root nodes (trigger + Teleport) so
+          <template v-if="item.kind === 'exclusive' && item.args && item.group">
+            <div class="args-page-row args-page-row-cluster-label">
+              <span class="args-page-cluster-label">
+                {{ t('comfyUISettings.argsExclusiveLabel', 'Choose one') }}
+              </span>
+            </div>
+            <!-- BaseSelect has two root nodes (trigger + Teleport) so
                attributes don't auto-fall through. Wrap in a div to
                carry the layout class. -->
-          <div class="args-page-exclusive-select">
-            <BaseSelect
-              :model-value="activeInGroup(item.group)"
-              :options="optionsForGroup(item.args)"
-              :aria-label="t('comfyUISettings.argsExclusiveLabel', 'Choose one')"
-              :placeholder="t('comfyUISettings.argsExclusiveNone', 'None (default)')"
-              @update:model-value="(v) => onExclusiveChange(item.group!, v)"
-            />
-          </div>
-        </template>
-
-        <!-- Single arg row: leading switch + flag/help stack. The
-             optional value input renders below, indented under the
-             flag column so it reads as subordinate. -->
-        <template v-else-if="item.kind === 'arg' && item.arg">
-          <div class="args-page-arg-row">
-            <button
-              type="button"
-              role="switch"
-              class="args-page-switch"
-              :data-state="isActive(item.arg.name) ? 'checked' : 'unchecked'"
-              :aria-checked="isActive(item.arg.name)"
-              :aria-label="`--${item.arg.name}`"
-              @click="
-                item.arg.type === 'boolean'
-                  ? toggleBoolean(item.arg)
-                  : toggleValue(item.arg)
-              "
-            >
-              <span class="args-page-switch-thumb" aria-hidden="true"></span>
-            </button>
-            <div class="args-page-arg-body">
-              <span class="args-page-flag">--{{ item.arg.name }}</span>
-              <p class="args-page-help">{{ item.arg.help }}</p>
-              <BaseInput
-                v-if="
-                  isActive(item.arg.name) &&
-                  (item.arg.type === 'value' || item.arg.type === 'optional-value')
-                "
-                class="args-page-value-input"
-                :model-value="getValue(item.arg.name)"
-                :placeholder="item.arg.metavar ?? (item.arg.type === 'optional-value' ? t('comfyUISettings.argsOptionalPlaceholder', 'optional') : t('comfyUISettings.argsValuePlaceholder', 'value'))"
-                @change="(v) => setValue(item.arg!, v)"
+            <div class="args-page-exclusive-select">
+              <BaseSelect
+                :model-value="activeInGroup(item.group)"
+                :options="optionsForGroup(item.args)"
+                :aria-label="t('comfyUISettings.argsExclusiveLabel', 'Choose one')"
+                :placeholder="t('comfyUISettings.argsExclusiveNone', 'None (default)')"
+                @update:model-value="(v) => onExclusiveChange(item.group!, v)"
               />
             </div>
-          </div>
-        </template>
-      </div>
-    </section>
+          </template>
+
+          <!-- Single arg row: leading switch + flag/help stack. The
+             optional value input renders below, indented under the
+             flag column so it reads as subordinate. -->
+          <template v-else-if="item.kind === 'arg' && item.arg">
+            <div class="args-page-arg-row">
+              <button
+                type="button"
+                role="switch"
+                class="args-page-switch"
+                :data-state="isActive(item.arg.name) ? 'checked' : 'unchecked'"
+                :aria-checked="isActive(item.arg.name)"
+                :aria-label="`--${item.arg.name}`"
+                @click="
+                  item.arg.type === 'boolean' ? toggleBoolean(item.arg) : toggleValue(item.arg)
+                "
+              >
+                <span class="args-page-switch-thumb" aria-hidden="true"></span>
+              </button>
+              <div class="args-page-arg-body">
+                <span class="args-page-flag">--{{ item.arg.name }}</span>
+                <p class="args-page-help">{{ item.arg.help }}</p>
+                <BaseInput
+                  v-if="
+                    isActive(item.arg.name) &&
+                    (item.arg.type === 'value' || item.arg.type === 'optional-value')
+                  "
+                  class="args-page-value-input"
+                  :model-value="getValue(item.arg.name)"
+                  :placeholder="
+                    item.arg.metavar ??
+                    (item.arg.type === 'optional-value'
+                      ? t('comfyUISettings.argsOptionalPlaceholder', 'optional')
+                      : t('comfyUISettings.argsValuePlaceholder', 'value'))
+                  "
+                  @change="(v) => setValue(item.arg!, v)"
+                />
+              </div>
+            </div>
+          </template>
+        </div>
+      </section>
     </template>
   </div>
 </template>
@@ -629,7 +666,9 @@ const unknownFlagsMessage = computed(() => {
   color: var(--text-muted);
   border-radius: 4px;
   cursor: pointer;
-  transition: color 120ms ease, background-color 120ms ease;
+  transition:
+    color 120ms ease,
+    background-color 120ms ease;
 }
 
 .args-page-search-clear:hover {
@@ -870,7 +909,9 @@ const unknownFlagsMessage = computed(() => {
   border-radius: 50%;
   border: 1.5px solid color-mix(in srgb, var(--text-muted) 60%, transparent);
   background: transparent;
-  transition: border-color 150ms ease, background-color 150ms ease;
+  transition:
+    border-color 150ms ease,
+    background-color 150ms ease;
 }
 
 .args-page-radio-row.is-active .args-page-radio-indicator {

@@ -11,9 +11,11 @@ export interface TelemetryActionEventDetail {
 }
 
 export function emitTelemetryAction(actionName: string, context: TelemetryContext = {}): void {
-  window.dispatchEvent(new CustomEvent<TelemetryActionEventDetail>(TELEMETRY_ACTION_EVENT_NAME, {
-    detail: { actionName, context },
-  }))
+  window.dispatchEvent(
+    new CustomEvent<TelemetryActionEventDetail>(TELEMETRY_ACTION_EVENT_NAME, {
+      detail: { actionName, context }
+    })
+  )
 }
 
 export function toVariantBucket(variantId: string | undefined): string {
@@ -21,23 +23,9 @@ export function toVariantBucket(variantId: string | undefined): string {
   return variantId.replace(/^(win|mac|linux)-/, '')
 }
 
-export function toErrorBucket(error: unknown): string {
-  const message = (
-    error instanceof Error
-      ? error.message
-      : typeof error === 'string'
-        ? error
-        : ''
-  ).toLowerCase()
-  if (!message) return 'unknown'
-  if (message.includes('cancel')) return 'cancelled'
-  if (message.includes('timeout')) return 'timeout'
-  if (message.includes('network') || message.includes('fetch')) return 'network'
-  if (message.includes('disk') || message.includes('space')) return 'disk'
-  if (message.includes('permission') || message.includes('access')) return 'permissions'
-  if (message.includes('path')) return 'path'
-  return 'other'
-}
+// Re-exported from `src/shared/errorBucket.ts` so renderer and main classify
+// identically. Kept as `toErrorBucket` for the renderer's existing callers.
+export { bucketError as toErrorBucket } from '../../../shared/errorBucket'
 
 export function toCountBucket(count: number): string {
   if (count <= 0) return '0'
@@ -80,11 +68,53 @@ export function toModelDirectoryBucket(directory: string | undefined): string {
     'clip',
     'text_encoders',
     'unet',
-    'vae_approx',
+    'vae_approx'
   ])
   return known.has(leaf) ? leaf : 'other'
 }
 
 export function isTerminalModelDownloadStatus(status: ModelDownloadStatus): boolean {
   return status === 'completed' || status === 'error' || status === 'cancelled'
+}
+
+/**
+ * Coarse hardware tier classification for cohort filtering.
+ *
+ * The exact thresholds are deliberately heuristic — the raw `gpu_model`
+ * and `gpu_vram_gb`
+ * are also sent to PostHog, so finer slicing is always available. The
+ * tier exists so dashboards can rank "high-end vs low-end rigs" without
+ * re-deriving classification per query.
+ *
+ * Rules:
+ * - `apple` — vendor is Apple (M1 / M2 / M3 unified memory; perf curve
+ * differs from discrete cards enough to warrant a tier).
+ * - `high` — NVIDIA / AMD with VRAM ≥ 24 GB.
+ * - `mid` — NVIDIA / AMD with VRAM 12-23 GB.
+ * - `low` — NVIDIA / AMD with VRAM 6-11 GB.
+ * - `sub_low` — NVIDIA / AMD with VRAM < 6 GB, OR any non-NVIDIA-AMD
+ * discrete card (Intel Arc, etc. — most desktop ML
+ * workloads struggle on these).
+ * - `cpu_only` — no GPU vendor reported, or VRAM is zero / unknown.
+ */
+export type GpuTier = 'high' | 'mid' | 'low' | 'sub_low' | 'apple' | 'cpu_only'
+
+export function deriveGpuTier(opts: {
+  vendor: string | null | undefined
+  vramGb: number | null | undefined
+}): GpuTier {
+  const vendor = (opts.vendor ?? '').toLowerCase()
+  // Main reports `gpu_vendor: 'mps'` for Apple Silicon (via gpu.ts's
+  // canonical GpuId enum — see GPU_LABELS where 'mps' → "Apple Silicon").
+  // Also accept the literal 'apple' for any future code path that uses
+  // the vendor-name string directly instead of the canonical id.
+  if (vendor === 'apple' || vendor === 'mps') return 'apple'
+  const vram = opts.vramGb ?? 0
+  if (!vendor) return 'cpu_only'
+  if (vendor !== 'nvidia' && vendor !== 'amd') return 'sub_low'
+  if (vram <= 0) return 'cpu_only'
+  if (vram >= 24) return 'high'
+  if (vram >= 12) return 'mid'
+  if (vram >= 6) return 'low'
+  return 'sub_low'
 }

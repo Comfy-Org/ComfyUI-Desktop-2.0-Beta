@@ -139,6 +139,10 @@ export function useInstallContextMenu(opts: {
   function getMenuItems(inst: Installation): ContextMenuItem[] {
     const items: ContextMenuItem[] = []
     const stoppedActionGated = isStoppedActionGated(inst)
+    // Tooltip explaining why the REQUIRES_STOPPED items are greyed out
+    // (Update / Migrate / Restore / Copy / Uninstall need the instance
+    // stopped). Undefined when not gated so enabled items get no tooltip.
+    const gatedTitle = stoppedActionGated ? t('chooser.stoppedActionGatedReason') : undefined
 
     if (opts.onManage) {
       items.push({
@@ -147,13 +151,13 @@ export function useInstallContextMenu(opts: {
       })
 
       if (isInstalled(inst) && hasUpdateTag(inst)) {
-        items.push({ id: 'update', label: t('chooser.menuUpdate'), disabled: stoppedActionGated })
+        items.push({ id: 'update', label: t('chooser.menuUpdate'), disabled: stoppedActionGated, title: gatedTitle })
       }
       if (hasMigratePrompt(inst)) {
-        items.push({ id: 'migrate', label: t('chooser.menuMigrate'), disabled: stoppedActionGated })
+        items.push({ id: 'migrate', label: t('chooser.menuMigrate'), disabled: stoppedActionGated, title: gatedTitle })
       }
       if (isInstalled(inst) && hasInstallPath(inst) && isLocalLikeInstall(inst)) {
-        items.push({ id: 'restore-snapshot', label: t('chooser.menuRestoreSnapshot'), disabled: stoppedActionGated })
+        items.push({ id: 'restore-snapshot', label: t('chooser.menuRestoreSnapshot'), disabled: stoppedActionGated, title: gatedTitle })
       }
     }
 
@@ -180,6 +184,7 @@ export function useInstallContextMenu(opts: {
         id: 'copy-install',
         label: t('actions.copyInstallation'),
         disabled: stoppedActionGated,
+        title: gatedTitle,
       })
     }
 
@@ -199,6 +204,7 @@ export function useInstallContextMenu(opts: {
         id: 'delete',
         label: t('chooser.menuDelete'),
         disabled: stoppedActionGated,
+        title: gatedTitle,
         style: 'danger',
       })
     }
@@ -206,7 +212,7 @@ export function useInstallContextMenu(opts: {
     if (sessionStore.errorInstances.has(inst.id)) {
       items.push({
         id: 'dismiss-error',
-        label: t('running.dismiss'),
+        label: t('chooser.menuDismissError'),
         separator: items.length > 0,
       })
     }
@@ -272,7 +278,11 @@ export function useInstallContextMenu(opts: {
     if (id === 'manage') {
       opts.onManage?.(inst)
     } else if (id === 'update') {
-      opts.onManage?.(inst, { initialTab: 'update' })
+      // Match the title-bar install-update pill: open the picker on the
+      // Update tab AND auto-fire the update so the update modal runs,
+      // instead of just landing the user on the Update tab page. Same
+      // autoAction the deep-link / pill path uses (useDeepLinkRouter).
+      opts.onManage?.(inst, { initialTab: 'update', autoAction: 'update-comfyui' })
     } else if (id === 'migrate') {
       opts.onManage?.(inst, { autoAction: 'migrate-to-standalone' })
     } else if (id === 'restore-snapshot') {
@@ -336,10 +346,13 @@ export function useInstallContextMenu(opts: {
         const deleteLabel = t('actions.delete', 'Delete')
         const confirmed = await modal.confirm({
           title: t('actions.deleteConfirmTitle', 'Delete Install'),
-          message: `${t(
+          message: `${inst.installPath ? inst.installPath + '\n\n' : ''}${t(
             'actions.deleteConfirmMessage',
-            'This will permanently delete the install and all its files. This cannot be undone.',
-          )}\n${inst.installPath ?? ''}`,
+            'This permanently removes this ComfyUI installation and all its files. This cannot be undone.',
+          )}\n\n${t(
+            'actions.deleteConfirmDetail',
+            'Other installs are not affected.',
+          )}`,
           confirmLabel: deleteLabel,
           confirmStyle: 'danger',
         })

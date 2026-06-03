@@ -7,18 +7,13 @@
     "telemetryNotice": "Anonymous telemetry is collected to improve Comfy Desktop.",
     "telemetrySettings": "Manage in Settings",
     "migrateBannerTitle": "Migrate to Standalone",
-    "migrateBannerDesc": "Your Legacy Desktop installation was detected. Migrate to a Standalone install for better performance, easier updates, and full Comfy Desktop management.",
+    "migrateBannerDesc": "Your Legacy Desktop installation was detected. Migrate to a Standalone install for better performance, easier updates, and full Desktop 2.0 management.",
     "migrateBannerAction": "Migrate Now",
     "migrateBannerSkip": "New Install Without Migrating",
     "confirmStopLocal": {
       "title": "Return to Dashboard?",
-      "message": "ComfyUI for this installation will be stopped.",
-      "confirmLabel": "Stop & Return"
-    },
-    "confirmQuit": {
-      "title": "Quit Desktop?",
-      "message": "Comfy Desktop will close.",
-      "confirmLabel": "Quit"
+      "message": "This will stop the current ComfyUI.",
+      "confirmLabel": "Return to Dashboard"
     }
   },
 
@@ -53,7 +48,9 @@
     "menuMigrate": "Migrate to Standalone",
     "menuRestoreSnapshot": "Restore Snapshot",
     "menuRevealInFolder": "Open Folder",
-    "menuDelete": "Uninstall"
+    "menuDelete": "Uninstall",
+    "stoppedActionGatedReason": "Stop the running instance first.",
+    "menuDismissError": "Dismiss Error"
   },
 
   "titleBar": {
@@ -86,19 +83,15 @@
 
   "comfyLifecycle": {
     "preparingTitle": "Preparing…",
-    "stoppedTitle": "ComfyUI is not running",
-    "stoppedDesc": "Start ComfyUI to use this installation.",
     "launchingTitle": "Starting ComfyUI…",
-    "launchingDesc": "Waiting for the server to come online.",
     "stoppingTitle": "Stopping ComfyUI…",
-    "stoppingDesc": "Waiting for the process to shut down cleanly.",
     "crashedTitle": "ComfyUI exited unexpectedly",
     "crashedDesc": "The ComfyUI process exited. You can restart it below.",
     "crashedDescWithCode": "The ComfyUI process exited (exit code {code}). You can restart it below.",
-    "crashedDetailsToggle": "Show error log",
-    "start": "Start ComfyUI",
+    "crashedDescWithSignal": "The ComfyUI process was terminated by {signal}. You can restart it below.",
+    "crashedDescWithCodeAndSignal": "The ComfyUI process was terminated by {signal} (exit code {code}). You can restart it below.",
+    "crashedDescLogsHint": "See the logs for details.",
     "restart": "Restart ComfyUI",
-    "returnToDashboard": "Return to Dashboard",
     "launchProgressTitle": "Starting ComfyUI"
   },
 
@@ -254,7 +247,9 @@
     "next": "Next",
     "recommended": "Recommended",
     "latest": "Latest",
-    "changeInstallType": "Change Install Type"
+    "changeInstallType": "Change Install Type",
+    "nameWhitespace": "Enter a name, or leave blank to use the suggested one.",
+    "urlInvalid": "Enter a valid URL (e.g. http://localhost:8188)."
   },
 
   "diskSpace": {
@@ -296,6 +291,8 @@
     "switchTo": "Switch to {channel}",
     "switchChannelOnly": "Switch Channel",
     "switchChannelPrefix": "Switching channel from {from} to {to}.\n\n",
+    "movingTo": "Moving to {channel}.",
+    "switchingToTitle": "Switching to {channel}",
     "computingCommitsAhead": "Computing commits ahead…"
   },
 
@@ -371,7 +368,7 @@
     "onAppClose": "When app is closed",
     "closeTray": "Minimize to tray (keep instances running)",
     "closeQuit": "Stop all instances and quit",
-    "closeQuitTitle": "Quit Comfy Desktop",
+    "closeQuitTitle": "Quit Desktop 2.0",
     "closeQuitMessage": "The following are still active. Quitting will stop all of them.",
     "closeQuitConfirm": "Quit",
     "closeQuitSessions": "Running",
@@ -527,7 +524,7 @@
   },
 
   "tray": {
-    "showApp": "Show Comfy Desktop",
+    "showApp": "Show Desktop 2.0",
     "quit": "Quit"
   },
 
@@ -552,11 +549,15 @@
     "copyingFiles": "Copying files…",
     "delete": "Uninstall",
     "deleteConfirmTitle": "Uninstall",
-    "deleteConfirmMessage": "This will permanently uninstall ComfyUI and delete all its files. This cannot be undone.",
+    "deleteConfirmMessage": "This permanently removes this ComfyUI installation and all its files. This cannot be undone.",
+    "deleteConfirmDetail": "Other installs are not affected.",
     "untrack": "Forget",
     "untrackConfirmTitle": "Forget Install",
     "untrackConfirmMessage": "This will remove the install from the app. The files will not be deleted.",
-    "share": "Share"
+    "share": "Share",
+    "rename": "Rename",
+    "renameTitle": "Rename Install",
+    "renameMessage": "Enter a new name for this install."
   },
 
   "migrate": {
@@ -648,7 +649,19 @@
 
   "cloud": {
     "label": "Cloud",
-    "desc": "Connect to Comfy Cloud for remote GPU-powered workflows."
+    "desc": "Connect to Comfy Cloud for remote GPU-powered workflows.",
+    "signInBanner": {
+      "message": "We opened your browser to sign in. Didn’t open?",
+      "copy": "Copy link",
+      "copied": "Copied",
+      "openAgain": "Open again",
+      "dismiss": "Dismiss"
+    },
+    "capacityDegraded": "Heavy usage",
+    "capacityDegradedHint": "ComfyUI Cloud is under heavy load right now — you may see slower response times. Please try again later for the best experience.",
+    "capacityDisabled": "Temporarily unavailable",
+    "capacityDisabledHint": "ComfyUI Cloud is temporarily unavailable due to high demand. Please try again later.",
+    "capacityProceed": "Continue anyway"
   },
 
   "desktop": {
@@ -684,7 +697,7 @@
     "label": "Standalone",
     "desc": "Pre-built environment with managed Python and dependencies.",
     "comfyui": "ComfyUI",
-    "variant": "Environment Variant",
+    "variant": "Hardware",
     "python": "Python",
     "pythonEnvs": "Python Environments",
     "activeEnv": "Active: {env}",
@@ -859,6 +872,8 @@
     "copyUpdatedAs": "Copy & Updated as",
     "releaseUpdatedAs": "Release Updated as",
     "copyDeleted": "deleted",
+    "copyEventLabel": "Copied to {destination}",
+    "copyEventLabelIncoming": "Copied from {source}",
     "viewInstall": "View",
     "restorePreviewTitle": "Restore Preview — changes that will be applied:",
     "restoreNoChanges": "No changes needed — environment already matches this snapshot.",
@@ -927,9 +942,10 @@
     "waitingTime": "Waiting for ComfyUI to be ready… ({secs}s)",
     "portBusyUsing": "Port {old} is busy — using port {new} instead…",
     "instanceRunningTitle": "An instance is already running",
-    "instanceRunningMessage": "\"{name}\" is running. What would you like to do?",
-    "instanceRunningProceed": "Launch Anyway",
-    "instanceRunningReplace": "Close & Launch New",
+    "instanceRunningMessage": "Choosing \"Close & Launch\" will stop the instances listed below.",
+    "instanceRunningListLabel": "Will be stopped",
+    "instanceRunningProceed": "Run All",
+    "instanceRunningReplace": "Close & Launch",
     "modelFolderRelaunchTitle": "Restarting ComfyUI",
     "modelFolderRelaunchDesc": "New model folders were detected from custom nodes. Restarting so ComfyUI can use them right away.",
     "steps": {
@@ -970,6 +986,7 @@
     "portConflictKilling": "Stopping…",
     "portConflictKillFailed": "Could not free port {port}. The process may require manual termination.",
     "duplicateName": "An install named \"{name}\" already exists. Please choose a different name.",
+    "nameRequired": "Please enter a name.",
     "unknownSource": "This installation has an unrecognized source type. It may have been created by a different version. Delete it and reinstall.",
     "operationInProgress": "\"{operation}\" is currently in progress for this installation. Would you like to cancel it?",
     "operationInProgressGeneric": "Another operation is currently in progress for this installation. Would you like to cancel it?",
@@ -980,12 +997,15 @@
   },
 
   "tooltips": {
+    "instances": "A separate ComfyUI installation with its own version, models, and settings.",
+    "snapshots": "A saved point-in-time state of an installation (versions + custom nodes) you can restore later.",
     "standalone": "A self-contained install with its own bundled Python and dependencies. Easy to update and manage.",
     "portable": "The official portable Windows build with embedded Python. Runs from a single folder without a system-wide install.",
     "git": "A git-based install cloned from the ComfyUI repository. Requires git and Python to be installed on your system.",
     "snapshot": "A saved record of your environment's state — ComfyUI version, custom nodes, and pip packages — that can be restored later.",
     "updateChannel": "Controls where updates come from. 'Stable' uses tested releases; 'Latest' pulls the newest commits directly from GitHub.",
     "startupArgs": "Command-line arguments passed to ComfyUI when it starts, such as --port or --lowvram.",
+    "launchMode": "Choose how ComfyUI runs: in its own app window, or as a console-only process.",
     "browserPartition": "Controls whether this install shares browser cache (cookies, local storage) with other installs or keeps its own separate cache.",
     "sharedDirs": "Directories shared across all installations for inputs and outputs.",
     "sharedModels": "Folders shared across all installations so models aren't downloaded twice. Newly downloaded models go to the primary folder. The system default folder is always kept and can't be removed, and the primary folder can't be removed while it's in use — pick a different primary first.",

@@ -1,14 +1,21 @@
 import {
   fs,
-  installations, settings,
+  installations,
+  settings,
   sourceMap,
   detectDesktopInstall,
-  isGitAvailable, tryConfigureBootstrapPygit2, tryConfigurePygit2Fallback,
-  createCache, fetchJSON, getLatestStableTag,
-  setCallbacks, _broadcastToRenderer,
-  migrateDefaults, checkInstallationUpdates,
+  isGitAvailable,
+  tryConfigureBootstrapPygit2,
+  tryConfigurePygit2Fallback,
+  createCache,
+  fetchJSON,
+  getLatestStableTag,
+  setCallbacks,
+  _broadcastToRenderer,
+  migrateDefaults,
+  checkInstallationUpdates,
   isEffectivelyEmptyInstallDir,
-  UPDATE_CHECK_INTERVAL,
+  UPDATE_CHECK_INTERVAL
 } from './shared'
 import * as releaseCache from '../release-cache'
 import type { RegisterCallbacks } from './shared'
@@ -18,9 +25,18 @@ import { registerSnapshotHandlers } from './registerSnapshotHandlers'
 import { registerSettingsHandlers } from './registerSettingsHandlers'
 import { registerSessionHandlers } from './registerSessionHandlers'
 import { registerCrashHandlers } from './registerCrashHandlers'
+import { registerTelemetryHandlers } from './registerTelemetryHandlers'
 
 // Re-export public API from shared
-export { getAppVersion, stopRunning, hasRunningSessions, getSessionProcess, hasActiveOperations, getActiveDetails, cancelAll } from './shared'
+export {
+  getAppVersion,
+  stopRunning,
+  hasRunningSessions,
+  getSessionProcess,
+  hasActiveOperations,
+  getActiveDetails,
+  cancelAll
+} from './shared'
 export type { RegisterCallbacks } from './shared'
 
 /** Idempotent bridge between `releaseCache.onEnriched` (a module-level
@@ -52,8 +68,8 @@ export function register(callbacks: RegisterCallbacks = {}): void {
       sourceId: 'cloud',
       remoteUrl: 'https://cloud.comfy.org/',
       launchMode: 'window',
-      browserPartition: 'shared',
-    },
+      browserPartition: 'shared'
+    }
   ])
   installations.ensureExists('cloud', {
     name: 'Comfy Cloud',
@@ -61,7 +77,7 @@ export function register(callbacks: RegisterCallbacks = {}): void {
     remoteUrl: 'https://cloud.comfy.org/',
     launchMode: 'window',
     browserPartition: 'shared',
-    status: 'installed',
+    status: 'installed'
   })
 
   // Auto-track Desktop install if detected
@@ -74,7 +90,7 @@ export function register(callbacks: RegisterCallbacks = {}): void {
         installPath: desktopInfo.basePath,
         launchMode: 'external',
         desktopExePath: desktopInfo.executablePath || undefined,
-        status: 'installed',
+        status: 'installed'
       })
     }
   }
@@ -91,7 +107,9 @@ export function register(callbacks: RegisterCallbacks = {}): void {
         if (!source || source.skipInstall) continue
         if (!inst.installPath) continue
         if (!isEffectivelyEmptyInstallDir(inst.installPath)) continue
-        try { fs.rmSync(inst.installPath, { recursive: true, force: true }) } catch {}
+        try {
+          fs.rmSync(inst.installPath, { recursive: true, force: true })
+        } catch {}
         await installations.remove(inst.id)
         swept = true
       }
@@ -112,19 +130,21 @@ export function register(callbacks: RegisterCallbacks = {}): void {
     const configureGitBackend = async (): Promise<void> => {
       const forceBootstrap = process.env.COMFY_FORCE_BOOTSTRAP_GIT === '1'
 
-      if (tryConfigureBootstrapPygit2()) {
+      if (await tryConfigureBootstrapPygit2()) {
         console.log('[ipc] Using bootstrap pygit2 for git operations (default)')
         return
       }
 
       console.warn(
         '[ipc] Bootstrap pygit2 not available — bootstrap-python/<platform>/ is missing. ' +
-        'Run "pnpm run bootstrap" (or "pnpm run bootstrap:fetch") to build it. ' +
-        'Falling back to standalone-install pygit2 / system git.'
+          'Run "pnpm run bootstrap" (or "pnpm run bootstrap:fetch") to build it. ' +
+          'Falling back to standalone-install pygit2 / system git.'
       )
 
       if (forceBootstrap) {
-        console.warn('[ipc] COMFY_FORCE_BOOTSTRAP_GIT set but bootstrap python not found — no git backend will be configured')
+        console.warn(
+          '[ipc] COMFY_FORCE_BOOTSTRAP_GIT set but bootstrap python not found — no git backend will be configured'
+        )
         return
       }
 
@@ -135,8 +155,11 @@ export function register(callbacks: RegisterCallbacks = {}): void {
         const all = await installations.list()
         for (const inst of all) {
           if (inst.sourceId !== 'standalone' || !inst.installPath) continue
-          if (tryConfigurePygit2Fallback(inst.installPath)) {
-            console.log('[ipc] Configured pygit2 fallback via standalone install at', inst.installPath)
+          if (await tryConfigurePygit2Fallback(inst.installPath)) {
+            console.log(
+              '[ipc] Configured pygit2 fallback via standalone install at',
+              inst.installPath
+            )
             return
           }
         }
@@ -147,14 +170,18 @@ export function register(callbacks: RegisterCallbacks = {}): void {
       // Final fallback: system git, if installed.
       try {
         if (await isGitAvailable()) {
-          console.log('[ipc] Using system git (bootstrap pygit2 and standalone pygit2 both unavailable)')
+          console.log(
+            '[ipc] Using system git (bootstrap pygit2 and standalone pygit2 both unavailable)'
+          )
           return
         }
       } catch (err) {
         console.warn('[ipc] isGitAvailable() check failed:', err)
       }
 
-      console.warn('[ipc] No git backend available (bootstrap pygit2, standalone pygit2, and system git all missing)')
+      console.warn(
+        '[ipc] No git backend available (bootstrap pygit2, standalone pygit2, and system git all missing)'
+      )
     }
 
     await configureGitBackend()
@@ -164,13 +191,18 @@ export function register(callbacks: RegisterCallbacks = {}): void {
     // upstream ComfyUI tag without any local clone — this makes the New
     // Install wizard's "Latest Stable" entry display the concrete version
     // (e.g. v1.19.5) on first open.
-    try { await getLatestStableTag() } catch {}
+    try {
+      await getLatestStableTag()
+    } catch {}
   })()
 
   // Clean up partial downloads
   void (async () => {
     try {
-      const cache = createCache(settings.get('cacheDir') as string, settings.get('maxCachedFiles') as number)
+      const cache = createCache(
+        settings.get('cacheDir') as string,
+        settings.get('maxCachedFiles') as number
+      )
       await cache.cleanPartials()
     } catch {}
   })()
@@ -193,4 +225,5 @@ export function register(callbacks: RegisterCallbacks = {}): void {
   registerSettingsHandlers()
   registerSessionHandlers()
   registerCrashHandlers()
+  registerTelemetryHandlers()
 }

@@ -1,5 +1,14 @@
 # Telemetry
 
+> ⚠️ **This document is drifted from the code.** Specific event names,
+> properties, and file paths in the catalogue below are stale; some
+> events documented here no longer fire and some events that DO fire
+> are not listed. The architectural notes (providers, identity model,
+> scrubbing, consent) are broadly accurate.
+>
+> A full rewrite ships after the in-flight telemetry rework lands in
+> production. Until then: trust the code, not this doc.
+
 Comfy Desktop emits telemetry through **two providers** that share a
 single event bus:
 

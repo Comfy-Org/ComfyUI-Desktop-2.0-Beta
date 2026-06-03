@@ -39,7 +39,8 @@
     "menuMigrate": "迁移到独立版…",
     "menuRestoreSnapshot": "恢复快照…",
     "menuRevealInFolder": "打开文件夹",
-    "menuDelete": "删除…"
+    "menuDelete": "删除…",
+    "stoppedActionGatedReason": "请先停止正在运行的实例。"
   },
 
   "titleBar": {
@@ -198,7 +199,9 @@
     "noInfo": "选择此通道并检查更新以查看版本信息。",
     "current": "当前",
     "switchTo": "切换到 {channel}",
-    "switchChannelPrefix": "正在将更新通道从 {from} 切换到 {to}。\n\n"
+    "switchChannelPrefix": "正在将更新通道从 {from} 切换到 {to}。\n\n",
+    "movingTo": "正在切换到 {channel}。",
+    "switchingToTitle": "正在切换到 {channel}"
   },
 
   "track": {
@@ -421,10 +424,14 @@
     "copyingFiles": "正在复制文件…",
     "delete": "删除安装",
     "deleteConfirmTitle": "删除安装",
-    "deleteConfirmMessage": "这将永久删除该安装及其所有文件。此操作无法撤销。",
+    "deleteConfirmMessage": "这将永久删除此 ComfyUI 安装及其所有文件。此操作无法撤销。",
+    "deleteConfirmDetail": "其他安装不受影响。",
     "untrack": "取消跟踪",
     "untrackConfirmTitle": "取消跟踪安装",
-    "untrackConfirmMessage": "这将从启动器中移除该安装。文件不会被删除。"
+    "untrackConfirmMessage": "这将从启动器中移除该安装。文件不会被删除。",
+    "rename": "重命名",
+    "renameTitle": "重命名安装",
+    "renameMessage": "为此安装输入新名称。"
   },
 
   "migrate": {
@@ -488,14 +495,21 @@
 
   "cloud": {
     "label": "云端",
-    "desc": "连接到 Comfy Cloud 进行远程 GPU 加速工作流。"
+    "desc": "连接到 Comfy Cloud 进行远程 GPU 加速工作流。",
+    "signInBanner": {
+      "message": "我们已打开浏览器以登录。没有打开？",
+      "copy": "复制链接",
+      "copied": "已复制",
+      "openAgain": "重新打开",
+      "dismiss": "关闭"
+    }
   },
 
   "standalone": {
     "label": "Standalone",
     "desc": "预构建环境，包含托管的 Python 和依赖项。",
     "comfyui": "ComfyUI",
-    "variant": "环境变体",
+    "variant": "硬件",
     "python": "Python",
     "pythonEnvs": "Python 环境",
     "activeEnv": "当前：{env}",
@@ -601,9 +615,10 @@
     "waitingTime": "等待 ComfyUI 就绪…（{secs}秒）",
     "portBusyUsing": "端口 {old} 被占用——改用端口 {new}…",
     "instanceRunningTitle": "实例正在运行",
-    "instanceRunningMessage": "\"{name}\" 正在运行。同时运行多个本地安装可能会消耗大量系统资源。",
-    "instanceRunningProceed": "同时启动",
-    "instanceRunningReplace": "关闭运行中的实例并启动",
+    "instanceRunningMessage": "选择 \"关闭并启动\" 将停止下方列出的实例。",
+    "instanceRunningListLabel": "将被停止",
+    "instanceRunningProceed": "全部运行",
+    "instanceRunningReplace": "关闭并启动此实例",
     "modelFolderRelaunchTitle": "正在重启 ComfyUI",
     "modelFolderRelaunchDesc": "检测到自定义节点创建了新的模型文件夹。正在重启以便 ComfyUI 立即使用这些文件夹。"
   },
@@ -631,10 +646,14 @@
     "portConflictKillConfirmMessage": "这将强制停止当前使用此端口的进程。该 ComfyUI 实例中未保存的工作将丢失。",
     "portConflictKilling": "正在停止…",
     "portConflictKillFailed": "无法释放端口 {port}。该进程可能需要手动终止。",
-    "duplicateName": "名为 \"{name}\" 的安装已存在。请选择其他名称。"
+    "duplicateName": "名为 \"{name}\" 的安装已存在。请选择其他名称。",
+    "nameRequired": "请输入名称。"
   },
 
   "tooltips": {
+    "instances": "一个独立的 ComfyUI 安装，拥有各自的版本、模型和设置。",
+    "snapshots": "已保存的安装时间点状态（版本 + 自定义节点），可随时恢复。",
+    "launchMode": "选择 ComfyUI 的运行方式：在独立的应用窗口中运行，或作为仅控制台进程运行。",
     "updateNow": "就地更新此安装。",
     "copyAndUpdate": "复制此安装并更新副本。原始安装保持不变。"
   }

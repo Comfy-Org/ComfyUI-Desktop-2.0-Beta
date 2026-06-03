@@ -1,11 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, toRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Home, Plus, Search } from 'lucide-vue-next'
+import { LayoutDashboard, Plus, Search, X } from 'lucide-vue-next'
 import BaseInput from '../components/ui/BaseInput.vue'
 import { FILTER_CHIPS, useInstallList } from '../composables/useInstallList'
+import { useCloudCapacity } from '../composables/useCloudCapacity'
+import { useDialogs } from '../composables/useDialogs'
 import { useSessionStore } from '../stores/sessionStore'
 import ComfyUISettingsContent from '../components/settings/ComfyUISettingsContent.vue'
+import InfoTooltip from '../components/InfoTooltip.vue'
+import Tooltip from '../components/ui/Tooltip.vue'
 import InstanceRow from './instancePicker/InstanceRow.vue'
 import { resolvePickerTab, type PickerTab } from '../lib/pickerTabs'
 import { resolveProgressRouting } from '../lib/pickerProgressRouting'
@@ -69,11 +73,25 @@ interface PickerSnapshot {
   installs: PickerInstall[]
   activeInstallationId: string | null
   runningInstallationIds: string[]
+  /** Installs whose `instance-launching` has fired but `instance-started`
+   *  has not. Hydrated into `sessionStore.launchingInstances` because
+   *  the popup preload doesn't expose `onInstanceLaunching`. Drives
+   *  the **Start → Restart / Switch** CTA flip during the launching
+   *  window via `useInstallCta`. */
+  launchingInstallationIds: string[]
   selectedInstallationId: string | null
+  /** Monotonic counter bumped only when main intentionally retargets
+   *  the picker selection (open / "Manage…" deep-link). Snapshot
+   *  rebroadcasts from live-data events forward the current value
+   *  unchanged. The view only applies `selectedInstallationId` over a
+   *  local user pick when this advances, so a stale rebroadcast can't
+   *  snap the user back to a previously-selected row (issue #788). */
+  pickerSelectionEpoch?: number
   selectedSettings: DetailSection[] | null
   selectedSnapshots: SnapshotListData | null
   initialTab?: string | null
   autoAction?: string | null
+  autoActionNonce?: number
   storage: PickerStorageSlice
   operatingInstallationIds?: string[]
   installOperationStatus?: Record<string, PickerOperationStatus>
@@ -101,6 +119,20 @@ function hydrateSessionStoreFromSnapshot(): void {
       sessionStore.runningInstances.set(id, placeholder)
     }
   }
+  // The popup preload doesn't expose `onInstanceLaunching`, so the
+  // only path that brings launching state in is this snapshot.
+  // Without this hydration, `sessionStore.isLaunching(id)` would stay
+  // false during the launching window and `useInstallCta` would leave
+  // the CTA on Start (instead of flipping to Restart/Switch).
+  const nextLaunching = new Set(props.snapshot.launchingInstallationIds ?? [])
+  for (const id of Array.from(sessionStore.launchingInstances.keys())) {
+    if (!nextLaunching.has(id)) sessionStore.launchingInstances.delete(id)
+  }
+  for (const id of nextLaunching) {
+    if (!sessionStore.launchingInstances.has(id)) {
+      sessionStore.launchingInstances.set(id, { installationName: '' })
+    }
+  }
 }
 
 let panelLocaleMerge: Promise<void> | null = null
@@ -113,13 +145,15 @@ interface PickerBridge {
   platform?: string
   /** Dispatch a menu-item id through the existing
    *  `comfy-titlepopup:item-activated` → `activateTitlePopupMenuItem`
-   *  path. The picker's Home button reuses this with
-   *  `'return-to-dashboard'` so we don't add a parallel IPC for the
-   *  same action. */
+   *  path. The picker's dashboard button reuses this with `'new-window'`
+   *  so we don't add a parallel IPC for the same action. */
   activate?: (id: string) => void
+  /** Dismiss the popup (same as ESC / click-outside). Wired to the
+   *  top-right close button. */
+  close?: () => void
   pickInstall: (installationId: string) => void
   openNewInstall: () => void
-  restartInstall: (installationId: string) => void
+  restartInstall: (installationId: string, opts?: { confirmed?: boolean }) => void
   setPickerSelectedInstall: (installationId: string | null) => void
   pickerUpdateField: (
     installationId: string,
@@ -171,6 +205,30 @@ const {
   lastLaunchedShortLabel
 } = useInstallList({ installations: installationsRef })
 
+/** Rows for the picker list. Unlike the dashboard (which pins the Cloud
+ *  card on top), the IPP folds cloud into the recency-sorted list so it
+ *  sorts by its own `lastLaunchedAt` — a local that was opened more
+ *  recently sits above it, so cloud no longer "sticks" on top.
+ *
+ *  Tie-break: when recency is equal (e.g. nothing launched yet), cloud
+ *  takes priority and is ordered first. Note this is ordering only — the
+ *  auto-*selected* default still favours a real install on a tie (see
+ *  `resolvePickerSelectedInstallId` in main), so cloud can lead the list
+ *  without being pre-selected for users who never open it.
+ *  `showCloudCard` still gates cloud per the active filter / search query. */
+const pickerRows = computed<Installation[]>(() => {
+  const rows = [...visibleInstalls.value]
+  if (showCloudCard.value && cloudInstall.value) {
+    rows.push(cloudInstall.value)
+  }
+  return rows.sort((a, b) => {
+    const ta = a.lastLaunchedAt ?? -Infinity
+    const tb = b.lastLaunchedAt ?? -Infinity
+    if (tb !== ta) return tb - ta
+    return (b.sourceCategory === 'cloud' ? 1 : 0) - (a.sourceCategory === 'cloud' ? 1 : 0)
+  })
+})
+
 const visibleChips = computed(() => {
   return FILTER_CHIPS.filter((chip) => {
     if (chip.key === 'all') return true
@@ -186,14 +244,29 @@ const visibleChips = computed(() => {
 
 /** The install the user most recently launched — the sensible default
  *  selection when the popup opens with no active or explicitly-selected
- *  install. Falls back to list order when nothing has ever been launched. */
+ *  install.
+ *
+ *  Tie-break mirrors main's `mostRecentlyLaunchedInstallId`: the always-
+ *  seeded "Comfy Cloud" entry must not win the default just by sorting
+ *  first. Cloud is the default only when genuinely launched most-recently
+ *  (strictly higher `lastLaunchedAt`); on a tie a real install wins, so the
+ *  default stays fair for users who never open cloud. */
 function mostRecentInstallId(installs: PickerInstall[]): string | null {
-  const first = installs[0]
-  if (!first) return null
-  return installs.reduce(
-    (best, i) => ((i.lastLaunchedAt ?? 0) > (best.lastLaunchedAt ?? 0) ? i : best),
-    first
-  ).id
+  let best: PickerInstall | undefined
+  for (const inst of installs) {
+    if (!best) {
+      best = inst
+      continue
+    }
+    const ts = inst.lastLaunchedAt ?? 0
+    const bestTs = best.lastLaunchedAt ?? 0
+    if (ts > bestTs) {
+      best = inst
+    } else if (ts === bestTs && best.sourceCategory === 'cloud' && inst.sourceCategory !== 'cloud') {
+      best = inst
+    }
+  }
+  return best?.id ?? null
 }
 
 function resolveInitialSelection(snapshot: PickerSnapshot): string | null {
@@ -202,24 +275,34 @@ function resolveInitialSelection(snapshot: PickerSnapshot): string | null {
   return mostRecentInstallId(snapshot.installs)
 }
 const selectedId = ref<string | null>(resolveInitialSelection(props.snapshot))
+// Epoch already consumed by the local `selectedId`. Tracks the largest
+// `pickerSelectionEpoch` we've applied; only a strictly-greater snapshot
+// epoch counts as a main-authoritative retarget. Initial mount counts
+// as "applied" — `resolveInitialSelection` above already honoured the
+// snapshot's seed.
+const appliedSelectionEpoch = ref<number>(props.snapshot.pickerSelectionEpoch ?? 0)
+
 watch(
-  () => props.snapshot.selectedInstallationId,
-  (next) => {
-    if (next) selectedId.value = next
+  () => props.snapshot.pickerSelectionEpoch ?? 0,
+  (nextEpoch) => {
+    if (nextEpoch <= appliedSelectionEpoch.value) return
+    // Main intentionally retargeted (open / "Manage…" deep-link). Adopt
+    // its selection, even if the user had locally clicked something
+    // else in the meantime — a fresh open is a clear user intent that
+    // overrides any prior in-popup selection.
+    appliedSelectionEpoch.value = nextEpoch
+    selectedId.value = resolveInitialSelection(props.snapshot)
   }
 )
-watch(
-  () => props.snapshot.activeInstallationId,
-  (next) => {
-    if (!props.snapshot.selectedInstallationId) {
-      selectedId.value = next ?? mostRecentInstallId(props.snapshot.installs)
-    }
-  }
-)
+
+// Cold-start fallback: if the snapshot first arrives with no installs
+// and a `null` selection, this watcher seeds `selectedId` once installs
+// land. Once a selection exists (whether from user click or initial
+// resolve), live install-list updates must not touch it — they'd
+// otherwise reintroduce the snap-back this fix guards against.
 watch(
   () => props.snapshot.installs,
   (installs) => {
-    if (props.snapshot.selectedInstallationId || props.snapshot.activeInstallationId) return
     if (selectedId.value) return
     const id = mostRecentInstallId(installs)
     if (id) {
@@ -297,13 +380,21 @@ function handleNewInstall(): void {
   bridge?.openNewInstall()
 }
 
+function handleClose(): void {
+  bridge?.close?.()
+}
+
 /** Picker hosted by an install (vs the chooser/dashboard itself).
- *  Drives whether the Home → dashboard escape is offered — pointless
- *  to surface on a picker already shown from the dashboard. */
+ *  Drives whether the dashboard button is offered — pointless to
+ *  surface on a picker already shown from the dashboard. */
 const isInstallHost = computed(() => !!props.snapshot.activeInstallationId)
 
-function handleReturnToDashboard(): void {
-  bridge?.activate?.('return-to-dashboard')
+/** Open the dashboard. Routes through `new-window` (a fresh chooser
+ *  host) rather than `return-to-dashboard` — the latter detaches the
+ *  install, which STOPS the running instance. The user wants to view the
+ *  dashboard without killing what's running, so we open it alongside. */
+function handleOpenDashboard(): void {
+  bridge?.activate?.('new-window')
 }
 
 watch(
@@ -330,8 +421,18 @@ const initialExpandedTab = computed<PickerTab>(() =>
   resolvePickerTab(props.snapshot.initialTab, 'update')
 )
 
+// Both lifecycle id arrays must be watched — the popup's preload
+// has no `instance-launching` / `instance-started` IPC listeners, so
+// the snapshot is the sole source of truth for `sessionStore`. Watching
+// only `runningInstallationIds` would miss the launching-only
+// transitions this drawer relies on to flip the CTA from Start to
+// Restart/Switch mid-launch. NUL-joined so an id containing a comma
+// can't collide a unique boundary.
 watch(
-  () => props.snapshot.runningInstallationIds.join(','),
+  [
+    () => props.snapshot.runningInstallationIds.join('\0'),
+    () => (props.snapshot.launchingInstallationIds ?? []).join('\0')
+  ],
   () => hydrateSessionStoreFromSnapshot(),
   { immediate: true }
 )
@@ -428,11 +529,61 @@ function handleSettingsNavigateList(): void {
   selectedId.value = null
 }
 
-function handleExpandedPrimaryAction(running: boolean): void {
+/** Footer primary CTA dispatch. `restartInPlace` is true only when the
+ *  selected install is running in THIS host window — then we stop +
+ *  relaunch in place via `restartInstall`. Otherwise (not running, or
+ *  running in another window — issue #749) we route to `pickInstall`,
+ *  whose main-side focus-existing short-circuit raises the already-open
+ *  window rather than restarting it. */
+// Capacity-protection switch (PostHog flag `desktop-cloud-capacity`).
+// When `disabled`, the primary action no-ops for a cloud install so the
+// user can't enter cloud during an outage. A visual "Heavy usage" /
+// "Temporarily unavailable" chip on the cloud row itself is a follow-up
+// (the row's a child component `InstanceRow.vue`).
+const cloudCapacity = useCloudCapacity()
+const dialogs = useDialogs()
+/** Tier-aware capacity status passed down to per-row chips so a paid
+ *  user doesn't see "Temporarily unavailable" on a row they can still
+ *  click through. Mirrors what `confirmEntry()` will do. */
+const ippCapacityStatus = computed(() => cloudCapacity.effectiveStatus())
+
+async function handleExpandedPrimaryAction(restartInPlace: boolean): Promise<void> {
   const inst = selectedInstall.value
   if (!inst) return
-  if (running) {
-    bridge?.restartInstall(inst.id)
+  // Cloud capacity gate. `normal` resolves instantly; `degraded`
+  // shows a confirm modal (user can back out); `disabled` resolves
+  // false. Matches the ChooserView path so the two can't diverge.
+  if (inst.sourceCategory === 'cloud' && !(await cloudCapacity.confirmEntry())) return
+  if (restartInPlace) {
+    // Confirm in-drawer for local restarts before crossing the bridge.
+    // Cloud / remote restarts have no local process to kill (matches
+    // main-side `shouldConfirmKillForEntry`), so they skip the prompt.
+    // Doing the confirm here keeps it visually consistent with Update /
+    // Stop / etc. — the drawer stays open during the prompt instead of
+    // dismissing first and reopening as a system-modal over the host.
+    if (inst.sourceCategory === 'local') {
+      const result = await dialogs.confirm({
+        title: 'Restart instance?',
+        message: 'Restart this instance?',
+        confirmLabel: 'Restart',
+        cancelLabel: 'Cancel',
+        messageDetails: [
+          {
+            label: 'Heads up',
+            items: [
+              'Restarting will stop the running session.',
+              'Any unsaved work in the workflow will be lost.',
+            ],
+          },
+        ],
+      })
+      if (result !== 'primary') return
+    }
+    // `confirmed: true` tells main to skip its own system-modal — the
+    // renderer already handled the prompt. Main keeps the modal as a
+    // safety net for any future caller that fires the IPC without
+    // confirming first.
+    bridge?.restartInstall(inst.id, { confirmed: true })
   } else {
     bridge?.pickInstall(inst.id)
   }
@@ -444,24 +595,39 @@ function handleExpandedPrimaryAction(running: boolean): void {
     <div class="picker-search">
       <BaseInput
         v-model="searchQuery"
+        class="picker-search-input"
         :placeholder="$t('chooser.searchPlaceholder')"
         :aria-label="$t('chooser.searchPlaceholder')"
       >
         <template #leading><Search :size="20" class="picker-search-icon" /></template>
       </BaseInput>
+      <!-- Explicit close affordance — users couldn't tell how to dismiss
+           the popup (ESC / click-outside weren't discoverable). The search
+           field shrinks to make room. -->
+      <button
+        type="button"
+        class="picker-close"
+        :aria-label="$t('common.close')"
+        :title="$t('common.close')"
+        @click="handleClose"
+      >
+        <X :size="18" />
+      </button>
     </div>
 
     <div class="picker-chips-row">
       <template v-if="isInstallHost">
-        <button
-          type="button"
-          class="picker-home"
-          :aria-label="$t('fileMenu.returnToDashboard')"
-          :title="$t('fileMenu.returnToDashboard')"
-          @click="handleReturnToDashboard"
-        >
-          <Home :size="14" />
-        </button>
+        <Tooltip :text="$t('instancePicker.openDashboardHint')" side="bottom">
+          <button
+            type="button"
+            class="picker-home"
+            :aria-label="$t('instancePicker.openDashboard')"
+            @click="handleOpenDashboard"
+          >
+            <LayoutDashboard :size="14" />
+            <span class="picker-home-label">{{ $t('instancePicker.openDashboard') }}</span>
+          </button>
+        </Tooltip>
         <span class="picker-chips-divider" aria-hidden="true"></span>
       </template>
       <div
@@ -487,24 +653,11 @@ function handleExpandedPrimaryAction(running: boolean): void {
     <div class="picker-body">
       <div class="picker-left">
         <div class="picker-list-section">
-          <div class="picker-list-section-title">{{ $t('instancePicker.instances') }}</div>
+          <div class="picker-list-section-title">{{ $t('instancePicker.instances') }}<InfoTooltip :text="$t('tooltips.instances')" side="bottom" /></div>
 
           <div class="picker-list" role="listbox">
             <InstanceRow
-              v-if="showCloudCard && cloudInstall"
-              :key="cloudInstall.id"
-              :installation="cloudInstall"
-              :active="selectedId === cloudInstall.id"
-              :running="isRowRunning(cloudInstall)"
-              :is-current="isRowCurrent(cloudInstall)"
-              :update-available="isRowUpdateAvailable(cloudInstall)"
-              :operating="effectiveOperatingSet.has(cloudInstall.id)"
-              :last-launched-short-label="lastLaunchedShortLabel(cloudInstall)"
-              @select="handleSelect"
-            />
-
-            <InstanceRow
-              v-for="inst in visibleInstalls"
+              v-for="inst in pickerRows"
               :key="inst.id"
               :installation="inst"
               :active="selectedId === inst.id"
@@ -513,6 +666,7 @@ function handleExpandedPrimaryAction(running: boolean): void {
               :update-available="isRowUpdateAvailable(inst)"
               :operating="effectiveOperatingSet.has(inst.id)"
               :last-launched-short-label="lastLaunchedShortLabel(inst)"
+              :capacity-status="ippCapacityStatus"
               @select="handleSelect"
             />
 
@@ -537,8 +691,10 @@ function handleExpandedPrimaryAction(running: boolean): void {
               :installation="selectedInstall"
               :initial-tab="initialExpandedTab"
               :auto-action="snapshot.autoAction ?? null"
+              :auto-action-nonce="snapshot.autoActionNonce ?? 0"
               :global-settings-snapshot="snapshot.storage"
               :active-operation="activeOperation"
+              :active-installation-id="snapshot.activeInstallationId"
               class="picker-expanded-body"
               @show-progress="handleSettingsShowProgress"
               @navigate-list="handleSettingsNavigateList"
@@ -569,8 +725,15 @@ function handleExpandedPrimaryAction(running: boolean): void {
 }
 
 .picker-search {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   border-bottom: 1px solid var(--brand-surface-border-hover, var(--chooser-surface-border));
-  padding: 6px 12px 8px 12px;
+  padding: 6px 8px 8px 12px;
+}
+.picker-search-input {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 .picker-search :deep(.ui-input) {
   background: transparent;
@@ -578,6 +741,32 @@ function handleExpandedPrimaryAction(running: boolean): void {
   border-radius: 0;
   padding: 0;
   gap: 8px;
+}
+/* Top-right close button. Flush to the search row so the field shrinks to
+   make room. Accessibility-first: an explicit, obvious way to dismiss. */
+.picker-close {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition:
+    background-color 100ms ease,
+    color 100ms ease,
+    border-color 100ms ease;
+}
+.picker-close:hover,
+.picker-close:focus-visible {
+  background: var(--brand-surface-bg-hover);
+  color: var(--neutral-100);
+  outline: none;
 }
 .picker-search :deep(.ui-input):focus-within {
   border-color: transparent;
@@ -614,24 +803,30 @@ function handleExpandedPrimaryAction(running: boolean): void {
   flex-wrap: wrap;
   min-width: 0;
 }
-/* Home — naked icon button. The vertical divider that follows it
- * does the visual separation work; a pill border around the icon
+/* Open Dashboard — naked icon + label button. The vertical divider
+ * that follows it does the visual separation work; a pill border
  * would compete with the chip pills and read as another filter.
- * Hover lifts the icon to full text colour without painting a
- * background. */
+ * Hover lifts both icon and label to full text colour without
+ * painting a background. */
 .picker-home {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
+  gap: 6px;
   height: 22px;
-  padding: 0;
+  padding: 0 6px 0 2px;
   border: none;
   background: transparent;
   color: var(--neutral-100);
   cursor: pointer;
   transition: color 100ms ease;
+}
+.picker-home-label {
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  white-space: nowrap;
 }
 .picker-home:hover,
 .picker-home:focus-visible {
@@ -709,6 +904,8 @@ function handleExpandedPrimaryAction(running: boolean): void {
 }
 .picker-list-section-title {
   flex: 0 0 auto;
+  display: flex;
+  align-items: center;
   font-size: 14px;
   font-weight: 500;
   line-height: 20px;

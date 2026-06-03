@@ -40,6 +40,29 @@ const KNOWN_MODEL_FOLDERS = new Set<string>([
   't2i_adapter',    // secondary dir for controlnet
 ])
 
+// Folder names that must NEVER be registered as model search paths, even if
+// they appear inside a shared models directory. These are either ComfyUI
+// system directories (custom_nodes, user, input, output, temp), dotfolders
+// owned by tooling (.venv, .snapshots, .git, __pycache__), or the `models`
+// self-reference produced when a ComfyUI install root is itself configured
+// as a shared models dir.
+//
+// `custom_nodes` is especially important: ComfyUI's prestartup does
+// `os.listdir(path)` on every registered `custom_nodes` path and crashes if
+// the directory is missing under any shared base_path.
+const NON_MODEL_FOLDERS = new Set<string>([
+  'custom_nodes',
+  'user',
+  'input',
+  'output',
+  'temp',
+  'models',
+  '.venv',
+  '.snapshots',
+  '.git',
+  '__pycache__',
+])
+
 export interface ModelPathsResult {
   yamlPath: string
   extraFolders: string[]
@@ -71,10 +94,14 @@ function allFoldersIn(dir: string): string[] {
 }
 
 /**
- * Scans a directory for subdirectories whose names are not in KNOWN_MODEL_FOLDERS.
+ * Scans a directory for subdirectories whose names are not in
+ * KNOWN_MODEL_FOLDERS and not in NON_MODEL_FOLDERS (system/tooling dirs that
+ * must never be treated as model search paths).
  */
 function extraFoldersIn(dir: string): string[] {
-  return allFoldersIn(dir).filter((name) => !KNOWN_MODEL_FOLDERS.has(name))
+  return allFoldersIn(dir).filter(
+    (name) => !KNOWN_MODEL_FOLDERS.has(name) && !NON_MODEL_FOLDERS.has(name),
+  )
 }
 
 /**

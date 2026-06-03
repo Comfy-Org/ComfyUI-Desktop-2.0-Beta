@@ -2,7 +2,7 @@ import { sourceMap } from '../lib/ipc/shared'
 import { getAppVersion } from '../lib/ipc'
 import { get as getInstallation } from '../installations'
 import type { ComfyWindowEntry } from './registry'
-import { isInstallHost } from './registry'
+import { hostInstallEvents, isInstallHost } from './registry'
 import {
   applyChooserHostTheme,
   CHOOSER_HOST_TITLE_TEXT,
@@ -31,6 +31,15 @@ export async function applyAttachHostPreview(
   if (isInstallHost(entry)) return
   const installation = await getInstallation(installationId)
   if (!installation) return
+  // Re-check after the await: `claim-attach-host` calls us fire-and-
+  // forget (`void applyAttachHostPreview(...)`), so a fast launch can
+  // attach the install (or destroy the window) while the disk lookup
+  // is in flight. Without these guards we would overwrite the real
+  // `installationId` push from `attachInstall` with a stale preview
+  // and the title-bar chrome would diverge from reality.
+  if (entry.window.isDestroyed()) return
+  if (isInstallHost(entry)) return
+  const previewChanged = entry.previewInstallationId !== installationId
   entry.previewInstallationId = installationId
   entry.titleBarText = installation.name
   entry.sourceCategory = sourceMap[installation.sourceId]?.category ?? null
@@ -46,6 +55,13 @@ export async function applyAttachHostPreview(
     )
     entry.titleBarView.webContents.send('comfy-titlebar:preview-mode-changed', true)
   }
+  // Treat the preview-id flip like an attach for picker-snapshot
+  // purposes — the snapshot folds previewInstallationId into the
+  // "Current" pill decision so the dashboard's chrome reads as
+  // "owns this install" from the moment the chooser stakes the
+  // attach claim, instead of waiting for `attachInstall` (which
+  // doesn't run until the port binds).
+  if (previewChanged) hostInstallEvents.emit('changed')
 }
 
 /**
@@ -58,8 +74,16 @@ export async function applyAttachHostPreview(
 export function clearAttachHostPreview(entry: ComfyWindowEntry): void {
   if (entry.previewInstallationId === null) return
   entry.previewInstallationId = null
-  if (entry.window.isDestroyed()) return
-  if (isInstallHost(entry)) return
+  if (entry.window.isDestroyed()) {
+    // Still emit so any picker listener can drop the stale id even
+    // when the chrome push paths short-circuit on a destroyed window.
+    hostInstallEvents.emit('changed')
+    return
+  }
+  if (isInstallHost(entry)) {
+    hostInstallEvents.emit('changed')
+    return
+  }
   entry.titleBarText = CHOOSER_HOST_TITLE_TEXT
   entry.sourceCategory = null
   entry.window.setTitle(CHOOSER_HOST_WINDOW_TITLE)
@@ -76,4 +100,7 @@ export function clearAttachHostPreview(entry: ComfyWindowEntry): void {
   // the call here so any future identity-tied theme tweak survives the
   // revert.
   applyChooserHostTheme(entry)
+  // Symmetric with the apply path so the picker drops the "Current"
+  // pill the moment the preview is released (op cancelled / errored).
+  hostInstallEvents.emit('changed')
 }

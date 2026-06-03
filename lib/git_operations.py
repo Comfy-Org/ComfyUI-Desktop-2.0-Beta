@@ -8,6 +8,7 @@ caller (src/main/lib/git.ts) can parse.
 Usage: python git_operations.py <subcommand> <repo_path> [args...]
 
 Subcommands:
+  healthcheck
   rev-parse          <repo_path> <ref>
   describe-tags      <repo_path> [commit]
   tag-list           <repo_path>
@@ -370,29 +371,65 @@ def cmd_fetch_tags(repo_path):
 def cmd_fetch_commit(repo_path, sha):
     """Fetch a single commit SHA from origin so it is available locally.
 
-    Needed when the local repo (e.g. a Stable install on a tag) doesn't have
-    the remote HEAD commit that the 'latest' channel points at.
-    Exit 0 on success, 1 on failure.
+    Needed when the local repo (e.g. a Stable install on a tag, or a shallow
+    standalone clone whose master HEAD has since advanced) doesn't have the
+    commit that the 'latest' channel points at.
+
+    Mirrors `git fetch origin <sha>`: explicitly asks the remote for the
+    requested object via the `allow-reachable-sha1-in-want` protocol
+    extension that GitHub supports.  Without the SHA in the refspec, a
+    plain `origin.fetch()` only refreshes default refs (refs/heads/*) and
+    can complete successfully without actually bringing in the requested
+    object — leaving the next `cmd_rev_list_count` call to silently fail
+    on `resolve_ref` because the SHA isn't in the object store.
+
+    Exit 0 only when the SHA is provably in the local object store, 1
+    otherwise.  Previously this function claimed success on any
+    non-throwing fetch attempt, which manifested upstream as a stuck
+    `commitsAhead=undefined` on the picker's Latest card.
     """
     repo = open_repo(repo_path)
     origin = get_origin(repo)
 
-    # Try unshallow fetch first so the full history is available
-    try:
-        origin.fetch(depth=0)
-        print("Fetched commit %s (unshallowed)." % sha, file=sys.stderr)
-        return
-    except Exception:
-        pass
+    last_error = None
 
-    # Fall back to regular fetch
+    # Primary: ask the remote for this exact SHA so the fetch actually
+    # delivers what we asked for (GitHub honours this via
+    # allow-reachable-sha1-in-want).
     try:
-        origin.fetch()
-        print("Fetched commit %s." % sha, file=sys.stderr)
-        return
+        origin.fetch([sha])
     except Exception as e:
-        print("Error: failed to fetch commit %s: %s" % (sha, e), file=sys.stderr)
+        last_error = e
+        # Fallback: unshallow so the full default-branch history is
+        # local.  Slower but works when the server rejects single-SHA
+        # fetches or pygit2/libgit2 can't construct the refspec.
+        try:
+            origin.fetch(depth=0)
+        except Exception as e2:
+            last_error = e2
+            # Final fallback: plain default-refspec fetch.  Doesn't
+            # guarantee the SHA arrives, but no worse than the previous
+            # behaviour — the post-fetch verification below catches it.
+            try:
+                origin.fetch()
+            except Exception as e3:
+                last_error = e3
+
+    # Verify the object actually landed.  pygit2 throws on missing
+    # objects; treat that as the same failure mode as the network
+    # error chain above so callers get an honest exit code.
+    try:
+        repo[sha]
+    except (KeyError, ValueError):
+        msg = (
+            "fetch did not deliver commit %s" % sha
+            if last_error is None
+            else "fetch failed for commit %s: %s" % (sha, last_error)
+        )
+        print("Error: %s" % msg, file=sys.stderr)
         sys.exit(1)
+
+    print("Fetched commit %s." % sha, file=sys.stderr)
 
 
 def cmd_clone(url, dest):
@@ -576,6 +613,7 @@ USAGE = """\
 Usage: python git_operations.py <subcommand> [args...]
 
 Subcommands:
+  healthcheck
   rev-parse          <repo_path> <ref>
   describe-tags      <repo_path> [commit]
   tag-list           <repo_path>
@@ -602,7 +640,14 @@ if __name__ == "__main__":
     subcmd = sys.argv[1]
 
     try:
-        if subcmd == "rev-parse":
+        if subcmd == "healthcheck":
+            # Minimal smoke test: prove Python starts, this script loads,
+            # and `import pygit2` (at module top) succeeded.  The TS
+            # caller probes this before configuring pygit2 as a fallback.
+            print("ok pygit2 %s" % getattr(pygit2, "__version__", "unknown"))
+            sys.exit(0)
+
+        elif subcmd == "rev-parse":
             if len(sys.argv) < 4:
                 print("Usage: git_operations.py rev-parse <repo_path> <ref>", file=sys.stderr)
                 sys.exit(1)

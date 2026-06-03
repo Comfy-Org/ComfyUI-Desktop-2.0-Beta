@@ -18,6 +18,7 @@ interface MockBridgeState {
   panelChangedCallbacks: ((panel: string) => void)[]
   titleChangedCallbacks: ((title: string) => void)[]
   sourceCategoryChangedCallbacks: ((category: string | null) => void)[]
+  zoomChangedCallbacks: ((level: number) => void)[]
   themeChangedCallbacks: ((theme: { bg: string; text: string }) => void)[]
   fullscreenChangedCallbacks: ((fullscreen: boolean) => void)[]
   menuOpenedCallbacks: ((info: { menu: 'menu' }) => void)[]
@@ -41,6 +42,8 @@ interface MockBridgeState {
   downloadsTrayClicks: number
   installPillClicks: { x: number; y: number }[]
   feedbackClicks: number
+  refreshInstanceClicks: number
+  resetZoomClicks: number
   showTooltipCalls: { text: string; leftX: number; rightX: number; bottomY: number }[]
   hideTooltipCalls: number
   readyCalls: number
@@ -51,6 +54,7 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
     panelChangedCallbacks: [],
     titleChangedCallbacks: [],
     sourceCategoryChangedCallbacks: [],
+    zoomChangedCallbacks: [],
     themeChangedCallbacks: [],
     fullscreenChangedCallbacks: [],
     menuOpenedCallbacks: [],
@@ -70,6 +74,8 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
     downloadsTrayClicks: 0,
     installPillClicks: [],
     feedbackClicks: 0,
+    refreshInstanceClicks: 0,
+    resetZoomClicks: 0,
     showTooltipCalls: [],
     hideTooltipCalls: 0,
     readyCalls: 0,
@@ -92,6 +98,10 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
     },
     onSourceCategoryChanged: (cb: (category: string | null) => void) => {
       state.sourceCategoryChangedCallbacks.push(cb)
+      return () => { }
+    },
+    onZoomChanged: (cb: (level: number) => void) => {
+      state.zoomChangedCallbacks.push(cb)
       return () => { }
     },
     onThemeChanged: (cb: (theme: { bg: string; text: string }) => void) => {
@@ -154,6 +164,12 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
     },
     clickFeedback: () => {
       state.feedbackClicks += 1
+    },
+    clickRefreshInstance: () => {
+      state.refreshInstanceClicks += 1
+    },
+    resetZoom: () => {
+      state.resetZoomClicks += 1
     },
     showTooltip: (payload: { text: string; leftX: number; rightX: number; bottomY: number }) => {
       state.showTooltipCalls.push(payload)
@@ -365,41 +381,67 @@ describe('TitleBarApp', () => {
     wrapper.unmount()
   })
 
-  it('hides the waffle menu and downloads tray for the full first-use takeover (consent + post-consent)', async () => {
-    // The title bar strips itself down to a minimal identity bar for
-    // the entire onboarding flow — waffle, downloads tray, and
-    // feedback button all disappear. No installs exist yet so the
-    // downloads tray is meaningless, and the takeover screens read
-    // cleaner without the surrounding chrome. The chrome returns once
-    // `firstUseMode === 'none'` (steady state).
+  it('locks chrome through the first-use takeover and restores it during loading-lockdown', async () => {
+    // First-use lockdown (consent + post-consent) strips chrome to a
+    // minimal identity bar — waffle / pill / trailing pills all hide.
+    // `consent-lockdown` also drops the waffle entirely (no escape
+    // hatch); `post-consent` keeps the waffle so the menu can surface
+    // the "Skip Onboarding" entry.
+    //
+    // `loading-lockdown` (any long-running op takeover — install /
+    // update / migrate / snapshot / launch) is NOT a chrome lockdown
+    // — the waffle, picker pill, feedback, and downloads tray all
+    // stay live so the user can open a fresh window, switch
+    // installs, or quit cleanly while the op runs in the background
+    // (#653).
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp)
     await flushPromises()
-    // Steady state — waffle + downloads tray are rendered.
+    // Steady state — every button is rendered.
     expect(wrapper.find('.title-menu-button--icon').exists()).toBe(true)
     expect(wrapper.find('.title-downloads-tray').exists()).toBe(true)
+    expect(wrapper.find('.title-feedback-button').exists()).toBe(true)
+    expect(wrapper.find('.title-install-pill.is-interactive').exists()).toBe(true)
     expect(wrapper.find('header').classes()).not.toContain('is-consent-lockdown')
 
-    // Consent step on screen — waffle + downloads tray disappear.
+    // Consent step — full strip (waffle gone, trailing cluster gone,
+    // pill collapses to static label).
     bridgeState.firstUseModeChangedCallbacks.forEach((cb) => cb('consent-lockdown'))
     await flushPromises()
     expect(wrapper.find('header').classes()).toContain('is-consent-lockdown')
     expect(wrapper.find('.title-menu-button--icon').exists()).toBe(false)
     expect(wrapper.find('.title-downloads-tray').exists()).toBe(false)
+    expect(wrapper.find('.title-feedback-button').exists()).toBe(false)
+    expect(wrapper.find('.title-install-pill.is-interactive').exists()).toBe(false)
 
-    // Advance to post-consent — chrome stays stripped (no waffle, no tray).
+    // Post-consent — waffle returns (Skip Onboarding lives there);
+    // trailing pills + interactive picker stay hidden.
     bridgeState.firstUseModeChangedCallbacks.forEach((cb) => cb('post-consent'))
     await flushPromises()
     expect(wrapper.find('header').classes()).not.toContain('is-consent-lockdown')
-    expect(wrapper.find('.title-menu-button--icon').exists()).toBe(false)
+    expect(wrapper.find('.title-menu-button--icon').exists()).toBe(true)
     expect(wrapper.find('.title-downloads-tray').exists()).toBe(false)
+    expect(wrapper.find('.title-feedback-button').exists()).toBe(false)
+    expect(wrapper.find('.title-install-pill.is-interactive').exists()).toBe(false)
 
-    // Takeover dismissed — back to steady state with full chrome.
+    // Loading-lockdown — every chrome button stays live so the user
+    // keeps full title-bar access during long-running ops.
+    bridgeState.firstUseModeChangedCallbacks.forEach((cb) => cb('loading-lockdown'))
+    await flushPromises()
+    expect(wrapper.find('header').classes()).not.toContain('is-consent-lockdown')
+    expect(wrapper.find('.title-menu-button--icon').exists()).toBe(true)
+    expect(wrapper.find('.title-downloads-tray').exists()).toBe(true)
+    expect(wrapper.find('.title-feedback-button').exists()).toBe(true)
+    expect(wrapper.find('.title-install-pill.is-interactive').exists()).toBe(true)
+
+    // Takeover dismissed — back to steady state.
     bridgeState.firstUseModeChangedCallbacks.forEach((cb) => cb('none'))
     await flushPromises()
     expect(wrapper.find('header').classes()).not.toContain('is-consent-lockdown')
     expect(wrapper.find('.title-menu-button--icon').exists()).toBe(true)
     expect(wrapper.find('.title-downloads-tray').exists()).toBe(true)
+    expect(wrapper.find('.title-feedback-button').exists()).toBe(true)
+    expect(wrapper.find('.title-install-pill.is-interactive').exists()).toBe(true)
     wrapper.unmount()
   })
 
@@ -906,7 +948,7 @@ describe('TitleBarApp', () => {
     const btn = wrapper.find('.title-feedback-button')
     expect(btn.exists()).toBe(true)
     expect(btn.attributes('aria-label')).toBe('Feedback')
-    expect(btn.text()).toContain('Feedback')
+    expect(btn.text()).toBe('')
     await btn.trigger('click')
     expect(bridgeState.feedbackClicks).toBe(1)
     wrapper.unmount()
@@ -1131,16 +1173,19 @@ describe('TitleBarApp', () => {
       const mod = await import('./TitleBarApp.vue')
       const wrapper = mount(mod.default, { attachTo: document.body })
       await flushPromises()
-      // Exactly one observer is created (the trailing-cluster mirror).
-      expect(handles).toHaveLength(1)
-      const handle = handles[0]!
-      // It observed the `.title-trailing` element.
+      // Two observers are created: one for the trailing-cluster
+      // mirror (this test's subject) and a second for the JS fit
+      // controller that watches the title-bar root.
+      expect(handles).toHaveLength(2)
       const trailingEl = wrapper.find('.title-trailing').element
-      expect(handle.observed[0]).toBe(trailingEl)
+      const handle = handles.find((h) => h.observed[0] === trailingEl)
+      expect(handle).toBeDefined()
       // Tear-down disconnects so the observer doesn't leak across
       // the WebContentsView's lifecycle.
       wrapper.unmount()
-      expect(handle.observed).toHaveLength(0)
+      for (const h of handles) {
+        expect(h.observed).toHaveLength(0)
+      }
     })
 
     it('mirrors trailing width onto the title bar as `--title-trailing-width`', async () => {

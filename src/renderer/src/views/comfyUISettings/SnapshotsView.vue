@@ -974,12 +974,18 @@ async function handleImport(): Promise<void> {
             </SnapshotRow>
           </template>
           <div v-else class="snapshots-view-copy-event">
-            <span class="snapshots-view-copy-icon" :aria-hidden="true">→</span>
+            <span class="snapshots-view-copy-icon" :aria-hidden="true">{{
+              item.event.direction === 'in' ? '←' : '→'
+            }}</span>
             <span class="snapshots-view-copy-label">
               {{
-                t('snapshots.copyEventLabel', {
-                  source: item.event.installationName || item.event.installationId
-                })
+                item.event.direction === 'in'
+                  ? t('snapshots.copyEventLabelIncoming', {
+                      source: item.event.installationName || item.event.installationId
+                    })
+                  : t('snapshots.copyEventLabel', {
+                      destination: item.event.installationName || item.event.installationId
+                    })
               }}
             </span>
             <span class="snapshots-view-copy-time">{{ formatDate(item.event.copiedAt) }}</span>

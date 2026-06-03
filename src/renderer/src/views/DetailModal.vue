@@ -20,14 +20,18 @@ import { emitTelemetryAction, toErrorBucket } from '../lib/telemetry'
 import { formatBytes } from '../lib/formatting'
 import { findActionById } from '../lib/findAction'
 import { progressOpKindForActionId, destroysInstanceForActionId } from '../lib/progressOpKind'
-import { IN_PLACE_RELAUNCH, augmentActionWithStopWarning, stopAndWaitForExit } from '../lib/stopWarning'
+import {
+  IN_PLACE_RELAUNCH,
+  augmentActionWithStopWarning,
+  stopAndWaitForExit
+} from '../lib/stopWarning'
 import { useMigrateAction } from '../composables/useMigrateAction'
 import {
   runConfirmChain,
   runDiskSpaceCheck,
   runFieldSelectsChain,
   runPromptChain,
-  runSelectChain,
+  runSelectChain
 } from '../composables/actionShoppingList'
 import { REQUIRES_STOPPED } from '../types/ipc'
 import { Pencil } from 'lucide-vue-next'
@@ -50,10 +54,9 @@ interface Props {
   asModal?: boolean
   /** When true, render bare (no ModalShell wrapper, no close button)
    *  for mounting inside a parent modal that owns the chrome — e.g.
-   *  the unified SettingsModal's "ComfyUI Settings" tab body. The
-   *  contenteditable install name renders as the first row of the
-   *  bare panel; everything else (tabs, scroll body, action bar)
-   *  follows unchanged. */
+   *  ManageInstallModal. The contenteditable install name renders as
+   *  the first row of the bare panel; everything else (tabs, scroll
+   *  body, action bar) follows unchanged. */
   embedded?: boolean
 }
 
@@ -61,7 +64,7 @@ const props = withDefaults(defineProps<Props>(), {
   initialTab: 'status',
   autoAction: null,
   asModal: false,
-  embedded: false,
+  embedded: false
 })
 
 const emit = defineEmits<{
@@ -90,7 +93,6 @@ function handleHeaderClose(): void {
 
 const scrollRef = ref<HTMLDivElement | null>(null)
 
-
 const sections = ref<DetailSection[]>([])
 const sectionsLoading = ref(false)
 const installationSize = ref<number | null>(null)
@@ -100,7 +102,7 @@ const tabLabels = computed<Record<string, string>>(() => ({
   status: t('common.tabStatus'),
   update: t('common.tabUpdate'),
   snapshots: t('common.tabSnapshots'),
-  settings: t('common.tabSettings'),
+  settings: t('common.tabSettings')
 }))
 
 const activeTab = ref<string>('status')
@@ -111,7 +113,10 @@ const availableTabs = computed(() => {
     if (s.tab && !s.pinBottom) tabIds.add(s.tab)
   }
   const ORDER = ['status', 'update', 'snapshots', 'settings']
-  return [...ORDER.filter((id) => tabIds.has(id)), ...Array.from(tabIds).filter((id) => !ORDER.includes(id))]
+  return [
+    ...ORDER.filter((id) => tabIds.has(id)),
+    ...Array.from(tabIds).filter((id) => !ORDER.includes(id))
+  ]
 })
 
 const hasTabs = computed(() => availableTabs.value.length > 1)
@@ -145,8 +150,8 @@ const bottomActions = computed<ActionDef[]>(() => {
       confirm: {
         title: t('actions.restartConfirmTitle'),
         message: t('actions.restartConfirmMessage'),
-        confirmLabel: t('actions.restartConfirm'),
-      },
+        confirmLabel: t('actions.restartConfirm')
+      }
     }
   })
 })
@@ -192,7 +197,7 @@ watch(
     void nextTick(() => {
       if (scrollRef.value) scrollRef.value.scrollTop = 0
     })
-  },
+  }
 )
 
 watch(
@@ -246,8 +251,7 @@ watch(
         const channelField = sections.value
           .flatMap((s) => s.fields ?? [])
           .find((f) => f.editType === 'channel-cards')
-        const currentChannel =
-          typeof channelField?.value === 'string' ? channelField.value : null
+        const currentChannel = typeof channelField?.value === 'string' ? channelField.value : null
         const action = findActionById(sections.value, actionId, currentChannel)
         if (action) {
           await nextTick()
@@ -338,7 +342,7 @@ async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Prom
   const instId = props.installation.id
   const telemetryContext = {
     source_category: props.installation.sourceCategory || 'unknown',
-    ui_surface: 'detail',
+    ui_surface: 'detail'
   }
 
   // Busy-only guard. migrate-to-standalone manages its own busy check
@@ -350,7 +354,7 @@ async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Prom
   const requiresStoppedGuard = REQUIRES_STOPPED.has(action.id)
   const wasRunning = sessionStore.isRunning(instId)
   if (requiresStoppedGuard && !ownsPreflight) {
-    if (!await actionGuard.checkBeforeAction(instId, action.label)) return
+    if (!(await actionGuard.checkBeforeAction(instId, action.label))) return
   }
 
   let mutableAction = { ...action }
@@ -359,7 +363,7 @@ async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Prom
   if (requiresStoppedGuard && wasRunning && !ownsPreflight) {
     mutableAction = augmentActionWithStopWarning(
       mutableAction,
-      t('errors.willStopRunning', { name: props.installation?.name || 'ComfyUI' }),
+      t('errors.willStopRunning', { name: props.installation?.name || 'ComfyUI' })
     )
   }
 
@@ -387,7 +391,7 @@ async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Prom
     if (!migrateResult) return
     mutableAction = {
       ...mutableAction,
-      data: { ...mutableAction.data, ...migrateResult },
+      data: { ...mutableAction.data, ...migrateResult }
     }
   }
 
@@ -403,18 +407,20 @@ async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Prom
   // when the loader is still running so the helper falls back to a
   // synchronous re-fetch.
   const cachedSize = installationSizeLoading.value ? null : installationSize.value
-  if (!await runDiskSpaceCheck(mutableAction, props.installation, modal, t, cachedSize)) return
+  if (!(await runDiskSpaceCheck(mutableAction, props.installation, modal, t, cachedSize))) return
 
   // showProgress
   if (mutableAction.showProgress) {
     const instName = props.installation.name
     const rawTitle = (mutableAction.progressTitle || mutableAction.label).replace(
       /\{(\w+)\}/g,
-      (_, k: string) =>
-        String((mutableAction.data as Record<string, unknown>)?.[k] ?? k)
+      (_, k: string) => String((mutableAction.data as Record<string, unknown>)?.[k] ?? k)
     )
     const title = `${rawTitle} — ${instName}`
-    emitTelemetryAction('desktop2.action.invoked', { action_id: mutableAction.id, ...telemetryContext })
+    emitTelemetryAction('desktop2.action.invoked', {
+      action_id: mutableAction.id,
+      ...telemetryContext
+    })
     // Synthetic 'restart' action: chain stopComfyUI → launch in a
     // single ProgressModal so the user sees one continuous
     // "Restarting ComfyUI" view rather than two flashes.
@@ -430,13 +436,22 @@ async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Prom
       : needsSelfStop
         ? async () => {
             await stopAndWaitForExit(instId, isRunning)
-            const result = await window.api.runAction(instId, mutableAction.id, mutableAction.data ? toRaw(mutableAction.data) : undefined)
+            const result = await window.api.runAction(
+              instId,
+              mutableAction.id,
+              mutableAction.data ? toRaw(mutableAction.data) : undefined
+            )
             if (wantsRelaunch && result?.ok !== false) {
               await window.api.runAction(instId, 'launch')
             }
             return result
           }
-        : () => window.api.runAction(instId, mutableAction.id, mutableAction.data ? toRaw(mutableAction.data) : undefined)
+        : () =>
+            window.api.runAction(
+              instId,
+              mutableAction.id,
+              mutableAction.data ? toRaw(mutableAction.data) : undefined
+            )
     // Tag launch / restart so PanelApp's handleShowProgress installs
     // the chooser-host close-on-instance-started subscription. Without
     // this, launches kicked off from this Tier-1 modal would leave the
@@ -451,6 +466,7 @@ async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Prom
       triggersInstanceStart,
       opKind: isRestart ? 'launch' : progressOpKindForActionId(mutableAction.id),
       destroysInstance: destroysInstanceForActionId(mutableAction.id),
+      actionId: mutableAction.id
     })
     return
   }
@@ -463,7 +479,10 @@ async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Prom
     btn.classList.add('loading')
   }
   try {
-    emitTelemetryAction('desktop2.action.invoked', { action_id: mutableAction.id, ...telemetryContext })
+    emitTelemetryAction('desktop2.action.invoked', {
+      action_id: mutableAction.id,
+      ...telemetryContext
+    })
     if (wasRunning && requiresStoppedGuard) {
       await stopAndWaitForExit(instId, () => sessionStore.isRunning(instId))
     }
@@ -477,11 +496,20 @@ async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Prom
       await actionGuard.checkBeforeAction(instId, mutableAction.label)
       return
     }
-    if (wasRunning && requiresStoppedGuard && IN_PLACE_RELAUNCH.has(mutableAction.id) && result?.ok !== false) {
+    if (
+      wasRunning &&
+      requiresStoppedGuard &&
+      IN_PLACE_RELAUNCH.has(mutableAction.id) &&
+      result?.ok !== false
+    ) {
       await window.api.runAction(instId, 'launch')
     }
-    const resultValue = result.cancelled ? 'cancelled' : (result.ok === false ? 'failed' : 'ok')
-    emitTelemetryAction('desktop2.action.result', { action_id: mutableAction.id, result: resultValue, ...telemetryContext })
+    const resultValue = result.cancelled ? 'cancelled' : result.ok === false ? 'failed' : 'ok'
+    emitTelemetryAction('desktop2.action.result', {
+      action_id: mutableAction.id,
+      result: resultValue,
+      ...telemetryContext
+    })
     if (result.navigate === 'list') {
       emit('close')
       emit('navigate-list')
@@ -495,11 +523,11 @@ async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Prom
       action_id: mutableAction.id,
       result: 'failed',
       error_bucket: toErrorBucket(error),
-      ...telemetryContext,
+      ...telemetryContext
     })
     await modal.alert({
       title: mutableAction.label,
-      message: error instanceof Error ? error.message : String(error),
+      message: error instanceof Error ? error.message : String(error)
     })
   } finally {
     if (btn) {
@@ -514,8 +542,6 @@ function navigateToInstallation(installationId: string): void {
   const inst = installationStore.getById(installationId)
   if (inst) emit('update:installation', inst)
 }
-
-
 </script>
 
 <template>
@@ -525,97 +551,100 @@ function navigateToInstallation(installationId: string): void {
     opacity="dim"
     @close="handleHeaderClose"
   >
-      <template #title>
+    <template #title>
+      <div
+        role="textbox"
+        :aria-label="$t('detail.editName', 'Edit installation name')"
+        contenteditable
+        spellcheck="false"
+        @blur="handleTitleBlur"
+        @keydown.enter.prevent="($event.target as HTMLElement).blur()"
+        @keydown.ctrl.a.prevent="handleTitleSelectAll"
+        @paste="handleTitlePaste"
+      >
+        {{ installation.name }}<Pencil :size="14" class="edit-name-hint" contenteditable="false" />
+      </div>
+    </template>
+    <div v-if="hasTabs" class="detail-tabs">
+      <button
+        v-for="tabId in availableTabs"
+        :key="tabId"
+        class="detail-tab"
+        :class="{ active: activeTab === tabId }"
+        @click="activeTab = tabId"
+      >
+        {{ tabLabels[tabId] ?? tabId }}
+      </button>
+    </div>
+    <div ref="scrollRef" class="view-scroll">
+      <div v-if="sectionsLoading" class="modal-loading with-spinner">
+        {{ $t('common.loading') }}
+      </div>
+      <SnapshotTab
+        v-else-if="activeTab === 'snapshots'"
+        :installation-id="installation.id"
+        @run-action="runAction"
+        @refresh-all="refreshAllSections"
+        @navigate-installation="navigateToInstallation"
+      />
+      <template v-else>
+        <DetailSectionComponent
+          v-for="section in mainSections"
+          :key="section.title ?? 'untitled'"
+          :installation-id="installation.id"
+          :title="section.title"
+          :description="section.description"
+          :collapsed="section.collapsed"
+          :items="section.items"
+          :fields="section.fields"
+          :actions="section.actions"
+          @run-action="runAction"
+          @refresh="refreshSection"
+        />
         <div
-          role="textbox"
-          :aria-label="$t('detail.editName', 'Edit installation name')"
-          contenteditable
-          spellcheck="false"
-          @blur="handleTitleBlur"
-          @keydown.enter.prevent="($event.target as HTMLElement).blur()"
-          @keydown.ctrl.a.prevent="handleTitleSelectAll"
-          @paste="handleTitlePaste"
+          v-if="activeTab === 'status' && (installationSizeLoading || installationSize !== null)"
+          class="detail-section"
         >
-          {{ installation.name }}<Pencil :size="14" class="edit-name-hint" contenteditable="false" />
-        </div>
-      </template>
-        <div v-if="hasTabs" class="detail-tabs">
-          <button
-            v-for="tabId in availableTabs"
-            :key="tabId"
-            class="detail-tab"
-            :class="{ active: activeTab === tabId }"
-            @click="activeTab = tabId"
-          >
-            {{ tabLabels[tabId] ?? tabId }}
-          </button>
-        </div>
-        <div ref="scrollRef" class="view-scroll">
-          <div v-if="sectionsLoading" class="modal-loading with-spinner">{{ $t('common.loading') }}</div>
-          <SnapshotTab
-            v-else-if="activeTab === 'snapshots'"
-            :installation-id="installation.id"
-            @run-action="runAction"
-            @refresh-all="refreshAllSections"
-            @navigate-installation="navigateToInstallation"
-          />
-          <template v-else>
-            <DetailSectionComponent
-              v-for="section in mainSections"
-              :key="section.title ?? 'untitled'"
-              :installation-id="installation.id"
-              :title="section.title"
-              :description="section.description"
-              :collapsed="section.collapsed"
-              :items="section.items"
-              :fields="section.fields"
-              :actions="section.actions"
-              @run-action="runAction"
-              @refresh="refreshSection"
-            />
-            <div v-if="activeTab === 'status' && (installationSizeLoading || installationSize !== null)" class="detail-section">
-              <div class="detail-section-body">
-                <div class="detail-fields">
-                  <div>
-                    <div class="detail-field-label">{{ $t('diskSpace.sizeLabel') }}</div>
-                    <div class="detail-field-value">
-                      {{ installationSizeLoading ? $t('diskSpace.calculatingSize') : (installationSize !== null ? formatBytes(installationSize) : $t('diskSpace.sizeUnavailable')) }}
-                    </div>
-                  </div>
+          <div class="detail-section-body">
+            <div class="detail-fields">
+              <div>
+                <div class="detail-field-label">{{ $t('diskSpace.sizeLabel') }}</div>
+                <div class="detail-field-value">
+                  {{
+                    installationSizeLoading
+                      ? $t('diskSpace.calculatingSize')
+                      : installationSize !== null
+                        ? formatBytes(installationSize)
+                        : $t('diskSpace.sizeUnavailable')
+                  }}
                 </div>
               </div>
             </div>
-          </template>
-        </div>
-
-        <!-- Bottom pinned actions -->
-        <div v-if="bottomSection" id="detail-bottom-actions">
-          <div class="detail-actions">
-            <TooltipWrap
-              v-for="a in bottomActions"
-              :key="a.id"
-              :text="a.tooltip"
-            >
-              <button
-                :class="[
-                  a.style,
-                  { 'looks-disabled': a.enabled === false && a.disabledMessage }
-                ]"
-                :disabled="a.enabled === false && !a.disabledMessage"
-                @click="handleActionClick(a, $event)"
-              >
-                {{ a.label }}
-              </button>
-            </TooltipWrap>
           </div>
         </div>
+      </template>
+    </div>
+
+    <!-- Bottom pinned actions -->
+    <div v-if="bottomSection" id="detail-bottom-actions">
+      <div class="detail-actions">
+        <TooltipWrap v-for="a in bottomActions" :key="a.id" :text="a.tooltip">
+          <button
+            :class="[a.style, { 'looks-disabled': a.enabled === false && a.disabledMessage }]"
+            :disabled="a.enabled === false && !a.disabledMessage"
+            @click="handleActionClick(a, $event)"
+          >
+            {{ a.label }}
+          </button>
+        </TooltipWrap>
+      </div>
+    </div>
   </ModalShell>
 
-  <!-- Embedded mount: bare panel body for the unified SettingsModal's
-       "ComfyUI Settings" tab. No ModalShell, no close button — the
-       parent owns the chrome. Editable install name sits at the top
-       of the body; tabs / scroll / action-bar follow as in the
-       wrapped mount. -->
+  <!-- Embedded mount: bare panel body for ManageInstallModal. No
+       ModalShell, no close button — the parent owns the chrome.
+       Editable install name sits at the top of the body; tabs /
+       scroll / action-bar follow as in the wrapped mount. -->
   <div v-else-if="installation" class="detail-embedded">
     <div class="detail-embedded-title">
       <div
@@ -643,7 +672,9 @@ function navigateToInstallation(installationId: string): void {
       </button>
     </div>
     <div ref="scrollRef" class="view-scroll">
-      <div v-if="sectionsLoading" class="modal-loading with-spinner">{{ $t('common.loading') }}</div>
+      <div v-if="sectionsLoading" class="modal-loading with-spinner">
+        {{ $t('common.loading') }}
+      </div>
       <SnapshotTab
         v-else-if="activeTab === 'snapshots'"
         :installation-id="installation.id"
@@ -665,13 +696,22 @@ function navigateToInstallation(installationId: string): void {
           @run-action="runAction"
           @refresh="refreshSection"
         />
-        <div v-if="activeTab === 'status' && (installationSizeLoading || installationSize !== null)" class="detail-section">
+        <div
+          v-if="activeTab === 'status' && (installationSizeLoading || installationSize !== null)"
+          class="detail-section"
+        >
           <div class="detail-section-body">
             <div class="detail-fields">
               <div>
                 <div class="detail-field-label">{{ $t('diskSpace.sizeLabel') }}</div>
                 <div class="detail-field-value">
-                  {{ installationSizeLoading ? $t('diskSpace.calculatingSize') : (installationSize !== null ? formatBytes(installationSize) : $t('diskSpace.sizeUnavailable')) }}
+                  {{
+                    installationSizeLoading
+                      ? $t('diskSpace.calculatingSize')
+                      : installationSize !== null
+                        ? formatBytes(installationSize)
+                        : $t('diskSpace.sizeUnavailable')
+                  }}
                 </div>
               </div>
             </div>
@@ -682,16 +722,9 @@ function navigateToInstallation(installationId: string): void {
 
     <div v-if="bottomSection" id="detail-bottom-actions">
       <div class="detail-actions">
-        <TooltipWrap
-          v-for="a in bottomActions"
-          :key="a.id"
-          :text="a.tooltip"
-        >
+        <TooltipWrap v-for="a in bottomActions" :key="a.id" :text="a.tooltip">
           <button
-            :class="[
-              a.style,
-              { 'looks-disabled': a.enabled === false && a.disabledMessage }
-            ]"
+            :class="[a.style, { 'looks-disabled': a.enabled === false && a.disabledMessage }]"
             :disabled="a.enabled === false && !a.disabledMessage"
             @click="handleActionClick(a, $event)"
           >

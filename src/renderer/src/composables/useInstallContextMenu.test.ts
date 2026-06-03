@@ -59,7 +59,7 @@ const messages = {
       delete: 'Delete',
       deleteConfirmTitle: 'Delete Install',
       deleteConfirmMessage:
-        'This will permanently delete the install and all its files. This cannot be undone.',
+        'This permanently removes this ComfyUI installation and all its files. Other installations and ComfyUI itself are unaffected. This cannot be undone.',
       share: 'Share',
     },
     snapshots: {
@@ -259,7 +259,7 @@ describe('useInstallContextMenu — delete fast path (regression for #582)', () 
     expect(modalMock.confirm).toHaveBeenCalledTimes(1)
     const confirmArgs = modalMock.confirm.mock.calls[0][0]
     expect(confirmArgs.title).toBe('Delete Install')
-    expect(confirmArgs.message).toContain('permanently delete')
+    expect(confirmArgs.message).toContain('permanently removes this ComfyUI installation')
     expect(confirmArgs.message).toContain('/tmp/my')
     expect(confirmArgs.confirmLabel).toBe('Delete')
     expect(confirmArgs.confirmStyle).toBe('danger')
@@ -330,6 +330,20 @@ describe('useInstallContextMenu — copy-install routing', () => {
     expect(onManage.mock.calls[0][0]).toBe(inst)
     expect(onManage.mock.calls[0][1]).toEqual({ autoAction: 'copy' })
     expect(apiMock.runAction).not.toHaveBeenCalled()
+  })
+
+  it('update opens the Update tab AND auto-fires the update (matches the title-bar pill)', async () => {
+    // Parity with the title-bar install-update pill (useDeepLinkRouter):
+    // open the picker on the Update tab with `autoAction: 'update-comfyui'`
+    // so the update modal runs, instead of just landing on the tab page.
+    const onManage = vi.fn<(inst: Installation, options?: { initialTab?: string; autoAction?: string | null }) => void>()
+    const inst = makeInstall()
+    const { menu } = mountHarnessWithManage(onManage)
+
+    await menu.triggerAction('update', inst)
+
+    expect(onManage).toHaveBeenCalledTimes(1)
+    expect(onManage.mock.calls[0][1]).toEqual({ initialTab: 'update', autoAction: 'update-comfyui' })
   })
 })
 

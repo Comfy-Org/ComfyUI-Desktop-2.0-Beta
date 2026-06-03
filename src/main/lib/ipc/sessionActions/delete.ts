@@ -4,18 +4,16 @@ import {
   deleteDir, formatDeleteStatus,
   findLockingProcesses,
   MARKER_FILE,
-  _operationAborts,
   makeSendProgress,
 } from '../shared'
 import type { ActionContext, ActionResult } from './types'
+import { withAbortableSessionAction } from './withAbortable'
 
-export async function handleDelete({ event, installationId, inst }: ActionContext): Promise<ActionResult> {
+export async function handleDelete(ctx: ActionContext): Promise<ActionResult> {
+  const { event, installationId, inst } = ctx
   if (!fs.existsSync(inst.installPath)) {
     await installations.remove(installationId)
     return { ok: true, navigate: 'list' }
-  }
-  if (_operationAborts.has(installationId)) {
-    return { ok: false, message: 'Another operation is already running for this installation.' }
   }
   const markerPath = path.join(inst.installPath, MARKER_FILE)
   let markerContent: string | null
@@ -28,38 +26,40 @@ export async function handleDelete({ event, installationId, inst }: ActionContex
   }
   const sender = event.sender
   const sendProgress = makeSendProgress(sender, installationId)
-  const abort = new AbortController()
-  _operationAborts.set(installationId, abort)
   sendProgress('delete', { percent: 0, status: 'Counting files…' })
-  try {
-    await deleteDir(inst.installPath, (p) => {
-      sendProgress('delete', { percent: p.percent, status: formatDeleteStatus(p) })
-    }, { signal: abort.signal })
-  } catch (err) {
-    _operationAborts.delete(installationId)
+
+  return withAbortableSessionAction(ctx, async (signal) => {
     try {
-      fs.mkdirSync(inst.installPath, { recursive: true })
-      fs.writeFileSync(markerPath, markerContent)
-    } catch {}
-    await installations.update(installationId, { status: 'partial-delete' })
-    const raw = (err as NodeJS.ErrnoException)
-    let message = raw.message
-    if (raw.code === 'EBUSY' || raw.code === 'EPERM') {
-      message = i18n.t('errors.deleteLocked', { path: raw.path ?? '' })
-      const lockedPath = raw.path
-      if (lockedPath) {
-        findLockingProcesses(lockedPath).then((procs) => {
-          if (procs.length > 0 && !sender.isDestroyed()) {
-            const names = [...new Set(procs.map((p) => p.name))].join(', ')
-            const detail = i18n.t('errors.deleteLockedBy', { processes: names, path: lockedPath })
-            sender.send('error-detail', { installationId, message: detail })
-          }
-        }).catch((err) => { console.error('Failed to identify locking processes:', err) })
+      await deleteDir(inst.installPath, (p) => {
+        sendProgress('delete', { percent: p.percent, status: formatDeleteStatus(p) })
+      }, { signal })
+    } catch (err) {
+      // Restore the safety marker so a retry still passes the marker check;
+      // mark the install as partially deleted so the dashboard surfaces it.
+      // The error is re-thrown so the wrapper maps it (cancelled → cancelled,
+      // EBUSY/EPERM → the lock-friendly message below).
+      try {
+        fs.mkdirSync(inst.installPath, { recursive: true })
+        fs.writeFileSync(markerPath, markerContent)
+      } catch {}
+      await installations.update(installationId, { status: 'partial-delete' })
+      const raw = (err as NodeJS.ErrnoException)
+      if (raw.code === 'EBUSY' || raw.code === 'EPERM') {
+        const lockedPath = raw.path
+        if (lockedPath) {
+          findLockingProcesses(lockedPath).then((procs) => {
+            if (procs.length > 0 && !sender.isDestroyed()) {
+              const names = [...new Set(procs.map((p) => p.name))].join(', ')
+              const detail = i18n.t('errors.deleteLockedBy', { processes: names, path: lockedPath })
+              sender.send('error-detail', { installationId, message: detail })
+            }
+          }).catch((err) => { console.error('Failed to identify locking processes:', err) })
+        }
+        throw new Error(i18n.t('errors.deleteLocked', { path: raw.path ?? '' }), { cause: err })
       }
+      throw err
     }
-    return { ok: false, message }
-  }
-  _operationAborts.delete(installationId)
-  await installations.remove(installationId)
-  return { ok: true, navigate: 'list' }
+    await installations.remove(installationId)
+    return { ok: true, navigate: 'list' }
+  })
 }

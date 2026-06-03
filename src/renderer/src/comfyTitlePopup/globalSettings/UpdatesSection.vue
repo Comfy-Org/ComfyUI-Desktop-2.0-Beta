@@ -12,9 +12,9 @@ import type {
 } from '../../types/ipc'
 
 /**
- * Desktop-only Updates tab. Presents human-readable status first (like
- * AppUpdateAction), version/build as secondary detail, and a single
- * inset card that groups status + metadata + actions.
+ * Desktop-only Updates tab. Presents human-readable status first,
+ * version/build as secondary detail, and a single inset card that
+ * groups status + metadata + actions.
  */
 
 interface Props {

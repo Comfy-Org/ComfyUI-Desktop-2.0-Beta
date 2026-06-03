@@ -11,6 +11,17 @@ export type Unsubscribe = () => void
 export type Theme = 'system' | 'dark' | 'light'
 export type ResolvedTheme = Exclude<Theme, 'system'>
 
+/** Capacity-protection status for Cloud entry points (see
+ *  `getCloudCapacity` and `useCloudCapacity`). `normal` = no UI changes;
+ *  `degraded` = show heavy-usage warning; `disabled` = block entry. */
+export type CloudCapacityStatus = 'normal' | 'degraded' | 'disabled'
+
+/** Signed-in user's Comfy Cloud subscription tier, normalized to the
+ *  two values the capacity gate cares about. `'unknown'` = signed out
+ *  or no fetch has succeeded yet this lifetime; treated as `'free'`
+ *  downstream (fail-closed). See `userTier.ts`. */
+export type CloudUserTier = 'free' | 'paid' | 'unknown'
+
 // --- Installation types ---
 export interface Installation {
   id: string
@@ -116,18 +127,37 @@ export interface DetailField {
   label: string
   value: string | boolean | number | Record<string, string> | null
   editable?: boolean
-  editType?: 'select' | 'boolean' | 'text' | 'number' | 'path' | 'channel-cards' | 'args-builder' | 'env-vars'
+  editType?:
+    | 'select'
+    | 'boolean'
+    | 'text'
+    | 'number'
+    | 'path'
+    | 'channel-cards'
+    | 'args-builder'
+    | 'env-vars'
   options?: DetailFieldOption[]
   refreshSection?: boolean
   /** Action id to fire automatically when this field's value changes
    *  (e.g. switching update channel triggers `check-update`). */
   onChangeAction?: string
   browseOnly?: boolean
+  /** Renders the field indented behind a hairline rail to signal it
+   *  depends on the toggle directly above it (e.g. the per-install
+   *  output-path picker under "Use shared output directory"). Set
+   *  explicitly by the field builder — the renderer must not infer
+   *  nesting from the field id, since ids like `outputDir` are reused
+   *  for equal-weight rows in the Shared Directories section. */
+  nested?: boolean
   tooltip?: string
   /** Marks fields that only take effect on next process start.
    *  Renderer shows a per-field tag + promotes the footer Restart
    *  button when one of these is edited while the install is running. */
   requiresRestart?: boolean
+  /** Inline explanatory text rendered beneath the control. Used for
+   *  fields whose effect is not self-evident from the label (e.g.
+   *  Chinese mirrors lists which hosts it swaps). */
+  description?: string
   // text / number support — surfaced from SettingsField when DetailField
   // is built from a global SettingsSection (Global Settings panel).
   placeholder?: string
@@ -409,7 +439,23 @@ export interface ComfyExitedData {
   installationName: string
   crashed?: boolean
   exitCode?: number
+  /** POSIX signal name when the process was killed by signal (e.g.
+   *  `'SIGKILL'`, `'SIGTERM'`). `null` / absent on a normal exit and on
+   *  Windows TerminateProcess paths (Windows reports an exit code only).
+   *  Surfacing this lets the lifecycle view differentiate "killed by
+   *  signal" from "crashed with non-zero exit". */
+  signal?: string
   lastStderr?: string
+  /**
+   * Wall-clock timestamp (epoch ms) when the crash was recorded main-side.
+   * Set by `recordCrash()` so a renderer that hydrates the crash *after*
+   * the live `comfy-exited` IPC (panel WebContents recreated, second
+   * window opened on the same install, etc.) still has a real value to
+   * compute crash-to-relaunch latency from. Live-path subscribers also
+   * stamp this on their own copy with `Date.now()`; the main-side value
+   * takes precedence on hydration so the two paths agree.
+   */
+  crashedAtMs?: number
 }
 
 export interface ComfyBootLogData {
@@ -520,8 +566,22 @@ export interface SnapshotDiffEntry {
   createdAt: string
   trigger: string
   label: string | null
-  nodesAdded: Array<{ id: string; type: string; dirName: string; enabled: boolean; version?: string; commit?: string }>
-  nodesRemoved: Array<{ id: string; type: string; dirName: string; enabled: boolean; version?: string; commit?: string }>
+  nodesAdded: Array<{
+    id: string
+    type: string
+    dirName: string
+    enabled: boolean
+    version?: string
+    commit?: string
+  }>
+  nodesRemoved: Array<{
+    id: string
+    type: string
+    dirName: string
+    enabled: boolean
+    version?: string
+    commit?: string
+  }>
   nodesChanged: Array<{
     id: string
     from: { version?: string; commit?: string; enabled: boolean }
@@ -652,6 +712,11 @@ export interface CopyEvent {
   copiedAt: string
   copyReason: 'copy' | 'copy-update' | 'release-update'
   exists: boolean
+  /** `out` = another install was copied FROM the install whose rail this is
+   *  shown on (installationName is the destination's name).
+   *  `in`  = THIS install was copied from another (installationName is the
+   *  source's name, snapshotted at copy time via `copiedFromName`). */
+  direction: 'in' | 'out'
 }
 
 export interface SnapshotDiffSummary {
@@ -877,8 +942,13 @@ export interface ElectronApi {
    *  view (and its title-bar / panel WebContentsViews). Returns true if a
    *  window was found and closed. Used by the embedded install-settings
    *  panel after a navigate-list emit (e.g. delete) so the parent window
-   *  doesn't linger with no install backing it. */
-  closeComfyWindow(installationId: string): Promise<boolean>
+   *  doesn't linger with no install backing it.
+   *
+   *  `skipConfirm` pre-clears the close so the panel-renderer quit-confirm
+   *  consult is bypassed. Callers should only set it when the user has
+   *  already explicitly consented (e.g. the launch guard's
+   *  "Close Running & Launch" choice). */
+  closeComfyWindow(installationId: string, opts?: { skipConfirm?: boolean }): Promise<boolean>
   /** Close the BrowserWindow that contains the calling panel
    *  WebContents. Used by the chooser to retire its install-less
    *  host window after a successful pick → launch hand-off.
@@ -898,9 +968,8 @@ export interface ElectronApi {
   closeCurrentPanel(): void
   /** Open the Global Settings popup for the panel's host window. Used
    *  by the panel-side file-menu "Settings" item and the
-   *  `comfy://open-settings?tab=global` deep link — both previously
-   *  routed to the legacy `SettingsModal` overlay. Main reuses the same
-   *  helper the hamburger Settings entry calls. */
+   *  `comfy://open-settings?tab=global` deep link. Main reuses the
+   *  same helper the hamburger Settings entry calls. */
   openGlobalSettings(): void
   /** Open the instance-picker popup for the panel's host window with
    *  `installationId` seeded as the picker's right-pane selection.
@@ -943,9 +1012,11 @@ export interface ElectronApi {
    *  `requestId` it must echo back via `respondCloseRequest` so main
    *  can pair the response with the request that fired it. */
   onCloseRequest(callback: (data: { requestId: string }) => void): Unsubscribe
-  /** Reply to a `comfy-window:request-close` consult — `cleared: true`
-   *  lets main proceed with destruction, `cleared: false` aborts. */
-  respondCloseRequest(payload: { requestId: string; cleared: boolean }): void
+  /** Reply to a `comfy-window:request-close` consult. `cleared: true`
+   *  lets main proceed, `cleared: false` aborts (overlay cancel-prompt
+   *  dismissed). `defer: true` means no overlay was in flight, so main
+   *  owns the close-window confirm itself. */
+  respondCloseRequest(payload: { requestId: string; cleared?: boolean; defer?: boolean }): void
   /** Send immediately on receiving a `comfy-window:request-close` so
    *  main knows the renderer picked it up and is processing. Main's
    *  hung-renderer safety timeout only fires until the ack lands; once
@@ -1018,17 +1089,49 @@ export interface ElectronApi {
   // Snapshots
   getSnapshots(installationId: string): Promise<SnapshotListData>
   getSnapshotDetail(installationId: string, filename: string): Promise<SnapshotDetailData>
-  getSnapshotDiff(installationId: string, filename: string, mode: 'previous' | 'current'): Promise<SnapshotDiffData>
-  exportSnapshot(installationId: string, filename: string): Promise<{ ok: boolean; message?: string }>
+  getSnapshotDiff(
+    installationId: string,
+    filename: string,
+    mode: 'previous' | 'current'
+  ): Promise<SnapshotDiffData>
+  exportSnapshot(
+    installationId: string,
+    filename: string
+  ): Promise<{ ok: boolean; message?: string }>
   exportAllSnapshots(installationId: string): Promise<{ ok: boolean; message?: string }>
-  importSnapshotsPreview(): Promise<{ ok: boolean; preview?: SnapshotFilePreview; message?: string }>
-  importSnapshotsDiff(installationId: string): Promise<{ ok: boolean; diff?: SnapshotDiffData; message?: string }>
-  importSnapshotsConfirm(installationId: string): Promise<{ ok: boolean; imported?: number; restoreFile?: string; message?: string }>
+  importSnapshotsPreview(): Promise<{
+    ok: boolean
+    preview?: SnapshotFilePreview
+    message?: string
+  }>
+  importSnapshotsDiff(
+    installationId: string
+  ): Promise<{ ok: boolean; diff?: SnapshotDiffData; message?: string }>
+  importSnapshotsConfirm(
+    installationId: string
+  ): Promise<{ ok: boolean; imported?: number; restoreFile?: string; message?: string }>
   previewSnapshotFile(): Promise<{ ok: boolean; preview?: SnapshotFilePreview; message?: string }>
-  previewDesktopMigration(): Promise<{ ok: boolean; message?: string; preview?: SnapshotFilePreview; snapshotPath?: string }>
-  previewLocalMigration(installationId: string): Promise<{ ok: boolean; message?: string; preview?: SnapshotFilePreview; snapshotPath?: string }>
-  previewSnapshotPath(filePath: string): Promise<{ ok: boolean; preview?: SnapshotFilePreview; message?: string }>
-  createFromSnapshot(filePath: string, name?: string, releaseTag?: string, variantId?: string): Promise<{ ok: boolean; entry?: { id: string; name: string }; message?: string }>
+  previewDesktopMigration(): Promise<{
+    ok: boolean
+    message?: string
+    preview?: SnapshotFilePreview
+    snapshotPath?: string
+  }>
+  previewLocalMigration(installationId: string): Promise<{
+    ok: boolean
+    message?: string
+    preview?: SnapshotFilePreview
+    snapshotPath?: string
+  }>
+  previewSnapshotPath(
+    filePath: string
+  ): Promise<{ ok: boolean; preview?: SnapshotFilePreview; message?: string }>
+  createFromSnapshot(
+    filePath: string,
+    name?: string,
+    releaseTag?: string,
+    variantId?: string
+  ): Promise<{ ok: boolean; entry?: { id: string; name: string }; message?: string }>
   getPathForFile(file: File): string
 
   // Settings
@@ -1044,6 +1147,12 @@ export interface ElectronApi {
 
   // App
   getAppVersion(): Promise<string>
+  /** Capacity-protection switch for Cloud entry points. Resolved at boot
+   *  from the `desktop-cloud-capacity` PostHog flag (variants `normal` |
+   *  `degraded` | `disabled`); defaults to `'normal'` when the flag is
+   *  unavailable. Renderers consume this via `useCloudCapacity`. */
+  getCloudCapacity(): Promise<CloudCapacityStatus>
+  getCloudUserTier(): Promise<CloudUserTier>
   quitApp(): Promise<void>
   relaunchApp(): Promise<void>
   resetZoom(): Promise<void>
@@ -1084,6 +1193,10 @@ export interface ElectronApi {
   /** Bulk-dismiss every terminal entry from main's recent buffer.
    *  Returns the number of entries removed. */
   clearFinishedModelDownloads(): Promise<number>
+  /** Re-dispatch a terminal (error) download from main's captured
+   *  original params. Returns false if it's still in flight or the
+   *  params were evicted from the recent buffer. */
+  retryModelDownload(url: string): Promise<boolean>
   showDownloadInFolder(savePath: string): Promise<void>
 
   // Event listeners (return unsubscribe functions)
@@ -1091,7 +1204,9 @@ export interface ElectronApi {
   onComfyOutput(callback: (data: ComfyOutputData) => void): Unsubscribe
   onComfyExited(callback: (data: ComfyExitedData) => void): Unsubscribe
   onComfyBootLog(callback: (data: ComfyBootLogData) => void): Unsubscribe
-  onInstanceLaunching(callback: (data: { installationId: string; installationName: string }) => void): Unsubscribe
+  onInstanceLaunching(
+    callback: (data: { installationId: string; installationName: string }) => void
+  ): Unsubscribe
   onInstanceLaunchFailed(callback: (data: { installationId: string }) => void): Unsubscribe
   onInstanceStarted(callback: (data: RunningInstance) => void): Unsubscribe
   onInstanceStopping(callback: (data: { installationId: string }) => void): Unsubscribe
@@ -1100,7 +1215,9 @@ export interface ElectronApi {
   onLocaleChanged(callback: (messages: Record<string, unknown>) => void): Unsubscribe
   onConfirmQuit(callback: (details: QuitActiveItem[]) => void): Unsubscribe
   onInstallationsChanged(callback: () => void): Unsubscribe
-  onInstallationsVersionsUpdated(callback: (updates: { id: string; version: string }[]) => void): Unsubscribe
+  onInstallationsVersionsUpdated(
+    callback: (updates: { id: string; version: string }[]) => void
+  ): Unsubscribe
   /**
    * Fires when `release-cache.enrichCommitsAhead` actually writes a new
    * `commitsAhead` value (not on no-op short-circuits). Open settings
@@ -1131,9 +1248,7 @@ export interface ElectronApi {
    * Settings update panel. Any field may be null if the auto-updater
    * didn't supply it for that tick.
    */
-  onAppUpdateDownloadProgress(
-    callback: (progress: AppUpdateDownloadProgress) => void,
-  ): Unsubscribe
+  onAppUpdateDownloadProgress(callback: (progress: AppUpdateDownloadProgress) => void): Unsubscribe
   /**
    * Fires when a user-initiated update action (download / install) fails.
    * Background auto-on download errors are NOT broadcast — only failures
@@ -1149,9 +1264,72 @@ export interface ElectronApi {
    *  carries the URLs that were removed so listeners can drop them in
    *  one pass instead of re-listing. */
   onModelDownloadsClearedFinished(callback: (data: { urls: string[] }) => void): Unsubscribe
+  /**
+   * Forward a renderer-originated telemetry event to main, which captures it
+   * via PostHog Node under the current distinct_id and consent state.
+   *
+   * Replaces the renderer's direct `posthog-js` capture path. Fire-and-forget:
+   * the renderer does not await delivery. Main is the single PostHog capture
+   * point so identity, consent, and dedup all live in one place.
+   */
+  captureTelemetry(event: string, properties: Record<string, unknown>): void
+  /**
+   * Forward a renderer-originated exception to main's PostHog Node
+   * `captureException` path. Used by `window.error` / `unhandledrejection`
+   * handlers and any explicit `try/catch` reporter. Fire-and-forget.
+   */
+  captureExceptionTelemetry(payload: {
+    message: string
+    stack?: string
+    properties?: Record<string, unknown>
+  }): void
+  /**
+   * Update person-level cohort properties on the current PostHog person.
+   * Replaces the renderer's previous `registerPostHog(properties)` calls.
+   * Main routes this to `posthog.identify({ distinctId, properties: { $set: ... } })`.
+   */
+  registerTelemetryProperties(properties: Record<string, unknown>): void
+  /**
+   * Bind a user_id on the current PostHog identity after a successful login.
+   * Main aliases the anonymous installation_id into user_id (PostHog merges
+   * histories), sets `is_authenticated: true`, and fires `app:user_logged_in`.
+   * The renderer remains responsible for Datadog `setUser` on its own SDK.
+   */
+  telemetryBindUserId(payload: { userId: string; properties?: Record<string, unknown> }): void
+  /**
+   * Unbind user_id on logout. Switches distinct_id back to the anonymous
+   * installation_id (NOT posthog.reset, which would clobber installation_id
+   * and download_token). Renderer also clears Datadog setUser.
+   */
+  telemetryUnbindUserId(): void
+  /**
+   * Look up an A/B experiment / feature-flag variant for this user.
+   * Returns the cached value (string for multivariate, boolean for a
+   * single-flag rollout) or `null` if the flag is not present in the
+   * cache. Callers MUST default to the control branch on `null`.
+   * Backed by `posthog.getAllFlags` via the boot-time experiments
+   * refresh; see `src/main/lib/experiments.ts`.
+   */
+  telemetryGetExperimentFlag(key: string): Promise<string | boolean | null>
+  /**
+   * Record an A/B experiment exposure. Per-session dedup is enforced
+   * main-side, so it's safe to call this on every render of an
+   * experiment surface (a re-render won't double-count).
+   */
+  telemetryRecordExposure(payload: {
+    experimentKey: string
+    variant: string
+    source?: 'cache' | 'remote' | 'fallback'
+  }): void
   onTelemetrySettingChanged(callback: (enabled: boolean | undefined) => void): Unsubscribe
   onDatadogError(callback: (payload: DatadogForwardedError) => void): Unsubscribe
-  onTelemetryActionFromMain(callback: (data: { event: string; context: Record<string, unknown>; mainAlreadyCaptured?: boolean }) => void): Unsubscribe
+  onTelemetryActionFromMain(
+    callback: (data: {
+      event: string
+      context: Record<string, unknown>
+      mainAlreadyCaptured?: boolean
+    }) => void
+  ): Unsubscribe
   onErrorDetail(callback: (data: ErrorDetailData) => void): Unsubscribe
   onSuggestChineseMirrors(callback: () => void): Unsubscribe
   onSettingsChanged(callback: (data: { key: string }) => void): Unsubscribe
@@ -1214,7 +1392,7 @@ export interface ElectronApi {
        *  `successTerminal` preset before handing off to
        *  `progressStore.startOperation`. */
       successChoice?: boolean
-    }) => void,
+    }) => void
   ): Unsubscribe
 }
 
@@ -1232,7 +1410,7 @@ export const REQUIRES_STOPPED = new Set([
   'migrate-to-standalone',
   'snapshot-restore',
   'update-comfyui',
-  'migrate-from',
+  'migrate-from'
 ])
 
 /** Picker popup's settings-passthrough IPC channels — main registers them,
@@ -1261,5 +1439,5 @@ export const PICKER_SETTINGS_CHANNELS = {
   previewDesktopMigration: 'comfy-titlepopup:picker-settings-preview-desktop-migration',
   previewLocalMigration: 'comfy-titlepopup:picker-settings-preview-local-migration',
   relaunchApp: 'comfy-titlepopup:picker-settings-relaunch-app',
-  getLocaleMessages: 'comfy-titlepopup:picker-settings-get-locale-messages',
+  getLocaleMessages: 'comfy-titlepopup:picker-settings-get-locale-messages'
 } as const

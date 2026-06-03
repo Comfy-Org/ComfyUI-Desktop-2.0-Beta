@@ -92,4 +92,13 @@ describe('getModelDownloadContentScript', () => {
     expect(script).toContain('downloadAsset')
     expect(script).toContain('window.WebSocket')
   })
+
+  it('auto-downloads 3D outputs (SaveGLB) alongside images/audio/video', () => {
+    // SaveGLB emits its results under ui={"3d": [...]} (see
+    // ComfyUI/comfy_extras/nodes_save_3d.py). The remote/cloud
+    // WebSocket intercept iterates a fixed list of output-dict keys,
+    // so "3d" must be in that list or .glb files silently fail to
+    // download from cloud/remote sessions (issue #784).
+    expect(script).toContain(`['images', 'gifs', 'audio', 'video', '3d']`)
+  })
 })

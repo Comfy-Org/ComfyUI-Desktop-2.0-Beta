@@ -50,7 +50,8 @@ export function buildElectronApi(): ElectronApi {
     openExternal: (url) => ipcRenderer.invoke('open-external', url),
     getDiskSpace: (targetPath) => ipcRenderer.invoke('get-disk-space', targetPath),
     validateInstallPath: (targetPath) => ipcRenderer.invoke('validate-install-path', targetPath),
-    getInstallationSize: (installationId) => ipcRenderer.invoke('get-installation-size', installationId),
+    getInstallationSize: (installationId) =>
+      ipcRenderer.invoke('get-installation-size', installationId),
     cancelInstallationSize: () => ipcRenderer.invoke('cancel-installation-size'),
 
     // Locale
@@ -65,39 +66,31 @@ export function buildElectronApi(): ElectronApi {
     getInstallations: () => ipcRenderer.invoke('get-installations'),
     getInstallationsSummary: () => ipcRenderer.invoke('get-installations-summary'),
     addInstallation: (data) => ipcRenderer.invoke('add-installation', data),
-    reorderInstallations: (orderedIds) =>
-      ipcRenderer.invoke('reorder-installations', orderedIds),
+    reorderInstallations: (orderedIds) => ipcRenderer.invoke('reorder-installations', orderedIds),
     probeInstallation: (dirPath) => ipcRenderer.invoke('probe-installation', dirPath),
     trackInstallation: (data) => ipcRenderer.invoke('track-installation', data),
-    installInstance: (installationId) =>
-      ipcRenderer.invoke('install-instance', installationId),
+    installInstance: (installationId) => ipcRenderer.invoke('install-instance', installationId),
     updateInstallation: (installationId, data) =>
       ipcRenderer.invoke('update-installation', installationId, data),
 
     // Running
     stopComfyUI: (installationId) => ipcRenderer.invoke('stop-comfyui', installationId),
-    focusComfyWindow: (installationId) =>
-      ipcRenderer.invoke('focus-comfy-window', installationId),
+    focusComfyWindow: (installationId) => ipcRenderer.invoke('focus-comfy-window', installationId),
     openInstallWindow: (installationId) =>
       ipcRenderer.invoke('open-install-window', installationId),
-    closeComfyWindow: (installationId) =>
-      ipcRenderer.invoke('close-comfy-window', installationId),
-    closeHostWindow: () =>
-      ipcRenderer.invoke('close-host-window'),
-    returnToDashboard: () =>
-      ipcRenderer.invoke('return-to-dashboard'),
-    closeCurrentPanel: () =>
-      ipcRenderer.send('comfy-window:close-current-panel'),
-    openGlobalSettings: () =>
-      ipcRenderer.send('comfy-titlepopup:open-global-settings'),
+    closeComfyWindow: (installationId, opts) =>
+      ipcRenderer.invoke('close-comfy-window', installationId, opts),
+    closeHostWindow: () => ipcRenderer.invoke('close-host-window'),
+    returnToDashboard: () => ipcRenderer.invoke('return-to-dashboard'),
+    closeCurrentPanel: () => ipcRenderer.send('comfy-window:close-current-panel'),
+    openGlobalSettings: () => ipcRenderer.send('comfy-titlepopup:open-global-settings'),
     openInstancePicker: (opts) =>
       ipcRenderer.send('comfy-window:open-instance-picker-for-install', {
         installationId: opts?.installationId ?? null,
         initialTab: opts?.initialTab ?? null,
-        autoAction: opts?.autoAction ?? null,
+        autoAction: opts?.autoAction ?? null
       }),
-    setFirstUseMode: (mode) =>
-      ipcRenderer.send('comfy-window:set-first-use-mode', { mode }),
+    setFirstUseMode: (mode) => ipcRenderer.send('comfy-window:set-first-use-mode', { mode }),
     onFirstUseSkip: (callback) => {
       const handler = (): void => callback()
       ipcRenderer.on('comfy-panel:first-use-skip', handler)
@@ -119,14 +112,12 @@ export function buildElectronApi(): ElectronApi {
     },
     respondCloseRequest: (payload) =>
       ipcRenderer.send('comfy-window:request-close-response', payload),
-    ackCloseRequest: (payload) =>
-      ipcRenderer.send('comfy-window:request-close-ack', payload),
+    ackCloseRequest: (payload) => ipcRenderer.send('comfy-window:request-close-ack', payload),
     onReturnToDashboardRequest: (callback) => {
       const handler = (_event: IpcRendererEvent, data: unknown) =>
         callback(data as { requestId: string })
       ipcRenderer.on('comfy-window:request-return-to-dashboard', handler)
-      return () =>
-        ipcRenderer.removeListener('comfy-window:request-return-to-dashboard', handler)
+      return () => ipcRenderer.removeListener('comfy-window:request-return-to-dashboard', handler)
     },
     respondReturnToDashboardRequest: (payload) =>
       ipcRenderer.send('comfy-window:request-return-to-dashboard-response', payload),
@@ -134,25 +125,20 @@ export function buildElectronApi(): ElectronApi {
       ipcRenderer.send('comfy-window:request-return-to-dashboard-ack', payload),
     transferHostBoundsToInstall: (installationId) =>
       ipcRenderer.invoke('transfer-host-bounds-to-install', installationId),
-    claimAttachHost: (installationId) =>
-      ipcRenderer.invoke('claim-attach-host', installationId),
-    releaseAttachHostPreview: () =>
-      ipcRenderer.invoke('release-attach-host-preview'),
+    claimAttachHost: (installationId) => ipcRenderer.invoke('claim-attach-host', installationId),
+    releaseAttachHostPreview: () => ipcRenderer.invoke('release-attach-host-preview'),
     getRunningInstances: () => ipcRenderer.invoke('get-running-instances'),
     getLastCrashError: (installationId: string) =>
       ipcRenderer.invoke('get-last-crash-error', installationId),
     cancelLaunch: () => ipcRenderer.invoke('cancel-launch'),
-    cancelOperation: (installationId) =>
-      ipcRenderer.invoke('cancel-operation', installationId),
+    cancelOperation: (installationId) => ipcRenderer.invoke('cancel-operation', installationId),
     killPortProcess: (port) => ipcRenderer.invoke('kill-port-process', port),
 
     // Actions
-    getListActions: (installationId) =>
-      ipcRenderer.invoke('get-list-actions', installationId),
+    getListActions: (installationId) => ipcRenderer.invoke('get-list-actions', installationId),
     getDetailSections: (installationId) =>
       ipcRenderer.invoke('get-detail-sections', installationId),
-    getComfyArgs: (installationId) =>
-      ipcRenderer.invoke('get-comfy-args', installationId),
+    getComfyArgs: (installationId) => ipcRenderer.invoke('get-comfy-args', installationId),
     runAction: (installationId, actionId, actionData?) =>
       ipcRenderer.invoke('run-action', installationId, actionId, actionData),
 
@@ -166,22 +152,23 @@ export function buildElectronApi(): ElectronApi {
       ipcRenderer.invoke('export-snapshot', installationId, filename),
     exportAllSnapshots: (installationId) =>
       ipcRenderer.invoke('export-all-snapshots', installationId),
-    importSnapshotsPreview: () =>
-      ipcRenderer.invoke('import-snapshots-preview'),
+    importSnapshotsPreview: () => ipcRenderer.invoke('import-snapshots-preview'),
     importSnapshotsDiff: (installationId: string) =>
       ipcRenderer.invoke('import-snapshots-diff', installationId),
     importSnapshotsConfirm: (installationId: string) =>
       ipcRenderer.invoke('import-snapshots-confirm', installationId),
-    previewSnapshotFile: () =>
-      ipcRenderer.invoke('preview-snapshot-file'),
-    previewDesktopMigration: () =>
-      ipcRenderer.invoke('preview-desktop-migration'),
+    previewSnapshotFile: () => ipcRenderer.invoke('preview-snapshot-file'),
+    previewDesktopMigration: () => ipcRenderer.invoke('preview-desktop-migration'),
     previewLocalMigration: (installationId: string) =>
       ipcRenderer.invoke('preview-local-migration', installationId),
     previewSnapshotPath: (filePath: string) =>
       ipcRenderer.invoke('preview-snapshot-path', filePath),
-    createFromSnapshot: (filePath: string, name?: string, releaseTag?: string, variantId?: string) =>
-      ipcRenderer.invoke('create-from-snapshot', filePath, name, releaseTag, variantId),
+    createFromSnapshot: (
+      filePath: string,
+      name?: string,
+      releaseTag?: string,
+      variantId?: string
+    ) => ipcRenderer.invoke('create-from-snapshot', filePath, name, releaseTag, variantId),
     getPathForFile: (file: File) => webUtils.getPathForFile(file),
 
     // Settings
@@ -197,11 +184,14 @@ export function buildElectronApi(): ElectronApi {
 
     // App
     getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+    getCloudCapacity: () => ipcRenderer.invoke('get-cloud-capacity'),
+    getCloudUserTier: () => ipcRenderer.invoke('get-cloud-user-tier'),
     quitApp: () => ipcRenderer.invoke('quit-app'),
     relaunchApp: () => ipcRenderer.invoke('app:relaunch'),
     resetZoom: () => ipcRenderer.invoke('reset-zoom'),
     getSystemInfo: () => ipcRenderer.invoke('get-system-info'),
-    getInstallationDdContext: (installationId: string) => ipcRenderer.invoke('get-installation-dd-context', installationId),
+    getInstallationDdContext: (installationId: string) =>
+      ipcRenderer.invoke('get-installation-dd-context', installationId),
     getInstallsInventory: () => ipcRenderer.invoke('get-installs-inventory'),
     getDeviceId: () => ipcRenderer.invoke('get-device-id'),
 
@@ -212,6 +202,7 @@ export function buildElectronApi(): ElectronApi {
     cancelModelDownload: (url) => ipcRenderer.invoke('model-download-cancel', { url }),
     dismissModelDownload: (url) => ipcRenderer.invoke('model-download-dismiss', { url }),
     clearFinishedModelDownloads: () => ipcRenderer.invoke('model-download-clear-finished'),
+    retryModelDownload: (url) => ipcRenderer.invoke('model-download-retry', { url }),
     showDownloadInFolder: (savePath) => ipcRenderer.invoke('show-download-in-folder', { savePath }),
 
     // Updates
@@ -223,47 +214,56 @@ export function buildElectronApi(): ElectronApi {
 
     // Event listeners (return unsubscribe functions)
     onInstallProgress: (callback) => {
-      const handler = (_event: IpcRendererEvent, data: unknown) => callback(data as Parameters<typeof callback>[0])
+      const handler = (_event: IpcRendererEvent, data: unknown) =>
+        callback(data as Parameters<typeof callback>[0])
       ipcRenderer.on('install-progress', handler)
       return () => ipcRenderer.removeListener('install-progress', handler)
     },
     onComfyOutput: (callback) => {
-      const handler = (_event: IpcRendererEvent, data: unknown) => callback(data as Parameters<typeof callback>[0])
+      const handler = (_event: IpcRendererEvent, data: unknown) =>
+        callback(data as Parameters<typeof callback>[0])
       ipcRenderer.on('comfy-output', handler)
       return () => ipcRenderer.removeListener('comfy-output', handler)
     },
     onComfyExited: (callback) => {
-      const handler = (_event: IpcRendererEvent, data: unknown) => callback(data as Parameters<typeof callback>[0])
+      const handler = (_event: IpcRendererEvent, data: unknown) =>
+        callback(data as Parameters<typeof callback>[0])
       ipcRenderer.on('comfy-exited', handler)
       return () => ipcRenderer.removeListener('comfy-exited', handler)
     },
     onComfyBootLog: (callback) => {
-      const handler = (_event: IpcRendererEvent, data: unknown) => callback(data as Parameters<typeof callback>[0])
+      const handler = (_event: IpcRendererEvent, data: unknown) =>
+        callback(data as Parameters<typeof callback>[0])
       ipcRenderer.on('comfy-boot-log', handler)
       return () => ipcRenderer.removeListener('comfy-boot-log', handler)
     },
     onInstanceLaunching: (callback) => {
-      const handler = (_event: IpcRendererEvent, data: unknown) => callback(data as Parameters<typeof callback>[0])
+      const handler = (_event: IpcRendererEvent, data: unknown) =>
+        callback(data as Parameters<typeof callback>[0])
       ipcRenderer.on('instance-launching', handler)
       return () => ipcRenderer.removeListener('instance-launching', handler)
     },
     onInstanceLaunchFailed: (callback) => {
-      const handler = (_event: IpcRendererEvent, data: unknown) => callback(data as Parameters<typeof callback>[0])
+      const handler = (_event: IpcRendererEvent, data: unknown) =>
+        callback(data as Parameters<typeof callback>[0])
       ipcRenderer.on('instance-launch-failed', handler)
       return () => ipcRenderer.removeListener('instance-launch-failed', handler)
     },
     onInstanceStarted: (callback) => {
-      const handler = (_event: IpcRendererEvent, data: unknown) => callback(data as Parameters<typeof callback>[0])
+      const handler = (_event: IpcRendererEvent, data: unknown) =>
+        callback(data as Parameters<typeof callback>[0])
       ipcRenderer.on('instance-started', handler)
       return () => ipcRenderer.removeListener('instance-started', handler)
     },
     onInstanceStopping: (callback) => {
-      const handler = (_event: IpcRendererEvent, data: unknown) => callback(data as Parameters<typeof callback>[0])
+      const handler = (_event: IpcRendererEvent, data: unknown) =>
+        callback(data as Parameters<typeof callback>[0])
       ipcRenderer.on('instance-stopping', handler)
       return () => ipcRenderer.removeListener('instance-stopping', handler)
     },
     onInstanceStopped: (callback) => {
-      const handler = (_event: IpcRendererEvent, data: unknown) => callback(data as Parameters<typeof callback>[0])
+      const handler = (_event: IpcRendererEvent, data: unknown) =>
+        callback(data as Parameters<typeof callback>[0])
       ipcRenderer.on('instance-stopped', handler)
       return () => ipcRenderer.removeListener('instance-stopped', handler)
     },
@@ -273,12 +273,14 @@ export function buildElectronApi(): ElectronApi {
       return () => ipcRenderer.removeListener('theme-changed', handler)
     },
     onLocaleChanged: (callback) => {
-      const handler = (_event: IpcRendererEvent, messages: unknown) => callback(messages as Record<string, unknown>)
+      const handler = (_event: IpcRendererEvent, messages: unknown) =>
+        callback(messages as Record<string, unknown>)
       ipcRenderer.on('locale-changed', handler)
       return () => ipcRenderer.removeListener('locale-changed', handler)
     },
     onConfirmQuit: (callback) => {
-      const handler = (_event: IpcRendererEvent, details: unknown) => callback(details as Parameters<typeof callback>[0])
+      const handler = (_event: IpcRendererEvent, details: unknown) =>
+        callback(details as Parameters<typeof callback>[0])
       ipcRenderer.on('confirm-quit', handler)
       return () => ipcRenderer.removeListener('confirm-quit', handler)
     },
@@ -295,7 +297,10 @@ export function buildElectronApi(): ElectronApi {
     },
     onInstallationsVersionsUpdated: (callback) => {
       const handler = (_event: IpcRendererEvent, data: unknown) => {
-        const updates = (data as Record<string, unknown>).updates as { id: string; version: string }[]
+        const updates = (data as Record<string, unknown>).updates as {
+          id: string
+          version: string
+        }[]
         callback(updates)
       }
       ipcRenderer.on('installations-versions-updated', handler)
@@ -331,37 +336,88 @@ export function buildElectronApi(): ElectronApi {
       return () => ipcRenderer.removeListener('zoom-changed', handler)
     },
     onModelDownloadProgress: (callback) => {
-      const handler = (_event: IpcRendererEvent, data: unknown) => callback(data as Parameters<typeof callback>[0])
+      const handler = (_event: IpcRendererEvent, data: unknown) =>
+        callback(data as Parameters<typeof callback>[0])
       ipcRenderer.on('model-download-progress', handler)
       return () => ipcRenderer.removeListener('model-download-progress', handler)
     },
     onModelDownloadRemoved: (callback) => {
-      const handler = (_event: IpcRendererEvent, data: unknown) => callback(data as Parameters<typeof callback>[0])
+      const handler = (_event: IpcRendererEvent, data: unknown) =>
+        callback(data as Parameters<typeof callback>[0])
       ipcRenderer.on('model-download-removed', handler)
       return () => ipcRenderer.removeListener('model-download-removed', handler)
     },
     onModelDownloadsClearedFinished: (callback) => {
-      const handler = (_event: IpcRendererEvent, data: unknown) => callback(data as Parameters<typeof callback>[0])
+      const handler = (_event: IpcRendererEvent, data: unknown) =>
+        callback(data as Parameters<typeof callback>[0])
       ipcRenderer.on('model-downloads-cleared-finished', handler)
       return () => ipcRenderer.removeListener('model-downloads-cleared-finished', handler)
     },
     onTelemetrySettingChanged: (callback) => {
-      const handler = (_event: IpcRendererEvent, enabled: unknown) => callback(enabled as Parameters<typeof callback>[0])
+      const handler = (_event: IpcRendererEvent, enabled: unknown) =>
+        callback(enabled as Parameters<typeof callback>[0])
       ipcRenderer.on('telemetry-setting-changed', handler)
       return () => ipcRenderer.removeListener('telemetry-setting-changed', handler)
     },
+    captureTelemetry: (event, properties) => {
+      // ipcRenderer.send is fire-and-forget; main handles the PostHog Node capture.
+      try {
+        ipcRenderer.send('telemetry:capture', { event, properties })
+      } catch {
+        // ignore — telemetry must never break the renderer
+      }
+    },
+    captureExceptionTelemetry: (payload) => {
+      try {
+        ipcRenderer.send('telemetry:captureException', payload)
+      } catch {
+        // ignore
+      }
+    },
+    registerTelemetryProperties: (properties) => {
+      try {
+        ipcRenderer.send('telemetry:registerProperties', properties)
+      } catch {
+        // ignore
+      }
+    },
+    telemetryBindUserId: (payload) => {
+      try {
+        ipcRenderer.send('telemetry:bindUserId', payload)
+      } catch {
+        // ignore
+      }
+    },
+    telemetryUnbindUserId: () => {
+      try {
+        ipcRenderer.send('telemetry:unbindUserId')
+      } catch {
+        // ignore
+      }
+    },
+    telemetryGetExperimentFlag: (key) => ipcRenderer.invoke('telemetry:getExperimentFlag', key),
+    telemetryRecordExposure: (payload) => {
+      try {
+        ipcRenderer.send('telemetry:recordExposure', payload)
+      } catch {
+        // ignore
+      }
+    },
     onDatadogError: (callback) => {
-      const handler = (_event: IpcRendererEvent, data: unknown) => callback(data as Parameters<typeof callback>[0])
+      const handler = (_event: IpcRendererEvent, data: unknown) =>
+        callback(data as Parameters<typeof callback>[0])
       ipcRenderer.on('dd-error', handler)
       return () => ipcRenderer.removeListener('dd-error', handler)
     },
     onTelemetryActionFromMain: (callback) => {
-      const handler = (_event: IpcRendererEvent, data: unknown) => callback(data as Parameters<typeof callback>[0])
+      const handler = (_event: IpcRendererEvent, data: unknown) =>
+        callback(data as Parameters<typeof callback>[0])
       ipcRenderer.on('telemetry-action-from-main', handler)
       return () => ipcRenderer.removeListener('telemetry-action-from-main', handler)
     },
     onErrorDetail: (callback) => {
-      const handler = (_event: IpcRendererEvent, data: unknown) => callback(data as Parameters<typeof callback>[0])
+      const handler = (_event: IpcRendererEvent, data: unknown) =>
+        callback(data as Parameters<typeof callback>[0])
       ipcRenderer.on('error-detail', handler)
       return () => ipcRenderer.removeListener('error-detail', handler)
     },
@@ -396,10 +452,10 @@ export function buildElectronApi(): ElectronApi {
             actionId?: string
             version?: string | null
             settingsTab?: 'comfy' | 'directories' | 'downloads' | 'global'
-          },
+          }
         )
       ipcRenderer.on('panel-trigger-overlay', handler)
       return () => ipcRenderer.removeListener('panel-trigger-overlay', handler)
-    },
+    }
   }
 }

@@ -107,16 +107,16 @@ function installMockApi(overrides: Partial<MockApi> = {}): MockApi {
     updateInstallation: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   }
-  ;(window as unknown as { api: MockApi }).api = api
+    ; (window as unknown as { api: MockApi }).api = api
   return api
 }
 
-describe('useComfyUISettings — staleness clearing (regression for #582)', () => {
+describe('useComfyUISettings — switch staleness behaviour (#782 / #582)', () => {
   beforeEach(() => {
     setActivePinia(createTestingPinia({ stubActions: false }))
   })
 
-  it('clears sections + diskSpace synchronously when the install id changes so the old install\'s data does not flash', async () => {
+  it('keeps the previous install\'s sections + diskSpace painted during the switch window so the right pane does not flash "Loading…" (#782)', async () => {
     // Two installs with distinct section payloads. The IPC for install B
     // is held open until we explicitly resolve it — this models the
     // real disk-bound delay in `getDetailSections` for an install with
@@ -150,20 +150,27 @@ describe('useComfyUISettings — staleness clearing (regression for #582)', () =
     expect(composable.sections.value.map((s) => s.title)).toEqual([
       'Sections for A',
     ])
+    expect(composable.sectionsFresh.value).toBe(true)
 
-    // Now switch to install B. The watcher fires `reload(B)` which
-    // calls `loadAll('b', ...)`. The fix clears `sections.value`
-    // BEFORE awaiting, so the next microtask should already see an
-    // empty sections array (and `loading: true`).
+    // Switch to install B. The watcher fires `reload(B)` which calls
+    // `loadAll('b', ...)`. The fix for #782 deliberately does NOT
+    // blank sections/diskSpace synchronously — the previous payload
+    // stays painted so the host's `v-else-if="loading &&
+    // !visibleSections.length"` placeholder never triggers and the
+    // "Loading…" text doesn't flash. `sectionsFresh` flips to false
+    // so the host can mark the pane stale (pointer-events: none,
+    // More menu disabled) until the new IPC lands.
     installation.value = makeInstall('b', 'B')
     await nextTick()
 
     expect(composable.loading.value).toBe(true)
-    expect(composable.sections.value).toEqual([])
-    expect(composable.diskSpace.value).toBeNull()
+    expect(composable.sections.value.map((s) => s.title)).toEqual([
+      'Sections for A',
+    ])
+    expect(composable.sectionsFresh.value).toBe(false)
 
-    // Resolve install B's IPC; sections + loading flip to the new
-    // payload.
+    // Resolve install B's IPC; sections flip to B and sectionsFresh
+    // returns true atomically.
     resolveB!([makeSection('B')])
     await Promise.resolve()
     await Promise.resolve()
@@ -173,6 +180,7 @@ describe('useComfyUISettings — staleness clearing (regression for #582)', () =
     expect(composable.sections.value.map((s) => s.title)).toEqual([
       'Sections for B',
     ])
+    expect(composable.sectionsFresh.value).toBe(true)
     expect(api.getDetailSections).toHaveBeenCalledTimes(2)
     scope.stop()
   })
@@ -199,6 +207,7 @@ describe('useComfyUISettings — staleness clearing (regression for #582)', () =
     await nextTick()
     expect(composable.sections.value).toEqual([])
     expect(composable.diskSpace.value).toBeNull()
+    expect(composable.sectionsFresh.value).toBe(false)
     scope.stop()
   })
 
@@ -414,7 +423,7 @@ describe('useComfyUISettings.runAction — stop-warning augment + self-stopping 
     } as ActionDef)
 
     expect(onShowProgress).toHaveBeenCalledTimes(1)
-    const opts = onShowProgress.mock.calls[0][0] as ShowProgressOpts
+    const opts = onShowProgress.mock.calls[0]?.[0] as ShowProgressOpts
     // triggersInstanceStart reflects the relaunch that the apiCall will
     // append — ProgressModal needs it to wire up the instance-started
     // listener that closes the chooser host.
@@ -455,7 +464,7 @@ describe('useComfyUISettings.runAction — stop-warning augment + self-stopping 
       confirm: { message: 'Update?' },
     } as ActionDef)
 
-    const opts = onShowProgress.mock.calls[0][0] as ShowProgressOpts
+    const opts = onShowProgress.mock.calls[0]?.[0] as ShowProgressOpts
     await opts.apiCall()
 
     expect(api.stopComfyUI).toHaveBeenCalledTimes(1)
@@ -486,7 +495,7 @@ describe('useComfyUISettings.runAction — stop-warning augment + self-stopping 
       confirm: { message: 'Copy & update?' },
     } as ActionDef)
 
-    const opts = onShowProgress.mock.calls[0][0] as ShowProgressOpts
+    const opts = onShowProgress.mock.calls[0]?.[0] as ShowProgressOpts
     // No auto-relaunch wired in → triggersInstanceStart stays false; the
     // new install opens in its own chooser-host window instead.
     expect(opts.triggersInstanceStart).toBe(false)
@@ -515,7 +524,7 @@ describe('useComfyUISettings.runAction — stop-warning augment + self-stopping 
       confirm: { message: 'Update?' },
     } as ActionDef)
 
-    const opts = onShowProgress.mock.calls[0][0] as ShowProgressOpts
+    const opts = onShowProgress.mock.calls[0]?.[0] as ShowProgressOpts
     expect(opts.triggersInstanceStart).toBe(false)
     await opts.apiCall()
 
@@ -725,7 +734,7 @@ describe('useComfyUISettings.updateField — optimistic write + restart-required
     // withTimeout's setTimeout should win and trigger rollback.
     vi.useFakeTimers()
     try {
-      const updateInstallation = vi.fn().mockReturnValue(new Promise<void>(() => {}))
+      const updateInstallation = vi.fn().mockReturnValue(new Promise<void>(() => { }))
       const { composable, scope } = await mountWithField('a', 'window', { updateInstallation })
       markRunning('a')
 
@@ -805,6 +814,77 @@ describe('useComfyUISettings.updateField — optimistic write + restart-required
       FOO: 'bar',
     })
     expect(composable.pendingRestartFieldIds.value.has('envVars')).toBe(false)
+    scope.stop()
+  })
+})
+
+describe('useComfyUISettings — renameInstallation', () => {
+  beforeEach(() => {
+    setActivePinia(createTestingPinia({ stubActions: false }))
+    dialogsSpies.alert.mockReset()
+  })
+
+  async function mountRename(api: MockApi) {
+    const installation = ref<Installation | null>(makeInstall('a', 'Old Name'))
+    const scope = effectScope()
+    let composable!: ReturnType<typeof useComfyUISettings>
+    scope.run(() => {
+      composable = useComfyUISettings({ installation, onShowProgress: vi.fn() })
+    })
+    await nextTick()
+    await Promise.resolve()
+    await Promise.resolve()
+    return { composable, scope, api }
+  }
+
+  it('commits a fresh name, reloads sections, and resolves true', async () => {
+    const api = installMockApi({ updateInstallation: vi.fn().mockResolvedValue({ ok: true }) })
+    const { composable, scope } = await mountRename(api)
+    api.getDetailSections.mockClear()
+
+    const committed = await composable.renameInstallation('New Name')
+
+    expect(committed).toBe(true)
+    expect(api.updateInstallation).toHaveBeenCalledWith('a', { name: 'New Name' })
+    expect(api.getDetailSections).toHaveBeenCalled() // reload() ran
+    expect(dialogsSpies.alert).not.toHaveBeenCalled()
+    scope.stop()
+  })
+
+  it('trims surrounding whitespace before committing', async () => {
+    const api = installMockApi({ updateInstallation: vi.fn().mockResolvedValue({ ok: true }) })
+    const { composable, scope } = await mountRename(api)
+
+    await composable.renameInstallation('  Padded  ')
+
+    expect(api.updateInstallation).toHaveBeenCalledWith('a', { name: 'Padded' })
+    scope.stop()
+  })
+
+  it('is a no-op (no IPC) when the trimmed name is empty or unchanged', async () => {
+    const api = installMockApi()
+    const { composable, scope } = await mountRename(api)
+
+    expect(await composable.renameInstallation('   ')).toBe(false)
+    expect(await composable.renameInstallation('Old Name')).toBe(false)
+    expect(api.updateInstallation).not.toHaveBeenCalled()
+    scope.stop()
+  })
+
+  it('surfaces a rejection (duplicate name) as an alert and resolves false', async () => {
+    const api = installMockApi({
+      updateInstallation: vi.fn().mockResolvedValue({ ok: false, message: 'taken' }),
+    })
+    const { composable, scope } = await mountRename(api)
+    api.getDetailSections.mockClear()
+
+    const committed = await composable.renameInstallation('Dupe')
+
+    expect(committed).toBe(false)
+    expect(dialogsSpies.alert).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'taken' }),
+    )
+    expect(api.getDetailSections).not.toHaveBeenCalled() // no reload on failure
     scope.stop()
   })
 })

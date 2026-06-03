@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { installTypeMetaFor } from '../../lib/installTypeIcon'
 import { TID } from '../../../../shared/testIds'
-import type { Installation } from '../../types/ipc'
+import type { CloudCapacityStatus, Installation } from '../../types/ipc'
 
 /**
  * Compact list-row for the picker's expanded-mode left pane: icon + name +
@@ -33,6 +33,11 @@ interface Props {
   operating?: boolean
   /** Compact recency (`3h ago`) for single-line picker rows. */
   lastLaunchedShortLabel: string
+  /** Cloud capacity status (PostHog `desktop-cloud-capacity`). Applied
+   *  only to cloud rows: `disabled` greys the row and makes the click
+   *  a no-op (defense-in-depth — the footer action also gates), and
+   *  `degraded` swaps the recency label for a "Heavy usage" chip. */
+  capacityStatus?: CloudCapacityStatus
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -41,7 +46,12 @@ const props = withDefaults(defineProps<Props>(), {
   isCurrent: false,
   updateAvailable: false,
   operating: false,
+  capacityStatus: 'normal',
 })
+
+const isCloud = computed(() => props.installation.sourceCategory === 'cloud')
+const isCloudDisabled = computed(() => isCloud.value && props.capacityStatus === 'disabled')
+const isCloudDegraded = computed(() => isCloud.value && props.capacityStatus === 'degraded')
 
 const { t } = useI18n()
 
@@ -52,6 +62,11 @@ const emit = defineEmits<{
 const typeMeta = computed(() => installTypeMetaFor(props.installation.sourceCategory))
 
 function handleClick(): void {
+  // Row click always selects — even for a disabled cloud install. The
+  // user should be able to navigate to the cloud tab to see the
+  // "Temporarily unavailable" chip + the disabled launch button rather
+  // than being silently bounced. The launch gate lives on the footer
+  // primary action (ComfyUISettingsContent), not on the row click.
   emit('select', props.installation)
 }
 </script>
@@ -89,7 +104,21 @@ function handleClick(): void {
       </div>
       <div class="picker-row-body">
         <span class="picker-row-name">{{ installation.name }}</span>
-        <span v-if="isCurrent" class="picker-row-current-pill">
+        <span
+          v-if="isCloudDisabled"
+          class="picker-row-capacity-pill picker-row-capacity-pill--disabled"
+          :title="$t('cloud.capacityDisabledHint')"
+        >
+          {{ $t('cloud.capacityDisabled') }}
+        </span>
+        <span
+          v-else-if="isCloudDegraded"
+          class="picker-row-capacity-pill"
+          :title="$t('cloud.capacityDegradedHint')"
+        >
+          {{ $t('cloud.capacityDegraded') }}
+        </span>
+        <span v-else-if="isCurrent" class="picker-row-current-pill">
           {{ t('snapshots.current') }}
         </span>
         <span v-else-if="lastLaunchedShortLabel" class="picker-row-recency">
@@ -236,5 +265,28 @@ function handleClick(): void {
 .picker-row.is-active .picker-row-current-pill {
   color: var(--text);
   background: color-mix(in srgb, var(--text) 14%, transparent);
+}
+
+/* Capacity-protection chip on the cloud row. Mirrors the chooser tile
+ * chips so the dashboard and IPP read consistently. The row itself
+ * stays clickable even when cloud is disabled — selection works (user
+ * can navigate to the cloud tab to see the disabled state); the launch
+ * gate lives on the footer primary button. */
+.picker-row-capacity-pill {
+  flex: 0 0 auto;
+  padding: 1px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.45;
+  color: var(--accent-warn, #d97706);
+  background: var(--accent-warn-soft, rgba(255, 193, 7, 0.15));
+  border: 1px solid var(--accent-warn, #d97706);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.picker-row-capacity-pill--disabled {
+  color: var(--accent-danger, #d92d20);
+  background: var(--accent-danger-soft, rgba(217, 45, 32, 0.12));
+  border-color: var(--accent-danger, #d92d20);
 }
 </style>

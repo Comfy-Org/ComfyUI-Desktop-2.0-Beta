@@ -4,38 +4,232 @@ import path from 'path'
 import { app } from 'electron'
 import { killProcTree } from './process'
 import { getBundledScriptPath } from './bundledScript'
+import { removeQuarantine, codesignBinaries } from '../sources/standalone/macRepair'
+import * as telemetry from './telemetry'
 
-let _pygit2Python: string | null = null
-let _pygit2Script: string | null = null
+// ───────────────────────────────────────────────────────────────────────────
+// pygit2 fallback state + circuit breaker
+//
+// Background: on machines without a global `git` binary we fall back to a
+// bundled Python interpreter (shipped in `standalone-env/`) plus our
+// `git_operations.py` helper.  On macOS in particular the Python binary
+// can be in a broken state (quarantine flag still set, codesignature
+// invalidated by extraction/copy/migration) — in which case every spawn
+// either hangs on Gatekeeper or fails fast.  Because various boot-time
+// paths (update checks, version resolution, renderer polling) call into
+// git frequently, an unhealthy Python helper used to manifest as a flood
+// of Python processes on application boot.
+//
+// To prevent that we:
+//   1. Probe with a real `--healthcheck` call before configuring.
+//   2. On macOS, repair the standalone-env (remove quarantine + adhoc
+//      codesign) once if the first probe fails, then re-probe.
+//   3. Track consecutive launch/timeout failures and disable the
+//      fallback for the rest of the session once a threshold is hit.
+//   4. Always run long-lived pygit2 spawns under a hard timeout.
+// ───────────────────────────────────────────────────────────────────────────
+
+type Pygit2State =
+  | { status: 'unconfigured' }
+  | { status: 'healthy'; python: string; script: string; failures: number }
+  | { status: 'disabled'; reason: string }
+
+let _pygit2: Pygit2State = { status: 'unconfigured' }
+
+/** Consecutive launch/timeout failures before disabling the fallback. */
+const PYGIT2_MAX_FAILURES = 3
+
+/** Hard timeout for long-running pygit2 spawn operations (clone / checkout). */
+const PYGIT2_LONG_TIMEOUT_MS = 20 * 60 * 1000 // 20 minutes
+
+/** Timeout for the boot-time `--healthcheck` probe. */
+const PYGIT2_PROBE_TIMEOUT_MS = 5_000
+
+/** Tracks env directories we have already attempted to repair this session,
+ *  so we don't pay the codesign cost more than once per env. */
+const _pygit2RepairedDirs = new Set<string>()
 
 export function configurePygit2(pythonPath: string, scriptPath: string): void {
-  _pygit2Python = pythonPath
-  _pygit2Script = scriptPath
+  _pygit2 = { status: 'healthy', python: pythonPath, script: scriptPath, failures: 0 }
 }
 
 export function isPygit2Configured(): boolean {
-  return _pygit2Python !== null && _pygit2Script !== null
+  return _pygit2.status === 'healthy'
 }
 
 export function getPygit2Config(): { python: string | null; script: string | null } {
-  return { python: _pygit2Python, script: _pygit2Script }
+  if (_pygit2.status === 'healthy') {
+    return { python: _pygit2.python, script: _pygit2.script }
+  }
+  return { python: null, script: null }
+}
+
+export function getPygit2Status(): Pygit2State {
+  return _pygit2
+}
+
+/** Reset all pygit2 state.  Tests + recovery flows only. */
+export function resetPygit2State(): void {
+  _pygit2 = { status: 'unconfigured' }
+  _pygit2RepairedDirs.clear()
+}
+
+function disablePygit2(reason: string): void {
+  if (_pygit2.status === 'disabled') return
+  console.warn('[git] disabling pygit2 fallback:', reason)
+  // Fires exactly once per session when the circuit breaker trips after
+  // PYGIT2_MAX_FAILURES consecutive launch failures. Mirrored to Datadog
+  // for alerting — a spike here means a release broke the bundled
+  // Python env for a population of users (signing / quarantine /
+  // bootstrap-python copy drift).
+  const failures = _pygit2.status === 'healthy' ? _pygit2.failures : 0
+  telemetry.emit('desktop2.pygit2.circuit_broken', {
+    reason_bucket: telemetry.bucketError(reason),
+    failures
+  })
+  _pygit2 = { status: 'disabled', reason }
+}
+
+function recordPygit2Failure(reason: string): void {
+  if (_pygit2.status !== 'healthy') return
+  const failures = _pygit2.failures + 1
+  _pygit2 = { ..._pygit2, failures }
+  if (failures >= PYGIT2_MAX_FAILURES) {
+    disablePygit2(`disabled after ${failures} consecutive launch failures: ${reason}`)
+  }
+}
+
+function recordPygit2Success(): void {
+  if (_pygit2.status !== 'healthy' || _pygit2.failures === 0) return
+  _pygit2 = { ..._pygit2, failures: 0 }
+}
+
+/** Classify an execFile error: launch failure (timeout, ENOENT, signal) vs
+ *  normal non-zero exit from the helper. */
+function isLaunchFailure(error: ExecFileException | null): boolean {
+  if (!error) return false
+  if (error.killed) return true // timeout
+  if (error.signal) return true
+  const code = error.code
+  if (typeof code === 'string') return true // ENOENT, EACCES, etc.
+  return false
+}
+
+/** Resolve the path to the standalone Python interpreter for an install. */
+function getStandalonePythonPath(installPath: string): string {
+  return process.platform === 'win32'
+    ? path.join(installPath, 'standalone-env', 'python.exe')
+    : path.join(installPath, 'standalone-env', 'bin', 'python3')
+}
+
+/**
+ * Probe a candidate Python + helper script by running `healthcheck`.
+ * Validates that Python launches, the helper script loads, and `pygit2`
+ * (imported at module top) is importable.
+ */
+export function probePygit2(
+  pythonPath: string,
+  scriptPath: string,
+  timeoutMs: number = PYGIT2_PROBE_TIMEOUT_MS
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  return new Promise((resolve) => {
+    execFile(
+      pythonPath,
+      ['-s', '-u', scriptPath, 'healthcheck'],
+      {
+        encoding: 'utf-8',
+        windowsHide: true,
+        timeout: timeoutMs
+      },
+      (error, stdout, stderr) => {
+        if (!error && (stdout ?? '').includes('ok pygit2')) {
+          resolve({ ok: true })
+          return
+        }
+        const reason =
+          `${error?.message ?? ''}\n${(stderr ?? '').trim()}`.trim() || 'pygit2 healthcheck failed'
+        resolve({ ok: false, reason })
+      }
+    )
+  })
+}
+
+/**
+ * Best-effort macOS repair for a Python env directory: remove quarantine
+ * flag and adhoc-sign Mach-O binaries.  Used for both the bundled
+ * bootstrap-python (whose codesignature gets invalidated when the .app is
+ * extracted from a zip) and standalone-env (copied/migrated installs).
+ *
+ * No-op on non-Darwin platforms or when already attempted for this dir
+ * in the current session.
+ */
+async function repairEnvForPygit2(envDir: string): Promise<void> {
+  if (process.platform !== 'darwin') return
+  if (_pygit2RepairedDirs.has(envDir)) return
+  _pygit2RepairedDirs.add(envDir)
+  if (!fs.existsSync(envDir)) return
+  // Fires at most once per env dir per session when the boot probe trips
+  // the macOS quarantine + codesign repair path. Adoption signal: how
+  // many users actually hit the broken-bundled-Python state we shipped
+  // #738 to fix. `result` flips to 'failed' if the repair itself throws.
+  let result: 'ok' | 'failed' = 'ok'
+  const log = (msg: string): void => {
+    console.log('[git] pygit2 repair:', msg.trim())
+  }
+  try {
+    log(`removing quarantine on ${envDir}`)
+    await removeQuarantine(envDir, log)
+    log(`adhoc codesigning ${envDir}`)
+    await codesignBinaries(envDir, log)
+  } catch (err) {
+    result = 'failed'
+    console.warn('[git] pygit2 repair failed:', err)
+  }
+  telemetry.emit('desktop2.pygit2.repair_attempted', { result })
 }
 
 /**
  * Try to configure the pygit2 fallback using a standalone installation's
- * Python.  Validates that both the Python binary and the helper script
- * exist before calling {@link configurePygit2}.
+ * Python.  Verifies the binary actually works by running a healthcheck —
+ * and on macOS, transparently runs quarantine removal + adhoc codesigning
+ * once if the first probe fails, so the bundled Python is in a usable
+ * state before going live.
  *
- * @returns `true` if pygit2 was successfully configured.
+ * Refuses to configure when:
+ *   - the helper script or Python binary doesn't exist
+ *   - the healthcheck still fails after repair
+ *   - the fallback has already been disabled this session
+ *
+ * @returns `true` only if pygit2 is now healthy.
  */
-export function tryConfigurePygit2Fallback(installPath: string): boolean {
-  const pythonPath = process.platform === 'win32'
-    ? path.join(installPath, 'standalone-env', 'python.exe')
-    : path.join(installPath, 'standalone-env', 'bin', 'python3')
+export async function tryConfigurePygit2Fallback(installPath: string): Promise<boolean> {
+  if (_pygit2.status === 'disabled') return false
+  const pythonPath = getStandalonePythonPath(installPath)
   if (!fs.existsSync(pythonPath)) return false
   const scriptPath = getBundledScriptPath('git_operations.py')
   if (!fs.existsSync(scriptPath)) return false
+
+  let probe = await probePygit2(pythonPath, scriptPath)
+  if (!probe.ok && process.platform === 'darwin') {
+    console.warn(`[git] pygit2 probe failed; attempting macOS repair: ${probe.reason}`)
+    await repairEnvForPygit2(path.join(installPath, 'standalone-env'))
+    probe = await probePygit2(pythonPath, scriptPath)
+  }
+
+  if (!probe.ok) {
+    console.warn(`[git] pygit2 fallback rejected for ${installPath}: ${probe.reason}`)
+    // Probe still failing AFTER any repair attempt — the user is in the
+    // broken state we shipped #738 to detect. Datadog-mirrored so ops
+    // can correlate with release / signing-cert changes.
+    telemetry.emit('desktop2.pygit2.probe_failed', {
+      source: 'standalone',
+      error_bucket: telemetry.bucketError(probe.reason)
+    })
+    return false
+  }
+
   configurePygit2(pythonPath, scriptPath)
+  console.log('[git] pygit2 fallback configured via', pythonPath)
   return true
 }
 
@@ -45,48 +239,166 @@ export function tryConfigurePygit2Fallback(installPath: string): boolean {
  * git operations to work from app launch, before any standalone
  * environment is downloaded.
  *
- * @returns `true` if pygit2 was successfully configured.
+ * Verifies the binary actually works by running a healthcheck — and on
+ * macOS, transparently runs quarantine removal + adhoc codesigning once
+ * if the first probe fails.  Without this guard, a broken bundled Python
+ * caused boot-time git callers to spawn an endless stream of Python
+ * processes on macOS.
+ *
+ * @returns `true` only if pygit2 is now healthy.
  */
-export function tryConfigureBootstrapPygit2(): boolean {
-  const osName = process.platform === 'win32' ? 'win'
-    : process.platform === 'darwin' ? 'mac'
-    : 'linux'
+export async function tryConfigureBootstrapPygit2(): Promise<boolean> {
+  if (_pygit2.status === 'disabled') return false
+  const osName =
+    process.platform === 'win32' ? 'win' : process.platform === 'darwin' ? 'mac' : 'linux'
   const platformDir = `${osName}-${process.arch}`
   const bootstrapDir = app.isPackaged
     ? path.join(process.resourcesPath, 'bootstrap-python')
     : path.join(__dirname, '..', '..', 'bootstrap-python', platformDir)
-  const pythonPath = process.platform === 'win32'
-    ? path.join(bootstrapDir, 'python.exe')
-    : path.join(bootstrapDir, 'bin', 'python3')
+  const pythonPath =
+    process.platform === 'win32'
+      ? path.join(bootstrapDir, 'python.exe')
+      : path.join(bootstrapDir, 'bin', 'python3')
   if (!fs.existsSync(pythonPath)) return false
   const scriptPath = getBundledScriptPath('git_operations.py')
   if (!fs.existsSync(scriptPath)) return false
+
+  let probe = await probePygit2(pythonPath, scriptPath)
+  if (!probe.ok && process.platform === 'darwin') {
+    console.warn(`[git] bootstrap pygit2 probe failed; attempting macOS repair: ${probe.reason}`)
+    await repairEnvForPygit2(bootstrapDir)
+    probe = await probePygit2(pythonPath, scriptPath)
+  }
+
+  if (!probe.ok) {
+    console.warn(`[git] bootstrap pygit2 rejected at ${pythonPath}: ${probe.reason}`)
+    telemetry.emit('desktop2.pygit2.probe_failed', {
+      source: 'bootstrap',
+      error_bucket: telemetry.bucketError(probe.reason)
+    })
+    return false
+  }
+
   configurePygit2(pythonPath, scriptPath)
+  console.log('[git] bootstrap pygit2 configured via', pythonPath)
   return true
 }
 
-function runPygit2(args: string[], timeout: number = 5000): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+function runPygit2(
+  args: string[],
+  timeout: number = 5000
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
-    execFile(_pygit2Python!, ['-s', '-u', _pygit2Script!, ...args], {
-      encoding: 'utf-8',
-      windowsHide: true,
-      timeout,
-    }, (error, stdout, stderr) => {
-      resolve({
-        exitCode: error ? (typeof (error as ExecFileException).code === 'number' ? ((error as ExecFileException).code as number) : 1) : 0,
-        stdout: (stdout ?? '').toString(),
-        stderr: (stderr ?? '').toString(),
-      })
-    })
+    if (_pygit2.status !== 'healthy') {
+      resolve({ exitCode: 1, stdout: '', stderr: 'pygit2 fallback is not available' })
+      return
+    }
+    const { python, script } = _pygit2
+    execFile(
+      python,
+      ['-s', '-u', script, ...args],
+      {
+        encoding: 'utf-8',
+        windowsHide: true,
+        timeout
+      },
+      (error, stdout, stderr) => {
+        const stderrStr = (stderr ?? '').toString()
+        if (isLaunchFailure(error)) {
+          recordPygit2Failure(error?.message ?? stderrStr ?? 'launch failure')
+        } else {
+          recordPygit2Success()
+        }
+        resolve({
+          exitCode: error
+            ? typeof (error as ExecFileException).code === 'number'
+              ? ((error as ExecFileException).code as number)
+              : 1
+            : 0,
+          stdout: (stdout ?? '').toString(),
+          stderr: stderrStr
+        })
+      }
+    )
   })
 }
 
 function makeRunPygit2(
   sendOutput: (text: string) => void,
   signal?: AbortSignal,
+  timeoutMs: number = PYGIT2_LONG_TIMEOUT_MS
 ): (args: string[]) => Promise<ProcessResult> {
-  return (args: string[]): Promise<ProcessResult> =>
-    spawnStreamed(_pygit2Python!, ['-s', '-u', _pygit2Script!, ...args], sendOutput, { signal })
+  return (args: string[]): Promise<ProcessResult> => {
+    if (signal?.aborted) return Promise.resolve({ exitCode: 1, stderr: '', stdout: '' })
+    if (_pygit2.status !== 'healthy') {
+      return Promise.resolve({
+        exitCode: 1,
+        stderr: 'pygit2 fallback is not available',
+        stdout: ''
+      })
+    }
+    const { python, script } = _pygit2
+    return new Promise((resolve) => {
+      const stdoutChunks: string[] = []
+      const stderrChunks: string[] = []
+      const proc = spawn(python, ['-s', '-u', script, ...args], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+        detached: process.platform !== 'win32'
+      })
+      let settled = false
+      let timedOut = false
+      const finish = (result: ProcessResult): void => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        signal?.removeEventListener('abort', onAbort)
+        resolve(result)
+      }
+      const timer = setTimeout(() => {
+        timedOut = true
+        const msg = `\nTimed out running pygit2 helper after ${Math.round(timeoutMs / 1000)}s\n`
+        sendOutput(msg)
+        stderrChunks.push(msg)
+        killProcTree(proc)
+        recordPygit2Failure('timeout in long-running pygit2 spawn')
+        finish({ exitCode: 1, stderr: stderrChunks.join(''), stdout: stdoutChunks.join('') })
+      }, timeoutMs)
+      const onAbort = (): void => {
+        killProcTree(proc)
+      }
+      signal?.addEventListener('abort', onAbort, { once: true })
+      if (signal?.aborted) onAbort()
+      proc.stdout.on('data', (data: Buffer) => {
+        const text = data.toString()
+        stdoutChunks.push(text)
+        sendOutput(text)
+      })
+      proc.stderr.on('data', (data: Buffer) => {
+        const text = data.toString()
+        stderrChunks.push(text)
+        sendOutput(text)
+      })
+      proc.on('error', (err) => {
+        recordPygit2Failure(err.message)
+        sendOutput(err.message)
+        finish({
+          exitCode: 1,
+          stderr: stderrChunks.join('') + err.message,
+          stdout: stdoutChunks.join('')
+        })
+      })
+      proc.on('close', (code) => {
+        if (timedOut) return
+        if (code === 0) recordPygit2Success()
+        finish({
+          exitCode: code ?? 1,
+          stderr: stderrChunks.join(''),
+          stdout: stdoutChunks.join('')
+        })
+      })
+    })
+  }
 }
 
 export interface ProcessResult {
@@ -103,7 +415,7 @@ function spawnStreamed(
   cmd: string,
   args: string[],
   sendOutput: (text: string) => void,
-  options?: { cwd?: string; signal?: AbortSignal },
+  options?: { cwd?: string; signal?: AbortSignal }
 ): Promise<ProcessResult> {
   const { cwd, signal } = options ?? {}
   if (signal?.aborted) return Promise.resolve({ exitCode: 1, stderr: '', stdout: '' })
@@ -114,9 +426,11 @@ function spawnStreamed(
       ...(cwd ? { cwd } : {}),
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
-      detached: process.platform !== 'win32',
+      detached: process.platform !== 'win32'
     })
-    const onAbort = (): void => { killProcTree(proc) }
+    const onAbort = (): void => {
+      killProcTree(proc)
+    }
     signal?.addEventListener('abort', onAbort, { once: true })
     if (signal?.aborted) onAbort()
     proc.stdout.on('data', (data: Buffer) => {
@@ -132,7 +446,11 @@ function spawnStreamed(
     proc.on('error', (err) => {
       signal?.removeEventListener('abort', onAbort)
       sendOutput(err.message)
-      resolve({ exitCode: 1, stderr: stderrChunks.join('') + err.message, stdout: stdoutChunks.join('') })
+      resolve({
+        exitCode: 1,
+        stderr: stderrChunks.join('') + err.message,
+        stdout: stdoutChunks.join('')
+      })
     })
     proc.on('close', (code) => {
       signal?.removeEventListener('abort', onAbort)
@@ -225,7 +543,11 @@ function redactUrl(url: string): string {
  * asynchronously (local operation, no network).  Returns undefined if git is
  * unavailable, the tag doesn't exist, or any error occurs.
  */
-export function countCommitsAhead(repoPath: string, tag: string, commit: string = 'HEAD'): Promise<number | undefined> {
+export function countCommitsAhead(
+  repoPath: string,
+  tag: string,
+  commit: string = 'HEAD'
+): Promise<number | undefined> {
   if (isPygit2Configured()) {
     return runPygit2(['rev-list-count', repoPath, tag, commit]).then(({ exitCode, stdout }) => {
       if (exitCode !== 0) return undefined
@@ -234,16 +556,24 @@ export function countCommitsAhead(repoPath: string, tag: string, commit: string 
     })
   }
   return new Promise((resolve) => {
-    execFile('git', ['rev-list', '--count', `${tag}..${commit}`], {
-      cwd: repoPath,
-      encoding: 'utf-8',
-      windowsHide: true,
-      timeout: 1000,
-    }, (error, stdout) => {
-      if (error) { resolve(undefined); return }
-      const n = parseInt(stdout.trim(), 10)
-      resolve(Number.isFinite(n) ? n : undefined)
-    })
+    execFile(
+      'git',
+      ['rev-list', '--count', `${tag}..${commit}`],
+      {
+        cwd: repoPath,
+        encoding: 'utf-8',
+        windowsHide: true,
+        timeout: 1000
+      },
+      (error, stdout) => {
+        if (error) {
+          resolve(undefined)
+          return
+        }
+        const n = parseInt(stdout.trim(), 10)
+        resolve(Number.isFinite(n) ? n : undefined)
+      }
+    )
   })
 }
 
@@ -252,7 +582,10 @@ export function countCommitsAhead(repoPath: string, tag: string, commit: string 
  * asynchronously (local operation, no network).  Returns undefined if git is
  * unavailable, no tags exist, or any error occurs.
  */
-export function findNearestTag(repoPath: string, commit: string = 'HEAD'): Promise<string | undefined> {
+export function findNearestTag(
+  repoPath: string,
+  commit: string = 'HEAD'
+): Promise<string | undefined> {
   if (isPygit2Configured()) {
     return runPygit2(['describe-tags', repoPath, commit]).then(({ exitCode, stdout }) => {
       if (exitCode !== 0) return undefined
@@ -261,16 +594,24 @@ export function findNearestTag(repoPath: string, commit: string = 'HEAD'): Promi
     })
   }
   return new Promise((resolve) => {
-    execFile('git', ['describe', '--tags', '--abbrev=0', commit], {
-      cwd: repoPath,
-      encoding: 'utf-8',
-      windowsHide: true,
-      timeout: 1000,
-    }, (error, stdout) => {
-      if (error) { resolve(undefined); return }
-      const tag = stdout.trim()
-      resolve(tag || undefined)
-    })
+    execFile(
+      'git',
+      ['describe', '--tags', '--abbrev=0', commit],
+      {
+        cwd: repoPath,
+        encoding: 'utf-8',
+        windowsHide: true,
+        timeout: 1000
+      },
+      (error, stdout) => {
+        if (error) {
+          resolve(undefined)
+          return
+        }
+        const tag = stdout.trim()
+        resolve(tag || undefined)
+      }
+    )
   })
 }
 
@@ -297,26 +638,34 @@ export function lsRemoteLatestTag(url: string): Promise<string | undefined> {
     })
   }
   return new Promise((resolve) => {
-    execFile('git', ['ls-remote', '--tags', url], {
-      encoding: 'utf-8',
-      windowsHide: true,
-      timeout: 15000,
-    }, (error, stdout) => {
-      if (error) { resolve(undefined); return }
-      let best: { tag: string; version: number[] } | undefined
-      for (const line of stdout.trim().split('\n')) {
-        const ref = line.split(/\s+/)[1]
-        if (!ref || !ref.startsWith('refs/tags/') || ref.endsWith('^{}')) continue
-        const name = ref.slice('refs/tags/'.length)
-        const m = name.match(/^v?(\d+(?:\.\d+)*)$/)
-        if (!m) continue
-        const v = m[1]!.split('.').map(Number)
-        if (!best || compareVersionArrays(v, best.version) > 0) {
-          best = { tag: name, version: v }
+    execFile(
+      'git',
+      ['ls-remote', '--tags', url],
+      {
+        encoding: 'utf-8',
+        windowsHide: true,
+        timeout: 15000
+      },
+      (error, stdout) => {
+        if (error) {
+          resolve(undefined)
+          return
         }
+        let best: { tag: string; version: number[] } | undefined
+        for (const line of stdout.trim().split('\n')) {
+          const ref = line.split(/\s+/)[1]
+          if (!ref || !ref.startsWith('refs/tags/') || ref.endsWith('^{}')) continue
+          const name = ref.slice('refs/tags/'.length)
+          const m = name.match(/^v?(\d+(?:\.\d+)*)$/)
+          if (!m) continue
+          const v = m[1]!.split('.').map(Number)
+          if (!best || compareVersionArrays(v, best.version) > 0) {
+            best = { tag: name, version: v }
+          }
+        }
+        resolve(best?.tag)
       }
-      resolve(best?.tag)
-    })
+    )
   })
 }
 
@@ -333,15 +682,23 @@ export function lsRemoteRef(url: string, ref: string): Promise<string | null> {
     })
   }
   return new Promise((resolve) => {
-    execFile('git', ['ls-remote', '--refs', url, ref], {
-      encoding: 'utf-8',
-      windowsHide: true,
-      timeout: 15000,
-    }, (error, stdout) => {
-      if (error) { resolve(null); return }
-      const sha = stdout.trim().split(/\s+/)[0]
-      resolve(sha || null)
-    })
+    execFile(
+      'git',
+      ['ls-remote', '--refs', url, ref],
+      {
+        encoding: 'utf-8',
+        windowsHide: true,
+        timeout: 15000
+      },
+      (error, stdout) => {
+        if (error) {
+          resolve(null)
+          return
+        }
+        const sha = stdout.trim().split(/\s+/)[0]
+        resolve(sha || null)
+      }
+    )
   })
 }
 
@@ -363,16 +720,24 @@ export function findLatestVersionTag(repoPath: string): Promise<string | undefin
     })
   }
   return new Promise((resolve) => {
-    execFile('git', ['tag', '-l', 'v*', '--sort=-v:refname'], {
-      cwd: repoPath,
-      encoding: 'utf-8',
-      windowsHide: true,
-      timeout: 1000,
-    }, (error, stdout) => {
-      if (error) { resolve(undefined); return }
-      const tag = stdout.trim().split('\n')[0]?.trim()
-      resolve(tag || undefined)
-    })
+    execFile(
+      'git',
+      ['tag', '-l', 'v*', '--sort=-v:refname'],
+      {
+        cwd: repoPath,
+        encoding: 'utf-8',
+        windowsHide: true,
+        timeout: 1000
+      },
+      (error, stdout) => {
+        if (error) {
+          resolve(undefined)
+          return
+        }
+        const tag = stdout.trim().split('\n')[0]?.trim()
+        resolve(tag || undefined)
+      }
+    )
   })
 }
 
@@ -386,25 +751,39 @@ export function findLatestVersionTag(repoPath: string): Promise<string | undefin
  * from master, this counts only the commits unique to the release branch
  * (typically just the version bump).
  */
-export function countUniqueCommits(repoPath: string, ref1: string, ref2: string): Promise<number | undefined> {
+export function countUniqueCommits(
+  repoPath: string,
+  ref1: string,
+  ref2: string
+): Promise<number | undefined> {
   if (isPygit2Configured()) {
-    return runPygit2(['cherry-pick-count', repoPath, ref1, ref2], 5000).then(({ exitCode, stdout }) => {
-      if (exitCode !== 0) return undefined
-      const n = parseInt(stdout.trim(), 10)
-      return Number.isFinite(n) ? n : undefined
-    })
+    return runPygit2(['cherry-pick-count', repoPath, ref1, ref2], 5000).then(
+      ({ exitCode, stdout }) => {
+        if (exitCode !== 0) return undefined
+        const n = parseInt(stdout.trim(), 10)
+        return Number.isFinite(n) ? n : undefined
+      }
+    )
   }
   return new Promise((resolve) => {
-    execFile('git', ['rev-list', '--count', '--cherry-pick', '--left-only', `${ref1}...${ref2}`], {
-      cwd: repoPath,
-      encoding: 'utf-8',
-      windowsHide: true,
-      timeout: 5000,
-    }, (error, stdout) => {
-      if (error) { resolve(undefined); return }
-      const n = parseInt(stdout.trim(), 10)
-      resolve(Number.isFinite(n) ? n : undefined)
-    })
+    execFile(
+      'git',
+      ['rev-list', '--count', '--cherry-pick', '--left-only', `${ref1}...${ref2}`],
+      {
+        cwd: repoPath,
+        encoding: 'utf-8',
+        windowsHide: true,
+        timeout: 5000
+      },
+      (error, stdout) => {
+        if (error) {
+          resolve(undefined)
+          return
+        }
+        const n = parseInt(stdout.trim(), 10)
+        resolve(Number.isFinite(n) ? n : undefined)
+      }
+    )
   })
 }
 
@@ -414,20 +793,29 @@ export function countUniqueCommits(repoPath: string, ref1: string, ref2: string)
  * Returns true if ancestor is reachable from descendant, false otherwise
  * (including on error).
  */
-export function isAncestorOf(repoPath: string, ancestor: string, descendant: string): Promise<boolean> {
+export function isAncestorOf(
+  repoPath: string,
+  ancestor: string,
+  descendant: string
+): Promise<boolean> {
   if (isPygit2Configured()) {
     return runPygit2(['is-ancestor', repoPath, ancestor, descendant]).then(({ exitCode }) => {
       return exitCode === 0
     })
   }
   return new Promise((resolve) => {
-    execFile('git', ['merge-base', '--is-ancestor', ancestor, descendant], {
-      cwd: repoPath,
-      windowsHide: true,
-      timeout: 1000,
-    }, (error) => {
-      resolve(!error)
-    })
+    execFile(
+      'git',
+      ['merge-base', '--is-ancestor', ancestor, descendant],
+      {
+        cwd: repoPath,
+        windowsHide: true,
+        timeout: 1000
+      },
+      (error) => {
+        resolve(!error)
+      }
+    )
   })
 }
 
@@ -436,7 +824,11 @@ export function isAncestorOf(repoPath: string, ancestor: string, descendant: str
  * (local, no network).  Returns the SHA on success, undefined on error
  * (e.g. if either ref is missing from the object store).
  */
-export function findMergeBase(repoPath: string, ref1: string, ref2: string): Promise<string | undefined> {
+export function findMergeBase(
+  repoPath: string,
+  ref1: string,
+  ref2: string
+): Promise<string | undefined> {
   if (isPygit2Configured()) {
     return runPygit2(['merge-base', repoPath, ref1, ref2]).then(({ exitCode, stdout }) => {
       if (exitCode !== 0) return undefined
@@ -445,16 +837,24 @@ export function findMergeBase(repoPath: string, ref1: string, ref2: string): Pro
     })
   }
   return new Promise((resolve) => {
-    execFile('git', ['merge-base', ref1, ref2], {
-      cwd: repoPath,
-      encoding: 'utf-8',
-      windowsHide: true,
-      timeout: 1000,
-    }, (error, stdout) => {
-      if (error) { resolve(undefined); return }
-      const sha = stdout.trim()
-      resolve(sha || undefined)
-    })
+    execFile(
+      'git',
+      ['merge-base', ref1, ref2],
+      {
+        cwd: repoPath,
+        encoding: 'utf-8',
+        windowsHide: true,
+        timeout: 1000
+      },
+      (error, stdout) => {
+        if (error) {
+          resolve(undefined)
+          return
+        }
+        const sha = stdout.trim()
+        resolve(sha || undefined)
+      }
+    )
   })
 }
 
@@ -472,16 +872,24 @@ export function revParseRef(repoPath: string, ref: string): Promise<string | und
     })
   }
   return new Promise((resolve) => {
-    execFile('git', ['rev-parse', ref], {
-      cwd: repoPath,
-      encoding: 'utf-8',
-      windowsHide: true,
-      timeout: 1000,
-    }, (error, stdout) => {
-      if (error) { resolve(undefined); return }
-      const sha = stdout.trim()
-      resolve(sha || undefined)
-    })
+    execFile(
+      'git',
+      ['rev-parse', ref],
+      {
+        cwd: repoPath,
+        encoding: 'utf-8',
+        windowsHide: true,
+        timeout: 1000
+      },
+      (error, stdout) => {
+        if (error) {
+          resolve(undefined)
+          return
+        }
+        const sha = stdout.trim()
+        resolve(sha || undefined)
+      }
+    )
   })
 }
 
@@ -500,22 +908,35 @@ export function fetchTags(repoPath: string): Promise<boolean> {
     })
   }
   return new Promise((resolve) => {
-    execFile('git', ['fetch', '--unshallow', 'origin', '--tags'], {
-      cwd: repoPath,
-      windowsHide: true,
-      timeout: 15000,
-    }, (error) => {
-      if (!error) { resolve(true); return }
-      // Unshallow fails when the repo is already complete or on network
-      // error — retry without --unshallow so tags still get fetched.
-      execFile('git', ['fetch', 'origin', '--tags'], {
+    execFile(
+      'git',
+      ['fetch', '--unshallow', 'origin', '--tags'],
+      {
         cwd: repoPath,
         windowsHide: true,
-        timeout: 15000,
-      }, (error2) => {
-        resolve(!error2)
-      })
-    })
+        timeout: 15000
+      },
+      (error) => {
+        if (!error) {
+          resolve(true)
+          return
+        }
+        // Unshallow fails when the repo is already complete or on network
+        // error — retry without --unshallow so tags still get fetched.
+        execFile(
+          'git',
+          ['fetch', 'origin', '--tags'],
+          {
+            cwd: repoPath,
+            windowsHide: true,
+            timeout: 15000
+          },
+          (error2) => {
+            resolve(!error2)
+          }
+        )
+      }
+    )
   })
 }
 
@@ -531,13 +952,18 @@ export function fetchCommitSha(repoPath: string, sha: string): Promise<boolean> 
     })
   }
   return new Promise((resolve) => {
-    execFile('git', ['fetch', 'origin', sha], {
-      cwd: repoPath,
-      windowsHide: true,
-      timeout: 15000,
-    }, (error) => {
-      resolve(!error)
-    })
+    execFile(
+      'git',
+      ['fetch', 'origin', sha],
+      {
+        cwd: repoPath,
+        windowsHide: true,
+        timeout: 15000
+      },
+      (error) => {
+        resolve(!error)
+      }
+    )
   })
 }
 
@@ -581,7 +1007,7 @@ export function gitClone(
 function makeRunGit(
   repoPath: string,
   sendOutput: (text: string) => void,
-  signal?: AbortSignal,
+  signal?: AbortSignal
 ): (args: string[]) => Promise<ProcessResult> {
   return (args: string[]): Promise<ProcessResult> =>
     spawnStreamed('git', args, sendOutput, { cwd: repoPath, signal })
@@ -608,13 +1034,15 @@ export function gitCheckoutCommit(
 
   return runGit(['checkout', commit]).then((directResult) => {
     if (directResult.exitCode === 0) return directResult
-    return runGit(['fetch', '--unshallow', 'origin']).then((result) => {
-      if (result.exitCode !== 0) return runGit(['fetch', 'origin'])
-      return result
-    }).then((fetchResult) => {
-      if (fetchResult.exitCode !== 0) return fetchResult
-      return runGit(['checkout', commit])
-    })
+    return runGit(['fetch', '--unshallow', 'origin'])
+      .then((result) => {
+        if (result.exitCode !== 0) return runGit(['fetch', 'origin'])
+        return result
+      })
+      .then((fetchResult) => {
+        if (fetchResult.exitCode !== 0) return fetchResult
+        return runGit(['checkout', commit])
+      })
   })
 }
 
@@ -641,22 +1069,26 @@ export function gitFetchAndCheckout(
   // tags. Use --unshallow to handle shallow clones; fall back to a
   // regular fetch if the repo is already complete.
   const refspec = '+refs/heads/master:refs/remotes/origin/master'
-  return runGit(['fetch', '--unshallow', '--tags', 'origin', refspec]).then((result) => {
-    if (result.exitCode !== 0) return runGit(['fetch', '--tags', 'origin', refspec])
-    return result
-  }).then((result) => {
-    if (result.exitCode !== 0) return result
-    // Ensure a local master branch exists (mirroring the pygit2 update
-    // script) so future updates via update_comfyui.py work correctly.
-    // Detach HEAD first so `branch -f` can't fail due to master being
-    // the currently checked-out branch.
-    return runGit(['checkout', '--detach', 'HEAD']).then(() => {
-      // Detach may fail if HEAD is invalid (fresh archive with no commits
-      // checked out); that's fine — branch -f will still succeed.
-      return runGit(['branch', '-f', 'master', 'refs/remotes/origin/master'])
-    }).then((branchResult) => {
-      if (branchResult.exitCode !== 0) return branchResult
-      return runGit(['checkout', commit])
+  return runGit(['fetch', '--unshallow', '--tags', 'origin', refspec])
+    .then((result) => {
+      if (result.exitCode !== 0) return runGit(['fetch', '--tags', 'origin', refspec])
+      return result
     })
-  })
+    .then((result) => {
+      if (result.exitCode !== 0) return result
+      // Ensure a local master branch exists (mirroring the pygit2 update
+      // script) so future updates via update_comfyui.py work correctly.
+      // Detach HEAD first so `branch -f` can't fail due to master being
+      // the currently checked-out branch.
+      return runGit(['checkout', '--detach', 'HEAD'])
+        .then(() => {
+          // Detach may fail if HEAD is invalid (fresh archive with no commits
+          // checked out); that's fine — branch -f will still succeed.
+          return runGit(['branch', '-f', 'master', 'refs/remotes/origin/master'])
+        })
+        .then((branchResult) => {
+          if (branchResult.exitCode !== 0) return branchResult
+          return runGit(['checkout', commit])
+        })
+    })
 }

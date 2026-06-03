@@ -1,21 +1,46 @@
 import {
-  path, fs, os, ipcMain, dialog, BrowserWindow,
-  installations, i18n,
+  path,
+  fs,
+  os,
+  ipcMain,
+  dialog,
+  BrowserWindow,
+  installations,
+  i18n,
   sourceMap,
-  findLatestVersionTag, revParseRef, hasGitDir,
+  findLatestVersionTag,
+  revParseRef,
+  hasGitDir,
   defaultInstallDir,
-  detectGPU, detectDesktopInstall, stageDesktopSnapshot, stageLocalSnapshot,
-  getSnapshotCount, getSnapshotListData, getSnapshotDetailData,
-  getSnapshotDiffVsPrevious, diffAgainstCurrent, loadSnapshot, listSnapshots,
-  buildExportEnvelope, validateExportEnvelope, importSnapshots,
-  resolveSnapshotVersion, getVariantLabel,
-  findDuplicatePath, uniqueName, sanitizeDirName, allocateUniqueDir,
+  detectGPU,
+  detectDesktopInstall,
+  stageDesktopSnapshot,
+  stageLocalSnapshot,
+  getSnapshotCount,
+  getSnapshotListData,
+  getSnapshotDetailData,
+  getSnapshotDiffVsPrevious,
+  diffAgainstCurrent,
+  loadSnapshot,
+  listSnapshots,
+  buildExportEnvelope,
+  validateExportEnvelope,
+  importSnapshots,
+  resolveSnapshotVersion,
+  getVariantLabel,
+  findDuplicatePath,
+  uniqueName,
+  sanitizeDirName,
+  allocateUniqueDir
 } from './shared'
-import type {
-  LatestTagOverride, SnapshotExportEnvelope, FieldOption, Snapshot,
-} from './shared'
+import type { LatestTagOverride, SnapshotExportEnvelope, FieldOption, Snapshot } from './shared'
+import type { CopyEvent } from '../../../types/ipc'
+import * as telemetry from '../telemetry'
 
-async function _findReferenceRepo(): Promise<{ comfyuiDir: string; override?: LatestTagOverride } | null> {
+async function _findReferenceRepo(): Promise<{
+  comfyuiDir: string
+  override?: LatestTagOverride
+} | null> {
   const all = await installations.list()
   for (const inst of all) {
     if (!inst.installPath) continue
@@ -31,12 +56,19 @@ async function _findReferenceRepo(): Promise<{ comfyuiDir: string; override?: La
   return null
 }
 
-async function buildSnapshotPreview(filePath: string, envelope: SnapshotExportEnvelope): Promise<Record<string, unknown>> {
+async function buildSnapshotPreview(
+  filePath: string,
+  envelope: SnapshotExportEnvelope
+): Promise<Record<string, unknown>> {
   const ref = await _findReferenceRepo()
-  const resolveOpts = ref ? { comfyuiDir: ref.comfyuiDir, latestTagOverride: ref.override } : undefined
+  const resolveOpts = ref
+    ? { comfyuiDir: ref.comfyuiDir, latestTagOverride: ref.override }
+    : undefined
 
-  const resolveVersion = (comfyui: { ref: string; commit: string | null; baseTag?: string; commitsAhead?: number }, style: 'short' | 'detail'): Promise<string> =>
-    resolveSnapshotVersion('', comfyui, style, resolveOpts)
+  const resolveVersion = (
+    comfyui: { ref: string; commit: string | null; baseTag?: string; commitsAhead?: number },
+    style: 'short' | 'detail'
+  ): Promise<string> => resolveSnapshotVersion('', comfyui, style, resolveOpts)
 
   const newest = envelope.snapshots[0]!
   const resolvedVersions = await Promise.all(
@@ -49,7 +81,7 @@ async function buildSnapshotPreview(filePath: string, envelope: SnapshotExportEn
     label: s.label,
     comfyuiVersion: resolvedVersions[i]!,
     nodeCount: s.customNodes.length,
-    pipPackageCount: Object.keys(s.pipPackages).length,
+    pipPackageCount: Object.keys(s.pipPackages).length
   }))
   return {
     filePath,
@@ -72,30 +104,60 @@ async function buildSnapshotPreview(filePath: string, envelope: SnapshotExportEn
         enabled: n.enabled,
         version: n.version,
         commit: n.commit,
-        url: n.url,
+        url: n.url
       })),
       pipPackageCount: Object.keys(newest.pipPackages).length,
-      pipPackages: newest.pipPackages,
-    },
+      pipPackages: newest.pipPackages
+    }
   }
 }
 
 export function registerSnapshotHandlers(): void {
   ipcMain.handle('get-snapshots', async (_event, installationId: string) => {
     const inst = await installations.get(installationId)
-    if (!inst || !inst.installPath) return { snapshots: [], copyEvents: [], totalCount: 0, context: { updateChannel: '', pythonVersion: '', variant: '', variantLabel: '' } }
+    if (!inst || !inst.installPath)
+      return {
+        snapshots: [],
+        copyEvents: [],
+        totalCount: 0,
+        context: { updateChannel: '', pythonVersion: '', variant: '', variantLabel: '' }
+      }
     const data = await getSnapshotListData(inst.installPath)
 
     const allInstalls = await installations.list()
-    const copyEvents = allInstalls
-      .filter((i) => (i.copiedFrom as string | undefined) === installationId && (i.copiedAt as string | undefined))
+    const copyEvents: CopyEvent[] = allInstalls
+      .filter(
+        (i) =>
+          (i.copiedFrom as string | undefined) === installationId &&
+          (i.copiedAt as string | undefined)
+      )
       .map((i) => ({
         installationId: i.id,
         installationName: i.name,
         copiedAt: i.copiedAt as string,
         copyReason: (i.copyReason as 'copy' | 'copy-update' | 'release-update') || 'copy',
         exists: true,
+        direction: 'out'
       }))
+
+    // Surface the inbound copy on the destination's rail too — `copiedFromName`
+    // is captured at copy time so it survives source rename / deletion. Falls
+    // back to the source's current name when missing (older copies that
+    // predate `copiedFromName`), then to the raw id as a last resort.
+    const copiedFrom = inst.copiedFrom as string | undefined
+    const copiedAt = inst.copiedAt as string | undefined
+    if (copiedFrom && copiedAt) {
+      const source = allInstalls.find((i) => i.id === copiedFrom)
+      const snapshottedName = inst.copiedFromName as string | undefined
+      copyEvents.push({
+        installationId: copiedFrom,
+        installationName: snapshottedName || source?.name || copiedFrom,
+        copiedAt,
+        copyReason: (inst.copyReason as 'copy' | 'copy-update' | 'release-update') || 'copy',
+        exists: Boolean(source),
+        direction: 'in'
+      })
+    }
 
     return {
       ...data,
@@ -104,33 +166,51 @@ export function registerSnapshotHandlers(): void {
         updateChannel: (inst.updateChannel as string | undefined) || 'stable',
         pythonVersion: (inst.pythonVersion as string | undefined) || '',
         variant: (inst.variant as string | undefined) || '',
-        variantLabel: (inst.variant as string | undefined) ? getVariantLabel(inst.variant as string) : '',
-      },
+        variantLabel: (inst.variant as string | undefined)
+          ? getVariantLabel(inst.variant as string)
+          : ''
+      }
     }
   })
 
-  ipcMain.handle('get-snapshot-detail', async (_event, installationId: string, filename: string) => {
-    const inst = await installations.get(installationId)
-    if (!inst || !inst.installPath) throw new Error('Installation not found or has no install path')
-    const detail = await getSnapshotDetailData(inst.installPath, filename)
-    if (!detail.pythonVersion) detail.pythonVersion = (inst.pythonVersion as string | undefined) || undefined
-    if (!detail.updateChannel) detail.updateChannel = (inst.updateChannel as string | undefined) || undefined
-    return detail
-  })
-
-  ipcMain.handle('get-snapshot-diff', async (_event, installationId: string, filename: string, mode: 'previous' | 'current') => {
-    const inst = await installations.get(installationId)
-    if (!inst || !inst.installPath) throw new Error('Installation not found or has no install path')
-    if (mode === 'previous') {
-      return getSnapshotDiffVsPrevious(inst.installPath, filename)
+  ipcMain.handle(
+    'get-snapshot-detail',
+    async (_event, installationId: string, filename: string) => {
+      const inst = await installations.get(installationId)
+      if (!inst || !inst.installPath)
+        throw new Error('Installation not found or has no install path')
+      const detail = await getSnapshotDetailData(inst.installPath, filename)
+      if (!detail.pythonVersion)
+        detail.pythonVersion = (inst.pythonVersion as string | undefined) || undefined
+      if (!detail.updateChannel)
+        detail.updateChannel = (inst.updateChannel as string | undefined) || undefined
+      return detail
     }
-    const target = await loadSnapshot(inst.installPath, filename)
-    const diff = await diffAgainstCurrent(inst.installPath, inst, target)
-    const empty = !diff.comfyuiChanged && !diff.updateChannelChanged && diff.nodesAdded.length === 0 && diff.nodesRemoved.length === 0 &&
-                  diff.nodesChanged.length === 0 && diff.pipsAdded.length === 0 && diff.pipsRemoved.length === 0 &&
-                  diff.pipsChanged.length === 0
-    return { mode: 'current' as const, baseLabel: 'Current state', diff, empty }
-  })
+  )
+
+  ipcMain.handle(
+    'get-snapshot-diff',
+    async (_event, installationId: string, filename: string, mode: 'previous' | 'current') => {
+      const inst = await installations.get(installationId)
+      if (!inst || !inst.installPath)
+        throw new Error('Installation not found or has no install path')
+      if (mode === 'previous') {
+        return getSnapshotDiffVsPrevious(inst.installPath, filename)
+      }
+      const target = await loadSnapshot(inst.installPath, filename)
+      const diff = await diffAgainstCurrent(inst.installPath, inst, target)
+      const empty =
+        !diff.comfyuiChanged &&
+        !diff.updateChannelChanged &&
+        diff.nodesAdded.length === 0 &&
+        diff.nodesRemoved.length === 0 &&
+        diff.nodesChanged.length === 0 &&
+        diff.pipsAdded.length === 0 &&
+        diff.pipsRemoved.length === 0 &&
+        diff.pipsChanged.length === 0
+      return { mode: 'current' as const, baseLabel: 'Current state', diff, empty }
+    }
+  )
 
   ipcMain.handle('export-snapshot', async (_event, installationId: string, filename: string) => {
     const inst = await installations.get(installationId)
@@ -143,10 +223,19 @@ export function registerSnapshotHandlers(): void {
     const dateStr = snapshot.createdAt.slice(0, 10).replace(/-/g, '')
     const { canceled, filePath } = await dialog.showSaveDialog(win, {
       defaultPath: `snapshot-${safeName}-${snapshot.trigger}-${dateStr}.json`,
-      filters: [{ name: 'JSON', extensions: ['json'] }],
+      filters: [{ name: 'JSON', extensions: ['json'] }]
     })
     if (canceled || !filePath) return { ok: false }
     await fs.promises.writeFile(filePath, JSON.stringify(envelope, null, 2))
+    // Fire only after the file is actually written — a cancelled save
+    // dialog returns above, so this never counts cancels. Pairs with the
+    // existing snapshot.created / .imported / .restore_* events so the
+    // Snapshots dashboard can show the full create → share → import loop.
+    telemetry.emit('desktop2.snapshot.shared', {
+      installation_id: installationId,
+      scope: 'latest',
+      trigger: snapshot.trigger
+    })
     return { ok: true }
   })
 
@@ -162,10 +251,15 @@ export function registerSnapshotHandlers(): void {
     const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '')
     const { canceled, filePath } = await dialog.showSaveDialog(win, {
       defaultPath: `snapshots-${safeName}-${dateStr}.json`,
-      filters: [{ name: 'JSON', extensions: ['json'] }],
+      filters: [{ name: 'JSON', extensions: ['json'] }]
     })
     if (canceled || !filePath) return { ok: false }
     await fs.promises.writeFile(filePath, JSON.stringify(envelope, null, 2))
+    telemetry.emit('desktop2.snapshot.shared', {
+      installation_id: installationId,
+      scope: 'all',
+      count: entries.length
+    })
     return { ok: true }
   })
 
@@ -177,19 +271,29 @@ export function registerSnapshotHandlers(): void {
     if (!win) return { ok: false, message: 'No window.' }
     const { canceled, filePaths } = await dialog.showOpenDialog(win, {
       filters: [{ name: 'JSON', extensions: ['json'] }],
-      properties: ['openFile'],
+      properties: ['openFile']
     })
     if (canceled || filePaths.length === 0) return { ok: false }
     try {
       const content = await fs.promises.readFile(filePaths[0]!, 'utf-8')
       let parsed: unknown
-      try { parsed = JSON.parse(content) } catch { return { ok: false, message: 'Invalid JSON file.' } }
+      try {
+        parsed = JSON.parse(content)
+      } catch {
+        return { ok: false, message: 'Invalid JSON file.' }
+      }
       let envelope: SnapshotExportEnvelope
-      try { envelope = validateExportEnvelope(parsed) } catch (err) { return { ok: false, message: (err as Error).message } }
+      try {
+        envelope = validateExportEnvelope(parsed)
+      } catch (err) {
+        return { ok: false, message: (err as Error).message }
+      }
       const preview = await buildSnapshotPreview(filePaths[0]!, envelope)
       _pendingImportEnvelope = { filePath: filePaths[0]!, envelope }
       return { ok: true, preview }
-    } catch { return { ok: false, message: 'Failed to read snapshot file.' } }
+    } catch {
+      return { ok: false, message: 'Failed to read snapshot file.' }
+    }
   })
 
   ipcMain.handle('import-snapshots-diff', async (_event, installationId: string) => {
@@ -200,17 +304,28 @@ export function registerSnapshotHandlers(): void {
 
       const newestInEnvelope = _pendingImportEnvelope.envelope.snapshots[0]!
       const diff = await diffAgainstCurrent(inst.installPath, inst, newestInEnvelope as Snapshot)
-      const empty = !diff.comfyuiChanged && !diff.updateChannelChanged && diff.nodesAdded.length === 0 && diff.nodesRemoved.length === 0 &&
-                    diff.nodesChanged.length === 0 && diff.pipsAdded.length === 0 && diff.pipsRemoved.length === 0 &&
-                    diff.pipsChanged.length === 0
+      const empty =
+        !diff.comfyuiChanged &&
+        !diff.updateChannelChanged &&
+        diff.nodesAdded.length === 0 &&
+        diff.nodesRemoved.length === 0 &&
+        diff.nodesChanged.length === 0 &&
+        diff.pipsAdded.length === 0 &&
+        diff.pipsRemoved.length === 0 &&
+        diff.pipsChanged.length === 0
 
       // Reject if the import would produce no changes
       if (empty) {
         return { ok: false, message: i18n.t('snapshots.importAlreadyCurrent') }
       }
 
-      return { ok: true, diff: { mode: 'current' as const, baseLabel: 'Current state', diff, empty } }
-    } catch (err) { return { ok: false, message: (err as Error)?.message ?? 'Failed to compute import diff.' } }
+      return {
+        ok: true,
+        diff: { mode: 'current' as const, baseLabel: 'Current state', diff, empty }
+      }
+    } catch (err) {
+      return { ok: false, message: (err as Error)?.message ?? 'Failed to compute import diff.' }
+    }
   })
 
   ipcMain.handle('import-snapshots-confirm', async (_event, installationId: string) => {
@@ -225,7 +340,9 @@ export function registerSnapshotHandlers(): void {
       const snapshotCount = await getSnapshotCount(inst.installPath)
       await installations.update(installationId, { snapshotCount })
       return { ok: true, imported: result.imported, restoreFile: result.filenames[0]! }
-    } catch (err) { return { ok: false, message: (err as Error)?.message ?? 'Failed to import snapshots.' } }
+    } catch (err) {
+      return { ok: false, message: (err as Error)?.message ?? 'Failed to import snapshots.' }
+    }
   })
 
   let _lastDesktopPreviewFile: string | null = null
@@ -243,7 +360,11 @@ export function registerSnapshotHandlers(): void {
       const { envelope, stagedFile } = await stageDesktopSnapshot(desktopInfo)
 
       _lastDesktopPreviewFile = stagedFile
-      return { ok: true, preview: await buildSnapshotPreview(stagedFile, envelope), snapshotPath: stagedFile }
+      return {
+        ok: true,
+        preview: await buildSnapshotPreview(stagedFile, envelope),
+        snapshotPath: stagedFile
+      }
     } catch (err) {
       console.warn('preview-desktop-migration failed:', err)
       return { ok: false, message: (err as Error)?.message ?? String(err) }
@@ -265,11 +386,15 @@ export function registerSnapshotHandlers(): void {
       const { envelope, stagedFile } = await stageLocalSnapshot(
         inst.installPath,
         inst.sourceId as string,
-        inst.name,
+        inst.name
       )
 
       _lastLocalPreviewFiles.set(installationId, stagedFile)
-      return { ok: true, preview: await buildSnapshotPreview(stagedFile, envelope), snapshotPath: stagedFile }
+      return {
+        ok: true,
+        preview: await buildSnapshotPreview(stagedFile, envelope),
+        snapshotPath: stagedFile
+      }
     } catch (err) {
       console.warn('preview-local-migration failed:', err)
       return { ok: false, message: (err as Error)?.message ?? String(err) }
@@ -282,111 +407,161 @@ export function registerSnapshotHandlers(): void {
 
     const { canceled, filePaths } = await dialog.showOpenDialog(win, {
       filters: [{ name: 'Snapshot', extensions: ['json'] }],
-      properties: ['openFile'],
+      properties: ['openFile']
     })
     if (canceled || filePaths.length === 0) return { ok: false }
 
     const content = await fs.promises.readFile(filePaths[0]!, 'utf-8')
     let parsed: unknown
-    try { parsed = JSON.parse(content) } catch { return { ok: false, message: 'Invalid JSON file.' } }
+    try {
+      parsed = JSON.parse(content)
+    } catch {
+      return { ok: false, message: 'Invalid JSON file.' }
+    }
     let envelope: SnapshotExportEnvelope
-    try { envelope = validateExportEnvelope(parsed) } catch (err) { return { ok: false, message: (err as Error).message } }
+    try {
+      envelope = validateExportEnvelope(parsed)
+    } catch (err) {
+      return { ok: false, message: (err as Error).message }
+    }
 
     return { ok: true, preview: await buildSnapshotPreview(filePaths[0]!, envelope) }
   })
 
   ipcMain.handle('preview-snapshot-path', async (_event, filePath: string) => {
-    if (!filePath || !fs.existsSync(filePath)) return { ok: false, message: 'Snapshot file not found.' }
+    if (!filePath || !fs.existsSync(filePath))
+      return { ok: false, message: 'Snapshot file not found.' }
 
     const content = await fs.promises.readFile(filePath, 'utf-8')
     let parsed: unknown
-    try { parsed = JSON.parse(content) } catch { return { ok: false, message: 'Invalid JSON file.' } }
+    try {
+      parsed = JSON.parse(content)
+    } catch {
+      return { ok: false, message: 'Invalid JSON file.' }
+    }
     let envelope: SnapshotExportEnvelope
-    try { envelope = validateExportEnvelope(parsed) } catch (err) { return { ok: false, message: (err as Error).message } }
+    try {
+      envelope = validateExportEnvelope(parsed)
+    } catch (err) {
+      return { ok: false, message: (err as Error).message }
+    }
 
     return { ok: true, preview: await buildSnapshotPreview(filePath, envelope) }
   })
 
-  ipcMain.handle('create-from-snapshot', async (_event, filePath: string, customName?: string, releaseTag?: string, variantId?: string) => {
-    if (!filePath || !fs.existsSync(filePath)) return { ok: false, message: 'Snapshot file not found.' }
+  ipcMain.handle(
+    'create-from-snapshot',
+    async (
+      _event,
+      filePath: string,
+      customName?: string,
+      releaseTag?: string,
+      variantId?: string
+    ) => {
+      if (!filePath || !fs.existsSync(filePath))
+        return { ok: false, message: 'Snapshot file not found.' }
 
-    const content = await fs.promises.readFile(filePath, 'utf-8')
-    let parsed: unknown
-    try { parsed = JSON.parse(content) } catch { return { ok: false, message: 'Invalid JSON file.' } }
-    let envelope: SnapshotExportEnvelope
-    try { envelope = validateExportEnvelope(parsed) } catch (err) { return { ok: false, message: (err as Error).message } }
-
-    const targetSnapshot = envelope.snapshots[0]!
-    const snapshotVariant = targetSnapshot.comfyui.variant || ''
-
-    const platformPrefix: Record<string, string> = { win32: 'win-', darwin: 'mac-', linux: 'linux-' }
-    const prefix = platformPrefix[process.platform]
-    if (!prefix) return { ok: false, message: `Unsupported platform: ${process.platform}` }
-    const strippedVariant = snapshotVariant.replace(/^(win|mac|linux)-/, '')
-    const baseGpu = strippedVariant.replace(/-.*$/, '')
-
-    const source = sourceMap['standalone']!
-    const releaseOptions = await source.getFieldOptions!('release', {}, {})
-    if (releaseOptions.length === 0) return { ok: false, message: 'No releases available.' }
-
-    let selectedRelease: FieldOption
-    if (releaseTag) {
-      const match = releaseOptions.find((r) => r.value === releaseTag)
-      if (!match) return { ok: false, message: `Release "${releaseTag}" is no longer available.` }
-      selectedRelease = match
-    } else {
-      console.warn('No releaseTag specified for create-from-snapshot, falling back to latest release.')
-      selectedRelease = releaseOptions[0]!
-    }
-
-    const gpu = await detectGPU()
-    const variantOptions = await source.getFieldOptions!('variant', { release: selectedRelease }, { gpu: gpu?.id })
-    if (variantOptions.length === 0) return { ok: false, message: 'No compatible variants found for this platform.' }
-
-    let matched: FieldOption | undefined
-    if (variantId) {
-      matched = variantOptions.find((v) => (v.data?.variantId as string) === variantId)
-      if (!matched) return { ok: false, message: `Variant "${variantId}" is not available for the selected release.` }
-    } else {
-      const localVariant = prefix + strippedVariant
-      matched = variantOptions.find((v) => (v.data?.variantId as string) === localVariant)
-      if (!matched) {
-        matched = variantOptions.find((v) => {
-          const vid = ((v.data?.variantId as string) || '').replace(/^(win|mac|linux)-/, '')
-          return vid === baseGpu || vid.startsWith(baseGpu + '-')
-        })
+      const content = await fs.promises.readFile(filePath, 'utf-8')
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(content)
+      } catch {
+        return { ok: false, message: 'Invalid JSON file.' }
       }
-      if (!matched) matched = variantOptions.find((v) => v.recommended)
-      if (!matched) matched = variantOptions[0]!
+      let envelope: SnapshotExportEnvelope
+      try {
+        envelope = validateExportEnvelope(parsed)
+      } catch (err) {
+        return { ok: false, message: (err as Error).message }
+      }
+
+      const targetSnapshot = envelope.snapshots[0]!
+      const snapshotVariant = targetSnapshot.comfyui.variant || ''
+
+      const platformPrefix: Record<string, string> = {
+        win32: 'win-',
+        darwin: 'mac-',
+        linux: 'linux-'
+      }
+      const prefix = platformPrefix[process.platform]
+      if (!prefix) return { ok: false, message: `Unsupported platform: ${process.platform}` }
+      const strippedVariant = snapshotVariant.replace(/^(win|mac|linux)-/, '')
+      const baseGpu = strippedVariant.replace(/-.*$/, '')
+
+      const source = sourceMap['standalone']!
+      const releaseOptions = await source.getFieldOptions!('release', {}, {})
+      if (releaseOptions.length === 0) return { ok: false, message: 'No releases available.' }
+
+      let selectedRelease: FieldOption
+      if (releaseTag) {
+        const match = releaseOptions.find((r) => r.value === releaseTag)
+        if (!match) return { ok: false, message: `Release "${releaseTag}" is no longer available.` }
+        selectedRelease = match
+      } else {
+        console.warn(
+          'No releaseTag specified for create-from-snapshot, falling back to latest release.'
+        )
+        selectedRelease = releaseOptions[0]!
+      }
+
+      const gpu = await detectGPU()
+      const variantOptions = await source.getFieldOptions!(
+        'variant',
+        { release: selectedRelease },
+        { gpu: gpu?.id }
+      )
+      if (variantOptions.length === 0)
+        return { ok: false, message: 'No compatible variants found for this platform.' }
+
+      let matched: FieldOption | undefined
+      if (variantId) {
+        matched = variantOptions.find((v) => (v.data?.variantId as string) === variantId)
+        if (!matched)
+          return {
+            ok: false,
+            message: `Variant "${variantId}" is not available for the selected release.`
+          }
+      } else {
+        const localVariant = prefix + strippedVariant
+        matched = variantOptions.find((v) => (v.data?.variantId as string) === localVariant)
+        if (!matched) {
+          matched = variantOptions.find((v) => {
+            const vid = ((v.data?.variantId as string) || '').replace(/^(win|mac|linux)-/, '')
+            return vid === baseGpu || vid.startsWith(baseGpu + '-')
+          })
+        }
+        if (!matched) matched = variantOptions.find((v) => v.recommended)
+        if (!matched) matched = variantOptions[0]!
+      }
+
+      const instData = {
+        sourceId: source.id,
+        sourceLabel: source.label,
+        ...source.buildInstallation({ release: selectedRelease, variant: matched })
+      }
+      const baseName = customName || envelope.installationName || 'ComfyUI'
+      const name = await uniqueName(baseName)
+      const dirName = sanitizeDirName(name)
+      const installDir = defaultInstallDir()
+      const installPath = allocateUniqueDir(installDir, dirName)
+
+      const duplicate = await findDuplicatePath(installPath)
+      if (duplicate) return { ok: false, message: `Directory already used by "${duplicate.name}".` }
+
+      const stagingDir = path.join(os.tmpdir(), 'comfyui-desktop-2-snapshots')
+      await fs.promises.mkdir(stagingDir, { recursive: true })
+      const stagedFile = path.join(stagingDir, `pending-${Date.now()}.json`)
+      await fs.promises.copyFile(filePath, stagedFile)
+
+      const entry = await installations.add({
+        name,
+        installPath,
+        pendingSnapshotRestore: stagedFile,
+        ...instData,
+        seen: false
+      })
+
+      return { ok: true, entry: { id: entry.id, name: entry.name } }
     }
-
-    const instData = {
-      sourceId: source.id,
-      sourceLabel: source.label,
-      ...source.buildInstallation({ release: selectedRelease, variant: matched }),
-    }
-    const baseName = customName || envelope.installationName || 'ComfyUI'
-    const name = await uniqueName(baseName)
-    const dirName = sanitizeDirName(name)
-    const installDir = defaultInstallDir()
-    const installPath = allocateUniqueDir(installDir, dirName)
-
-    const duplicate = await findDuplicatePath(installPath)
-    if (duplicate) return { ok: false, message: `Directory already used by "${duplicate.name}".` }
-
-    const stagingDir = path.join(os.tmpdir(), 'comfyui-desktop-2-snapshots')
-    await fs.promises.mkdir(stagingDir, { recursive: true })
-    const stagedFile = path.join(stagingDir, `pending-${Date.now()}.json`)
-    await fs.promises.copyFile(filePath, stagedFile)
-
-    const entry = await installations.add({
-      name,
-      installPath,
-      pendingSnapshotRestore: stagedFile,
-      ...instData,
-      seen: false,
-    })
-
-    return { ok: true, entry: { id: entry.id, name: entry.name } }
-  })
+  )
 }

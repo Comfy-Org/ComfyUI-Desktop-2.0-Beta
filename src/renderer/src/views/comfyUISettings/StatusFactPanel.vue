@@ -1,23 +1,102 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { Pencil } from 'lucide-vue-next'
 import BaseCopyButton from '../../components/ui/BaseCopyButton.vue'
 import type { DetailField, DetailSection, Installation } from '../../types/ipc'
 
 /**
  * Status tab — grouped install summary with identity hero and inset
  * fact groups. Replaces generic readonly SettingsSectionList rows.
+ *
+ * The hero name is inline-editable (contenteditable); committing it calls
+ * the `onRename` prop. Mirrors the legacy `DetailModal` title affordance.
  */
 
 interface Props {
   installation: Installation | null
   sections: DetailSection[]
   diskUsage: { label: string; value: string } | null
+  /** Commit a renamed install, resolving `true` when the write landed and
+   *  `false` on rejection. A function prop (not an emit) so the blur
+   *  handler can await the outcome and revert only on failure. */
+  onRename?: (newName: string) => Promise<boolean>
 }
 
 const props = defineProps<Props>()
 
 const { t } = useI18n()
+
+// The hero name is a `contenteditable` whose text we drive imperatively
+// rather than via Vue interpolation: mixing `{{ }}` with the inline pencil
+// icon in one editable element left Vue unable to patch the manually-edited
+// text node, so a committed rename painted everywhere except this hero
+// until a remount. Owning the text via this ref + the `watch` below keeps
+// the element in lockstep with the prop.
+const nameEl = useTemplateRef<HTMLElement>('nameEl')
+
+/** Write the install's name into the editable element if it differs.
+ *  Guarded so we don't stomp the caret while the user is mid-edit. */
+function syncName(): void {
+  const el = nameEl.value
+  if (!el) return
+  const name = props.installation?.name ?? ''
+  if (el.textContent !== name) el.textContent = name
+}
+
+// Watch both the name AND the element ref: the ref starts null and is
+// assigned after the first render, so keying on it too paints the initial
+// name once the contenteditable mounts (otherwise the `immediate` run fires
+// before the ref exists and the hero opens blank until the next change).
+watch(
+  [() => props.installation?.name ?? '', nameEl],
+  () => {
+    // Don't fight the user's caret while they're typing in this field.
+    if (document.activeElement !== nameEl.value) syncName()
+  },
+  { immediate: true, flush: 'post' },
+)
+
+function handleNameSelectAll(event: KeyboardEvent): void {
+  event.preventDefault()
+  const el = event.currentTarget as HTMLElement
+  const range = document.createRange()
+  range.selectNodeContents(el)
+  const sel = window.getSelection()
+  sel?.removeAllRanges()
+  sel?.addRange(range)
+}
+
+function handleNamePaste(event: ClipboardEvent): void {
+  event.preventDefault()
+  const text = event.clipboardData?.getData('text/plain') ?? ''
+  document.execCommand('insertText', false, text)
+}
+
+/** Escape abandons the edit: restore the original name and blur. The
+ *  blur handler then sees an unchanged value and no-ops. */
+function handleNameEscape(): void {
+  syncName()
+  nameEl.value?.blur()
+}
+
+async function handleNameBlur(event: FocusEvent): Promise<void> {
+  const el = event.target as HTMLElement
+  const current = props.installation?.name ?? ''
+  const newName = el.textContent?.trim() ?? ''
+  if (newName && newName !== current) {
+    // Keep the typed text optimistically (normalised to the trimmed value)
+    // so the hero doesn't flash back to the old name mid-round-trip. The
+    // watcher confirms it on success; only a rejection needs a manual
+    // revert, since an unchanged prop fires no watcher.
+    if (el.textContent !== newName) el.textContent = newName
+    const committed = await props.onRename?.(newName)
+    if (committed === false) syncName()
+    return
+  }
+  // Empty / whitespace-only / unchanged: restore the canonical name now.
+  syncName()
+}
 
 interface FactRow {
   id: string
@@ -52,8 +131,19 @@ function fieldValue(field: DetailField): string {
   return String(v)
 }
 
+/** Localised dates (e.g. the "Installed" field) come through as
+ *  `toLocaleDateString()` output — `5/28/2026` etc. — whose `/`
+ *  separators would otherwise trip the slash-based path heuristic and
+ *  sprout a copy button that makes no sense for a date (#712). A path
+ *  always carries a letter (drive/segment name), a backslash, or a
+ *  leading `~`; a date is only digits and date separators. */
+function looksLikeDate(value: string): boolean {
+  return /^[\d/.\-: ]+$/.test(value)
+}
+
 function isPathLike(value: string): boolean {
   if (!value || value === '—') return false
+  if (looksLikeDate(value)) return false
   return value.includes('/') || value.includes('\\') || value.startsWith('~')
 }
 
@@ -176,7 +266,23 @@ const groups = computed<FactGroup[]>(() => {
   <div class="status-fact-panel">
     <header v-if="installation" class="status-fact-hero">
       <div class="status-fact-hero-title-row">
-        <p class="status-fact-hero-name">{{ installation.name }}</p>
+        <span class="status-fact-hero-name-wrap">
+          <span
+            ref="nameEl"
+            class="status-fact-hero-name"
+            role="textbox"
+            :aria-label="t('statusFactPanel.editName', 'Edit installation name')"
+            contenteditable="plaintext-only"
+            spellcheck="false"
+            @blur="handleNameBlur"
+            @keydown.enter.prevent="($event.target as HTMLElement).blur()"
+            @keydown.esc.prevent="handleNameEscape"
+            @keydown.ctrl.a.prevent="handleNameSelectAll"
+            @keydown.meta.a.prevent="handleNameSelectAll"
+            @paste="handleNamePaste"
+          />
+          <Pencil :size="13" class="status-fact-hero-edit-hint" aria-hidden="true" />
+        </span>
         <span v-if="installation.sourceLabel" class="status-fact-hero-badge">
           {{ installation.sourceLabel }}
         </span>
@@ -226,12 +332,61 @@ const groups = computed<FactGroup[]>(() => {
   gap: 8px;
 }
 
+/* Wrapper groups the editable name + the pencil hint as siblings (the
+   pencil can't live inside the contenteditable — `textContent =` writes
+   would wipe it). Hover/focus state is tracked on the wrap so the hint
+   reacts to interaction with the name. */
+.status-fact-hero-name-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  margin-left: -6px;
+}
+
 .status-fact-hero-name {
-  margin: 0;
   font-size: 18px;
   font-weight: 600;
   line-height: 24px;
   color: var(--text);
+  min-width: 0;
+  padding: 2px 6px;
+  border-radius: 6px;
+  outline: none;
+  cursor: text;
+  /* A long name ellipsizes at rest like the old static title did; editing
+     scrolls horizontally within the box rather than wrapping or overflowing
+     the hero. `nowrap` (not `pre`) so the field still collapses runs of
+     whitespace the way a single-line name field should. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background-color 120ms ease;
+}
+
+.status-fact-hero-name:hover {
+  background: var(--brand-surface-bg-hover);
+}
+
+.status-fact-hero-name:focus-visible {
+  background: var(--brand-surface-bg-hover);
+  box-shadow: 0 0 0 2px var(--focus-ring, var(--neutral-50));
+}
+
+/* Faded pencil hint — fades up on hover/focus so the name reads clean at
+   rest but advertises editability on intent. */
+.status-fact-hero-edit-hint {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  opacity: 0;
+  transition: opacity 120ms ease;
+  user-select: none;
+  pointer-events: none;
+}
+
+.status-fact-hero-name-wrap:hover .status-fact-hero-edit-hint,
+.status-fact-hero-name:focus-visible ~ .status-fact-hero-edit-hint {
+  opacity: 0.6;
 }
 
 .status-fact-hero-badge {

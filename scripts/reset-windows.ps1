@@ -1,4 +1,4 @@
-# Comfy Desktop -- Windows reset script
+# ComfyUI Desktop 2.0 -- Windows reset script
 #
 # Wipes app settings, caches, and the Chromium profile for the current build
 # AND for the older beta names (ComfyUI Launcher / comfyui-launcher), in case
@@ -20,7 +20,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# Refuse to run while the app is open
+# Refuse to run while the app is open. "Comfy Desktop" covers the
+# upcoming post-rename productName (the "2.0" suffix is being dropped).
 $runningNames = @(
   'Comfy Desktop',
   'ComfyUI Desktop 2.0',
@@ -36,8 +37,13 @@ if ($running) {
 }
 
 # Every historical app/package name. The userData folder on Windows is named
-# after the productName (or package.json "name") field.
+# after the productName (or package.json "name") field. "Comfy Desktop"
+# is included for the upcoming post-rename productName. "ComfyUI" covers
+# the legacy v1.x desktop app (productName "ComfyUI") whose state can
+# survive an upgrade to the 2.0 beta and break a clean install (mirrors
+# #679's macOS findings).
 $appNames = @(
+  'ComfyUI',
   'Comfy Desktop',
   'ComfyUI Desktop 2.0',
   'ComfyUI Launcher',
@@ -55,13 +61,18 @@ foreach ($root in $roots) {
   if (-not $root) { continue }
   foreach ($name in $appNames) {
     $targets.Add((Join-Path $root $name))
+    # electron-updater pending-update cache (LOCALAPPDATA\<name>-updater).
+    # If left in place, the updater can re-apply a stale update.exe / nupkg
+    # over the freshly-installed app on next launch — a common cause of
+    # "I reinstalled but the bug is still there".
+    $targets.Add((Join-Path $root ($name + '-updater')))
   }
 }
 
 $existing = @($targets | Where-Object { Test-Path -LiteralPath $_ })
 
 if ($existing.Count -eq 0) {
-  Write-Host "Nothing to remove. No Comfy Desktop / Launcher data found."
+  Write-Host "Nothing to remove. No ComfyUI Desktop 2.0 / Launcher data found."
   exit 0
 }
 
@@ -89,6 +100,6 @@ foreach ($t in $existing) {
 }
 
 Write-Host ""
-Write-Host "Done. Reinstall Comfy Desktop from the latest installer if you"
+Write-Host "Done. Reinstall ComfyUI Desktop 2.0 from the latest installer if you"
 Write-Host "haven't already, then launch it. The app should come up with a clean"
 Write-Host "profile."

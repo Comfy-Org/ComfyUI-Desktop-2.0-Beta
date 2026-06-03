@@ -1000,6 +1000,38 @@ defineExpose({ startOperation, showOperation })
             class="brand-progress__error-copy"
           />
         </div>
+
+        <!-- Error actions — centered in the hero stack, directly below the
+             error message, mirroring the success-terminal action row. Keeps
+             the primary Reboot CTA with the failure context instead of
+             stranding it bottom-left in the footer. -->
+        <div
+          v-if="currentOp.finished && !!currentOp.error && !currentOp.cancelRequested && !isPortConflictOpen"
+          class="brand-progress__error-actions"
+        >
+          <button
+            type="button"
+            :class="
+              currentOp.destroysInstance
+                ? 'brand-primary brand-progress__footer-btn'
+                : 'brand-ghost brand-progress__footer-btn'
+            "
+            @click="returnToDashboard('crashed')"
+          >
+            <ArrowLeft :size="14" />
+            {{ $t('common.back') }}
+          </button>
+          <button
+            v-if="!currentOp.destroysInstance"
+            type="button"
+            class="brand-primary brand-progress__footer-btn"
+            :data-testid="TID.progressReboot"
+            @click="handleReboot"
+          >
+            <RefreshCcw :size="14" />
+            {{ $t('progress.reboot') }}
+          </button>
+        </div>
       </div>
     </div>
     <!-- Footer band — sibling to the centered hero stack so the action
@@ -1094,32 +1126,6 @@ defineExpose({ startOperation, showOperation })
                 @click="handleKillProcess(currentOp.result.portConflict.port)"
               >
                 {{ $t('errors.portConflictKill') }}
-              </button>
-            </template>
-            <template
-              v-else-if="currentOp.finished && !!currentOp.error && !currentOp.cancelRequested"
-            >
-              <button
-                v-if="!currentOp.destroysInstance"
-                type="button"
-                class="brand-primary brand-progress__footer-btn"
-                :data-testid="TID.progressReboot"
-                @click="handleReboot"
-              >
-                <RefreshCcw :size="14" />
-                {{ $t('progress.reboot') }}
-              </button>
-              <button
-                type="button"
-                :class="
-                  currentOp.destroysInstance
-                    ? 'brand-primary brand-progress__footer-btn'
-                    : 'brand-ghost brand-progress__footer-btn'
-                "
-                @click="returnToDashboard('crashed')"
-              >
-                <ArrowLeft :size="14" />
-                {{ $t('progress.returnToDashboard') }}
               </button>
             </template>
           </div>
@@ -1306,10 +1312,15 @@ defineExpose({ startOperation, showOperation })
 .brand-progress__logs-chevron.is-open {
   transform: rotate(0deg);
 }
-/* Log panel that opens above the footer bar */
+/* Log panel that opens above the footer bar. `min-height: 0` lets the
+   accordion shrink within the bounded footer so short windows scroll
+   the log body (capped via the panel's own `max-height`) instead of
+   pushing the footer bar off-screen. Display stays `grid` (set by
+   BaseAccordion) so the 0fr→1fr open/close animation is untouched. */
 .brand-progress__logs-wrap {
   border-radius: 10px;
   overflow: hidden;
+  min-height: 0;
 }
 .brand-progress__logs-wrap.is-expanded {
   border: 1px solid var(--brand-surface-border);
@@ -1333,8 +1344,14 @@ defineExpose({ startOperation, showOperation })
 }
 .brand-progress__logs {
   width: 100%;
-  height: clamp(140px, 25vh, 260px);
+  /* `max-height` (not a fixed `height`) so the panel shrinks on short
+     windows instead of forcing the footer past the viewport. `25vh`
+     tracks window height; the 88px floor keeps a couple of readable
+     lines even on a very short window, and 260px caps it on tall ones. */
+  max-height: clamp(88px, 25vh, 260px);
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 12px 14px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
@@ -1403,6 +1420,23 @@ defineExpose({ startOperation, showOperation })
   flex-wrap: wrap;
 }
 
+/* Error CTAs — centered in the hero stack under the error message.
+   Back (ghost) sits left, Reboot (primary) right; both flex to equal
+   width within a bounded row so the pair reads as a balanced unit
+   rather than two differently-sized chips. */
+.brand-progress__error-actions {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 12px;
+  width: 100%;
+  max-width: 420px;
+}
+.brand-progress__error-actions > .brand-progress__footer-btn {
+  flex: 1 1 0;
+  justify-content: center;
+}
+
 /* Error detail line beneath the banner. Selectable so users can copy
    manually. Bounded so a long Python traceback / `uv pip` failure
    doesn't stretch the takeover past the viewport — chosen slightly
@@ -1430,16 +1464,30 @@ defineExpose({ startOperation, showOperation })
   white-space: pre-wrap;
 }
 
-/* Footer — positioned container for the bar + the logs panel above it */
+/* Footer — positioned container for the bar + the logs panel above it.
+   `top` is anchored so the block can never grow taller than the gap
+   between the takeover's top padding and its bottom inset — on a short
+   window the logs panel shrinks (see its flexible height + min-height
+   below) instead of overflowing off the top edge and clipping the
+   toggle. `min-height: 0` lets the flex child shrink past its content. */
 .brand-progress__footer {
   position: absolute;
+  top: clamp(72px, 14vh, 160px);
   bottom: clamp(16px, 2.5vh, 32px);
   left: clamp(16px, 2.5vw, 32px);
   right: clamp(16px, 2.5vw, 32px);
   z-index: 3;
   display: flex;
   flex-direction: column;
+  justify-content: flex-end;
   gap: 8px;
+  min-height: 0;
+  pointer-events: none;
+}
+/* Re-enable interaction on the actual content — the container is only a
+   geometric bound, so it stays click-through where it's empty. */
+.brand-progress__footer > * {
+  pointer-events: auto;
 }
 .brand-progress__footer-bar {
   display: flex;

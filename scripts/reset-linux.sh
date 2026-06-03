@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Comfy Desktop -- Linux reset script
+# ComfyUI Desktop 2.0 -- Linux reset script
 #
 # Wipes app settings, caches, and the Chromium profile for the current build
 # AND for the older beta names (ComfyUI Launcher / comfyui-launcher), in case
@@ -32,8 +32,9 @@ if [ "$(uname -s)" != "Linux" ]; then
   exit 1
 fi
 
-# Refuse to run while the app is open
-if pgrep -f "comfyui-desktop-2|Comfy Desktop|comfyui-launcher|ComfyUI Launcher" >/dev/null 2>&1; then
+# Refuse to run while the app is open (includes the upcoming post-rename
+# "Comfy Desktop" display name)
+if pgrep -f "comfyui-desktop-2|ComfyUI Desktop 2.0|Comfy Desktop|comfyui-launcher|ComfyUI Launcher" >/dev/null 2>&1; then
   echo "Comfy Desktop / Launcher is running. Please quit it first,"
   echo "then re-run this script."
   exit 1
@@ -46,10 +47,15 @@ XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
 XDG_STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
 
 # Every historical app/package name. The userData folder on Linux is named
-# after the package.json "name" field (NOT productName).
+# after the package.json "name" field (NOT productName). "Comfy Desktop"
+# is included for the upcoming post-rename productName. "ComfyUI" covers
+# the legacy v1.x desktop app (productName "ComfyUI") whose state can
+# survive an upgrade to the 2.0 beta and break a clean install (mirrors
+# #679's macOS findings).
 APP_NAMES=(
   "comfyui-desktop-2"
   "comfyui-launcher"
+  "ComfyUI"
   "Comfy Desktop"
   "ComfyUI Desktop 2.0"
   "ComfyUI Launcher"
@@ -59,10 +65,11 @@ TARGETS=()
 
 for name in "${APP_NAMES[@]}"; do
   TARGETS+=(
-    "$XDG_CONFIG_HOME/$name"     # userData / settings.json / Chromium profile
-    "$XDG_CACHE_HOME/$name"      # download-cache (after XDG migration)
-    "$XDG_DATA_HOME/$name"       # installations.json, shared_model_paths.yaml
-    "$XDG_STATE_HOME/$name"      # port-locks
+    "$XDG_CONFIG_HOME/$name"             # userData / settings.json / Chromium profile
+    "$XDG_CACHE_HOME/$name"              # download-cache (after XDG migration)
+    "$XDG_CACHE_HOME/${name}-updater"    # electron-updater pending update cache
+    "$XDG_DATA_HOME/$name"               # installations.json, shared_model_paths.yaml
+    "$XDG_STATE_HOME/$name"              # port-locks
   )
 done
 
@@ -74,7 +81,7 @@ for t in "${TARGETS[@]}"; do
 done
 
 if [ ${#EXISTING[@]} -eq 0 ]; then
-  echo "Nothing to remove. No Comfy Desktop / Launcher data found."
+  echo "Nothing to remove. No ComfyUI Desktop 2.0 / Launcher data found."
   exit 0
 fi
 
@@ -103,6 +110,6 @@ for t in "${EXISTING[@]}"; do
 done
 
 echo
-echo "Done. Reinstall Comfy Desktop from the latest .AppImage or .deb"
+echo "Done. Reinstall ComfyUI Desktop 2.0 from the latest .AppImage or .deb"
 echo "if you haven't already, then launch it. The app should come up with a"
 echo "clean profile."

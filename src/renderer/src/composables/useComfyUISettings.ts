@@ -10,6 +10,7 @@ import { progressOpKindForActionId, destroysInstanceForActionId } from '../lib/p
 import {
   REQUIRES_STOPPED,
   type ActionDef,
+  type ActionResult,
   type DetailField,
   type DetailSection,
   type DiskSpaceInfo,
@@ -80,6 +81,16 @@ export interface UseComfyUISettingsApi {
   loading: Ref<boolean>
   error: Ref<string | null>
 
+  /** True when the currently-painted `sections` / `diskSpace` /
+   *  `installSize` payload belongs to the currently-selected install.
+   *  Lags briefly during a picker row switch — the previous install's
+   *  payload stays painted until the new install's IPC resolves so
+   *  the right pane doesn't flash "Loading…" (#782). Hosts gate
+   *  per-install action invocations on this (footer More menu, body
+   *  pointer-events) so a click during the stale window can't run
+   *  an action defined by the previous install's payload. */
+  sectionsFresh: ComputedRef<boolean>
+
   /** Transient, non-blocking status line (e.g. a manual "Check for
    *  update" that found nothing). Set with an auto-clear timer; the host
    *  renders it inline and fades it out rather than blocking on a modal. */
@@ -113,6 +124,11 @@ export interface UseComfyUISettingsApi {
    *  inline pill surfaces the message. Auto-clears after a short
    *  timer or on the next edit of the same field. */
   fieldErrorMessages: ComputedRef<Map<string, string>>
+
+  /** Commit a new display name for the selected install (inline hero
+   *  edit). Resolves `true` when committed, `false` on no-op / rejection
+   *  (duplicate name → alert). */
+  renameInstallation: (newName: string) => Promise<boolean>
 
   /** Run an action coming off a `DetailSection.actions[]` entry. */
   runAction: (action: ActionDef) => Promise<void>
@@ -209,10 +225,14 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
   // Inline error pill auto-clear window. Long enough to read, short
   // enough not to nag.
   const ERROR_TAG_TTL_MS = 4000
-  /** Last install id `loadAll` was called with — drives the
-   *  clear-before-await decision so same-install reloads (field edits,
-   *  action completions) don't blank the pane, only row switches do. */
+  /** Last install id `loadAll` was called with — used by
+   *  `refreshSection` to drop late same-install splices after a switch. */
   let lastLoadedId: string | null = null
+  /** Install id whose payload currently sits in `sections` /
+   *  `diskSpace` / `installSize`. Tracks "what's painted" rather
+   *  than "what we asked for"; backs the public `sectionsFresh`
+   *  computed below. */
+  const sectionsPayloadId = ref<string | null>(null)
   /** Monotonically increasing request id. Each `loadAll` /
    *  `refreshSection` call captures the next value and only writes
    *  results back into the refs if it is still the latest in-flight
@@ -221,17 +241,18 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
   let requestSeq = 0
 
   async function loadAll(installationId: string, installPath: string): Promise<void> {
-    // Only clear the visible state on an actual install switch so a
-    // same-install reload (after `updateField` / action completion)
-    // doesn't flash "Loading…" — that flicker would be a regression on
-    // its own. Row switches inside the picker DO clear, which is the
-    // bug we wanted to fix (#582).
-    const isInstallSwitch = installationId !== lastLoadedId
-    if (isInstallSwitch) {
-      sections.value = []
-      diskSpace.value = null
-      installSize.value = null
-    }
+    // We deliberately do NOT blank `sections` / `diskSpace` /
+    // `installSize` here on install switch. Blanking caused a visible
+    // "Loading…" flash for the (very brief) IPC window on every row
+    // click in the instance picker (#782). Keeping the previous
+    // payload in place trades the flicker for a soft swap when the
+    // new payload lands. The new install's identity is the prop
+    // already; only the body has to await, and the crossfade on the
+    // host (`ComfyUISettingsContent.vue`, keyed on install id) makes
+    // the transition read as intentional. `sectionsInstallationId`
+    // below still reflects the previous install until the new payload
+    // resolves, so hosts can gate per-install action invocations on
+    // freshness (the footer More menu does this).
     lastLoadedId = installationId
     loading.value = true
     error.value = null
@@ -244,6 +265,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
       if (seq !== requestSeq) return
       sections.value = secs
       diskSpace.value = disk
+      sectionsPayloadId.value = installationId
     } catch (e) {
       if (seq !== requestSeq) return
       error.value = e instanceof Error ? e.message : String(e)
@@ -270,6 +292,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
       sections.value = []
       diskSpace.value = null
       installSize.value = null
+      sectionsPayloadId.value = null
       lastLoadedId = null
       // Bump the sequence so any in-flight loadAll for a previous
       // install can't write into our now-cleared refs.
@@ -503,6 +526,30 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     } else {
       await reload()
     }
+  }
+
+  /** Commit a new display name for the selected install. Shared by the
+   *  About-tab inline hero edit; the footer "More → Rename" path runs
+   *  through `runAction` instead, but both reconcile via
+   *  `update-installation` → `'changed'` → store refetch. The IPC handler
+   *  owns the duplicate-name guard — a rejection surfaces here as an alert
+   *  and the `installation` prop stays put.
+   *
+   *  Resolves `true` when the name was committed, `false` on a no-op
+   *  (empty / unchanged) or a rejection (duplicate). The hero uses this to
+   *  revert its optimistic text only when the write didn't land. */
+  async function renameInstallation(newName: string): Promise<boolean> {
+    const inst = toValue(opts.installation)
+    if (!inst) return false
+    const name = newName.trim()
+    if (!name || name === inst.name) return false
+    const result: ActionResult | void = await window.api.updateInstallation(inst.id, { name })
+    if (result?.ok === false) {
+      await dialogs.alert({ title: inst.name, message: result.message ?? '' })
+      return false
+    }
+    await reload()
+    return true
   }
 
   async function runAction(action: ActionDef): Promise<void> {
@@ -827,15 +874,22 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     },
   )
 
+  const sectionsFresh = computed<boolean>(() => {
+    const inst = toValue(opts.installation)
+    return !!inst && sectionsPayloadId.value === inst.id
+  })
+
   return {
     sections,
     diskSpace,
     loading,
     error,
+    sectionsFresh,
     notice,
     reload,
     refreshSection,
     updateField,
+    renameInstallation,
     pendingRestartFieldIds,
     fieldErrorMessages,
     runAction,

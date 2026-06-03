@@ -1,6 +1,7 @@
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
+import { EventEmitter } from 'events'
 import { app, ipcMain, dialog, shell, BrowserWindow, nativeTheme } from 'electron'
 import { execFile, spawn, execFileSync } from 'child_process'
 import type { ChildProcess } from 'child_process'
@@ -92,6 +93,11 @@ export type {
 
 // ── Constants ──
 
+// Re-export the cross-process cancel string so main-side handlers can
+// pull it from this barrel alongside the other constants. See
+// `src/shared/operationStatus.ts` for the canonical definition.
+export { MSG_CANCELLED } from '../../../shared/operationStatus'
+
 export const MARKER_FILE = '.comfyui-desktop-2'
 export const COMFYUI_REPO = 'Comfy-Org/ComfyUI'
 export const UPDATE_CHECK_INTERVAL = 10 * 60 * 1000
@@ -172,6 +178,60 @@ let _gpuPromise: Promise<GpuInfo | null> | null = null
 export const _operationAborts = new Map<string, AbortController>()
 export const _runningSessions = new Map<string, SessionInfo>()
 export const _pendingPorts = new Map<number, string>()
+
+/**
+ * Installation IDs that are mid-launch — between `instance-launching`
+ * (port reserved, child spawned) and `instance-started` (live, in
+ * `_runningSessions`) or `instance-launch-failed`. Mirrors the
+ * renderer-side `sessionStore.launchingInstances` so the picker
+ * popup — which can't subscribe to `instance-launching` itself
+ * (different preload, no `window.api`) — can be hydrated from a
+ * snapshot field instead.
+ *
+ * Kept as an internal Set so the producer/consumer/cleanup sites
+ * (`_markLaunching` / `_clearLaunching` / `_addSession` / launch
+ * teardown) can't drift apart. Read via `_getLaunchingInstallationIds`.
+ */
+const _launchingInstallationIds = new Set<string>()
+
+/**
+ * Internal bus for session lifecycle changes — emitted whenever the
+ * launching set or `_runningSessions` mutates. The picker popup
+ * subscribes via `titlePopup.ts` to rebroadcast its snapshot so the
+ * "Current" pill / CTA / running-dot flip live during the launching
+ * window without waiting for the install-record `markLaunched` round-
+ * trip at `instance-started` time.
+ */
+export const sessionLifecycleEvents = new EventEmitter()
+
+export function _getLaunchingInstallationIds(): string[] {
+  return Array.from(_launchingInstallationIds)
+}
+
+/**
+ * Mark `installationId` as mid-launch, broadcast `instance-launching`,
+ * and notify subscribers so the picker repaints. Idempotent — a
+ * duplicate mark for the same id is a no-op (no spurious snapshot
+ * churn). Called from `launch.ts` right after reserving the port.
+ */
+export function _markLaunching(installationId: string, installationName: string): void {
+  const wasNew = !_launchingInstallationIds.has(installationId)
+  _launchingInstallationIds.add(installationId)
+  _broadcastToRenderer('instance-launching', { installationId, installationName })
+  if (wasNew) sessionLifecycleEvents.emit('changed')
+}
+
+/**
+ * Symmetric clear for `_markLaunching` on the failure path —
+ * broadcasts `instance-launch-failed`. The success path goes through
+ * `_addSession` which clears the set inline before broadcasting
+ * `instance-started`.
+ */
+export function _clearLaunchingFailed(installationId: string): void {
+  const had = _launchingInstallationIds.delete(installationId)
+  _broadcastToRenderer('instance-launch-failed', { installationId })
+  if (had) sessionLifecycleEvents.emit('changed')
+}
 
 export interface PickerOperationStatus {
   /** Current phase label. Empty string while not yet started. */
@@ -414,7 +474,12 @@ export { _registerExtraBroadcastTarget, _unregisterExtraBroadcastTarget, _broadc
 
 export function _addSession(installationId: string, { proc, port, url, mode, installationName }: Omit<SessionInfo, 'startedAt'>, bootTimeMs?: number): void {
   _runningSessions.set(installationId, { proc, port, url, mode, installationName, startedAt: Date.now() })
+  // Clear the launching marker first so the lifecycle-event
+  // subscribers see a coherent snapshot (running set ∪ launching set
+  // never double-counts an id across the transition).
+  _launchingInstallationIds.delete(installationId)
   _broadcastToRenderer('instance-started', { installationId, port, url, mode, installationName, bootTimeMs })
+  sessionLifecycleEvents.emit('changed')
   // Stamps `lastLaunchedAt` + `lastLaunchedAtByCategory[category]` so
   // per-category recency surfaces don't scan every record. Resolver
   // runs inside `markLaunched`'s lock to avoid an extra read.
@@ -431,6 +496,7 @@ export function _removeSession(installationId: string): void {
   if (session.port) removePortLock(session.port)
   _runningSessions.delete(installationId)
   _broadcastToRenderer('instance-stopped', { installationId })
+  sessionLifecycleEvents.emit('changed')
 }
 
 export function _getPublicSessions(): Record<string, unknown>[] {
@@ -472,6 +538,24 @@ export async function _fetchAndResolveLatestTags(
     result.set(origin, { name: tagName, sha })
   }))
   return result
+}
+
+// Scheduling guard for the fire-and-forget background resolver invoked from
+// `get-installations`.  Renderer mounts / refreshes used to spawn a fresh
+// pygit2 burst on every call.  Now we coalesce overlapping invocations
+// (single-flight) and rate-limit subsequent runs (TTL) so repeated UI
+// fetches don't churn the bundled Python interpreter.
+let _resolveVersionsInFlight: Promise<void> | null = null
+let _lastResolveVersionsAt = 0
+const RESOLVE_VERSIONS_TTL_MS = 10 * 60 * 1000
+
+export function scheduleResolveAndBroadcastVersions(list: InstallationRecord[]): void {
+  if (_resolveVersionsInFlight) return
+  if (Date.now() - _lastResolveVersionsAt < RESOLVE_VERSIONS_TTL_MS) return
+  _lastResolveVersionsAt = Date.now()
+  _resolveVersionsInFlight = _resolveAndBroadcastVersions(list).catch(() => {}).finally(() => {
+    _resolveVersionsInFlight = null
+  })
 }
 
 export async function _resolveAndBroadcastVersions(list: InstallationRecord[]): Promise<void> {
@@ -589,20 +673,31 @@ export function resolveTheme(): ResolvedTheme {
   return theme === 'system' ? (nativeTheme.shouldUseDarkColors ? 'dark' : 'light') : theme
 }
 
-export async function checkInstallationUpdates(): Promise<void> {
-  try {
-    await Promise.allSettled(
-      ALL_UPDATE_CHANNELS.map((channel) =>
-        releaseCache.getOrFetch(COMFYUI_REPO, channel, async () => {
-          const release = await fetchLatestRelease(channel)
-          if (!release) return null
-          return releaseCache.buildCacheEntry(release)
-        }, true)
+// Single-flight guard: overlapping calls await the same in-flight run rather
+// than triggering parallel bursts of git / pygit2 work.  Boot + periodic
+// timer + manual refresh all share one execution.
+let _checkInstallationUpdatesInFlight: Promise<void> | null = null
+
+export function checkInstallationUpdates(): Promise<void> {
+  if (_checkInstallationUpdatesInFlight) return _checkInstallationUpdatesInFlight
+  _checkInstallationUpdatesInFlight = (async (): Promise<void> => {
+    try {
+      await Promise.allSettled(
+        ALL_UPDATE_CHANNELS.map((channel) =>
+          releaseCache.getOrFetch(COMFYUI_REPO, channel, async () => {
+            const release = await fetchLatestRelease(channel)
+            if (!release) return null
+            return releaseCache.buildCacheEntry(release)
+          }, true)
+        )
       )
-    )
-    await _enrichLatestCommitsAhead()
-    _broadcastToRenderer('installations-changed', {})
-  } catch {}
+      await _enrichLatestCommitsAhead()
+      _broadcastToRenderer('installations-changed', {})
+    } catch {}
+  })().finally(() => {
+    _checkInstallationUpdatesInFlight = null
+  })
+  return _checkInstallationUpdatesInFlight
 }
 
 async function _enrichLatestCommitsAhead(): Promise<void> {
@@ -645,6 +740,7 @@ export async function stopRunning(installationId?: string): Promise<void> {
       await killProcessTree(session.proc)
     }
     _broadcastToRenderer('instance-stopped', { installationId })
+    sessionLifecycleEvents.emit('changed')
   } else {
     const sessions = [..._runningSessions.entries()]
     for (const [id] of sessions) {
@@ -664,6 +760,7 @@ export async function stopRunning(installationId?: string): Promise<void> {
     for (const [id] of sessions) {
       _broadcastToRenderer('instance-stopped', { installationId: id })
     }
+    if (sessions.length > 0) sessionLifecycleEvents.emit('changed')
   }
 }
 

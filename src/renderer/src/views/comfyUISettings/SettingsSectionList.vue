@@ -130,10 +130,8 @@ function toggleCollapsed(section: { title?: string }): void {
 
 const visibleSections = computed(() => props.sections)
 
-const NESTED_FIELD_IDS = new Set(['useSharedOutputDir', 'outputDir'])
-
 function isNestedField(field: DetailField): boolean {
-  return NESTED_FIELD_IDS.has(field.id ?? '')
+  return field.nested === true
 }
 
 function hasChannelPicker(section: DetailSection): boolean {
@@ -347,6 +345,11 @@ function fieldOwnsLabel(field: DetailField): boolean {
 
           <span v-else class="settings-v2-field-readonly">{{ asString(field.value) }}</span>
         </template>
+
+        <p v-if="field.description" class="settings-v2-field-description" role="note">
+          <ShieldAlert :size="14" class="settings-v2-field-description-icon" aria-hidden="true" />
+          <span>{{ field.description }}</span>
+        </p>
       </div>
 
       <div
@@ -504,8 +507,36 @@ function fieldOwnsLabel(field: DetailField): boolean {
   gap: 10px;
 }
 
-.settings-v2-section .settings-v2-field + .settings-v2-field {
-  margin-top: 4px;
+/* Inline explanation rendered beneath the control for fields whose
+ * effect isn't self-evident from the label (e.g. the Chinese mirrors
+ * toggle lists which hosts it swaps). Mirrors the env-vars notice
+ * styling so both inline-info surfaces read as one family. */
+.settings-v2-field-description {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: -2px 0 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.settings-v2-field-description-icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--info, var(--neutral-100));
+}
+
+/* Dependent (nested) fields are revealed by the toggle directly above
+ * them — e.g. "Use shared output directory" only appears once
+ * "Auto-download outputs" is on, and the output-path picker only once
+ * that's off. Pull them up tight to their parent (cancelling most of the
+ * section's 16px row gap) and indent behind a hairline rail so the chain
+ * reads as one dependent group instead of equally-weighted rows. */
+.settings-v2-field.is-nested {
+  margin-top: -8px;
+  padding-left: 14px;
+  border-left: 1px solid color-mix(in srgb, var(--chooser-surface-border) 70%, transparent);
 }
 
 .settings-v2-field-label {

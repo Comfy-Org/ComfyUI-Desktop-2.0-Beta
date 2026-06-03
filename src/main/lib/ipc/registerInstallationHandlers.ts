@@ -1,15 +1,32 @@
 import {
-  path, fs, ipcMain,
-  sources, installations, settings, i18n,
-  sourceMap, formatComfyVersion, _resolveAndBroadcastVersions,
-  findDuplicatePath, uniqueName, sanitizeDirName, allocateUniqueDir,
-  syncOemSeedBestEffort, isEffectivelyEmptyInstallDir,
-  download, createCache, extract, deleteDir, formatDeleteStatus, deleteAction, untrackAction,
+  path,
+  fs,
+  ipcMain,
+  sources,
+  installations,
+  settings,
+  i18n,
+  sourceMap,
+  formatComfyVersion,
+  scheduleResolveAndBroadcastVersions,
+  findDuplicatePath,
+  uniqueName,
+  sanitizeDirName,
+  allocateUniqueDir,
+  syncOemSeedBestEffort,
+  isEffectivelyEmptyInstallDir,
+  download,
+  createCache,
+  extract,
+  deleteDir,
+  formatDeleteStatus,
+  deleteAction,
+  untrackAction,
   MARKER_FILE,
   _operationAborts,
   sanitizeEnvVars,
   getComfyArgsSchema,
-  COMFYUI_REPO,
+  COMFYUI_REPO
 } from './shared'
 import type { ComfyVersion, ComfyArgDef, InstallationRecord } from './shared'
 import * as releaseCache from '../release-cache'
@@ -17,6 +34,7 @@ import { runStartupReleaseChecks } from '../release-cache-startup'
 import { _broadcastToRenderer } from './shared'
 import { hasGitDir } from '../git'
 import { restoreSnapshotIntoInstallation } from '../standaloneMigration'
+import * as mainTelemetry from '../telemetry'
 import { recordIpcInvocation } from '../e2eOverrides'
 
 /** Fire-and-forget: refresh the shared ComfyUI release cache for the
@@ -26,7 +44,7 @@ import { recordIpcInvocation } from '../e2eOverrides'
  *  so it never spams GitHub on dashboard refreshes. */
 function _kickReleaseCachePrewarm(allInstalls: InstallationRecord[]): void {
   void runStartupReleaseChecks(allInstalls, {
-    onRefreshed: () => _broadcastToRenderer('installations-changed', {}),
+    onRefreshed: () => _broadcastToRenderer('installations-changed', {})
   }).catch(() => {})
 }
 
@@ -41,9 +59,7 @@ function _kickReleaseCachePrewarm(allInstalls: InstallationRecord[]): void {
  * install (e.g. picker missing the version pill because nobody attached
  * the comfyVersion → version mapping).
  */
-export function enrichInstallationsForRenderer(
-  allInstalls: InstallationRecord[],
-): {
+export function enrichInstallationsForRenderer(allInstalls: InstallationRecord[]): {
   visible: InstallationRecord[]
   enriched: Record<string, unknown>[]
 } {
@@ -52,22 +68,29 @@ export function enrichInstallationsForRenderer(
   // still exists.
   const migratedSourceIds = new Set(
     allInstalls
-      .filter((i) => (i.copyReason as string | undefined) === 'standalone-migration' && i.status !== 'installing')
+      .filter(
+        (i) =>
+          (i.copyReason as string | undefined) === 'standalone-migration' &&
+          i.status !== 'installing'
+      )
       .map((i) => i.copiedFrom as string)
-      .filter(Boolean),
+      .filter(Boolean)
   )
   const visible = allInstalls.filter(
-    (i) => i.status !== 'installing' && !migratedSourceIds.has(i.id),
+    (i) => i.status !== 'installing' && !migratedSourceIds.has(i.id)
   )
   const enriched = visible.map((inst) => {
     const source = sourceMap[inst.sourceId]
     if (!source) return inst as unknown as Record<string, unknown>
     const listPreview = source.getListPreview ? source.getListPreview(inst) : undefined
-    const statusTag = inst.status === 'partial-delete'
-      ? { label: i18n.t('errors.deleteInterrupted'), style: 'danger' }
-      : inst.status === 'failed'
-        ? { label: i18n.t('errors.installFailed'), style: 'danger' }
-        : (source.getStatusTag ? source.getStatusTag(inst) : undefined)
+    const statusTag =
+      inst.status === 'partial-delete'
+        ? { label: i18n.t('errors.deleteInterrupted'), style: 'danger' }
+        : inst.status === 'failed'
+          ? { label: i18n.t('errors.installFailed'), style: 'danger' }
+          : source.getStatusTag
+            ? source.getStatusTag(inst)
+            : undefined
     const cv = inst.comfyVersion as ComfyVersion | undefined
     const rawVersion = cv ? formatComfyVersion(cv, 'short') : (inst.version as string | undefined)
     const version = rawVersion === inst.sourceId ? undefined : rawVersion
@@ -78,7 +101,7 @@ export function enrichInstallationsForRenderer(
       sourceCategory: source.category,
       hasConsole: source.hasConsole !== false,
       ...(listPreview != null ? { listPreview } : {}),
-      ...(statusTag ? { statusTag } : {}),
+      ...(statusTag ? { statusTag } : {})
     }
   })
   return { visible, enriched }
@@ -90,8 +113,11 @@ export function registerInstallationHandlers(): void {
     const allInstalls = await installations.list()
     const { visible, enriched } = enrichInstallationsForRenderer(allInstalls)
 
-    // Resolve versions from git state in the background.
-    _resolveAndBroadcastVersions(visible).catch(() => { })
+    // Resolve versions from git state in the background.  Coalesced +
+    // TTL-throttled so repeated renderer refreshes don't trigger
+    // pygit2 bursts (every get-installations used to fire a fresh
+    // background git pass — see scheduleResolveAndBroadcastVersions).
+    scheduleResolveAndBroadcastVersions(visible)
 
     // Pre-warm the shared ComfyUI release cache so the dashboard /
     // title-bar update pills reflect upstream state without requiring
@@ -126,10 +152,8 @@ export function registerInstallationHandlers(): void {
     const visible = all.filter((i) => i.status !== 'installing')
     return {
       localCount: visible.filter((i) => i.sourceId !== 'cloud').length,
-      hasLaunchedCloud: visible.some(
-        (i) => i.sourceId === 'cloud' && !!i.lastLaunchedAt,
-      ),
-      hasLegacyDesktop: visible.some((i) => i.sourceId === 'desktop'),
+      hasLaunchedCloud: visible.some((i) => i.sourceId === 'cloud' && !!i.lastLaunchedAt),
+      hasLegacyDesktop: visible.some((i) => i.sourceId === 'desktop')
     }
   })
 
@@ -198,6 +222,15 @@ export function registerInstallationHandlers(): void {
       }
     }
 
+    // Capture the prior comfyVersion BEFORE the install runs so we can fire
+    // desktop2.comfyui.update.applied at the end. An install on a record that
+    // already has a comfyVersion is a *version update*, not a fresh install
+    // (per 04 cross-cutting Add #5). Fresh installs have no prior version
+    // populated; this handler runs the same source.install() for both, so
+    // pre-vs-post comfyVersion is the cleanest signal.
+    const priorComfyVersion = inst.comfyVersion as ComfyVersion | undefined
+    const isComfyUpdate = priorComfyVersion != null
+
     if (source.install) {
       fs.mkdirSync(inst.installPath, { recursive: true })
       fs.writeFileSync(path.join(inst.installPath, MARKER_FILE), installationId)
@@ -209,19 +242,22 @@ export function registerInstallationHandlers(): void {
         if (inst.pendingSnapshotRestore) {
           steps.push(
             { phase: 'restore-nodes', label: i18n.t('standalone.snapshotRestoreNodesPhase') },
-            { phase: 'restore-pip', label: i18n.t('standalone.snapshotRestorePipPhase') },
+            { phase: 'restore-pip', label: i18n.t('standalone.snapshotRestorePipPhase') }
           )
         }
         sendProgress('steps', { steps })
       }
       const abort = new AbortController()
       _operationAborts.set(installationId, abort)
-      const cache = createCache(settings.get('cacheDir') as string, settings.get('maxCachedFiles') as number)
+      const cache = createCache(
+        settings.get('cacheDir') as string,
+        settings.get('maxCachedFiles') as number
+      )
       try {
         await source.install(inst, { sendProgress, download, cache, extract, signal: abort.signal })
         if (source.postInstall) {
           const update = (data: Record<string, unknown>): Promise<void> =>
-            installations.update(installationId, data).then(() => { })
+            installations.update(installationId, data).then(() => {})
           await source.postInstall(inst, { sendProgress, update, signal: abort.signal })
         }
 
@@ -230,14 +266,18 @@ export function registerInstallationHandlers(): void {
         const pendingFile = freshInst?.pendingSnapshotRestore as string | undefined
         if (freshInst && pendingFile && fs.existsSync(pendingFile)) {
           const sendOutput = (text: string): void => {
-            try { if (!sender.isDestroyed()) sender.send('comfy-output', { installationId, text }) } catch { }
+            try {
+              if (!sender.isDestroyed()) sender.send('comfy-output', { installationId, text })
+            } catch {}
           }
           const update = (data: Record<string, unknown>): Promise<void> =>
-            installations.update(installationId, data).then(() => { })
+            installations.update(installationId, data).then(() => {})
           await restoreSnapshotIntoInstallation(
-            freshInst, pendingFile, true,
+            freshInst,
+            pendingFile,
+            true,
             { sendProgress, sendOutput, signal: abort.signal },
-            update,
+            update
           )
         }
 
@@ -245,37 +285,55 @@ export function registerInstallationHandlers(): void {
       } catch (err) {
         _operationAborts.delete(installationId)
         if (abort.signal.aborted) {
+          if (isComfyUpdate) {
+            mainTelemetry.emit('desktop2.comfyui.update.applied', {
+              installation_id: installationId,
+              from_version: formatComfyVersion(priorComfyVersion, 'short'),
+              to_version: null,
+              result: 'cancelled'
+            })
+          }
           let cleaned = !fs.existsSync(inst.installPath)
           if (!cleaned) {
             try {
               fs.rmSync(inst.installPath, { recursive: true, force: true })
               cleaned = true
-            } catch { }
+            } catch {}
           }
           if (cleaned) {
             await installations.remove(installationId)
             return { ok: true, navigate: 'list' }
           }
           const markerPath = path.join(inst.installPath, MARKER_FILE)
-          try { fs.writeFileSync(markerPath, installationId) } catch { }
+          try {
+            fs.writeFileSync(markerPath, installationId)
+          } catch {}
           await installations.update(installationId, { status: 'partial-delete' })
           const deleteAbort = new AbortController()
           _operationAborts.set(installationId, deleteAbort)
           sendProgress('delete', { percent: 0, status: 'Counting files…' })
           try {
-            await deleteDir(inst.installPath, (p) => {
-              sendProgress('delete', { percent: p.percent, status: formatDeleteStatus(p) })
-            }, { signal: deleteAbort.signal })
+            await deleteDir(
+              inst.installPath,
+              (p) => {
+                sendProgress('delete', { percent: p.percent, status: formatDeleteStatus(p) })
+              },
+              { signal: deleteAbort.signal }
+            )
             _operationAborts.delete(installationId)
             await installations.remove(installationId)
           } catch (_delErr) {
             _operationAborts.delete(installationId)
             if (deleteAbort.signal.aborted) {
               if (isEffectivelyEmptyInstallDir(inst.installPath)) {
-                try { fs.rmSync(inst.installPath, { recursive: true, force: true }) } catch { }
+                try {
+                  fs.rmSync(inst.installPath, { recursive: true, force: true })
+                } catch {}
                 await installations.remove(installationId)
               } else {
-                try { fs.writeFileSync(markerPath, installationId) } catch { }
+                try {
+                  fs.writeFileSync(markerPath, installationId)
+                } catch {}
                 await installations.update(installationId, { status: 'partial-delete' })
               }
             }
@@ -283,11 +341,31 @@ export function registerInstallationHandlers(): void {
           return { ok: true, navigate: 'list' }
         }
         await installations.update(installationId, { status: 'failed' })
+        if (isComfyUpdate) {
+          mainTelemetry.emit('desktop2.comfyui.update.applied', {
+            installation_id: installationId,
+            from_version: formatComfyVersion(priorComfyVersion, 'short'),
+            to_version: null,
+            result: 'error',
+            error_bucket: mainTelemetry.bucketError(err),
+            error_message: (err as Error).message.slice(0, 500)
+          })
+        }
         return { ok: false, message: (err as Error).message }
       }
       _operationAborts.delete(installationId)
       await installations.update(installationId, { status: 'installed' })
       await syncOemSeedBestEffort()
+      if (isComfyUpdate) {
+        const freshInst = await installations.get(installationId)
+        const newComfyVersion = freshInst?.comfyVersion as ComfyVersion | undefined
+        mainTelemetry.emit('desktop2.comfyui.update.applied', {
+          installation_id: installationId,
+          from_version: formatComfyVersion(priorComfyVersion, 'short'),
+          to_version: newComfyVersion ? formatComfyVersion(newComfyVersion, 'short') : null,
+          result: 'success'
+        })
+      }
       return { ok: true }
     }
 
@@ -305,37 +383,44 @@ export function registerInstallationHandlers(): void {
   })
 
   // Detail — validate editable fields dynamically from source schema
-  ipcMain.handle('update-installation', async (_event, installationId: string, data: Record<string, unknown>) => {
-    const inst = await installations.get(installationId)
-    if (!inst) return { ok: false, message: 'Installation not found.' }
-    const source = sourceMap[inst.sourceId]
-    if (!source) return { ok: false, message: i18n.t('errors.unknownSource') }
-    const sections = source.getDetailSections(inst)
-    const allowedIds = new Set(['name', 'seen'])
-    for (const section of sections) {
-      const fields = (section as Record<string, unknown>).fields as Record<string, unknown>[] | undefined
-      if (!fields) continue
-      for (const f of fields) {
-        if ((f as Record<string, unknown>).editable && (f as Record<string, unknown>).id) {
-          allowedIds.add((f as Record<string, unknown>).id as string)
+  ipcMain.handle(
+    'update-installation',
+    async (_event, installationId: string, data: Record<string, unknown>) => {
+      const inst = await installations.get(installationId)
+      if (!inst) return { ok: false, message: 'Installation not found.' }
+      const source = sourceMap[inst.sourceId]
+      if (!source) return { ok: false, message: i18n.t('errors.unknownSource') }
+      const sections = source.getDetailSections(inst)
+      const allowedIds = new Set(['name', 'seen'])
+      for (const section of sections) {
+        const fields = (section as Record<string, unknown>).fields as
+          | Record<string, unknown>[]
+          | undefined
+        if (!fields) continue
+        for (const f of fields) {
+          if ((f as Record<string, unknown>).editable && (f as Record<string, unknown>).id) {
+            allowedIds.add((f as Record<string, unknown>).id as string)
+          }
         }
       }
-    }
-    const filtered: Record<string, unknown> = {}
-    for (const key of Object.keys(data)) {
-      if (allowedIds.has(key)) {
-        filtered[key] = key === 'envVars' ? sanitizeEnvVars(data[key]) : data[key]
+      const filtered: Record<string, unknown> = {}
+      for (const key of Object.keys(data)) {
+        if (allowedIds.has(key)) {
+          filtered[key] = key === 'envVars' ? sanitizeEnvVars(data[key]) : data[key]
+        }
       }
-    }
-    if (filtered.name && filtered.name !== inst.name) {
-      const all = await installations.list()
-      if (all.some((i) => i.id !== installationId && i.name === filtered.name)) {
-        return { ok: false, message: i18n.t('errors.duplicateName', { name: filtered.name as string }) }
+      if (filtered.name && filtered.name !== inst.name) {
+        if (await installations.hasNameConflict(installationId, filtered.name as string)) {
+          return {
+            ok: false,
+            message: i18n.t('errors.duplicateName', { name: filtered.name as string })
+          }
+        }
       }
+      await installations.update(installationId, filtered)
+      return { ok: true }
     }
-    await installations.update(installationId, filtered)
-    return { ok: true }
-  })
+  )
 
   ipcMain.handle('get-detail-sections', async (_event, installationId: string) => {
     recordIpcInvocation('get-detail-sections', installationId)
@@ -356,12 +441,12 @@ export function registerInstallationHandlers(): void {
       return [
         {
           title: '',
-          description: i18n.t('errors.unknownSource'),
+          description: i18n.t('errors.unknownSource')
         },
         {
           pinBottom: true,
-          actions,
-        },
+          actions
+        }
       ]
     }
     // Resolve commitsAhead for the `latest` channel against the install's
@@ -387,28 +472,40 @@ export function registerInstallationHandlers(): void {
     return source.getDetailSections(inst)
   })
 
-  ipcMain.handle('get-comfy-args', async (_event, installationId: string): Promise<{ args: ComfyArgDef[]; error?: string } | null> => {
-    const inst = await installations.get(installationId)
-    if (!inst) return { args: [], error: 'Installation not found' }
-    const source = sourceMap[inst.sourceId]
-    if (!source) return { args: [], error: `Unknown source: ${inst.sourceId}` }
-    const launchCmd = source.getLaunchCommand(inst)
-    if (!launchCmd?.cmd || !launchCmd.args || !launchCmd.cwd) {
-      return { args: [], error: `No launch command available (source: ${inst.sourceId})` }
+  ipcMain.handle(
+    'get-comfy-args',
+    async (
+      _event,
+      installationId: string
+    ): Promise<{ args: ComfyArgDef[]; error?: string } | null> => {
+      const inst = await installations.get(installationId)
+      if (!inst) return { args: [], error: 'Installation not found' }
+      const source = sourceMap[inst.sourceId]
+      if (!source) return { args: [], error: `Unknown source: ${inst.sourceId}` }
+      const launchCmd = source.getLaunchCommand(inst)
+      if (!launchCmd?.cmd || !launchCmd.args || !launchCmd.cwd) {
+        return { args: [], error: `No launch command available (source: ${inst.sourceId})` }
+      }
+      const sIdx = launchCmd.args.indexOf('-s')
+      if (sIdx === -1 || sIdx + 1 >= launchCmd.args.length) {
+        return { args: [], error: `No -s flag in launch args: [${launchCmd.args.join(', ')}]` }
+      }
+      const mainPyRel = launchCmd.args[sIdx + 1]!
+      const mainPyAbs = path.resolve(launchCmd.cwd, mainPyRel)
+      try {
+        const schema = await getComfyArgsSchema(
+          launchCmd.cmd,
+          mainPyAbs,
+          launchCmd.cwd,
+          installationId,
+          inst.version as string | undefined
+        )
+        return { args: schema.args }
+      } catch (err) {
+        const msg = (err as Error).message ?? String(err)
+        console.warn('[get-comfy-args] Failed to get schema:', msg)
+        return { args: [], error: msg }
+      }
     }
-    const sIdx = launchCmd.args.indexOf('-s')
-    if (sIdx === -1 || sIdx + 1 >= launchCmd.args.length) {
-      return { args: [], error: `No -s flag in launch args: [${launchCmd.args.join(', ')}]` }
-    }
-    const mainPyRel = launchCmd.args[sIdx + 1]!
-    const mainPyAbs = path.resolve(launchCmd.cwd, mainPyRel)
-    try {
-      const schema = await getComfyArgsSchema(launchCmd.cmd, mainPyAbs, launchCmd.cwd, installationId, inst.version as string | undefined)
-      return { args: schema.args }
-    } catch (err) {
-      const msg = (err as Error).message ?? String(err)
-      console.warn('[get-comfy-args] Failed to get schema:', msg)
-      return { args: [], error: msg }
-    }
-  })
+  )
 }

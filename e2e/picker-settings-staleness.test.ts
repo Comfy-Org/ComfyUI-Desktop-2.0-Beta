@@ -1,27 +1,27 @@
 /**
- * Instance-picker right-pane staleness regression (issue #582 fix #1).
+ * Instance-picker right-pane staleness regression (issues #582, #782).
  *
  * The picker's expanded mode mounts `ComfyUISettingsContent` against
- * the selected install. Before the fix, clicking a different row left
- * the previous install's sections painted while the new install's
- * `get-detail-sections` IPC was still in flight — and a slow
- * out-of-order resolution could re-stamp install A's sections on top
- * of B's right pane.
+ * the selected install. Two behaviours must hold when the user
+ * clicks a different row in the left list:
  *
- * The fix in `useComfyUISettings`:
+ *   - The wrapper's `data-install-id` must reflect the selected
+ *     install immediately (bound to the prop). It must never stay on
+ *     the previous install once the switch is initiated.
  *
- *   1. Clears `sections` immediately when `installationId` changes so
- *      the loading placeholder takes over the right pane during the
- *      gap.
- *   2. Stamps every in-flight `get-detail-sections` request with a
- *      monotonic sequence number and drops any response whose
- *      sequence has since been superseded.
+ *   - The right pane must not flash the "Loading…" placeholder. The
+ *     #782 fix keeps the previous install's sections painted while
+ *     the new install's `get-detail-sections` IPC is in flight; the
+ *     placeholder is reserved for true first-load (no prior payload).
  *
- * This test seeds two installs, opens the picker in expanded mode for
- * A, then switches to B and asserts that the sections pane's
- * `data-install-id` never stays on "A" once the switch is initiated
- * — it must either render the loading placeholder or flip to B's
- * sections.
+ *   - A slow out-of-order response from the previous install (#582)
+ *     must not re-stamp its sections on top of the current install's
+ *     pane. The composable's monotonic `requestSeq` guards this.
+ *
+ * The assertion below tolerates either intermediate state — the new
+ * install's id OR the loading placeholder — so it stays valid under
+ * both the pre-#782 (clear-then-load) and post-#782 (keep-and-swap)
+ * behaviours.
  */
 
 import os from 'node:os'

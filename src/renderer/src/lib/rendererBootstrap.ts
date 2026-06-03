@@ -26,27 +26,28 @@
 import { datadogRum, type RumBeforeSend } from '@datadog/browser-rum'
 import { normalizeRumErrorEvent } from './datadogPathNormalization'
 import {
+  deriveGpuTier,
   TELEMETRY_ACTION_EVENT_NAME,
   type TelemetryActionEventDetail,
-  type TelemetryContext,
+  type TelemetryContext
 } from './telemetry'
-import {
-  capturePostHog,
-  captureExceptionPostHog,
-  identifyPostHog,
-  initPostHog,
-  isInitialized as isPostHogInitialized,
-  isPostHogConfigured,
-  registerPostHog,
-  setPostHogConsent,
-} from './posthogProvider'
+// PostHog Browser SDK (`posthog-js`) is intentionally NOT imported here.
+// All PostHog capture is consolidated into the main process via
+// `posthog-node`. The renderer forwards every product / exception /
+// person-property event through `window.api.captureTelemetry` /
+// `captureExceptionTelemetry` / `registerTelemetryProperties` IPC
+// bridges; main resolves the distinct id, consent state, and dedup in
+// one place. Datadog RUM stays renderer-only (the SDK is browser-only)
+// and is gated to the failure-event allow-list in
+// `src/shared/datadogMirroredEvents.ts`.
 import { scrubAll } from '../../../shared/piiScrub'
+import { isDatadogMirroredEvent } from '../../../shared/datadogMirroredEvents'
 
 function serializeUnknownError(error: unknown): { message: string; stack?: string } {
   if (error instanceof Error) {
     return {
       message: error.message || error.name || 'Error',
-      stack: error.stack,
+      stack: error.stack
     }
   }
   if (typeof error === 'string') {
@@ -80,21 +81,20 @@ const DEFAULT_DATADOG_CLIENT_TOKEN = 'pub5b0afc7fe0411fcebad80bb87274d711'
 const DEFAULT_DATADOG_SERVICE = 'comfyui-desktop-2'
 
 const datadogClientToken = (
-  import.meta.env.VITE_DATADOG_RUM_CLIENT_TOKEN
-  || DEFAULT_DATADOG_CLIENT_TOKEN
+  import.meta.env.VITE_DATADOG_RUM_CLIENT_TOKEN || DEFAULT_DATADOG_CLIENT_TOKEN
 ).trim()
 const datadogApplicationId = (
-  import.meta.env.VITE_DATADOG_RUM_APPLICATION_ID
-  || DEFAULT_DATADOG_APPLICATION_ID
+  import.meta.env.VITE_DATADOG_RUM_APPLICATION_ID || DEFAULT_DATADOG_APPLICATION_ID
 ).trim()
 const datadogSite = (import.meta.env.VITE_DATADOG_RUM_SITE || 'us5.datadoghq.com').trim()
 const datadogService = (import.meta.env.VITE_DATADOG_RUM_SERVICE || DEFAULT_DATADOG_SERVICE).trim()
 const datadogEnv = (import.meta.env.VITE_DATADOG_RUM_ENV || 'prod-v2').trim()
 const datadogVersion = (import.meta.env.VITE_DATADOG_RUM_VERSION || '').trim()
 
-const isDatadogConfigured = !isFlagDisabled(import.meta.env.VITE_DATADOG_RUM_ENABLED)
-  && datadogClientToken.length > 0
-  && datadogApplicationId.length > 0
+const isDatadogConfigured =
+  !isFlagDisabled(import.meta.env.VITE_DATADOG_RUM_ENABLED) &&
+  datadogClientToken.length > 0 &&
+  datadogApplicationId.length > 0
 
 let isDatadogInitialized = false
 let bootstrapInvoked = false
@@ -107,12 +107,16 @@ const datadogBeforeSend: RumBeforeSend = (event) => {
 }
 
 function toDatadogTrackingConsent(enabled: boolean | undefined): DatadogTrackingConsent {
-  return enabled === false ? 'not-granted' : 'granted'
+  // Three-state: only explicit `true` grants. `false` AND `undefined` (user
+  // has not made a choice yet) both produce `'not-granted'` so Datadog RUM's
+  // autocapture streams (views, resources, long tasks, user interactions)
+  // do not collect pre-consent.
+  return enabled === true ? 'granted' : 'not-granted'
 }
 
 async function getTelemetryEnabledSetting(): Promise<boolean | undefined> {
   try {
-    return await window.api.getSetting('telemetryEnabled') as boolean | undefined
+    return (await window.api.getSetting('telemetryEnabled')) as boolean | undefined
   } catch {
     return undefined
   }
@@ -151,14 +155,21 @@ let rendererRole: RendererRole = 'panel'
 let resolvedTelemetryEnabled: boolean | undefined = undefined
 
 /** Allow-list of event names that can fire before the user has made a
- *  consent decision. Strictly the consent decision itself — adding to
- *  this list is a privacy / compliance change, not a code change. */
+ * consent decision. Strictly the consent decision itself — adding to
+ * this list is a privacy / compliance change, not a code change. */
 const PRE_CONSENT_ALLOWED_EVENTS: ReadonlySet<string> = new Set([
-  'desktop2.first_use.consent_decision',
+  'desktop2.first_use.consent_decision'
 ])
 
 function isTelemetryEmitAllowed(actionName: string): boolean {
-  if (resolvedTelemetryEnabled !== undefined) return true
+  // Three-state: only `true` grants. `false` (explicit deny) AND
+  // `undefined` (user has not chosen yet) both gate down to the
+  // pre-consent allow-list. Previous "!== undefined → return true"
+  // shape let denied users through the renderer gate, relying on
+  // main's gate + Datadog's tracking-consent setting to silently drop
+  // — one regression in either downstream gate would have become a
+  // privacy leak.
+  if (resolvedTelemetryEnabled === true) return true
   return PRE_CONSENT_ALLOWED_EVENTS.has(actionName)
 }
 
@@ -186,17 +197,28 @@ function scrubTelemetryContext(context: TelemetryContext): TelemetryContext {
 function trackTelemetryAction(
   actionName: string,
   context: TelemetryContext,
-  options: { skipPostHog?: boolean } = {},
+  options: { skipPostHog?: boolean } = {}
 ): void {
   if (!isTelemetryEmitAllowed(actionName)) return
   const scrubbed = scrubTelemetryContext(context)
-  if (isDatadogInitialized) {
-    try { datadogRum.addAction(actionName, scrubbed) } catch {}
+  // Provider split: Datadog only mirrors the failure-event
+  // allow-list. Product / funnel events are PostHog-only — Datadog is for
+  // alerting, not analysis.
+  if (isDatadogInitialized && isDatadogMirroredEvent(actionName)) {
+    try {
+      datadogRum.addAction(actionName, scrubbed)
+    } catch {}
   }
-  // `mainAlreadyCaptured` events come from the main-process PostHog Node
-  // SDK and would be duplicates if we recaptured them in the browser SDK.
-  if (!options.skipPostHog && isPostHogInitialized()) {
-    capturePostHog(actionName, scrubbed)
+  // Renderer routes capture through main's posthog-node via IPC. The
+  // skipPostHog gate stays for events that originated in main (via
+  // `telemetry-action-from-main`): main already captured those and a
+  // round-trip IPC re-capture would double-count.
+  if (!options.skipPostHog) {
+    try {
+      window.api.captureTelemetry(actionName, scrubbed)
+    } catch {
+      // ignore — telemetry must never break the renderer
+    }
   }
 }
 
@@ -238,10 +260,12 @@ async function registerCohortContext(opts: {
 }): Promise<void> {
   const appChannel = deriveAppChannel(opts.appVersion)
   const locale = await window.api.getLocale().catch(() => 'unknown')
-  const theme = await window.api.getSetting('theme')
+  const theme = await window.api
+    .getSetting('theme')
     .then((v) => (typeof v === 'string' && v ? v : 'unknown'))
     .catch(() => 'unknown')
-  const firstUseCompleted = await window.api.getSetting('firstUseCompleted')
+  const firstUseCompleted = await window.api
+    .getSetting('firstUseCompleted')
     .then((v) => (typeof v === 'boolean' ? v : null))
     .catch(() => null)
   const installSummary = await window.api.getInstallationsSummary().catch(() => null)
@@ -268,7 +292,7 @@ async function registerCohortContext(opts: {
     // entry at least once. The seeded entry's mere presence is
     // meaningless because it's force-re-seeded on every boot.
     has_launched_cloud: installSummary?.hasLaunchedCloud ?? null,
-    has_legacy_install: installSummary?.hasLegacyDesktop ?? null,
+    has_legacy_install: installSummary?.hasLegacyDesktop ?? null
   }
 
   if (isDatadogInitialized) {
@@ -278,8 +302,12 @@ async function registerCohortContext(opts: {
       }
     } catch {}
   }
-  if (isPostHogInitialized()) {
-    registerPostHog(cohort)
+  // Person-property upsert through main's posthog-node. Idempotent; safe
+  // to fire from every renderer surface independently.
+  try {
+    window.api.registerTelemetryProperties(cohort)
+  } catch {
+    // ignore
   }
 }
 
@@ -303,112 +331,150 @@ async function initializeProviders(): Promise<void> {
         version: datadogVersion || undefined,
         trackingConsent: toDatadogTrackingConsent(telemetryEnabled),
         beforeSend: datadogBeforeSend,
-        sessionSampleRate: parseSampleRate(import.meta.env.VITE_DATADOG_RUM_SESSION_SAMPLE_RATE, 100),
+        sessionSampleRate: parseSampleRate(
+          import.meta.env.VITE_DATADOG_RUM_SESSION_SAMPLE_RATE,
+          100
+        ),
         // Session replay is intentionally not configured. Datadog defaults
         // to off when the field is omitted; reintroduce only as a deliberate
         // code change in a release.
         trackResources: true,
         trackLongTasks: true,
-        trackUserInteractions: true,
+        trackUserInteractions: true
       })
       isDatadogInitialized = true
       // Tag every RUM event with the renderer surface so queries can
       // distinguish title-bar / title-menu / panel sessions per host window.
-      try { datadogRum.setGlobalContextProperty('renderer_role', rendererRole) } catch {}
+      try {
+        datadogRum.setGlobalContextProperty('renderer_role', rendererRole)
+      } catch {}
     } catch {}
   }
 
-  if (isPostHogConfigured()) {
-    initPostHog({
-      appVersion,
-      appEnv: datadogEnv,
-      isPackaged: !import.meta.env.DEV,
-      consent,
-      rendererRole,
-    })
-  }
+  // PostHog Browser SDK init removed Main process owns
+  // PostHog capture via `posthog-node`; renderer forwards every event
+  // through `window.api.captureTelemetry` / `captureExceptionTelemetry` /
+  // `registerTelemetryProperties` IPC bridges. The `desktop2.session.started`
+  // event is still owned by main's `identify()` and fires on consent grant.
 
-  if (isDatadogInitialized || isPostHogInitialized()) {
-    // `desktop2.session.started` is owned by main (`identify()` in
-    // `src/main/lib/telemetry.ts`) because it has to ride the deferred-
-    // identify pattern that binds `distinctId` first. Firing it again
-    // here would double-count every session.
-    void registerCohortContext({ appVersion, telemetryEnabled: consent })
-    window.api.getDeviceId().then((id) => {
+  // Cohort context + device-id binding fire regardless of Datadog state —
+  // main's posthog-node handles the IPC capture even if Datadog is
+  // configured off.
+  void registerCohortContext({ appVersion, telemetryEnabled: consent })
+  window.api
+    .getDeviceId()
+    .then((id) => {
       if (isDatadogInitialized) {
-        try { datadogRum.setUser({ id }) } catch {}
+        try {
+          datadogRum.setUser({ id })
+        } catch {}
       }
-      // For PostHog we'll merge in the system_info profile properties below.
-      identifyPostHog(id)
-    }).catch(() => {})
-    // Per-session boot census of every persisted install. Gated to
-    // `'panel'` (same pattern as `installation_started` /
-    // `snapshot_history` below) so it fires exactly once per session:
-    // the chooser host owns the `'panel'` renderer, every other host
-    // window has only the always-on `'title-bar'` renderer. Without
-    // this gate the inventory would fire N times per session — once
-    // per host window's title-bar bootstrap. Payload is metadata +
-    // diff counts only (no per-node / per-package contents) and is
-    // capped to ~200 KB main-side; arrays of objects bypass the typed
-    // bridge the same way `snapshot_history` does below.
-    if (rendererRole === 'panel') {
-      window.api.getInstallsInventory().then((inventory) => {
+      // PostHog identify happens in main's boot block — no renderer call
+      // needed. Person-property upserts ride through registerTelemetryProperties.
+    })
+    .catch(() => {})
+
+  // Per-session boot census of every persisted install. Gated to
+  // `'panel'` so it fires exactly once per session: the chooser host
+  // owns the `'panel'` renderer; every other host window has only the
+  // always-on `'title-bar'` renderer. Without this gate the inventory
+  // would fire N times per session — once per host window's title-bar
+  // bootstrap. Payload is metadata + diff counts only (no per-node /
+  // per-package contents) and is capped to ~200 KB main-side; arrays
+  // of objects bypass the typed bridge the same way `snapshot_history`
+  // does below.
+  if (rendererRole === 'panel') {
+    window.api
+      .getInstallsInventory()
+      .then((inventory) => {
         if (!inventory) return
-        // Honor the pre-consent gate even on the bypass path. The
-        // typed-bridge `trackTelemetryAction` route already does this;
-        // we replicate the check inline here because direct
-        // `addAction` / `capturePostHog` calls skip that wrapper.
+        // Honor the pre-consent gate even on the bypass path.
         if (!isTelemetryEmitAllowed('desktop2.session.installs_inventory')) return
         if (isDatadogInitialized) {
           try {
             datadogRum.addAction(
               'desktop2.session.installs_inventory',
-              inventory as unknown as Record<string, unknown>,
+              inventory as unknown as Record<string, unknown>
             )
           } catch {}
         }
-        if (isPostHogInitialized()) {
-          capturePostHog(
+        try {
+          window.api.captureTelemetry(
             'desktop2.session.installs_inventory',
-            inventory as unknown as TelemetryContext,
+            inventory as unknown as Record<string, unknown>
           )
+        } catch {
+          // ignore
         }
-      }).catch(() => {})
-    }
-    // Convention: session-wide events (one per session regardless of
-    // how many host windows the user opens) are gated to `panel`
-    // because the chooser host is the singleton owner of the panel
-    // renderer. Per-renderer SDK setup (`registerCohortContext`,
-    // `setUser`, `identifyPostHog`) is intentionally un-gated — each
-    // renderer's local SDK instance needs its own configuration.
-    // `installs_inventory` above follows the same rule.
-    window.api.getSystemInfo().then(async (info) => {
-      const ctx = info as unknown as Record<string, string | number | boolean | null | undefined>
-      if (rendererRole === 'panel') {
-        trackTelemetryAction('desktop2.session.system_info', ctx)
-      }
-      // Promote system info to PostHog profile properties so it's queryable
-      // across sessions without joining against a per-session event.
-      // Stays un-gated: it's an idempotent person-property upsert, not
-      // an event emit, so each renderer's SDK setting the same keys
-      // produces no duplication.
-      try {
-        const id = await window.api.getDeviceId()
-        identifyPostHog(id, {
-          platform: ctx['platform'],
-          arch: ctx['arch'],
-          os_distro: ctx['os_distro'],
-          os_release: ctx['os_release'],
-          gpu_vendor: ctx['gpu_vendor'],
-          gpu_model: ctx['gpu_model'],
-          total_memory_gb: ctx['total_memory_gb'],
-          cpu_cores: ctx['cpu_cores'],
-          electron_version: ctx['electron_version'],
-          app_version: appVersion,
-        })
-      } catch {}
-    }).catch(() => {})
+      })
+      .catch(() => {})
   }
+
+  // Convention: session-wide events (one per session regardless of how
+  // many host windows the user opens) are gated to `panel`. Per-renderer
+  // wiring (`registerCohortContext`, Datadog `setUser`,
+  // `registerTelemetryProperties`) is intentionally un-gated — Datadog's
+  // per-renderer SDK needs its own configuration; PostHog person-property
+  // upserts are idempotent and dedupe naturally main-side.
+  window.api
+    .getSystemInfo()
+    .then((info) => {
+      // Hardware enrichment getSystemInfo already collects:
+      // - gpus[] with vendor / model / vram_mb / driver_version
+      // - nvidia_driver_version / nvidia_driver_supported
+      // - cpu_manufacturer / cpu_physical_cores / cpu_speed_ghz
+      // - os_arch
+      // The previous system_info event only forwarded the basic fields.
+      // We now forward the full payload and derive `gpu_tier` / `gpu_vram_gb`
+      // / `gpu_count` / `gpu_driver_version` for cohort filtering.
+      const primaryGpu = info.gpus[0] ?? null
+      const gpuVramMb = primaryGpu?.vram_mb ?? null
+      const gpuVramGb = gpuVramMb != null ? Math.round(gpuVramMb / 1024) : null
+      const gpuDriverVersion = info.nvidia_driver_version ?? primaryGpu?.driver_version ?? null
+      const gpuTier = deriveGpuTier({ vendor: info.gpu_vendor, vramGb: gpuVramGb })
+      const enriched: Record<string, string | number | boolean | null | undefined> = {
+        ...(info as unknown as Record<string, string | number | boolean | null | undefined>),
+        gpu_vram_mb: gpuVramMb,
+        gpu_vram_gb: gpuVramGb,
+        gpu_count: info.gpus.length,
+        gpu_driver_version: gpuDriverVersion,
+        gpu_tier: gpuTier
+      }
+      if (rendererRole === 'panel') {
+        trackTelemetryAction('desktop2.session.system_info', enriched)
+      }
+      // Promote durable hardware traits to PostHog person-profile properties
+      // so cohort filters work across sessions without joining against the
+      // per-session event. Idempotent — safe to fire from every renderer.
+      try {
+        window.api.registerTelemetryProperties({
+          platform: info.platform,
+          arch: info.arch,
+          os_distro: info.os_distro,
+          os_release: info.os_release,
+          os_arch: info.os_arch,
+          gpu_vendor: info.gpu_vendor,
+          gpu_model: info.gpu_model,
+          gpu_vram_gb: gpuVramGb,
+          gpu_count: info.gpus.length,
+          gpu_driver_version: gpuDriverVersion,
+          gpu_tier: gpuTier,
+          nvidia_driver_supported: info.nvidia_driver_supported,
+          total_memory_gb: info.total_memory_gb,
+          cpu_model: info.cpu_model,
+          cpu_cores: info.cpu_cores,
+          cpu_physical_cores: info.cpu_physical_cores,
+          cpu_speed_ghz: info.cpu_speed_ghz,
+          cpu_manufacturer: info.cpu_manufacturer,
+          electron_version: info.electron_version,
+          chrome_version: info.chrome_version,
+          app_version: appVersion
+        })
+      } catch {
+        // ignore
+      }
+    })
+    .catch(() => {})
 }
 
 function reportRendererError(payload: {
@@ -434,17 +500,25 @@ function reportRendererError(payload: {
         context: {
           origin: 'renderer',
           forwarded_source: payload.source,
-          ...(payload.context || {}),
-        },
+          ...(payload.context || {})
+        }
       })
     } catch {}
   }
-  if (!payload.skipPostHog && isPostHogInitialized()) {
-    captureExceptionPostHog(error, {
-      origin: 'renderer',
-      forwarded_source: payload.source,
-      ...(payload.context || {}),
-    })
+  if (!payload.skipPostHog) {
+    try {
+      window.api.captureExceptionTelemetry({
+        message: error.message,
+        stack: error.stack,
+        properties: {
+          origin: 'renderer',
+          forwarded_source: payload.source,
+          ...(payload.context || {})
+        }
+      })
+    } catch {
+      // ignore — telemetry must never break the renderer
+    }
   }
 }
 
@@ -454,10 +528,10 @@ function reportRendererError(payload: {
  * are no-ops, so each renderer entry-point can call this safely without
  * coordinating across modules.
  *
- * @param role  Identifies the renderer surface for telemetry tagging
- *              (`'panel'`, `'title-bar'`, or `'title-menu'`). Defaults to
- *              `'panel'` for backward compatibility with the historical
- *              single-renderer entry-point.
+ * @param role Identifies the renderer surface for telemetry tagging
+ * (`'panel'`, `'title-bar'`, or `'title-menu'`). Defaults to
+ * `'panel'` for backward compatibility with the historical
+ * single-renderer entry-point.
  */
 export function initializeRendererBootstrap(role: RendererRole = 'panel'): void {
   if (bootstrapInvoked) return
@@ -472,7 +546,9 @@ export function initializeRendererBootstrap(role: RendererRole = 'panel'): void 
     // consent state set just below decides whether they actually ship).
     resolvedTelemetryEnabled = enabled
     if (isDatadogConfigured) setDatadogTrackingConsent(toDatadogTrackingConsent(enabled))
-    setPostHogConsent(enabled !== false)
+    // PostHog consent is owned by main: `registerSettingsHandlers` calls
+    // `mainTelemetry.setConsentState` on every persisted change to
+    // `telemetryEnabled`. No renderer-side action needed.
   })
 
   window.addEventListener(TELEMETRY_ACTION_EVENT_NAME, handleTelemetryActionBridgeEvent)
@@ -484,7 +560,9 @@ export function initializeRendererBootstrap(role: RendererRole = 'panel'): void 
   // otherwise double-count.
   window.api.onTelemetryActionFromMain((data) => {
     if (!data || typeof data.event !== 'string' || data.event.length === 0) return
-    const ctx = (data.context && typeof data.context === 'object' ? data.context : {}) as TelemetryContext
+    const ctx = (
+      data.context && typeof data.context === 'object' ? data.context : {}
+    ) as TelemetryContext
     trackTelemetryAction(data.event, ctx, { skipPostHog: data.mainAlreadyCaptured === true })
   })
 
@@ -499,8 +577,8 @@ export function initializeRendererBootstrap(role: RendererRole = 'panel'): void 
       context: {
         filename: event.filename,
         lineno: event.lineno,
-        colno: event.colno,
-      },
+        colno: event.colno
+      }
     })
   })
 
@@ -509,7 +587,7 @@ export function initializeRendererBootstrap(role: RendererRole = 'panel'): void 
     reportRendererError({
       source: 'renderer-unhandled-rejection',
       message: serialized.message,
-      stack: serialized.stack,
+      stack: serialized.stack
     })
   })
 
@@ -526,9 +604,9 @@ export function initializeRendererBootstrap(role: RendererRole = 'panel'): void 
         context: {
           origin: 'main-process',
           level: data.level,
-          ...(data.context || {}),
+          ...(data.context || {})
         },
-        skipPostHog: data.skipPostHog === true,
+        skipPostHog: data.skipPostHog === true
       })
     })
   }
@@ -545,37 +623,55 @@ export function initializeRendererBootstrap(role: RendererRole = 'panel'): void 
         installation_id: data.installationId,
         crashed: data.crashed ?? false,
         exit_code: data.exitCode ?? null,
-        last_stderr: data.lastStderr ?? null,
+        last_stderr: data.lastStderr ?? null
       })
     })
 
     window.api.onComfyBootLog((data) => {
       trackTelemetryAction('desktop2.comfyui.boot_log', {
         installation_id: data.installationId,
-        boot_stderr: data.bootStderr,
+        boot_stderr: data.bootStderr
       })
     })
 
     window.api.onInstanceStarted((data) => {
-      const bootTimeMs = (data as unknown as Record<string, unknown>).bootTimeMs as number | undefined
-      window.api.getInstallationDdContext(data.installationId).then((ctx) => {
-        if (!ctx) return
-        const { snapshot_diffs, ...metadata } = ctx
-        trackTelemetryAction('desktop2.session.installation_started', {
-          ...(metadata as unknown as Record<string, string | number | boolean | null | undefined>),
-          boot_time_ms: bootTimeMs ?? null,
+      const bootTimeMs = (data as unknown as Record<string, unknown>).bootTimeMs as
+        | number
+        | undefined
+      window.api
+        .getInstallationDdContext(data.installationId)
+        .then((ctx) => {
+          if (!ctx) return
+          const { snapshot_diffs, ...metadata } = ctx
+          trackTelemetryAction('desktop2.session.installation_started', {
+            ...(metadata as unknown as Record<
+              string,
+              string | number | boolean | null | undefined
+            >),
+            boot_time_ms: bootTimeMs ?? null
+          })
+          if (snapshot_diffs.length > 0) {
+            // snapshot_diffs is an array of objects, which Datadog/PostHog handle
+            // natively; bypass the typed bridge via a fresh call.
+            if (isDatadogInitialized) {
+              try {
+                datadogRum.addAction('desktop2.session.snapshot_history', {
+                  installation_id: ctx.installation_id,
+                  snapshot_diffs
+                })
+              } catch {}
+            }
+            try {
+              window.api.captureTelemetry('desktop2.session.snapshot_history', {
+                installation_id: ctx.installation_id,
+                snapshot_diffs
+              } as unknown as Record<string, unknown>)
+            } catch {
+              // ignore
+            }
+          }
         })
-        if (snapshot_diffs.length > 0) {
-          // snapshot_diffs is an array of objects, which Datadog/PostHog handle
-          // natively; bypass the typed bridge via a fresh call.
-          if (isDatadogInitialized) {
-            try { datadogRum.addAction('desktop2.session.snapshot_history', { installation_id: ctx.installation_id, snapshot_diffs }) } catch {}
-          }
-          if (isPostHogInitialized()) {
-            capturePostHog('desktop2.session.snapshot_history', { installation_id: ctx.installation_id, snapshot_diffs } as unknown as TelemetryContext)
-          }
-        }
-      }).catch(() => {})
+        .catch(() => {})
     })
   }
 }

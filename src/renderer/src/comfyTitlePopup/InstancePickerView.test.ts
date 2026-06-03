@@ -50,14 +50,20 @@ interface MockSnapshot {
   installs: MockInstall[]
   activeInstallationId: string | null
   runningInstallationIds: string[]
+  /** Optional — defaults to `[]` in `mountPicker`. Tests that exercise
+   *  the launching state explicitly set this. */
+  launchingInstallationIds?: string[]
   selectedInstallationId?: string | null
+  pickerSelectionEpoch?: number
   selectedSettings?: unknown[] | null
   selectedSnapshots?: unknown | null
 }
 
 interface BridgeState {
   picks: string[]
-  restarts: string[]
+  /** Each entry: `[installationId, opts]` — captures the second arg so
+   *  tests can assert the renderer-confirmed flag reaches the bridge. */
+  restarts: { id: string; opts?: { confirmed?: boolean } }[]
   newInstallCount: number
   selectedInstallSets: (string | null)[]
   updateFieldCalls: { installationId: string; fieldId: string; value: unknown }[]
@@ -77,8 +83,8 @@ function installMockBridge(): BridgeState {
     pickInstall: (id: string) => {
       state.picks.push(id)
     },
-    restartInstall: (id: string) => {
-      state.restarts.push(id)
+    restartInstall: (id: string, opts?: { confirmed?: boolean }) => {
+      state.restarts.push({ id, opts })
     },
     openNewInstall: () => {
       state.newInstallCount += 1
@@ -123,6 +129,7 @@ async function mountPicker(snapshot: MockSnapshot) {
     selectedInstallationId: snapshot.activeInstallationId,
     selectedSettings: null,
     selectedSnapshots: emptySnapshotListPayload,
+    launchingInstallationIds: [] as string[],
     ...snapshot,
   }
   return mount(InstancePickerView, {
@@ -287,7 +294,7 @@ describe('comfyTitlePopup/InstancePickerView', () => {
       expect(chooserHost.find('.picker-home').exists()).toBe(false)
     })
 
-    it('routes Home clicks through bridge.activate("return-to-dashboard")', async () => {
+    it('routes dashboard-button clicks through bridge.activate("new-window") so the running instance is not stopped', async () => {
       const activate = vi.fn()
       const existing = (window as unknown as { __comfyTitlePopup: Record<string, unknown> })
         .__comfyTitlePopup
@@ -301,7 +308,7 @@ describe('comfyTitlePopup/InstancePickerView', () => {
         runningInstallationIds: [],
       })
       await wrapper.find('.picker-home').trigger('click')
-      expect(activate).toHaveBeenCalledWith('return-to-dashboard')
+      expect(activate).toHaveBeenCalledWith('new-window')
     })
   })
 
@@ -425,12 +432,13 @@ describe('comfyTitlePopup/InstancePickerView', () => {
       expect(bridge.restarts).toEqual([])
     })
 
-    it('dispatches restartInstall when the selected install is running', async () => {
+    it('shows the in-drawer confirm and dispatches restartInstall(confirmed) on accept', async () => {
       const { default: ComfyUISettingsContent } = await import(
         '../components/settings/ComfyUISettingsContent.vue'
       )
+      const { useDialogs } = await import('../composables/useDialogs')
       const wrapper = await mountPicker({
-        installs: [makeInstall({ id: 'a', name: 'Alpha' })],
+        installs: [makeInstall({ id: 'a', name: 'Alpha', sourceCategory: 'local' })],
         activeInstallationId: 'a',
         runningInstallationIds: ['a'],
       })
@@ -438,8 +446,248 @@ describe('comfyTitlePopup/InstancePickerView', () => {
       expect(settings.exists()).toBe(true)
       settings.vm.$emit('primary-action', true)
       await flushPromises()
-      expect(bridge.restarts).toEqual(['a'])
+      // Renderer parks on the confirm; bridge hasn't fired yet.
+      const dialogs = useDialogs()
+      expect(dialogs.state.open).toBe(true)
+      expect(dialogs.state.kind).toBe('confirm')
+      expect(dialogs.state.confirm.title).toBe('Restart instance?')
+      expect(bridge.restarts).toEqual([])
+      // Accept the confirm — bridge fires with `confirmed: true` so
+      // main knows to skip its own system-modal.
+      dialogs.confirmPrimary()
+      await flushPromises()
+      expect(bridge.restarts).toEqual([{ id: 'a', opts: { confirmed: true } }])
       expect(bridge.picks).toEqual([])
+    })
+
+    it('does not dispatch restartInstall when the in-drawer confirm is cancelled', async () => {
+      const { default: ComfyUISettingsContent } = await import(
+        '../components/settings/ComfyUISettingsContent.vue'
+      )
+      const { useDialogs } = await import('../composables/useDialogs')
+      const wrapper = await mountPicker({
+        installs: [makeInstall({ id: 'a', name: 'Alpha', sourceCategory: 'local' })],
+        activeInstallationId: 'a',
+        runningInstallationIds: ['a'],
+      })
+      const settings = wrapper.findComponent(ComfyUISettingsContent)
+      settings.vm.$emit('primary-action', true)
+      await flushPromises()
+      const dialogs = useDialogs()
+      expect(dialogs.state.open).toBe(true)
+      dialogs.cancel()
+      await flushPromises()
+      expect(bridge.restarts).toEqual([])
+    })
+
+    it('skips the in-drawer confirm for non-local installs (no local process to kill)', async () => {
+      const { default: ComfyUISettingsContent } = await import(
+        '../components/settings/ComfyUISettingsContent.vue'
+      )
+      const { useDialogs } = await import('../composables/useDialogs')
+      const wrapper = await mountPicker({
+        installs: [makeInstall({ id: 'r', name: 'Remote', sourceCategory: 'remote' })],
+        activeInstallationId: 'r',
+        runningInstallationIds: ['r'],
+      })
+      const settings = wrapper.findComponent(ComfyUISettingsContent)
+      settings.vm.$emit('primary-action', true)
+      await flushPromises()
+      // No confirm parked — restart fires straight through, still with
+      // `confirmed: true` so main keeps a single code path.
+      const dialogs = useDialogs()
+      expect(dialogs.state.open).toBe(false)
+      expect(bridge.restarts).toEqual([{ id: 'r', opts: { confirmed: true } }])
+    })
+
+    // Issue #749 — Cloud + local both open. The footer CTA for an install
+    // running in ANOTHER window must route through pickInstall (whose
+    // main-side focus-existing short-circuit raises that window), NOT
+    // restartInstall. The settings content emits restartInPlace=false for
+    // the running-elsewhere case; verify the picker maps that to pick.
+    it('dispatches pickInstall (not restart) for an install running in another window', async () => {
+      const { default: ComfyUISettingsContent } = await import(
+        '../components/settings/ComfyUISettingsContent.vue'
+      )
+      const wrapper = await mountPicker({
+        installs: [
+          makeInstall({ id: 'a', name: 'Alpha' }),
+          makeInstall({ id: 'b', name: 'Bravo' }),
+        ],
+        // Host window is attached to 'a'; the user selected 'b', which is
+        // running in its own separate window.
+        activeInstallationId: 'a',
+        selectedInstallationId: 'b',
+        runningInstallationIds: ['b'],
+      })
+      const settings = wrapper.findComponent(ComfyUISettingsContent)
+      expect(settings.exists()).toBe(true)
+      // The component decides restartInPlace=false (running elsewhere) and
+      // emits accordingly; assert the picker dispatches pickInstall.
+      settings.vm.$emit('primary-action', false)
+      await flushPromises()
+      expect(bridge.picks).toEqual(['b'])
+      expect(bridge.restarts).toEqual([])
+    })
+  })
+
+  // The popup's `sessionStore` is hydrated solely from the picker
+  // snapshot — its preload doesn't expose `onInstanceLaunching` /
+  // `onInstanceStarted`. The hydration watcher must fire on launching-
+  // only transitions or `useInstallCta` will keep the CTA on Start
+  // for the entire launching window when the running set hasn't yet
+  // changed (the exact bug #785 fixes).
+  describe('session-store hydration from snapshot', () => {
+    it('hydrates launching ids when only launchingInstallationIds changes', async () => {
+      const { useSessionStore } = await import('../stores/sessionStore')
+      const wrapper = await mountPicker({
+        installs: [makeInstall({ id: 'a', name: 'Alpha' })],
+        activeInstallationId: null,
+        runningInstallationIds: [],
+        launchingInstallationIds: [],
+      })
+      const sessionStore = useSessionStore()
+      expect(sessionStore.isLaunching('a')).toBe(false)
+
+      await wrapper.setProps({
+        snapshot: {
+          installs: [makeInstall({ id: 'a', name: 'Alpha' })],
+          activeInstallationId: 'a',
+          runningInstallationIds: [],
+          launchingInstallationIds: ['a'],
+          selectedInstallationId: null,
+          selectedSettings: null,
+          selectedSnapshots: emptySnapshotListPayload,
+        },
+      })
+      await flushPromises()
+      expect(sessionStore.isLaunching('a')).toBe(true)
+    })
+
+    // Regression for #788: clicking through rows fast must not snap
+    // back to a previously-selected row when a stale snapshot (carrying
+    // an older `selectedInstallationId`) lands after the local click.
+    // The fix gates snapshot-driven selection updates on a strictly-
+    // increasing `pickerSelectionEpoch` — only `openInstancePickerForHost`
+    // bumps it. Plain live-data rebroadcasts share the same epoch as
+    // the open, so they cannot retarget the picker.
+    describe('selection epoch gating (#788)', () => {
+      it('ignores a stale same-epoch snapshot that would override a local pick', async () => {
+        const wrapper = await mountPicker({
+          installs: [
+            makeInstall({ id: 'a', name: 'Alpha' }),
+            makeInstall({ id: 'b', name: 'Bravo' }),
+          ],
+          activeInstallationId: 'a',
+          runningInstallationIds: [],
+          // First (open) snapshot at epoch 1: main seeded selection = 'a'.
+          pickerSelectionEpoch: 1,
+        })
+
+        // User clicks Bravo locally.
+        const bravoRow = wrapper.findAll('.picker-row').find((c) => c.text().includes('Bravo'))
+        await bravoRow!.trigger('click')
+        await flushPromises()
+        expect(bridge.selectedInstallSets.at(-1)).toBe('b')
+        const echoCountAfterClick = bridge.selectedInstallSets.length
+
+        // A late live-data snapshot lands carrying the old selection
+        // ('a') and the SAME epoch — represents either an in-flight
+        // broadcast that started before the user's click, or any other
+        // event-driven rebroadcast (installationEvents / session /
+        // download). The view must keep Bravo selected and must NOT
+        // re-echo 'a' back to main (which would otherwise make the
+        // snap-back persistent by overwriting main's pickerSelectedInstallationId).
+        await wrapper.setProps({
+          snapshot: {
+            installs: [
+              makeInstall({ id: 'a', name: 'Alpha' }),
+              makeInstall({ id: 'b', name: 'Bravo' }),
+            ],
+            activeInstallationId: 'a',
+            runningInstallationIds: [],
+            launchingInstallationIds: [],
+            selectedInstallationId: 'a',
+            pickerSelectionEpoch: 1,
+            selectedSettings: null,
+            selectedSnapshots: emptySnapshotListPayload,
+          },
+        })
+        await flushPromises()
+
+        const stillBravo = wrapper.findAll('.picker-row').find((c) => c.text().includes('Bravo'))
+        expect(stillBravo!.classes()).toContain('is-active')
+        expect(bridge.selectedInstallSets.length).toBe(echoCountAfterClick)
+        expect(bridge.selectedInstallSets.at(-1)).toBe('b')
+      })
+
+      it('retargets selection when the epoch advances (main reopened picker)', async () => {
+        const wrapper = await mountPicker({
+          installs: [
+            makeInstall({ id: 'a', name: 'Alpha' }),
+            makeInstall({ id: 'b', name: 'Bravo' }),
+            makeInstall({ id: 'c', name: 'Charlie' }),
+          ],
+          activeInstallationId: 'a',
+          runningInstallationIds: [],
+          pickerSelectionEpoch: 1,
+        })
+
+        // User clicks Bravo locally.
+        const bravoRow = wrapper.findAll('.picker-row').find((c) => c.text().includes('Bravo'))
+        await bravoRow!.trigger('click')
+        await flushPromises()
+
+        // Main retargets to Charlie via a fresh open (e.g. chooser-card
+        // "Manage…" deep-link). Epoch advances → renderer honours.
+        await wrapper.setProps({
+          snapshot: {
+            installs: [
+              makeInstall({ id: 'a', name: 'Alpha' }),
+              makeInstall({ id: 'b', name: 'Bravo' }),
+              makeInstall({ id: 'c', name: 'Charlie' }),
+            ],
+            activeInstallationId: 'a',
+            runningInstallationIds: [],
+            launchingInstallationIds: [],
+            selectedInstallationId: 'c',
+            pickerSelectionEpoch: 2,
+            selectedSettings: null,
+            selectedSnapshots: emptySnapshotListPayload,
+          },
+        })
+        await flushPromises()
+
+        const charlie = wrapper.findAll('.picker-row').find((c) => c.text().includes('Charlie'))
+        expect(charlie!.classes()).toContain('is-active')
+      })
+    })
+
+    it('clears a launching id when it drops out of the snapshot', async () => {
+      const { useSessionStore } = await import('../stores/sessionStore')
+      const wrapper = await mountPicker({
+        installs: [makeInstall({ id: 'a', name: 'Alpha' })],
+        activeInstallationId: 'a',
+        runningInstallationIds: [],
+        launchingInstallationIds: ['a'],
+      })
+      const sessionStore = useSessionStore()
+      expect(sessionStore.isLaunching('a')).toBe(true)
+
+      await wrapper.setProps({
+        snapshot: {
+          installs: [makeInstall({ id: 'a', name: 'Alpha' })],
+          activeInstallationId: 'a',
+          runningInstallationIds: ['a'],
+          launchingInstallationIds: [],
+          selectedInstallationId: null,
+          selectedSettings: null,
+          selectedSnapshots: emptySnapshotListPayload,
+        },
+      })
+      await flushPromises()
+      expect(sessionStore.isLaunching('a')).toBe(false)
+      expect(sessionStore.isRunning('a')).toBe(true)
     })
   })
 })

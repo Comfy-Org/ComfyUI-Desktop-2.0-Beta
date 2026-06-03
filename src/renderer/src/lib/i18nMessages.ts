@@ -51,6 +51,11 @@ export const en = {
     storageRestartNote:
       'Restart the application (or close and reopen) for these changes to take effect.'
   },
+  /** About-tab hero (StatusFactPanel.vue). The inline-editable name's
+   *  aria-label lives here so the popup-scoped catalog resolves it. */
+  statusFactPanel: {
+    editName: 'Edit installation name'
+  },
   models: {
     addDir: 'Add directory',
     removeDir: 'Remove',
@@ -63,6 +68,10 @@ export const en = {
     moreActions: 'More actions'
   },
   tooltips: {
+    instances:
+      'A separate ComfyUI installation with its own version, models, and settings.',
+    snapshots:
+      'A saved point-in-time state of an installation (versions + custom nodes) you can restore later.',
     sharedModels:
       "Folders shared across all installations so models aren't downloaded twice. Newly downloaded models go to the primary folder. The system default folder is always kept and can't be removed, and the primary folder can't be removed while it's in use — pick a different primary first.",
     modelsPrimary:
@@ -92,13 +101,19 @@ export const en = {
      *  The unseen indicator clears as soon as the popup is opened. */
     downloadsCompleteUnseen:
       'no recent downloads | {n} download finished — click to review | {n} downloads finished — click to review',
+    /** Tooltip when one or more downloads have failed since the user
+     *  last opened the tray. Takes precedence over the "finished" copy. */
+    downloadsFailedUnseen:
+      'no downloads failed | {n} download failed — click to review | {n} downloads failed — click to review',
     desktopUpdateAvailable: 'Desktop Update',
     desktopUpdateDownloading: 'Downloading update…',
     desktopUpdateReady: 'Desktop Update Ready',
     desktopUpdateWithVersion: '{label} (v{version})',
     installUpdateAvailable: 'ComfyUI Update',
     installUpdateVersion: 'ComfyUI {version}',
-    installUpdateShort: 'Update'
+    installUpdateShort: 'Update',
+    refreshInstanceTooltip: 'Refresh',
+    resetZoomTooltip: 'Reset zoom to 100%'
   },
   fileMenu: {
     newWindow: 'New Window',
@@ -109,8 +124,8 @@ export const en = {
     sendFeedback: 'Send Feedback',
     returnToDashboard: 'Return to Dashboard',
     closeAllWindows: 'Close All Windows',
-    exitWindow: 'Exit Window',
-    exitAllWindows: 'Exit All Windows',
+    exitWindow: 'Close Window',
+    exitAllWindows: 'Quit Desktop',
     skipOnboarding: 'Skip Onboarding'
     /* Reset Zoom carries a dynamic percentage in the label and is
      * built main-side without going through this catalog — kept as a
@@ -122,6 +137,7 @@ export const en = {
     pause: 'Pause',
     resume: 'Resume',
     cancel: 'Cancel',
+    retry: 'Retry',
     showInFolder: 'Show in Finder',
     remove: 'Remove from list',
     viewAllInSettings: 'View All Downloads',
@@ -138,7 +154,8 @@ export const en = {
     filterActive: 'Active',
     filterCompleted: 'Completed',
     filterErrored: 'Failed',
-    filterAriaLabel: 'Status filter'
+    filterAriaLabel: 'Status filter',
+    retry: 'Retry'
   },
   settingsModal: {
     title: 'Settings',
@@ -202,9 +219,16 @@ export const en = {
   instancePicker: {
     instances: 'Instances',
     newInstance: 'New Instance',
+    openDashboard: 'Open Dashboard',
+    openDashboardHint:
+      'Opens the dashboard in a new window. Your running instance keeps running.',
     latestOnGithub: 'Latest on GitHub',
-    open: 'Open',
+    open: 'Start',
     restart: 'Restart',
+    /** Primary CTA when the selected install is already running in
+     *  another window — focuses/switches to it instead of restarting
+     *  (issue #749). */
+    switch: 'Switch',
     restartConfirmTitle: 'Restart this instance?',
     restartConfirmDetail:
       'Restarting will stop the running session. Any unsaved work in the workflow will be lost.',
@@ -228,6 +252,20 @@ export const en = {
     progressUpdating: 'Updating…',
     progressDowngrading: 'Downgrading…',
     progressDowngraded: 'Downgrade complete',
+    progressCopying: 'Copying…',
+    progressCopied: 'Copy complete',
+    progressCopyingUpdating: 'Copying & updating…',
+    progressCopiedUpdated: 'Copy complete',
+    progressDeleting: 'Deleting…',
+    progressDeleted: 'Deleted',
+    progressRestoring: 'Restoring snapshot…',
+    progressRestored: 'Snapshot restored',
+    progressSavingSnapshot: 'Saving snapshot…',
+    progressSnapshotSaved: 'Snapshot saved',
+    progressDeletingSnapshot: 'Deleting snapshot…',
+    progressSnapshotDeleted: 'Snapshot deleted',
+    progressMigrating: 'Migrating…',
+    progressMigrated: 'Migration complete',
     progressWorking: 'Working…',
     progressError: 'Something went wrong',
     progressCancelled: 'Cancelled',

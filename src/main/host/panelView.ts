@@ -10,11 +10,11 @@ import {
   _activeOperationStatus,
 } from '../lib/ipc/shared'
 import {
-  bringToFront,
   comfyWindows,
   computeBodyMode,
   findEntryByTitleBarSender,
   getEntryByInstallationId,
+  revealColdStartHostIfPending,
   VALID_PANELS,
 } from './registry'
 import type { BodyMode, ComfyPanelKey, ComfyWindowEntry } from './registry'
@@ -61,7 +61,13 @@ export function ensurePanelView(
     const overlay = titleBarOverlayForTheme(resolveTheme() === 'dark')
     return overlay.color ?? TITLEBAR_BG
   }
-  panelView.setBackgroundColor(initialPanel === 'chooser' ? chooserPanelBg() : '#00000000')
+  // `chooser` and `new-install` are full-screen launcher flows (not
+  // overlays over the comfy view), so paint them opaque during load to
+  // avoid a black flash. Overlay modes (settings-v2) stay transparent so
+  // the live comfy view composites through.
+  panelView.setBackgroundColor(
+    initialPanel === 'chooser' || initialPanel === 'new-install' ? chooserPanelBg() : '#00000000',
+  )
   entry.window.contentView.addChildView(panelView)
   // Insert at zero size, behind the comfy view; layoutViews handles positioning.
   panelView.setBounds({ x: 0, y: TITLEBAR_HEIGHT + 1, width: 0, height: 0 })
@@ -73,11 +79,11 @@ export function ensurePanelView(
   panelView.webContents.once('did-finish-load', () => {
     const latest = comfyWindows.get(windowKey)
     if (!latest || latest.window.isDestroyed() || panelView.webContents.isDestroyed()) return
-    if (latest.coldStartPendingReveal) {
-      latest.coldStartPendingReveal = false
-      latest.layoutViews()
-      bringToFront(latest.window)
-    }
+    // Backstop reveal — the titleBarView's `dom-ready` listener in
+    // `openChooserHostWindow` usually wins this race well before
+    // panel.html finishes loading. Stays here for the (rare) case
+    // where the titlebar load fails / is delayed past the panel's.
+    revealColdStartHostIfPending(windowKey)
     const mode = computeBodyMode(latest)
     if (mode !== 'comfy') {
       panelView.webContents.send('panel-switch', { panel: mode, installationId: latest.installationId ?? '' })

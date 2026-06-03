@@ -124,6 +124,10 @@ describe('ChooserView', () => {
     const wrapper = mountChooser()
     await flushPromises()
     await wrapper.find('.chooser-tile-cloud').trigger('click')
+    // `pickInstall` is async (capacity gate awaits `confirmEntry`); the
+    // emit happens after the next tick, so drain pending microtasks
+    // before asserting.
+    await flushPromises()
     const events = wrapper.emitted('pick')
     expect(events).toBeDefined()
     expect((events![0]![0] as Installation).id).toBe('cloud')

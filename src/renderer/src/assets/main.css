@@ -549,6 +549,17 @@ button.looks-disabled {
 .brand-input input::placeholder {
   color: var(--neutral-400);
 }
+/* Invalid state — paired with an adjacent .field-error message.
+ * Overrides hover/focus border so the danger cue stays visible. */
+.brand-input--invalid,
+.brand-input--invalid:hover,
+.brand-input--invalid:focus-within {
+  border-color: var(--danger);
+}
+.brand-input--invalid:has(input:focus-visible) {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--danger) 35%, transparent);
+}
 
 .brand-tag-recommended {
   display: inline-block;
@@ -1874,8 +1885,8 @@ input[type='checkbox']:checked::after {
 .subpage-pop-enter-active,
 .subpage-pop-leave-active {
   transition:
-    transform 220ms cubic-bezier(0.32, 0.72, 0, 1),
-    opacity 180ms ease;
+    transform 110ms cubic-bezier(0.32, 0.72, 0, 1),
+    opacity 90ms ease;
 }
 .subpage-push-enter-from {
   transform: translateX(24px);
@@ -1899,7 +1910,7 @@ input[type='checkbox']:checked::after {
   .subpage-push-leave-active,
   .subpage-pop-enter-active,
   .subpage-pop-leave-active {
-    transition: opacity 140ms ease;
+    transition: opacity 70ms ease;
   }
   .subpage-push-enter-from,
   .subpage-push-leave-to,
@@ -3156,13 +3167,15 @@ input[type='checkbox']:checked::after {
     background-color 100ms ease,
     opacity 100ms ease;
 }
-.context-menu-item:hover:not(:disabled),
-.context-menu-item:focus-visible:not(:disabled) {
+.context-menu-item:hover:not(.disabled),
+.context-menu-item:focus-visible:not(.disabled) {
   background: var(--brand-surface-bg-hover);
   outline: none;
   color: var(--text);
 }
-.context-menu-item:disabled,
+/* Disabled via the `.disabled` class + `aria-disabled` (not the native
+   `disabled` attribute) so the hover title tooltip — which Chromium
+   suppresses on natively-disabled buttons — still surfaces the reason. */
 .context-menu-item.disabled {
   color: var(--text-muted);
   cursor: default;
@@ -3171,8 +3184,8 @@ input[type='checkbox']:checked::after {
 .context-menu-item.is-danger {
   color: var(--danger);
 }
-.context-menu-item.is-danger:hover:not(:disabled),
-.context-menu-item.is-danger:focus-visible:not(:disabled) {
+.context-menu-item.is-danger:hover:not(.disabled),
+.context-menu-item.is-danger:focus-visible:not(.disabled) {
   color: var(--danger-hover);
 }
 .context-menu-separator {

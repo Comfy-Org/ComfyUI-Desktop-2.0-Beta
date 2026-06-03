@@ -3,6 +3,7 @@ import { setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ActionResult } from '../types/ipc'
+import type * as TelemetryModule from '../lib/telemetry'
 import { useProgressStore } from './progressStore'
 import { useSessionStore } from './sessionStore'
 
@@ -10,6 +11,17 @@ vi.mock('vue-i18n', () => ({
   useI18n: () => ({
     t: (key: string) => key
   })
+}))
+
+// progressStore now emits `desktop2.op.result` via `emitTelemetryAction`,
+// which dispatches a CustomEvent on `window`. The `vi.stubGlobal('window',
+// …)` below replaces window with a plain object that drops prototype
+// methods like `dispatchEvent`, so stub the telemetry helper out — these
+// tests cover op lifecycle, not telemetry dispatch. `toErrorBucket` is
+// kept real (pure function used inside the store's emit path).
+vi.mock('../lib/telemetry', async (importOriginal) => ({
+  ...(await importOriginal<typeof TelemetryModule>()),
+  emitTelemetryAction: vi.fn()
 }))
 
 vi.stubGlobal('window', {
@@ -26,7 +38,7 @@ vi.stubGlobal('window', {
     onInstanceStarted: vi.fn(() => vi.fn()),
     onInstanceStopped: vi.fn(() => vi.fn()),
     onComfyExited: vi.fn(() => vi.fn()),
-    onErrorDetail: vi.fn(() => vi.fn()),
+    onErrorDetail: vi.fn(() => vi.fn())
   }
 })
 
@@ -51,7 +63,7 @@ describe('useProgressStore', () => {
       store.startOperation({
         installationId: 'inst-1',
         title: 'Install',
-        apiCall,
+        apiCall
       })
 
       await vi.waitFor(() => {
@@ -66,7 +78,7 @@ describe('useProgressStore', () => {
       store.startOperation({
         installationId: 'inst-1',
         title: 'Install',
-        apiCall,
+        apiCall
       })
 
       const op = store.operations.get('inst-1')!
@@ -82,7 +94,7 @@ describe('useProgressStore', () => {
       store.startOperation({
         installationId: 'inst-1',
         title: 'Install',
-        apiCall,
+        apiCall
       })
 
       const op = store.operations.get('inst-1')!
@@ -103,7 +115,7 @@ describe('useProgressStore', () => {
       store.startOperation({
         installationId: 'inst-1',
         title: 'Install',
-        apiCall,
+        apiCall
       })
 
       const op = store.operations.get('inst-1')!
@@ -120,7 +132,7 @@ describe('useProgressStore', () => {
       store.startOperation({
         installationId: 'inst-1',
         title: 'Install',
-        apiCall,
+        apiCall
       })
 
       const op = store.operations.get('inst-1')!
@@ -136,13 +148,13 @@ describe('useProgressStore', () => {
       sessionStore.startSession('inst-1')
       sessionStore.errorInstances.set('inst-1', {
         installationName: 'Test',
-        message: 'previous failure',
+        message: 'previous failure'
       })
 
       store.startOperation({
         installationId: 'inst-1',
         title: 'Delete',
-        apiCall: () => new Promise<ActionResult>(() => {}),
+        apiCall: () => new Promise<ActionResult>(() => {})
       })
 
       expect(sessionStore.errorInstances.has('inst-1')).toBe(false)
@@ -153,7 +165,7 @@ describe('useProgressStore', () => {
       store.startOperation({
         installationId: 'inst-1',
         title: 'Install ComfyUI',
-        apiCall,
+        apiCall
       })
 
       expect(store.operations.has('inst-1')).toBe(true)
@@ -168,7 +180,7 @@ describe('useProgressStore', () => {
       store.startOperation({
         installationId: 'inst-1',
         title: 'Install',
-        apiCall,
+        apiCall
       })
 
       expect(window.api.onInstallProgress).toHaveBeenCalled()
@@ -180,7 +192,7 @@ describe('useProgressStore', () => {
       store.startOperation({
         installationId: 'inst-1',
         title: 'Install',
-        apiCall,
+        apiCall
       })
 
       await vi.waitFor(() => {
@@ -196,7 +208,7 @@ describe('useProgressStore', () => {
       store.startOperation({
         installationId: 'inst-1',
         title: 'Install',
-        apiCall,
+        apiCall
       })
 
       await vi.waitFor(() => {
@@ -209,11 +221,13 @@ describe('useProgressStore', () => {
     })
 
     it('sets error on non-ok result', async () => {
-      const apiCall = vi.fn().mockResolvedValue({ ok: false, message: 'Bad config' } as ActionResult)
+      const apiCall = vi
+        .fn()
+        .mockResolvedValue({ ok: false, message: 'Bad config' } as ActionResult)
       store.startOperation({
         installationId: 'inst-1',
         title: 'Install',
-        apiCall,
+        apiCall
       })
 
       await vi.waitFor(() => {
@@ -230,7 +244,7 @@ describe('useProgressStore', () => {
       store.startOperation({
         installationId: 'inst-1',
         title: 'Launch',
-        apiCall,
+        apiCall
       })
 
       await vi.waitFor(() => {
@@ -248,7 +262,7 @@ describe('useProgressStore', () => {
       store.startOperation({
         installationId: 'inst-1',
         title: 'Launch',
-        apiCall,
+        apiCall
       })
 
       await vi.waitFor(() => {
@@ -265,13 +279,13 @@ describe('useProgressStore', () => {
       store.startOperation({
         installationId: 'inst-1',
         title: 'First',
-        apiCall: () => new Promise<ActionResult>(() => {}),
+        apiCall: () => new Promise<ActionResult>(() => {})
       })
 
       store.startOperation({
         installationId: 'inst-1',
         title: 'Second',
-        apiCall: () => new Promise<ActionResult>(() => {}),
+        apiCall: () => new Promise<ActionResult>(() => {})
       })
 
       expect(store.operations.get('inst-1')?.title).toBe('Second')
@@ -279,11 +293,13 @@ describe('useProgressStore', () => {
 
     it('sets result on port conflict without error', async () => {
       const portConflictInfo = { port: 8188, pids: [123], isComfy: true }
-      const apiCall = vi.fn().mockResolvedValue({ ok: false, portConflict: portConflictInfo } as ActionResult)
+      const apiCall = vi
+        .fn()
+        .mockResolvedValue({ ok: false, portConflict: portConflictInfo } as ActionResult)
       store.startOperation({
         installationId: 'inst-1',
         title: 'Launch',
-        apiCall,
+        apiCall
       })
 
       await vi.waitFor(() => {
@@ -297,11 +313,13 @@ describe('useProgressStore', () => {
     })
 
     it('handles synchronous apiCall throw', () => {
-      const apiCall = () => { throw new Error('Sync boom') }
+      const apiCall = () => {
+        throw new Error('Sync boom')
+      }
       store.startOperation({
         installationId: 'inst-1',
         title: 'Install',
-        apiCall: apiCall as unknown as () => Promise<ActionResult>,
+        apiCall: apiCall as unknown as () => Promise<ActionResult>
       })
 
       const op = store.operations.get('inst-1')!
@@ -315,7 +333,7 @@ describe('useProgressStore', () => {
       store.startOperation({
         installationId: 'inst-1',
         title: 'Install',
-        apiCall: () => new Promise<ActionResult>(() => {}),
+        apiCall: () => new Promise<ActionResult>(() => {})
       })
 
       store.cancelOperation('inst-1')
@@ -338,7 +356,10 @@ describe('useProgressStore', () => {
       store.startOperation({
         installationId: 'inst-1',
         title: 'Install',
-        apiCall: () => new Promise<ActionResult>((r) => { resolve = r }),
+        apiCall: () =>
+          new Promise<ActionResult>((r) => {
+            resolve = r
+          })
       })
       resolve!({ ok: true })
       await Promise.resolve()
@@ -385,7 +406,7 @@ describe('useProgressStore', () => {
       store.startOperation({
         installationId: 'inst-1',
         title: 'Install',
-        apiCall: () => new Promise<ActionResult>(() => {}),
+        apiCall: () => new Promise<ActionResult>(() => {})
       })
 
       store.cleanupOperation('inst-1')

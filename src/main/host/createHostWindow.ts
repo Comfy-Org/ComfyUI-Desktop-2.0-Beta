@@ -1,4 +1,4 @@
-import { BrowserWindow, WebContentsView, ipcMain, shell } from 'electron'
+import { BrowserWindow, WebContentsView, ipcMain, screen, shell } from 'electron'
 import path from 'path'
 import type { InstallationRecord } from '../installations'
 import { getAppVersion } from '../lib/ipc'
@@ -9,7 +9,12 @@ import {
   getDownloadsTrayState,
 } from '../lib/comfyDownloadManager'
 import { handleFirebasePopup, isFirebaseAuthHandlerUrl } from '../auth/firebaseBridge'
-import { isLikelyDownloadUrl, shouldOpenInPopup } from '../lib/allowedPopups'
+import {
+  isCheckoutReturnUrl,
+  isCheckoutUrl,
+  isLikelyDownloadUrl,
+  shouldOpenInPopup,
+} from '../lib/allowedPopups'
 import { COMFY_BG, TITLEBAR_BG } from '../lib/theme'
 import {
   TITLEBAR_HEIGHT,
@@ -26,10 +31,10 @@ import { forwardDatadogError } from '../lib/processErrorHandlers'
 import * as updater from '../lib/updater'
 import { getSavedBounds, getWindowOptions, saveWindowBounds } from '../lib/windowState'
 import { ensureSystemModal } from '../popups/systemModal'
+import { hideCheckoutBackdrop, showCheckoutBackdrop } from '../popups/checkoutBackdrop'
 import { hideTitlePopupForParent, prewarmTitlePopup } from '../popups/titlePopup'
 import { destroyPanelView, ensurePanelView } from './panelView'
 import {
-  bringToFront,
   comfyWindows,
   computeBodyMode,
   dropAttachClaimsForWindow,
@@ -37,10 +42,12 @@ import {
   isInstallHost,
   nextWindowKey,
   registerHostEntry,
+  revealColdStartHostIfPending,
   setLastFocusedInstallationId,
+  shouldConfirmKillForEntry,
   unregisterHostEntry,
 } from './registry'
-import type { ComfyWindowEntry } from './registry'
+import type { ComfyWindowEntry, ComfyPanelKey } from './registry'
 
 /** Default size for a freshly-spawned host window when an existing
  *  host of the same identity is already open. Matches the
@@ -49,6 +56,62 @@ import type { ComfyWindowEntry } from './registry'
  *  drift of whichever window happened to be the most recent. */
 const DEFAULT_HOST_WIDTH = 1280
 const DEFAULT_HOST_HEIGHT = 900
+
+/** Result of the panel-renderer close consult. See
+ *  {@link HostWindowFactories.consultPanelRendererClose}. */
+export type CloseConsultResult = 'cleared' | 'aborted' | 'defer'
+
+/** Should the close handler bail after the renderer consult?
+ *
+ *  A `forceClose` snapshot (caller pre-cleared via `preClearedClose`)
+ *  overrides a renderer-side cancel — launch-guard eviction and bulk
+ *  Exit-All gather user consent at a higher level and must not be
+ *  stalled by an unrelated per-window cancel-prompt the user happens
+ *  to have open. */
+export function shouldBailAfterConsult(consult: CloseConsultResult, forceClose: boolean): boolean {
+  return consult === 'aborted' && !forceClose
+}
+
+/** Should the install-host close-confirm modal run? Only fires when
+ *  the renderer deferred (no overlay), the host would kill a local
+ *  process, and the caller hasn't pre-cleared. Cloud/remote-backed
+ *  windows skip the modal (issue #654) — closing them never kills a
+ *  local ComfyUI. The "entry still exists" check is folded into
+ *  `killsLocalSession` (its `shouldConfirmKillForEntry` source rejects
+ *  a missing entry). */
+export function shouldShowInstallCloseConfirm(
+  consult: CloseConsultResult,
+  killsLocalSession: boolean,
+  forceClose: boolean,
+): boolean {
+  return consult === 'defer' && killsLocalSession && !forceClose
+}
+
+/** Should the close handler bail after the install-host close-confirm
+ *  modal? Same force-close override as {@link shouldBailAfterConsult}
+ *  — a pre-cleared close lands mid-modal must still proceed. */
+export function shouldBailAfterCloseConfirm(confirmed: boolean, forceClose: boolean): boolean {
+  return !confirmed && !forceClose
+}
+
+/** Should the close handler detach the last install-backed window to
+ *  the dashboard instead of tearing it down?
+ *
+ *  The OS ✕ on the last install window flips the host to chooser mode
+ *  in place so the app stays alive on the dashboard — that's why
+ *  `isLastWindow` exists. A force-close (launch-guard eviction, bulk
+ *  Exit-All) is a different intent: the caller already wants the
+ *  window gone, and leaving a stray dashboard window behind after a
+ *  swap-installs flow is noise. Force-close therefore skips the
+ *  detach branch and falls through to the normal teardown. */
+export function shouldDetachLastInstallWindowToDashboard(
+  isInstallHostWindow: boolean,
+  hasEntry: boolean,
+  isLastWindow: boolean,
+  forceClose: boolean,
+): boolean {
+  return isInstallHostWindow && hasEntry && isLastWindow && !forceClose
+}
 
 /** Constants reused by both host modes. Defined here because they only
  *  matter in the context of host-window construction. */
@@ -70,8 +133,22 @@ const CHOOSER_HOST_BOUNDS_KEY = 'chooser'
  *  `index.ts` (or other modules pending later extractions). Set once
  *  at the top of `whenReady` via `setHostWindowFactories(...)`. */
 export interface HostWindowFactories {
-  /** Async beforeunload-style consult through the panel renderer. */
-  consultPanelRendererClose: (panelView: WebContentsView | null | undefined) => Promise<boolean>
+  /** Async beforeunload-style consult through the panel renderer. Only
+   *  resolves the in-flight Tier 2/3 overlay cancel-prompt:
+   *    - `cleared`  — no overlay / user confirmed cancelling one → proceed
+   *    - `aborted`  — user dismissed the cancel-prompt → keep window open
+   *    - `defer`    — no overlay; main owns the close-window confirm
+   *  Falls back to `defer` when the renderer is unreachable. */
+  consultPanelRendererClose: (
+    panelView: WebContentsView | null | undefined,
+  ) => Promise<'cleared' | 'aborted' | 'defer'>
+  /** Shell-level "Close Window" confirm, owned by main so a hidden panel
+   *  renderer can't swallow it. Shared with the Close Window menu entry. */
+  confirmCloseInstanceWindow: (
+    window: BrowserWindow,
+    isLastWindow: boolean,
+    theme: { bg: string; text: string },
+  ) => Promise<boolean>
   /** Detach the install currently bound to a host entry (in-place flip). */
   detachInstallImpl: (entry: ComfyWindowEntry) => void
   /** WeakSet of host windows whose close was pre-cleared by the
@@ -139,6 +216,169 @@ function injectMacPasskeyWarning(childWindow: BrowserWindow): void {
 
   childWindow.webContents.on('dom-ready', inject)
   childWindow.webContents.on('did-navigate-in-page', inject)
+}
+
+/** Credits-checkout popup sizing. A landscape rectangle scaled to the
+ *  parent display's work area: most of the width, a shorter height, so
+ *  the checkout reads as a wide app-sized surface rather than a tall
+ *  dialog. Clamped to a min/max band and to a max aspect ratio so it
+ *  stays horizontal on a large monitor and never shrinks below what the
+ *  checkout content needs on a laptop. */
+const CHECKOUT_MIN_WIDTH = 720
+const CHECKOUT_MAX_WIDTH = 1280
+const CHECKOUT_MIN_HEIGHT = 560
+const CHECKOUT_MAX_HEIGHT = 860
+const CHECKOUT_WIDTH_FRACTION = 0.82
+const CHECKOUT_HEIGHT_FRACTION = 0.82
+/** Keep it a horizontal rectangle: width is at least this × height. */
+const CHECKOUT_MIN_ASPECT = 1.4
+
+/**
+ * Compute centered, work-area-fitted bounds for the checkout popup on
+ * whichever display the parent window currently sits on. Width is a
+ * large fraction of the work area, height a smaller one, both clamped to
+ * the min/max band; then width is widened (within the band) so the
+ * window stays a landscape rectangle. Centered over the parent.
+ * Cross-platform: `screen.workArea` already excludes the macOS menu bar
+ * / Dock and the Windows taskbar.
+ */
+function checkoutPopupBounds(parent: BrowserWindow): Electron.Rectangle {
+  const parentBounds = parent.getBounds()
+  const { workArea } = screen.getDisplayMatching(parentBounds)
+  const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v))
+
+  const height = clamp(
+    Math.round(workArea.height * CHECKOUT_HEIGHT_FRACTION),
+    CHECKOUT_MIN_HEIGHT,
+    Math.min(CHECKOUT_MAX_HEIGHT, workArea.height),
+  )
+  const maxWidth = Math.min(CHECKOUT_MAX_WIDTH, workArea.width)
+  const width = clamp(
+    Math.max(Math.round(workArea.width * CHECKOUT_WIDTH_FRACTION), Math.round(height * CHECKOUT_MIN_ASPECT)),
+    Math.min(CHECKOUT_MIN_WIDTH, maxWidth),
+    maxWidth,
+  )
+
+  // Center over the parent, then nudge fully inside the work area.
+  const cx = parentBounds.x + Math.round((parentBounds.width - width) / 2)
+  const cy = parentBounds.y + Math.round((parentBounds.height - height) / 2)
+  const x = clamp(cx, workArea.x, workArea.x + workArea.width - width)
+  const y = clamp(cy, workArea.y, workArea.y + workArea.height - height)
+  return { x, y, width, height }
+}
+
+/** Max wait for the host reload to paint before closing the popup
+ *  anyway, so a stalled reload can't trap the user on checkout. */
+const CHECKOUT_RELOAD_TIMEOUT_MS = 4000
+
+/**
+ * Wire the credits-checkout popup's lifecycle. The window is frameless
+ * on Windows/Linux and chrome-light on macOS, so we own the dim
+ * backdrop, the close affordances (scrim click, Esc, the ✕ overlay),
+ * and the auto-close/return handling below.
+ */
+function wireCheckoutPopup(
+  childWindow: BrowserWindow,
+  parent: BrowserWindow,
+  hostContents: Electron.WebContents,
+): void {
+  const close = (): void => {
+    if (!childWindow.isDestroyed()) childWindow.close()
+  }
+  // will-redirect and did-navigate both fire for the same return URL.
+  let returning = false
+
+  childWindow.once('ready-to-show', () => {
+    childWindow.show()
+    showCheckoutBackdrop(parent, close)
+    attachCheckoutCloseButton(childWindow, close)
+  })
+  childWindow.once('closed', () => hideCheckoutBackdrop(parent))
+
+  childWindow.webContents.on('before-input-event', (_e, input) => {
+    if (input.type === 'keyDown' && input.key === 'Escape') close()
+  })
+
+  const closeOnReturn = (_e: Electron.Event, targetUrl: string): void => {
+    if (returning || childWindow.isDestroyed() || !isCheckoutReturnUrl(targetUrl)) return
+    returning = true
+    if (hostContents.isDestroyed()) {
+      close()
+      return
+    }
+    // Reload the host (clears the cloud "Upgrade" modal that launched
+    // checkout — it lives in that page's DOM, out of our reach — and
+    // refreshes the balance) underneath the still-open popup + backdrop,
+    // then close only once its fresh frame paints, so the stale modal is
+    // never flashed.
+    let done = false
+    const finish = (): void => {
+      if (done) return
+      done = true
+      close()
+    }
+    hostContents.once('did-stop-loading', finish)
+    setTimeout(finish, CHECKOUT_RELOAD_TIMEOUT_MS)
+    hostContents.reload()
+  }
+
+  childWindow.webContents.on('will-redirect', closeOnReturn)
+  childWindow.webContents.on('did-navigate', closeOnReturn)
+}
+
+/** Inline ✕ button overlaid on the (frameless) checkout popup. The
+ *  checkout page renders its own back/✕ for in-flow navigation, but a
+ *  frameless window has no OS close control, so we float our own in the
+ *  top-right corner that closes the window on click. */
+const CHECKOUT_CLOSE_BUTTON_HTML = `<!doctype html>
+<html><head><meta charset="utf-8"><style>
+  /* Body ignores pointer events so only the button itself is clickable —
+     the rest of this overlay strip lets the checkout page underneath
+     receive clicks. */
+  html,body{margin:0;width:100%;height:100%;background:transparent;overflow:hidden;pointer-events:none}
+  /* The checkout's right pane is white, so the close chip is tuned for a
+     light background: dark glyph on a faint dark chip, deepening on hover. */
+  button{position:fixed;top:10px;right:10px;width:28px;height:28px;border:0;border-radius:8px;cursor:pointer;
+    pointer-events:auto;display:grid;place-items:center;color:rgba(0,0,0,0.55);background:rgba(0,0,0,0.06);font:16px/1 system-ui}
+  button:hover{background:rgba(0,0,0,0.12);color:rgba(0,0,0,0.85)}
+</style></head><body>
+<button id="x" aria-label="Close">✕</button>
+<script>
+  const { ipcRenderer } = require('electron');
+  document.getElementById('x').addEventListener('click', () => ipcRenderer.send('comfy-checkout:close'));
+</script>
+</body></html>`
+
+const CHECKOUT_CLOSE_BUTTON_SIZE = 48
+
+function attachCheckoutCloseButton(childWindow: BrowserWindow, onClose: () => void): void {
+  const overlay = new WebContentsView({
+    webPreferences: { contextIsolation: false, nodeIntegration: true, sandbox: false },
+  })
+  overlay.setBackgroundColor('#00000000')
+  childWindow.contentView.addChildView(overlay)
+  const place = (): void => {
+    if (childWindow.isDestroyed()) return
+    const { width } = childWindow.getContentBounds()
+    overlay.setBounds({
+      x: Math.max(0, width - CHECKOUT_CLOSE_BUTTON_SIZE),
+      y: 0,
+      width: CHECKOUT_CLOSE_BUTTON_SIZE,
+      height: CHECKOUT_CLOSE_BUTTON_SIZE,
+    })
+  }
+  place()
+  childWindow.on('resize', place)
+  void overlay.webContents
+    .loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(CHECKOUT_CLOSE_BUTTON_HTML)}`)
+    .catch(() => {})
+
+  const closeId = overlay.webContents.id
+  const handler = (event: Electron.IpcMainEvent): void => {
+    if (event.sender.id === closeId) onClose()
+  }
+  ipcMain.on('comfy-checkout:close', handler)
+  childWindow.once('closed', () => ipcMain.removeListener('comfy-checkout:close', handler))
 }
 
 /**
@@ -509,6 +749,12 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
         'comfy-titlebar:preview-mode-changed',
         entry.previewInstallationId !== null,
       )
+      if (!entry.comfyView.webContents.isDestroyed()) {
+        titleBarView.webContents.send(
+          'comfy-titlebar:zoom-changed',
+          entry.comfyView.webContents.getZoomLevel(),
+        )
+      }
     }
     // Both modes get the app-update pill and the downloads tray.
     // The install-update pill is install-backed only — chooser hosts
@@ -559,16 +805,83 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
       try {
         const entry = comfyWindows.get(windowKey)
         const skipConsult = fx.preClearedClose.has(comfyWindow)
-        // Hide any open title-bar popup before the panel-side
-        // quit-confirm fires. The popup is a sibling WebContentsView
-        // stacked above the panel view in the same BrowserWindow, so
-        // a panel-rendered `modal.confirm()` would otherwise sit
-        // behind the (visually opaque) popup and be unreachable.
+        // The OS ✕ must never quit the app. When this is the only live
+        // host window, an install-backed host returns to the dashboard
+        // (stop the instance, flip in place) instead of being destroyed;
+        // a chooser host is destroyed and the app quits via
+        // `window-all-closed`, which is the one sanctioned exit. The
+        // renderer also uses `isLastWindow` to tailor its close-confirm
+        // copy.
+        const isLastWindow =
+          Array.from(comfyWindows.values()).filter((e) => !e.window.isDestroyed()).length <= 1
+        // Hide any open title-bar popup before any confirm fires. The
+        // popup is a sibling WebContentsView stacked above the panel view
+        // in the same BrowserWindow, so a modal would otherwise sit behind
+        // the (visually opaque) popup and be unreachable.
         if (!skipConsult) hideTitlePopupForParent(comfyWindow)
-        const cleared = skipConsult ? true : await fx.consultPanelRendererClose(entry?.panelView)
-        if (!cleared) return
+        // Step 1 — let the renderer handle any in-flight Tier 2/3 overlay
+        // (its cancel-prompt). With no overlay it returns `defer`: the
+        // close-window confirm is main's job, because a running instance's
+        // panel view is hidden behind the ComfyUI view and can't be relied
+        // on to surface a prompt (the ✕ was closing silently for exactly
+        // that reason). `skipConsult` (the menu pre-cleared this close) and
+        // chooser hosts skip straight through.
+        //
+        // Every renderer-cancel path below re-checks `preClearedClose`
+        // before bailing — a force-close (launch-guard eviction, bulk
+        // Exit-All) can land mid-consult/mid-confirm, and the explicit
+        // caller-side consent must override a per-window cancel so the
+        // caller's awaiting flow can move on.
+        const consult: CloseConsultResult = skipConsult
+          ? 'cleared'
+          : await fx.consultPanelRendererClose(entry?.panelView)
+        if (shouldBailAfterConsult(consult, fx.preClearedClose.has(comfyWindow))) return
+        // Step 2 — for an install-backed host with no overlay, main shows
+        // the same Close Window confirm as the menu item. The dashboard
+        // closes with no prompt.
+        const entryForClose = comfyWindows.get(windowKey)
+        const isInstallHostWindow = !!entryForClose && !isChooserHost(entryForClose)
+        if (
+          shouldShowInstallCloseConfirm(
+            consult,
+            shouldConfirmKillForEntry(entryForClose),
+            fx.preClearedClose.has(comfyWindow),
+          )
+          && entryForClose
+        ) {
+          const confirmed = await fx.confirmCloseInstanceWindow(
+            comfyWindow,
+            isLastWindow,
+            entryForClose.lastTheme,
+          )
+          if (shouldBailAfterCloseConfirm(confirmed, fx.preClearedClose.has(comfyWindow))) return
+        }
+        // Capture the force-close intent before we drain the flag.
+        // Either the initial snapshot (`skipConsult`) or a late-arriving
+        // pre-clear (force-close that landed mid-consult/mid-modal) is
+        // enough to mark this as caller-driven.
+        const forceClose = skipConsult || fx.preClearedClose.has(comfyWindow)
         fx.preClearedClose.delete(comfyWindow)
         if (comfyWindow.isDestroyed()) return
+        // Last install-backed window → return to the dashboard rather
+        // than tear down + quit. `detachInstall` runs the same
+        // `_installCleanup` (stopRunning, listeners off) the teardown
+        // below would, then flips the window to chooser mode in place.
+        // Force-close skips this — the caller wants the window gone
+        // (e.g. launch-guard swapping installs shouldn't leave a stray
+        // dashboard window behind).
+        if (
+          shouldDetachLastInstallWindowToDashboard(
+            isInstallHostWindow,
+            !!entryForClose,
+            isLastWindow,
+            forceClose,
+          )
+          && entryForClose
+        ) {
+          entryForClose.detachInstall()
+          return
+        }
         // Each cleanup step is wrapped via `safeTeardown` so a single
         // throw can't skip the BrowserWindow.destroy() at the end.
         // Without this, an exception in (e.g.) the comfy webContents
@@ -749,7 +1062,22 @@ export function buildComfyView(
   webPreferences: Electron.WebPreferences,
   windowKey: number,
 ): WebContentsView {
-  const comfyView = new WebContentsView({ webPreferences })
+  /**
+   * Map the `monospace` generic to a real face. Electron leaves it unmapped,
+   * so ComfyUI's prompt textarea renders proportional on Desktop (monospace on web).
+   */
+  const defaultFontFamily: Electron.WebPreferences['defaultFontFamily'] = {
+    ...webPreferences.defaultFontFamily,
+    monospace:
+      process.platform === 'darwin'
+        ? 'Menlo'
+        : process.platform === 'win32'
+          ? 'Consolas'
+          : 'monospace',
+  }
+  const comfyView = new WebContentsView({
+    webPreferences: { ...webPreferences, defaultFontFamily },
+  })
   comfyView.setBackgroundColor(COMFY_BG)
 
   const comfyContents = comfyView.webContents
@@ -760,10 +1088,18 @@ export function buildComfyView(
   // the browser. `attachSessionDownloadHandler` is idempotent.
   attachSessionDownloadHandler(comfyContents.session)
 
+  // Set by the window-open handler immediately before the matching
+  // `did-create-window` fires (synchronous pairing), then reset there so
+  // it can never leak to a later non-checkout popup.
+  let nextPopupIsCheckout = false
+
   comfyContents.on('did-create-window', (childWindow) => {
+    const isCheckout = nextPopupIsCheckout
+    nextPopupIsCheckout = false
     childWindow.setIcon(APP_ICON)
     if (process.platform !== 'darwin') childWindow.removeMenu()
     injectMacPasskeyWarning(childWindow)
+    if (isCheckout) wireCheckoutPopup(childWindow, comfyWindow, comfyContents)
   })
   comfyContents.setWindowOpenHandler(({ url: childUrl }) => {
     // Intercept Firebase auth popups (`<authDomain>/__/auth/handler?...`)
@@ -785,6 +1121,31 @@ export function buildComfyView(
         },
       })
       return { action: 'deny' }
+    }
+    if (isCheckoutUrl(childUrl)) {
+      // `checkout.comfy.org` forbids iframing, so checkout has to be a
+      // real popup — styled to read as in-app (parented, centered, sized
+      // to the work area) and wired up in `wireCheckoutPopup`. Frameless
+      // on Windows/Linux only: there the checkout page's own ✕/back is
+      // enough, but a frameless `window.open` child on macOS can't be
+      // dragged/closed reliably, so it keeps its frame. preload:
+      // undefined strips our title-bar bridge.
+      nextPopupIsCheckout = true
+      const bounds = checkoutPopupBounds(comfyWindow)
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: {
+          parent: comfyWindow,
+          ...bounds,
+          minWidth: CHECKOUT_MIN_WIDTH,
+          minHeight: CHECKOUT_MIN_HEIGHT,
+          frame: process.platform !== 'darwin' ? false : undefined,
+          backgroundColor: COMFY_BG,
+          title: 'Purchase Credits',
+          show: false,
+          webPreferences: { preload: undefined },
+        },
+      }
     }
     if (shouldOpenInPopup(childUrl)) {
       // preload: undefined strips our title-bar bridge so OAuth/cloud-login
@@ -909,7 +1270,7 @@ export function applyChooserHostThemeToAll(): void {
  *  The comfyView still exists so `layoutViews` doesn't have to
  *  special-case its absence, but is sized to zero and never made
  *  visible. */
-export function openChooserHostWindow(): BrowserWindow {
+export function openChooserHostWindow(initialPanel: ComfyPanelKey = 'comfy'): BrowserWindow {
   // Install-less wrapper. The shared `createHostWindow()` builds
   // the BrowserWindow + 2 views skeleton, layoutViews, macOS
   // fullscreen, bounds-save listeners, close / closed handlers,
@@ -928,7 +1289,7 @@ export function openChooserHostWindow(): BrowserWindow {
   // invisible.
   const initialChooserTheme = getChooserHostTheme()
 
-  const { comfyWindow, entry } = createHostWindow({
+  const { comfyWindow, entry, titleBarView } = createHostWindow({
     windowTitle: CHOOSER_HOST_WINDOW_TITLE,
     boundsKey: CHOOSER_HOST_BOUNDS_KEY,
     initialTheme: initialChooserTheme,
@@ -971,18 +1332,35 @@ export function openChooserHostWindow(): BrowserWindow {
 
   entry.coldStartPendingReveal = true
 
-  ensurePanelView(entry.windowKey, entry, 'chooser')
+  // Seed the requested initial panel (default 'comfy' → chooser body for
+  // an install-less host). "+ New Instance" passes 'new-install' so the
+  // fresh window boots straight into the wizard with no dashboard flash.
+  entry.activePanel = initialPanel
+  ensurePanelView(entry.windowKey, entry, computeBodyMode(entry))
 
   entry.layoutViews()
 
   const revealKey = entry.windowKey
-  setTimeout(() => {
-    const live = comfyWindows.get(revealKey)
-    if (!live?.coldStartPendingReveal || live.window.isDestroyed()) return
-    live.coldStartPendingReveal = false
-    live.layoutViews()
-    bringToFront(live.window)
-  }, 10_000)
+
+  // Fast-path reveal: the title-bar bundle is ~25 KB and finishes its
+  // first paint in well under 200 ms even on a Windows cold start,
+  // versus ~700-1000 ms for the 585 KB panel bundle. Revealing on the
+  // titlebar's `dom-ready` lets the user see a fully chrome'd window
+  // (file menu, install pill, downloads icon) almost immediately
+  // after clicking File → New Window; the panel body underneath
+  // paints the chooser surface colour via its `setBackgroundColor`
+  // until panel.html finishes booting and Vue mounts. The
+  // panelView's `did-finish-load` handler in `ensurePanelView` is
+  // the fallback if titlebar load is delayed past the panel's.
+  titleBarView.webContents.once('dom-ready', () => revealColdStartHostIfPending(revealKey))
+
+  // Final backstop: if both views somehow fail to load, force a
+  // reveal so the window doesn't stay invisible forever. 2 s is
+  // generous relative to observed cold-start times but well short
+  // of the user noticing the window is missing. Cleared on close
+  // so a fast-close window doesn't leave the closure pending.
+  const backstopTimer = setTimeout(() => revealColdStartHostIfPending(revealKey), 2_000)
+  comfyWindow.once('closed', () => clearTimeout(backstopTimer))
 
   return comfyWindow
 }

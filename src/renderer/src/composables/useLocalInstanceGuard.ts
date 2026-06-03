@@ -32,6 +32,10 @@ export function useLocalInstanceGuard() {
     }
     for (const [id, instance] of sessionStore.launchingInstances) {
       if (id === targetId) continue
+      // Skip if the same install already came in via runningInstances
+      // above — an install in the brief overlap between "launching" and
+      // "running" would otherwise list (and close) twice.
+      if (runningLocal.some((r) => r.id === id)) continue
       const inst = installationStore.installations.find((i) => i.id === id)
       if (!inst || inst.sourceCategory === 'local') {
         runningLocal.push({ id, name: instance.installationName })
@@ -40,29 +44,57 @@ export function useLocalInstanceGuard() {
 
     if (runningLocal.length === 0) return true
 
-    const names = runningLocal.map((r) => r.name).join(', ')
-
-    // Two non-cancel actions in the footer — `secondary` is "Close
-    // Running & Launch" (destructive: stops the other instance),
-    // `primary` is "Launch Alongside" (additive). Header ✕ carries
-    // the dismiss affordance since the footer is full.
+    // Show the full list of instances that will be stopped via a
+    // structured detail block (mirrors the Quit Desktop confirm pattern
+    // in main/host/detach.ts → confirmAndCloseAllHostWindows). Inline
+    // `Close "{name}"` text was misleading once 2+ instances were
+    // running because it visually emphasized one name even though the
+    // primary action stopped them all.
+    //
+    // Two non-cancel actions in the footer. The primary (rightmost) is
+    // "Close & Launch" — the expected path when the user wants to
+    // switch instances; the secondary is "Run All" (additive: runs them
+    // all side by side). Header ✕ carries the dismiss affordance since
+    // the footer is full. Both use brand tones (no red) — closing the
+    // prior instance to launch a new one is normal, not destructive.
     const choice = await dialogs.confirm({
       title: t('launch.instanceRunningTitle'),
-      message: t('launch.instanceRunningMessage', { name: names }),
-      confirmLabel: t('launch.instanceRunningProceed'),
+      message: t('launch.instanceRunningMessage'),
+      messageDetails: [
+        { label: t('launch.instanceRunningListLabel'), items: runningLocal.map((r) => r.name) },
+      ],
+      confirmLabel: t('launch.instanceRunningReplace'),
       tone: 'primary',
-      secondaryLabel: t('launch.instanceRunningReplace'),
-      secondaryTone: 'danger',
+      secondaryLabel: t('launch.instanceRunningProceed'),
+      secondaryTone: 'default',
       showCancel: false,
       showCloseIcon: true,
     })
 
-    if (choice === 'secondary') {
-      await Promise.all(runningLocal.map((r) => window.api.stopComfyUI(r.id)))
+    // Primary → close the running instance(s), then launch.
+    // `stopComfyUI` awaits the actual process kill so the port is free
+    // before the new launch starts; `closeComfyWindow({ skipConfirm })`
+    // then retires the host window so the user doesn't get left on
+    // ComfyLifecycleView's stopped surface for an instance they didn't
+    // choose to revisit. The close call is fire-and-forget — its
+    // teardown can't gate the launch because a concurrent OS-X close
+    // handler with a pending user prompt could otherwise block it.
+    // The `.catch` keeps an IPC reject (e.g. context-bridge disconnect)
+    // from surfacing as an unhandled promise rejection in the renderer.
+    if (choice === 'primary') {
+      await Promise.all(
+        runningLocal.map(async (r) => {
+          await window.api.stopComfyUI(r.id)
+          window.api.closeComfyWindow(r.id, { skipConfirm: true }).catch((err) => {
+            console.warn('useLocalInstanceGuard: closeComfyWindow failed', err)
+          })
+        }),
+      )
       return true
     }
 
-    return choice === 'primary'
+    // Secondary → launch alongside the running instance(s).
+    return choice === 'secondary'
   }
 
   return { checkBeforeLaunch }

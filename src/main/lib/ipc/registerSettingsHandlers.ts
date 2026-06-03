@@ -1,8 +1,14 @@
 import {
-  ipcMain, nativeTheme,
-  sources, settings, i18n,
-  getAppVersion, resolveTheme,
-  _onLocaleChanged, _onThemeChanged, _broadcastToRenderer,
+  ipcMain,
+  nativeTheme,
+  sources,
+  settings,
+  i18n,
+  getAppVersion,
+  resolveTheme,
+  _onLocaleChanged,
+  _onThemeChanged,
+  _broadcastToRenderer
 } from './shared'
 import { updateTitleBarOverlay } from '../titleBarOverlay'
 import * as mainTelemetry from '../telemetry'
@@ -19,17 +25,32 @@ import type { SettingsSection } from '../../../types/ipc'
  *  path without going through IPC. */
 export function buildSettingsSections(): SettingsSection[] {
   const s = settings.getAll()
+  // The tooltip (info-icon hover) explains what the toggle does in
+  // either state. The inline description only appears once the toggle
+  // is ON so it reads as "here's what's currently in use", not "here's
+  // what will happen if you flip this".
   const chineseMirrorsField = {
-    id: 'useChineseMirrors', label: i18n.t('settings.useChineseMirrors'), type: 'boolean' as const, value: s.useChineseMirrors === true,
-    ...(s.useChineseMirrors === true ? { description: i18n.t('settings.chineseMirrorsDescription') } : {}),
+    id: 'useChineseMirrors',
+    label: i18n.t('settings.useChineseMirrors'),
+    type: 'boolean' as const,
+    value: s.useChineseMirrors === true,
+    tooltip: i18n.t('settings.chineseMirrorsDescription'),
+    ...(s.useChineseMirrors === true
+      ? { description: i18n.t('settings.chineseMirrorsDescription') }
+      : {})
   }
   const isChinese = i18n.getLocale().startsWith('zh')
   const appSections: SettingsSection[] = [
     {
       title: i18n.t('settings.general'),
       fields: [
-        { id: 'language', label: i18n.t('settings.language'), type: 'select', value: s.language || i18n.getLocale(),
-          options: i18n.getAvailableLocales() },
+        {
+          id: 'language',
+          label: i18n.t('settings.language'),
+          type: 'select',
+          value: s.language || i18n.getLocale(),
+          options: i18n.getAvailableLocales()
+        },
         // Theme picker is hidden — the app is dark-only across every
         // title-bar surface (Vue pills, dropdown popups, tooltips, OS
         // overlay). The underlying `theme` setting key + the
@@ -40,19 +61,29 @@ export function buildSettingsSections(): SettingsSection[] {
         // controls whether updates install silently vs prompt the
         // user. The `autoUpdate` key is retained in the schema (no
         // UI) for a future setting.
-        { id: 'autoInstallUpdates', label: i18n.t('settings.autoInstallUpdates'), type: 'boolean', value: s.autoInstallUpdates !== false },
+        {
+          id: 'autoInstallUpdates',
+          label: i18n.t('settings.autoInstallUpdates'),
+          type: 'boolean',
+          value: s.autoInstallUpdates !== false
+        },
         // The `onAppClose` field is hidden while docking-to-tray is
         // disabled (see main/index.ts createTray()). Restore this
         // entry — and the 'tray' default in settings.ts — when the
         // docked-app flow comes back.
-        ...(isChinese ? [chineseMirrorsField] : []),
-      ],
+        ...(isChinese ? [chineseMirrorsField] : [])
+      ]
     },
     {
       title: i18n.t('settings.telemetry'),
       fields: [
-        { id: 'telemetryEnabled', label: i18n.t('settings.telemetryEnabled'), type: 'boolean', value: s.telemetryEnabled !== false },
-      ],
+        {
+          id: 'telemetryEnabled',
+          label: i18n.t('settings.telemetryEnabled'),
+          type: 'boolean',
+          value: s.telemetryEnabled !== false
+        }
+      ]
     },
     {
       // The contents are the on-disk cache (model files, wheels,
@@ -61,23 +92,43 @@ export function buildSettingsSections(): SettingsSection[] {
       // user actually controls here.
       title: i18n.t('settings.cache'),
       fields: [
-        { id: 'cacheDir', label: i18n.t('settings.cacheDir'), type: 'path', value: s.cacheDir, openable: true },
-        { id: 'maxCachedFiles', label: i18n.t('settings.maxCachedFiles'), type: 'number', value: s.maxCachedFiles, min: 1, max: 50 },
-      ],
+        {
+          id: 'cacheDir',
+          label: i18n.t('settings.cacheDir'),
+          type: 'path',
+          value: s.cacheDir,
+          openable: true
+        },
+        {
+          id: 'maxCachedFiles',
+          label: i18n.t('settings.maxCachedFiles'),
+          type: 'number',
+          value: s.maxCachedFiles,
+          min: 1,
+          max: 50
+        }
+      ]
     },
     {
       title: i18n.t('settings.advanced'),
       fields: [
-        { id: 'pypiMirror', label: i18n.t('settings.pypiMirror'), type: 'text' as const, value: s.pypiMirror || '',
-          placeholder: i18n.t('settings.pypiMirrorPlaceholder') },
-        ...(!isChinese ? [chineseMirrorsField] : []),
-      ],
-    },
+        {
+          id: 'pypiMirror',
+          label: i18n.t('settings.pypiMirror'),
+          type: 'text' as const,
+          value: s.pypiMirror || '',
+          placeholder: i18n.t('settings.pypiMirrorPlaceholder')
+        },
+        ...(!isChinese ? [chineseMirrorsField] : [])
+      ]
+    }
   ]
   const sourceSections = sources.flatMap((src) => {
     const plugin = src as unknown as Record<string, unknown>
     if (typeof plugin.getSettingsSections === 'function') {
-      return (plugin.getSettingsSections as (s: Record<string, unknown>) => SettingsSection[])(s as Record<string, unknown>)
+      return (plugin.getSettingsSections as (s: Record<string, unknown>) => SettingsSection[])(
+        s as Record<string, unknown>
+      )
     }
     return []
   })
@@ -85,12 +136,22 @@ export function buildSettingsSections(): SettingsSection[] {
   const aboutSection: SettingsSection = {
     title: i18n.t('settings.about'),
     fields: [
-      { id: 'about-version', label: i18n.t('settings.version'), type: 'text', value: version, readonly: true },
-      { id: 'about-platform', label: i18n.t('settings.platform'), type: 'text', value: `${process.platform} (${process.arch})`, readonly: true },
+      {
+        id: 'about-version',
+        label: i18n.t('settings.version'),
+        type: 'text',
+        value: version,
+        readonly: true
+      },
+      {
+        id: 'about-platform',
+        label: i18n.t('settings.platform'),
+        type: 'text',
+        value: `${process.platform} (${process.arch})`,
+        readonly: true
+      }
     ],
-    actions: [
-      { label: 'GitHub', url: 'https://github.com/Comfy-Org/ComfyUI-Desktop-2.0-Beta' },
-    ],
+    actions: [{ label: 'GitHub', url: 'https://github.com/Comfy-Org/ComfyUI-Desktop-2.0-Beta' }]
   }
   return [...appSections, ...sourceSections, aboutSection]
 }
@@ -104,10 +165,15 @@ export function buildModelsPayload(): { systemDefault: string; sections: Setting
       {
         title: i18n.t('models.directories'),
         fields: [
-          { id: 'modelsDirs', label: i18n.t('models.directoriesDesc'), type: 'pathList', value: s.modelsDirs || [] },
-        ],
-      },
-    ],
+          {
+            id: 'modelsDirs',
+            label: i18n.t('models.directoriesDesc'),
+            type: 'pathList',
+            value: s.modelsDirs || []
+          }
+        ]
+      }
+    ]
   }
 }
 
@@ -118,10 +184,24 @@ export function buildMediaSections(): SettingsSection[] {
     {
       title: i18n.t('media.sharedDirs'),
       fields: [
-        { id: 'inputDir', label: i18n.t('media.inputDir'), type: 'path' as const, value: s.inputDir || settings.defaults.inputDir, openable: true, tooltip: i18n.t('tooltips.inputDir') },
-        { id: 'outputDir', label: i18n.t('media.outputDir'), type: 'path' as const, value: s.outputDir || settings.defaults.outputDir, openable: true, tooltip: i18n.t('tooltips.outputDir') },
-      ],
-    },
+        {
+          id: 'inputDir',
+          label: i18n.t('media.inputDir'),
+          type: 'path' as const,
+          value: s.inputDir || settings.defaults.inputDir,
+          openable: true,
+          tooltip: i18n.t('tooltips.inputDir')
+        },
+        {
+          id: 'outputDir',
+          label: i18n.t('media.outputDir'),
+          type: 'path' as const,
+          value: s.outputDir || settings.defaults.outputDir,
+          openable: true,
+          tooltip: i18n.t('tooltips.outputDir')
+        }
+      ]
+    }
   ]
 }
 
@@ -144,7 +224,13 @@ export function applySettingSet(key: string, value: unknown): void {
   }
   if (key === 'telemetryEnabled') {
     _broadcastToRenderer('telemetry-setting-changed', value)
-    mainTelemetry.setConsent(value !== false)
+    // Three-state: explicit true => granted, explicit false => denied,
+    // anything else (null / undefined) => undecided. Keeps `null != false`
+    // so a Desktop-1 migrator who has not been prompted yet stays
+    // suppressed instead of being collapsed into "opted in."
+    const state: mainTelemetry.ConsentState =
+      value === true ? 'granted' : value === false ? 'denied' : 'undecided'
+    mainTelemetry.setConsentState(state)
   }
   if (key === 'autoInstallUpdates' || key === 'autoUpdate') {
     // Re-broadcast the cached app-update state so a pending 'ready'

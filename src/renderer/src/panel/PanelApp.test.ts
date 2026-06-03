@@ -20,13 +20,6 @@ vi.mock('../composables/useModal', () => ({
 }))
 
 // Stub the heavy children so we can assert which sub-panel is rendered.
-vi.mock('../views/SettingsView.vue', () => ({
-  default: {
-    name: 'SettingsView',
-    template: '<div data-testid="settings-view" />',
-    methods: { loadSettings: vi.fn() },
-  },
-}))
 vi.mock('../views/DetailModal.vue', () => ({
   default: {
     name: 'DetailModal',
@@ -63,13 +56,6 @@ vi.mock('./ComfyLifecycleView.vue', () => ({
     props: ['installation', 'installationId'],
     template:
       '<div data-testid="comfy-lifecycle" :data-installation-id="installationId" />',
-  },
-}))
-vi.mock('../views/DirectoriesView.vue', () => ({
-  default: {
-    name: 'DirectoriesView',
-    template: '<div data-testid="directories-view" />',
-    methods: { loadAll: vi.fn(), loadModels: vi.fn(), loadMedia: vi.fn() },
   },
 }))
 vi.mock('../views/ChooserView.vue', () => ({
@@ -383,8 +369,6 @@ describe('PanelApp', () => {
     const wrapper = mountPanel()
     await flushPromises()
     expect(wrapper.find('[data-testid="comfy-lifecycle"]').exists()).toBe(true)
-    // Page modals (settings / directories) only mount when explicitly opened.
-    expect(wrapper.find('[data-testid="settings-view"]').exists()).toBe(false)
   })
 
 it('ignores unknown panel keys from onPanelSwitch', async () => {
@@ -395,7 +379,6 @@ it('ignores unknown panel keys from onPanelSwitch', async () => {
     mockState.panelSwitchCallbacks.forEach((cb) => cb({ panel: 'not-a-real-panel' }))
     await flushPromises()
     expect(wrapper.find('[data-testid="comfy-lifecycle"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="settings-view"]').exists()).toBe(false)
   })
 
   it('refetches the installation when onInstallationsChanged fires', async () => {
@@ -1042,47 +1025,34 @@ it('does NOT fire desktop2.view.opened when a panel-switch IPC re-confirms the a
     })
   })
 
-  describe('chooser host close consult', () => {
-    it('shows the Quit Desktop confirm on the chooser ✕ and clears when confirmed', async () => {
-      window.history.replaceState({}, '', '/?panel=chooser&firstUseCompleted=true')
-      mockModal.confirm.mockResolvedValueOnce(true)
+  describe('window close consult', () => {
+    // With no Tier 2/3 overlay open, the renderer no longer confirms — it
+    // defers, and main owns the Close Window / dashboard / quit decision
+    // (the panel renderer is unreliable behind a running ComfyUI view).
+    it('defers an install-backed ✕ to main when no overlay is open (no renderer modal)', async () => {
+      // Default URL already set in beforeEach: installationId=test-id
       mountPanel()
       await flushPromises()
 
       mockState.closeRequestCallbacks.forEach((cb) => cb({ requestId: 'req-1' }))
       await flushPromises()
 
-      expect(mockModal.confirm).toHaveBeenCalledWith(
-        expect.objectContaining({ title: 'dashboard.confirmQuit.title' }),
-      )
+      expect(mockModal.confirm).not.toHaveBeenCalled()
       const api = (window as unknown as { api: { respondCloseRequest: ReturnType<typeof vi.fn> } }).api
-      expect(api.respondCloseRequest).toHaveBeenCalledWith({ requestId: 'req-1', cleared: true })
+      expect(api.respondCloseRequest).toHaveBeenCalledWith({ requestId: 'req-1', defer: true })
     })
 
-    it('keeps the window open when the user cancels the Quit Desktop confirm', async () => {
+    it('defers a dashboard ✕ to main as well (no renderer modal)', async () => {
       window.history.replaceState({}, '', '/?panel=chooser&firstUseCompleted=true')
-      mockModal.confirm.mockResolvedValueOnce(false)
       mountPanel()
       await flushPromises()
 
       mockState.closeRequestCallbacks.forEach((cb) => cb({ requestId: 'req-2' }))
       await flushPromises()
 
-      const api = (window as unknown as { api: { respondCloseRequest: ReturnType<typeof vi.fn> } }).api
-      expect(api.respondCloseRequest).toHaveBeenCalledWith({ requestId: 'req-2', cleared: false })
-    })
-
-    it('clears silently on install-backed host ✕ with no overlay (no Quit confirm)', async () => {
-      // Default URL already set in beforeEach: installationId=test-id
-      mountPanel()
-      await flushPromises()
-
-      mockState.closeRequestCallbacks.forEach((cb) => cb({ requestId: 'req-3' }))
-      await flushPromises()
-
       expect(mockModal.confirm).not.toHaveBeenCalled()
       const api = (window as unknown as { api: { respondCloseRequest: ReturnType<typeof vi.fn> } }).api
-      expect(api.respondCloseRequest).toHaveBeenCalledWith({ requestId: 'req-3', cleared: true })
+      expect(api.respondCloseRequest).toHaveBeenCalledWith({ requestId: 'req-2', defer: true })
     })
   })
 })

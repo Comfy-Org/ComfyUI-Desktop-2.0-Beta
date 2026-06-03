@@ -14,12 +14,19 @@ interface ActiveSession {
 interface ErrorInstance {
   installationName: string
   exitCode?: number | string
+  /** POSIX signal name (e.g. `'SIGKILL'`) when the ComfyUI child process
+   *  was killed by signal. Absent on a normal crash with a non-zero exit
+   *  code and on Windows TerminateProcess paths. */
+  signal?: string
   message?: string
   /** Scrubbed tail of the failed process's stderr, if main captured one
    *  (only set on `crashed=true` exits — operation failures stay
    *  message-only). The lifecycle view renders this inline so the user
    *  doesn't have to dig into the log file to see what blew up. */
   lastStderr?: string
+  /** Wall-clock ms when the crash was first recorded. Used to measure
+   *  crash-to-relaunch latency on `desktop2.instance.relaunched_after_crash`. */
+  crashedAtMs?: number
 }
 
 export const useSessionStore = defineStore('session', () => {
@@ -138,9 +145,11 @@ export const useSessionStore = defineStore('session', () => {
     }
 
     cleanups.push(
-      window.api.onInstanceLaunching((data: { installationId: string; installationName: string }) => {
-        launchingInstances.set(data.installationId, { installationName: data.installationName })
-      }),
+      window.api.onInstanceLaunching(
+        (data: { installationId: string; installationName: string }) => {
+          launchingInstances.set(data.installationId, { installationName: data.installationName })
+        }
+      ),
       window.api.onInstanceLaunchFailed((data: { installationId: string }) => {
         launchingInstances.delete(data.installationId)
       }),
@@ -175,7 +184,9 @@ export const useSessionStore = defineStore('session', () => {
           errorInstances.set(data.installationId, {
             installationName: data.installationName,
             exitCode: data.exitCode,
+            signal: data.signal,
             lastStderr: data.lastStderr,
+            crashedAtMs: Date.now()
           })
         }
       })
@@ -214,6 +225,6 @@ export const useSessionStore = defineStore('session', () => {
     clearSession,
     appendOutput,
     init,
-    dispose,
+    dispose
   }
 })

@@ -10,14 +10,7 @@ import {
   _getPublicSessions,
   stopRunning,
 } from './shared'
-import {
-  handleRemove, handleOpenFolder,
-  handleDelete,
-  handleCopy, handleCopyUpdate, handleReleaseUpdate,
-  handleMigrateToStandalone,
-  handleLaunch,
-  handleDelegateToSource,
-} from './sessionActions'
+import { dispatchSessionAction } from './sessionActions'
 import { recordIpcInvocation } from '../e2eOverrides'
 
 export function registerSessionHandlers(): void {
@@ -78,18 +71,6 @@ export function registerSessionHandlers(): void {
       return { ok: false, message: i18n.t('errors.operationInProgress', { operation }) }
     }
 
-    const ctx = { event: _event, installationId, inst, actionData }
-
-    switch (actionId) {
-      case 'remove': return handleRemove(ctx)
-      case 'open-folder': return handleOpenFolder(ctx)
-      case 'delete': return handleDelete(ctx)
-      case 'copy': return handleCopy(ctx)
-      case 'copy-update': return handleCopyUpdate(ctx)
-      case 'release-update': return handleReleaseUpdate(ctx)
-      case 'migrate-to-standalone': return handleMigrateToStandalone(ctx)
-      case 'launch': return handleLaunch(ctx)
-      default: return handleDelegateToSource(ctx, actionId)
-    }
+    return dispatchSessionAction({ event: _event, installationId, inst, actionData }, actionId)
   })
 }

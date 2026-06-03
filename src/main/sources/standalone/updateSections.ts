@@ -6,7 +6,7 @@ import type { ChannelDef } from '../../lib/channel-cards'
 import { formatComfyVersion } from '../../lib/version'
 import type { ComfyVersion } from '../../lib/version'
 import { truncateNotes } from '../../lib/comfyui-releases'
-import { deleteAction, untrackAction, launchAction, openFolderAction } from '../../lib/actions'
+import { deleteAction, untrackAction, launchAction, openFolderAction, renameAction } from '../../lib/actions'
 import { t } from '../../lib/i18n'
 import { buildLaunchSettingsFields, buildSharedPathsField } from '../common/launchSettingsFields'
 import { getVariantLabel, DEFAULT_LAUNCH_ARGS } from './envPaths'
@@ -137,17 +137,23 @@ export function getDetailSections(installation: InstallationRecord): Record<stri
         : ''
       const boldInstalled = `**${installedDisplay}**`
       const boldLatest = `**${latestDisplay}**`
-      const confirmMessage = t(msgKey, {
-        installed: boldInstalled,
-        latest: boldLatest,
-      })
+      // A channel switch reads as "Moving to <channel>" rather than the
+      // upgrade/downgrade version diff — when you change channels the
+      // up/down direction is incidental and frames it confusingly (e.g.
+      // "Roll back…" for a stable switch). Same-channel updates keep the
+      // version-diff / rollback copy.
+      const confirmMessage = isSwitching
+        ? t('channelCards.movingTo', { channel: `**${card.label}**` })
+        : t(msgKey, { installed: boldInstalled, latest: boldLatest })
       actions.push({
         id: 'update-comfyui', label: t('standalone.updateNow'), style: 'primary', enabled: installed,
         tooltip: t('tooltips.updateNow'),
         showProgress: true,
-        progressTitle: isDowngrade
-          ? t('standalone.downgradingTitle', { version: latestDisplay })
-          : t('standalone.updatingTitle', { version: latestDisplay }),
+        progressTitle: isSwitching
+          ? t('channelCards.switchingToTitle', { channel: card.label })
+          : isDowngrade
+            ? t('standalone.downgradingTitle', { version: latestDisplay })
+            : t('standalone.updatingTitle', { version: latestDisplay }),
         // Always carry the explicit target channel. The stored
         // `updateChannel` can be stale (see getEffectiveChannel), so relying
         // on the action handler's fallback to it would pass `--stable` for a
@@ -158,7 +164,7 @@ export function getDetailSections(installation: InstallationRecord): Record<stri
         },
         confirm: {
           title: t('standalone.updateConfirmTitle'),
-          message: switchPrefix + confirmMessage,
+          message: confirmMessage,
           messageDetails: notesDetails,
         },
       })
@@ -217,6 +223,7 @@ export function getDetailSections(installation: InstallationRecord): Record<stri
       pinBottom: true,
       actions: [
         launchAction(installed, !installed ? t('errors.installNotReady') : undefined),
+        renameAction(installation.name),
         { id: 'copy', label: t('actions.copyInstallation'), style: 'default', enabled: installed,
           showProgress: true, progressTitle: t('actions.copyingInstallation'), cancellable: true,
           prompt: {

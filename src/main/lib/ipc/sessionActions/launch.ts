@@ -8,8 +8,9 @@ import {
   COMFY_BOOT_TIMEOUT_MS, SENSITIVE_ARG_RE,
   _onLaunch, _onComfyExited, _onComfyRestarted, _onModelFolderRelaunch,
   _operationAborts, _runningSessions, _pendingPorts,
-  _reservePort, _releasePort, _broadcastToRenderer,
+  _reservePort, _releasePort,
   _addSession, _removeSession,
+  _markLaunching, _clearLaunchingFailed,
   isEffectivelyEmptyInstallDir,
   captureSnapshotIfChanged, getSnapshotCount,
   syncCustomModelFolders, discoverExtraModelFolders,
@@ -34,6 +35,24 @@ import type { WriteStream } from 'fs'
  */
 const DESKTOP_FEATURE_FLAGS: Record<string, string> = {
   show_signin_button: 'true',
+}
+
+/**
+ * Classify a child-process exit as a crash for the launcher's session
+ * lifecycle. Node's `child_process` `exit` event hands back
+ * `(code: number | null, signal: NodeJS.Signals | null)`:
+ *  - Clean exit  → `code === 0, signal === null` (not a crash).
+ *  - Non-zero    → `code !== 0, signal === null` (crash).
+ *  - POSIX kill  → `code === null, signal !== null` (crash — `null !== 0`
+ *                  satisfies the first clause, but the explicit
+ *                  `signal !== null` arm makes the intent legible).
+ *  - Windows TerminateProcess (e.g. Task Manager force-kill) reports a
+ *    numeric code with `signal === null`, falling into the non-zero
+ *    branch — surfaced as a crash because the user didn't go through
+ *    our Stop path.
+ */
+export function isCrashedExit(code: number | null, signal: NodeJS.Signals | null): boolean {
+  return code !== 0 || signal !== null
 }
 
 async function openLogStream(installPath: string): Promise<WriteStream> {
@@ -180,7 +199,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
 
   // Skip port logic entirely
   if (launchCmd.skipPortWait) {
-    _broadcastToRenderer('instance-launching', { installationId, installationName: inst.name })
+    _markLaunching(installationId, inst.name)
     const sendOutput = makeSendOutput(sender, installationId)
     const launchEnv = buildLaunchEnv(inst)
 
@@ -212,13 +231,20 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     const mode = (inst.launchMode as string | undefined) || 'window'
     _addSession(installationId, { proc, port: 0, mode, installationName: inst.name }, Date.now() - launchStartedAt)
 
-    proc.on('exit', (code) => {
+    proc.on('exit', (code, signal) => {
       logStream.end()
-      const crashed = _runningSessions.has(installationId) && code !== 0
+      const crashed = _runningSessions.has(installationId) && isCrashedExit(code, signal)
       const lastStderr = scrubStderr(lastNLines(stderrBuf, 100))
       execTap.flushSummary()
       _removeSession(installationId)
-      const exitedPayload = { installationId, crashed, exitCode: code ?? undefined, installationName: inst.name, lastStderr }
+      const exitedPayload = {
+        installationId,
+        crashed,
+        exitCode: code ?? undefined,
+        signal: signal ?? undefined,
+        installationName: inst.name,
+        lastStderr,
+      }
       if (crashed) recordCrash(exitedPayload)
       if (!sender.isDestroyed()) {
         sender.send('comfy-exited', exitedPayload)
@@ -319,7 +345,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
 
   // Reserve port eagerly
   _reservePort(launchCmd.port!, inst.name)
-  _broadcastToRenderer('instance-launching', { installationId, installationName: inst.name })
+  _markLaunching(installationId, inst.name)
 
   const sessionPath = createSessionPath()
   const launchEnv = buildLaunchEnv(inst, sessionPath)
@@ -433,7 +459,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     logStream.end()
     _releasePort(launchCmd.port!)
     _operationAborts.delete(installationId)
-    _broadcastToRenderer('instance-launch-failed', { installationId })
+    _clearLaunchingFailed(installationId)
     if (launchResult.cancelled) return { ok: false, cancelled: true }
     return { ok: false, message: launchResult.message }
   }
@@ -497,7 +523,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
         logStream.end()
         await killProcessTree(proc)
         _removeSession(installationId)
-        _broadcastToRenderer('instance-launch-failed', { installationId })
+        _clearLaunchingFailed(installationId)
         if (abort.signal.aborted) return { ok: false, cancelled: true }
         return { ok: false, message: (err as Error).message }
       }
@@ -513,7 +539,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
   let currentGetStderr = launchResult.getStderr
 
   function attachExitHandler(p: ChildProcess): void {
-    p.on('exit', (code) => {
+    p.on('exit', (code, signal) => {
       if (rebootModelCheckAbort) {
         rebootModelCheckAbort.abort()
         rebootModelCheckAbort = null
@@ -590,11 +616,18 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
         return
       }
       logStream.end()
-      const crashed = _runningSessions.has(installationId)
+      const crashed = _runningSessions.has(installationId) && isCrashedExit(code, signal)
       const lastStderr = scrubStderr(lastNLines(currentGetStderr(), 100))
       execTap.flushSummary()
       _removeSession(installationId)
-      const exitedPayload = { installationId, crashed, exitCode: code ?? undefined, installationName: inst.name, lastStderr }
+      const exitedPayload = {
+        installationId,
+        crashed,
+        exitCode: code ?? undefined,
+        signal: signal ?? undefined,
+        installationName: inst.name,
+        lastStderr,
+      }
       if (crashed) recordCrash(exitedPayload)
       if (!sender.isDestroyed()) {
         sender.send('comfy-exited', exitedPayload)

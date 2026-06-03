@@ -7,6 +7,7 @@ import GlobalSettingsView from './GlobalSettingsView.vue'
 import ModalDialog from '../components/ModalDialog.vue'
 import DialogHost from '../components/DialogHost.vue'
 import { useModal } from '../composables/useModal'
+import { dismissPickerModals } from './dismissPickerModals'
 import type { DetailSection, SnapshotListData } from '../types/ipc'
 
 /**
@@ -84,6 +85,11 @@ interface PickerSnapshot {
   installs: PickerInstall[]
   activeInstallationId: string | null
   runningInstallationIds: string[]
+  /** Installs mid-launch — hydrated into `sessionStore.launchingInstances`
+   *  in the popup because its preload doesn't expose
+   *  `onInstanceLaunching`. Drives the CTA flip during the launching
+   *  window via `useInstallCta`. */
+  launchingInstallationIds: string[]
   /** Per-row Settings + Snapshots payload for the picker's right
    *  pane. Scoped to the picker's currently-selected install (changes
    *  every time the user clicks a different row; popup tells main via
@@ -91,6 +97,11 @@ interface PickerSnapshot {
    *  mean "no selection / no install path / source failure" — the
    *  picker renders the empty state in that case. */
   selectedInstallationId: string | null
+  /** Bumped only when main intentionally retargets the picker
+   *  selection (open / Manage…). Gates the picker view's "apply
+   *  snapshot selection over my local pick" behaviour so stale
+   *  rebroadcasts can't snap-back after a fast click (issue #788). */
+  pickerSelectionEpoch?: number
   selectedSettings: DetailSection[] | null
   selectedSnapshots: SnapshotListData | null
   storage: PickerStorageSlice
@@ -173,6 +184,12 @@ interface Bridge {
   onWillShow(
     cb: (info: { kind: 'menu' | 'downloads' | 'instance-picker' | 'global-settings' }) => void
   ): () => void
+  /** Fires when main wants the popup renderer to cancel any open
+   *  `useModal` / `useDialogs` entry — e.g. another title-bar dropdown
+   *  is about to preempt an open picker, and we don't want a half-open
+   *  confirm to survive the kind-switch as orphaned Vue state (issue
+   *  #770). */
+  onDismissModals(cb: () => void): () => void
 }
 
 const bridge = (window as unknown as { __comfyTitlePopup?: Bridge }).__comfyTitlePopup
@@ -189,7 +206,9 @@ const pickerSnapshot = ref<PickerSnapshot>({
   installs: [],
   activeInstallationId: null,
   runningInstallationIds: [],
+  launchingInstallationIds: [],
   selectedInstallationId: null,
+  pickerSelectionEpoch: 0,
   selectedSettings: null,
   selectedSnapshots: null,
   storage: { sharedDirectoriesFields: [], modelsDirs: [], modelsSystemDefault: '' }
@@ -266,6 +285,7 @@ let unsubDownloads: (() => void) | undefined
 let unsubInstancePicker: (() => void) | undefined
 let unsubGlobalSettings: (() => void) | undefined
 let unsubWillShow: (() => void) | undefined
+let unsubDismissModals: (() => void) | undefined
 
 /** Sequence counter — only the rAF closure for the most recently
  *  applied config gets to fire `notifyRendered`. Without this guard,
@@ -378,6 +398,14 @@ onMounted(() => {
   unsubWillShow = bridge?.onWillShow(() => {
     /* no-op for now — kept registered for forward compatibility */
   })
+  // Main fires this when the picker is about to be hidden because
+  // another title-bar dropdown (downloads / waffle / global-settings)
+  // was clicked. Resolve any open useModal / useDialogs entries as a
+  // cancel so the kind-switch doesn't leave a half-open confirm
+  // mounted in the reused WebContentsView.
+  unsubDismissModals = bridge?.onDismissModals(() => {
+    dismissPickerModals()
+  })
   window.addEventListener('keydown', handleKeydown)
   // Tell main the renderer is mounted and listening — main flushes any
   // config that was queued before this point.
@@ -421,6 +449,7 @@ onUnmounted(() => {
   unsubInstancePicker?.()
   unsubGlobalSettings?.()
   unsubWillShow?.()
+  unsubDismissModals?.()
   window.removeEventListener('keydown', handleKeydown)
 })
 </script>
