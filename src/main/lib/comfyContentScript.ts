@@ -285,8 +285,8 @@ export function getModelDownloadContentScript(): string {
           var msg = JSON.parse(event.data);
           if (msg.type !== 'executed' || !msg.data || !msg.data.output) return;
           var output = msg.data.output;
-          // Process all known output arrays: images, gifs, audio, video
-          var keys = ['images', 'gifs', 'audio', 'video'];
+          // Process all known output arrays: images, gifs, audio, video, 3d (SaveGLB)
+          var keys = ['images', 'gifs', 'audio', 'video', '3d'];
           for (var k = 0; k < keys.length; k++) {
             var items = output[keys[k]];
             if (!items || !items.length) continue;

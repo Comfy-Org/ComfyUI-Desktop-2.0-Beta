@@ -280,3 +280,63 @@ describe('standalone.getLaunchCommand for adopted Legacy Desktop installs', () =
     expect(cmd!.args!.includes('--user-directory')).toBe(false)
   })
 })
+
+// --- getFieldOptions('variant') — version-display consistency (issue #708) ---
+
+describe('standalone.getFieldOptions variant version display', () => {
+  // The newest R2 standalone bundle ships an OLDER ComfyUI (0.20.1) than the
+  // upstream stable tag the wizard auto-updates to (v0.22.3). Set up that gap.
+  function setupVersionGap() {
+    const { latest, vendorReleases, vendorId } = makeR2Releases(
+      ['v0.20.1-env1'],
+      { comfyuiVersion: '0.20.1' },
+    )
+    mockedFetchJSON.mockImplementation((url: string) => {
+      if (url.includes('latest.json')) return Promise.resolve(latest)
+      return Promise.resolve(vendorReleases[vendorId]!)
+    })
+    return { vendorId }
+  }
+
+  async function getReleaseOption(value: string) {
+    const releaseOptions = await standalone.getFieldOptions!(
+      'release',
+      {},
+      { includeLatestStable: true },
+    )
+    return releaseOptions.find((o) => o.value === value)!
+  }
+
+  it('variant card shows the upstream stable version (not the bundled one) when "Latest Stable" is selected', async () => {
+    const { vendorId } = setupVersionGap()
+    mockedGetLatestStableTag.mockResolvedValue('v0.22.3')
+    const release = await getReleaseOption('latest')
+
+    const variants = await standalone.getFieldOptions!('variant', { release }, {})
+    const card = variants.find((o) => o.value === vendorId)!
+    // The card and the dropdown must agree: both surface 0.22.3.
+    expect(card.description).toContain('ComfyUI 0.22.3')
+    expect(card.description).not.toContain('ComfyUI 0.20.1')
+  })
+
+  it('variant card falls back to the bundled version when the upstream tag is unresolved', async () => {
+    const { vendorId } = setupVersionGap()
+    mockedGetLatestStableTag.mockResolvedValue(null)
+    const release = await getReleaseOption('latest')
+
+    const variants = await standalone.getFieldOptions!('variant', { release }, {})
+    const card = variants.find((o) => o.value === vendorId)!
+    expect(card.description).toContain('ComfyUI 0.20.1')
+  })
+
+  it('variant card shows the bundled version for a pinned (non-latest) release', async () => {
+    const { vendorId } = setupVersionGap()
+    mockedGetLatestStableTag.mockResolvedValue('v0.22.3')
+    const release = await getReleaseOption('v0.20.1-env1')
+
+    const variants = await standalone.getFieldOptions!('variant', { release }, {})
+    const card = variants.find((o) => o.value === vendorId)!
+    // Pinned releases legitimately show the version baked into that env.
+    expect(card.description).toContain('ComfyUI 0.20.1')
+  })
+})

@@ -84,6 +84,11 @@ interface PickerSnapshot {
   installs: PickerInstall[]
   activeInstallationId: string | null
   runningInstallationIds: string[]
+  /** Installs mid-launch — hydrated into `sessionStore.launchingInstances`
+   *  in the popup because its preload doesn't expose
+   *  `onInstanceLaunching`. Drives the CTA flip during the launching
+   *  window via `useInstallCta`. */
+  launchingInstallationIds: string[]
   /** Per-row Settings + Snapshots payload for the picker's right
    *  pane. Scoped to the picker's currently-selected install (changes
    *  every time the user clicks a different row; popup tells main via
@@ -189,6 +194,7 @@ const pickerSnapshot = ref<PickerSnapshot>({
   installs: [],
   activeInstallationId: null,
   runningInstallationIds: [],
+  launchingInstallationIds: [],
   selectedInstallationId: null,
   selectedSettings: null,
   selectedSnapshots: null,

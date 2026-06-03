@@ -8,8 +8,9 @@ import {
   COMFY_BOOT_TIMEOUT_MS, SENSITIVE_ARG_RE,
   _onLaunch, _onComfyExited, _onComfyRestarted, _onModelFolderRelaunch,
   _operationAborts, _runningSessions, _pendingPorts,
-  _reservePort, _releasePort, _broadcastToRenderer,
+  _reservePort, _releasePort,
   _addSession, _removeSession,
+  _markLaunching, _clearLaunchingFailed,
   isEffectivelyEmptyInstallDir,
   captureSnapshotIfChanged, getSnapshotCount,
   syncCustomModelFolders, discoverExtraModelFolders,
@@ -219,7 +220,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
 
   // Skip port logic entirely
   if (launchCmd.skipPortWait) {
-    _broadcastToRenderer('instance-launching', { installationId, installationName: inst.name })
+    _markLaunching(installationId, inst.name)
     const sendOutput = makeSendOutput(sender, installationId)
     const launchEnv = buildLaunchEnv(inst)
 
@@ -365,7 +366,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
 
   // Reserve port eagerly
   _reservePort(launchCmd.port!, inst.name)
-  _broadcastToRenderer('instance-launching', { installationId, installationName: inst.name })
+  _markLaunching(installationId, inst.name)
 
   const sessionPath = createSessionPath()
   const launchEnv = buildLaunchEnv(inst, sessionPath)
@@ -479,7 +480,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     logStream.end()
     _releasePort(launchCmd.port!)
     _operationAborts.delete(installationId)
-    _broadcastToRenderer('instance-launch-failed', { installationId })
+    _clearLaunchingFailed(installationId)
     if (launchResult.cancelled) return { ok: false, cancelled: true }
     return { ok: false, message: launchResult.message }
   }
@@ -543,7 +544,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
         logStream.end()
         await killProcessTree(proc)
         _removeSession(installationId)
-        _broadcastToRenderer('instance-launch-failed', { installationId })
+        _clearLaunchingFailed(installationId)
         if (abort.signal.aborted) return { ok: false, cancelled: true }
         return { ok: false, message: (err as Error).message }
       }

@@ -650,7 +650,19 @@
 
   "cloud": {
     "label": "Cloud",
-    "desc": "Connect to Comfy Cloud for remote GPU-powered workflows."
+    "desc": "Connect to Comfy Cloud for remote GPU-powered workflows.",
+    "signInBanner": {
+      "message": "We opened your browser to sign in. Didn’t open?",
+      "copy": "Copy link",
+      "copied": "Copied",
+      "openAgain": "Open again",
+      "dismiss": "Dismiss"
+    },
+    "capacityDegraded": "Heavy usage",
+    "capacityDegradedHint": "ComfyUI Cloud is under heavy load right now — you may see slower response times. Please try again later for the best experience.",
+    "capacityDisabled": "Temporarily unavailable",
+    "capacityDisabledHint": "ComfyUI Cloud is temporarily unavailable due to high demand. Please try again later.",
+    "capacityProceed": "Continue anyway"
   },
 
   "desktop": {

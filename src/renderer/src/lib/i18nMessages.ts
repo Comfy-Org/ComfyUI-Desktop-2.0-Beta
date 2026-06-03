@@ -114,7 +114,7 @@ export const en = {
     returnToDashboard: 'Return to Dashboard',
     closeAllWindows: 'Close All Windows',
     exitWindow: 'Close Window',
-    exitAllWindows: 'Quit ComfyUI',
+    exitAllWindows: 'Quit Desktop',
     skipOnboarding: 'Skip Onboarding'
     /* Reset Zoom carries a dynamic percentage in the label and is
      * built main-side without going through this catalog — kept as a
@@ -206,6 +206,9 @@ export const en = {
   instancePicker: {
     instances: 'Instances',
     newInstance: 'New Instance',
+    openDashboard: 'Open Dashboard',
+    openDashboardHint:
+      'Opens the dashboard in a new window. Your running instance keeps running.',
     latestOnGithub: 'Latest on GitHub',
     open: 'Start',
     restart: 'Restart',
