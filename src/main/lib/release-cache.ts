@@ -13,8 +13,8 @@ import path from 'path'
 import fs from 'fs'
 import { dataDir } from './paths'
 import { writeFileSafe } from './safe-file'
-import { fetchLatestRelease, truncateNotes } from './comfyui-releases'
-import { fetchTags, countCommitsAhead, fetchCommitSha } from './git'
+import { fetchLatestRelease, getLatestStableTag, truncateNotes } from './comfyui-releases'
+import { fetchTags, countCommitsAhead, fetchCommitSha, findNearestTag } from './git'
 import { formatComfyVersion } from './version'
 import type { ComfyVersion } from './version'
 
@@ -30,6 +30,14 @@ export interface ReleaseCacheEntry {
   commitSha?: string
   baseTag?: string
   commitsAhead?: number
+  /** Wall-clock timestamp of the most recent `enrichCommitsAhead` settle
+   *  (success or failure) for this entry. Lets the renderer drop the
+   *  "Computing commits ahead…" hint as soon as enrichment gives up
+   *  instead of waiting for the safety-net timer, and prevents the hint
+   *  from re-appearing on every picker reopen when the underlying state
+   *  is structurally broken (e.g. no `baseTag` recoverable). Cleared
+   *  implicitly whenever `buildCacheEntry` writes a fresh entry. */
+  lastEnrichAttemptAt?: number
   [key: string]: unknown
 }
 
@@ -251,6 +259,17 @@ export async function checkForUpdate(
  */
 const _enrichInflight = new Map<string, Promise<void>>()
 
+/** Minimum interval between *failed* enrichment retries for the same
+ *  cache entry.  The inflight dedupe already coalesces concurrent
+ *  callers, but each picker reopen and each auto-check tick fires a
+ *  fresh `enrichCommitsAhead` call after the previous one has settled.
+ *  Without this throttle a structurally broken entry (no recoverable
+ *  `baseTag`, persistent rev-list failure) would re-run the full
+ *  recovery + fetch chain on every reopen for no gain.  30s is short
+ *  enough to recover quickly when the user comes back online, long
+ *  enough that rapid picker toggling doesn't spam git. */
+const ENRICH_RETRY_THROTTLE_MS = 30_000
+
 /** Listeners notified when `enrichCommitsAhead` actually writes a new
  *  `commitsAhead` value into the cache (not on no-op short-circuits). The
  *  IPC layer wires a broadcast here so renderers can refresh affected
@@ -267,6 +286,11 @@ export function onEnriched(cb: (repo: string) => void): () => void {
  * ls-remote cannot compute this, so we resolve it from a local git repo.
  * No-op if commitsAhead is already set or the entry lacks the required fields.
  * Concurrent calls for the same `(repo, comfyuiDir)` share one in-flight promise.
+ *
+ * Always stamps `lastEnrichAttemptAt` and fires `onEnriched` on settle —
+ * success or failure — so the renderer can drop the "Computing commits
+ * ahead…" hint as soon as we give up, rather than waiting for the
+ * safety-net timer.
  */
 export async function enrichCommitsAhead(repo: string, comfyuiDir: string): Promise<void> {
   const key = `${repo}::${comfyuiDir}`
@@ -275,42 +299,111 @@ export async function enrichCommitsAhead(repo: string, comfyuiDir: string): Prom
 
   const run = (async () => {
     const entry = get(repo, 'latest')
-    if (!entry?.commitSha || !entry.baseTag || entry.commitsAhead !== undefined) return
+    if (!entry?.commitSha || entry.commitsAhead !== undefined) return
     if (!fs.existsSync(path.join(comfyuiDir, '.git'))) return
+    // Retry throttle: a recent failed attempt (`lastEnrichAttemptAt`
+    // set but `commitsAhead` still undefined) means the recovery /
+    // count chain just ran and produced nothing.  Don't re-run it on
+    // every picker reopen — the underlying state is unlikely to change
+    // in the next few seconds, and we already broadcast a settle so
+    // the renderer dropped its spinner.
+    if (entry.lastEnrichAttemptAt !== undefined
+      && Date.now() - entry.lastEnrichAttemptAt < ENRICH_RETRY_THROTTLE_MS) return
+
+    // Recover a missing baseTag before bailing.  When
+    // `fetchLatestRelease('latest')` runs while `getLatestStableTag`
+    // is failing (offline / mirror flap / pygit2 not yet configured
+    // at boot), the cached entry is persisted with `commitSha` but no
+    // `baseTag` — and without it the rev-list range below has no
+    // anchor to count from.  Try the network tag refresh first; if
+    // that still fails, derive a tag from the local clone so the
+    // user isn't stranded with "Computing commits ahead…" forever.
+    let baseTag = entry.baseTag
+    if (!baseTag) {
+      const refreshed = await getLatestStableTag({ refresh: true }).catch(() => null)
+      if (refreshed) baseTag = refreshed
+    }
+    if (!baseTag) {
+      // Local fallback: ensure tags are present, then describe the
+      // target commit's nearest ancestor tag.  Cheap when tags are
+      // already there, single fetch when they aren't.
+      await fetchTags(comfyuiDir)
+      const local = await findNearestTag(comfyuiDir, entry.commitSha).catch(() => undefined)
+      if (local) baseTag = local
+    }
+    if (!baseTag) {
+      _stampEnrichAttempt(repo, entry.commitSha)
+      return
+    }
+
+    // Persist the recovered baseTag so future enrichments (and the
+    // channel-cards `enriching` guard) see the actual structural state
+    // instead of having to recover it again.
+    if (entry.baseTag !== baseTag) {
+      const current = get(repo, 'latest')
+      if (current && current.commitSha === entry.commitSha) {
+        set(repo, 'latest', { ...current, baseTag })
+      }
+    }
 
     // Fast path: when the base tag and target commit are already in the
     // local clone (the common case for an up-to-date install), count
     // locally and skip the network entirely. Only fall back to the slow
     // `git fetch --unshallow` + single-commit fetch when the objects are
     // missing (shallow clone, or master has advanced past what we have).
-    let ahead = await countCommitsAhead(comfyuiDir, entry.baseTag, entry.commitSha)
+    let ahead = await countCommitsAhead(comfyuiDir, baseTag, entry.commitSha)
     if (ahead === undefined) {
       await fetchTags(comfyuiDir)
       // The commit SHA may not exist locally (e.g. Stable install on a tag).
       // Fetch it explicitly so rev-list can resolve the range.
       await fetchCommitSha(comfyuiDir, entry.commitSha)
-      ahead = await countCommitsAhead(comfyuiDir, entry.baseTag, entry.commitSha)
+      ahead = await countCommitsAhead(comfyuiDir, baseTag, entry.commitSha)
     }
-    if (ahead === undefined) return
+    if (ahead === undefined) {
+      _stampEnrichAttempt(repo, entry.commitSha)
+      return
+    }
 
     const current = get(repo, 'latest')
     if (!current || current.commitSha !== entry.commitSha) return
-    const releaseName = formatComfyVersion({ commit: current.commitSha!, baseTag: current.baseTag, commitsAhead: ahead }, 'short')
-    set(repo, 'latest', { ...current, commitsAhead: ahead, releaseName })
-    for (const cb of _enrichedListeners) {
-      try {
-        cb(repo)
-      } catch (err) {
-        // Listener errors must not break enrichment (the cache is already
-        // updated at this point), but log so a misbehaving subscriber is
-        // visible during development.
-        console.warn('[release-cache] onEnriched listener threw:', err)
-      }
-    }
+    const resolvedBase = current.baseTag ?? baseTag
+    const releaseName = formatComfyVersion({ commit: current.commitSha!, baseTag: resolvedBase, commitsAhead: ahead }, 'short')
+    set(repo, 'latest', {
+      ...current,
+      baseTag: resolvedBase,
+      commitsAhead: ahead,
+      releaseName,
+      lastEnrichAttemptAt: Date.now(),
+    })
+    _notifyEnriched(repo)
   })().finally(() => _enrichInflight.delete(key))
 
   _enrichInflight.set(key, run)
   return run
+}
+
+/** Stamp a failed enrichment attempt so the renderer can stop showing
+ *  the spinner.  Skips the write (and broadcast) if the cache entry has
+ *  been swapped out from under us — that means another flow already
+ *  refreshed and any state we'd write is stale. */
+function _stampEnrichAttempt(repo: string, commitSha: string): void {
+  const current = get(repo, 'latest')
+  if (!current || current.commitSha !== commitSha) return
+  set(repo, 'latest', { ...current, lastEnrichAttemptAt: Date.now() })
+  _notifyEnriched(repo)
+}
+
+function _notifyEnriched(repo: string): void {
+  for (const cb of _enrichedListeners) {
+    try {
+      cb(repo)
+    } catch (err) {
+      // Listener errors must not break enrichment (the cache is already
+      // updated at this point), but log so a misbehaving subscriber is
+      // visible during development.
+      console.warn('[release-cache] onEnriched listener threw:', err)
+    }
+  }
 }
 
 /**

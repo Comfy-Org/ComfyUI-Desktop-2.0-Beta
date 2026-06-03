@@ -198,6 +198,7 @@ export type PopupDownloadAction =
   | { action: 'cancel'; url: string }
   | { action: 'show-in-folder'; url: string; savePath: string }
   | { action: 'dismiss'; url: string }
+  | { action: 'retry'; url: string }
   | { action: 'clear-finished' }
 
 /** Settings tabs the popup can deep-link the host's panelView into.

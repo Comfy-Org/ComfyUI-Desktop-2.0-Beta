@@ -8,6 +8,7 @@ import {
   getDownloadsTrayState,
   pauseModelDownload,
   resumeModelDownload,
+  retryDownload,
 } from '../lib/comfyDownloadManager'
 import { installationEvents } from '../installations'
 import * as mainTelemetry from '../lib/telemetry'
@@ -2198,6 +2199,9 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
           return
         case 'dismiss':
           dismissRecentDownload(url)
+          return
+        case 'retry':
+          retryDownload(url)
           return
         case 'show-in-folder':
           if (typeof savePath === 'string' && savePath.length > 0) {

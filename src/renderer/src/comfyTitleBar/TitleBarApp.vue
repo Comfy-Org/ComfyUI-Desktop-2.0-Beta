@@ -404,6 +404,7 @@ const {
   isInstancePickerOpen,
   downloadsActiveCount,
   unseenFinishedCount,
+  unseenErrorCount,
   downloadsTrayLabel,
   downloadsStartedAt,
   handleFileMenu,
@@ -710,7 +711,9 @@ onUnmounted(() => {
         class="title-downloads-tray"
         :class="{
           'has-active': downloadsActiveCount > 0,
-          'has-unseen': downloadsActiveCount === 0 && unseenFinishedCount > 0,
+          'has-error': unseenErrorCount > 0,
+          'has-unseen':
+            downloadsActiveCount === 0 && unseenErrorCount === 0 && unseenFinishedCount > 0,
           'is-flashing': downloadsFlash,
           'is-open': isDownloadsOpen
         }"
@@ -722,11 +725,26 @@ onUnmounted(() => {
           downloadsActiveCount
         }}</span>
         <span
+          v-else-if="unseenErrorCount > 0"
+          class="title-downloads-badge is-error"
+          aria-hidden="true"
+          >{{ unseenErrorCount }}</span
+        >
+        <span
           v-else-if="unseenFinishedCount > 0"
           class="title-downloads-badge is-unseen"
           aria-hidden="true"
           >{{ unseenFinishedCount }}</span
         >
+        <!-- Mid-batch failure marker: while downloads are still active the
+             badge shows the active count, so layer a small red dot on top
+             to surface a failure the instant it happens rather than waiting
+             for the queue to drain. -->
+        <span
+          v-if="downloadsActiveCount > 0 && unseenErrorCount > 0"
+          class="title-downloads-error-dot"
+          aria-hidden="true"
+        />
       </button>
     </div>
   </header>
@@ -1171,6 +1189,34 @@ onUnmounted(() => {
    * carries the "done, unseen" meaning so the icon+count combo can
    * stay identical in shape and size. */
   background: #22c55e;
+}
+
+.title-downloads-tray.has-error {
+  border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+}
+.title-downloads-badge.is-error {
+  /* Same shape as the other variants — the danger tone carries the
+   * "a download failed" meaning and takes precedence over the green
+   * "done, unseen" badge. */
+  background: var(--danger);
+}
+
+.title-downloads-error-dot {
+  /* Mid-batch failure marker. While downloads are still active the
+   * count badge occupies the top-right corner, so the failure dot
+   * anchors top-LEFT to avoid overlap. The red icon tint
+   * (`.has-error`) carries the colour meaning; this dot makes the
+   * failure legible at the badge level too. */
+  position: absolute;
+  top: -3px;
+  left: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--danger);
+  box-shadow: 0 0 0 2px var(--titlebar-bg, var(--neutral-900));
+  pointer-events: none;
 }
 
 @keyframes title-downloads-pulse {
