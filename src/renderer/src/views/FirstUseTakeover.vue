@@ -91,10 +91,12 @@ const emit = defineEmits<{
 const step = ref<Step>('start')
 const telemetryEnabled = ref(true)
 const locale = ref('en')
-/** Cloud-vs-Local selection picked on the merged start screen.
+/** Cloud / Local / Migrate selection picked on the merged start screen.
  *  Cloud is the brand-anchor card (glow + beam target) so it ships
- *  pre-selected — users can flip to Local before pressing Continue. */
-const pickedChoice = ref<'cloud' | 'local'>('cloud')
+ *  pre-selected — users can flip to Local or Migrate before pressing
+ *  Continue. The Migrate option only renders when `hasLegacyDesktop`
+ *  is true (an auto-tracked legacy install is on disk). */
+const pickedChoice = ref<'cloud' | 'local' | 'migrate'>('cloud')
 
 // Capacity-protection switch for Cloud (PostHog flag
 // `desktop-cloud-capacity`). At first-use, we follow the flag
@@ -320,10 +322,23 @@ async function routePostStart(): Promise<void> {
     }
     emitCompleted('cloud')
     emit('complete-cloud')
+  } else if (pickedChoice.value === 'migrate') {
+    // Migrate option only renders when hasLegacyDesktop is true, so we
+    // can route straight to chain-migrate without the localBranch
+    // sub-step. (localBranch is still kept for the InstallWizardModal
+    // → Back path: handleNewInstallBackToLocalBranch reopens this
+    // takeover with initialStep: 'localBranch' so the user lands on
+    // the migrate-vs-fresh fork from there.)
+    emitTelemetryAction('desktop2.first_use.local_branch_chosen', { choice: 'migrate' })
+    emitCompleted('local-migrate')
+    emit('chain-migrate')
   } else if (hasLegacyDesktop.value && !expressInstall.value) {
-    // Express takes precedence: when checked, skip the migrate-vs-fresh
-    // sub-step and head straight to the express Standalone install. Only
-    // surface the localBranch fork when Express is unticked.
+    // Local picked with a legacy install present + Express unchecked:
+    // historically the only way to reach the migrate-vs-fresh fork.
+    // The Migrate card above now hoists that choice up to the start
+    // screen, so this branch is rarely hit — it stays as a safety net
+    // for the keyboard-only path where the user kept Local selected
+    // without considering Migrate.
     step.value = 'localBranch'
     isContinuing.value = false
   } else {
@@ -371,15 +386,19 @@ function chooseMigrate(): void {
   emit('chain-migrate')
 }
 
-/** Radiogroup arrow-key handler for the Cloud/Local cards. WAI-ARIA
- *  APG §3.15: arrow keys cycle the checked radio and move DOM focus
- *  along with it. Without this, keyboard-only users can't switch
- *  between the two cards. */
+/** Radiogroup arrow-key handler for the Cloud / Local / Migrate cards.
+ *  WAI-ARIA APG §3.15: arrow keys cycle the checked radio and move DOM
+ *  focus along with it. The Migrate card is only present when
+ *  `hasLegacyDesktop` is true, so the cycle order is built dynamically
+ *  to match what's actually rendered. */
 function onStartCardsKeydown(e: KeyboardEvent): void {
   const target = e.target as HTMLElement | null
   if (!target?.closest('[role="radio"]')) return
-  const order = ['cloud', 'local'] as const
+  const order: readonly ('cloud' | 'local' | 'migrate')[] = hasLegacyDesktop.value
+    ? ['cloud', 'local', 'migrate']
+    : ['cloud', 'local']
   const currentIndex = order.indexOf(pickedChoice.value)
+  if (currentIndex < 0) return
   let next: number
   if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
     next = (currentIndex + 1) % order.length
@@ -572,6 +591,16 @@ defineExpose({ open })
             :description="$t('firstUse.localDesc')"
             data-testid="first-use-pick-local"
             @click="pickedChoice = 'local'"
+          />
+          <ChoiceCard
+            v-if="hasLegacyDesktop"
+            selectable
+            :selected="pickedChoice === 'migrate'"
+            :label="$t('firstUse.migrateLabel')"
+            :tagline="$t('firstUse.migrateTagline')"
+            :description="$t('firstUse.migrateDesc')"
+            data-testid="first-use-pick-migrate"
+            @click="pickedChoice = 'migrate'"
           />
         </div>
         <label

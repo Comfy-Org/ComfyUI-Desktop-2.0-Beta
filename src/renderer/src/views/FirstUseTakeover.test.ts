@@ -218,6 +218,37 @@ describe('FirstUseTakeover start step', () => {
     expect(wrapper.find('[data-testid="first-use-local-migrate"]').exists()).toBe(true)
   })
 
+  it('renders the Migrate card on the start screen only when hasLegacyDesktop is true', async () => {
+    const wrapper = mountTakeover()
+    // Default open() has hasLegacyDesktop = false.
+    expect(wrapper.find('[data-testid="first-use-pick-migrate"]').exists()).toBe(false)
+    // After the host plumbs the detected legacy install in, the third
+    // card appears next to Cloud and Local.
+    await (wrapper.vm as unknown as { open: (opts: { hasLegacyDesktop: boolean }) => Promise<void> }).open({
+      hasLegacyDesktop: true,
+    })
+    expect(wrapper.find('[data-testid="first-use-pick-migrate"]').exists()).toBe(true)
+  })
+
+  it('emits `chain-migrate` when the Migrate card is picked on the start screen', async () => {
+    const wrapper = mountTakeover()
+    await (wrapper.vm as unknown as { open: (opts: { hasLegacyDesktop: boolean }) => Promise<void> }).open({
+      hasLegacyDesktop: true,
+    })
+    await wrapper
+      .find('[data-testid="first-use-consent-tos"] input[type="checkbox"]')
+      .setValue(true)
+    await wrapper.find('[data-testid="first-use-pick-migrate"]').trigger('click')
+    await wrapper.find('[data-testid="first-use-continue"]').trigger('click')
+
+    expect(wrapper.emitted('chain-migrate')).toBeTruthy()
+    expect(wrapper.emitted('chain-local')).toBeFalsy()
+    expect(wrapper.emitted('complete-cloud')).toBeFalsy()
+    // Migrate skips the localBranch sub-step entirely — no detour
+    // through the migrate-vs-fresh fork.
+    expect(wrapper.find('[data-testid="first-use-local-migrate"]').exists()).toBe(false)
+  })
+
   it('emits `complete-cloud` (not `chain-local`) when Cloud is picked, regardless of Express', async () => {
     const wrapper = mountTakeover()
     await wrapper
