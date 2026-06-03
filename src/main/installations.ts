@@ -92,6 +92,15 @@ export async function list(): Promise<InstallationRecord[]> {
   return load()
 }
 
+/** True when `name` is already taken by an install other than `id`.
+ *  The single source of the rename uniqueness rule — shared by the
+ *  `update-installation` IPC handler and the `rename` session action so
+ *  the check can't drift between the two write paths. */
+export async function hasNameConflict(id: string, name: string): Promise<boolean> {
+  const all = await load()
+  return all.some((i) => i.id !== id && i.name === name)
+}
+
 export function uniqueName(baseName: string, existing: InstallationRecord[], excludeId?: string): string {
   const names = new Set(existing.filter((i) => i.id !== excludeId).map((i) => i.name))
   if (!names.has(baseName)) return baseName

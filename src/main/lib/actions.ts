@@ -55,6 +55,22 @@ export function launchAction(enabled: boolean, disabledMessage?: string): Action
   }
 }
 
+export function renameAction(currentName: string): ActionDef {
+  return {
+    id: 'rename',
+    label: t('actions.rename'),
+    style: 'default',
+    enabled: true,
+    prompt: {
+      field: 'name',
+      title: t('actions.renameTitle'),
+      message: t('actions.renameMessage'),
+      defaultValue: currentName,
+      required: true,
+    },
+  }
+}
+
 export function openFolderAction(installPath: string): ActionDef {
   return {
     id: 'open-folder',

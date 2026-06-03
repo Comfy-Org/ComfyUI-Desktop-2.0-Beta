@@ -428,7 +428,10 @@
     "deleteConfirmDetail": "其他安装不受影响。",
     "untrack": "取消跟踪",
     "untrackConfirmTitle": "取消跟踪安装",
-    "untrackConfirmMessage": "这将从启动器中移除该安装。文件不会被删除。"
+    "untrackConfirmMessage": "这将从启动器中移除该安装。文件不会被删除。",
+    "rename": "重命名",
+    "renameTitle": "重命名安装",
+    "renameMessage": "为此安装输入新名称。"
   },
 
   "migrate": {
@@ -612,7 +615,7 @@
     "waitingTime": "等待 ComfyUI 就绪…（{secs}秒）",
     "portBusyUsing": "端口 {old} 被占用——改用端口 {new}…",
     "instanceRunningTitle": "实例正在运行",
-    "instanceRunningMessage": "选择"关闭并启动"将停止下方列出的实例。",
+    "instanceRunningMessage": "选择 \"关闭并启动\" 将停止下方列出的实例。",
     "instanceRunningListLabel": "将被停止",
     "instanceRunningProceed": "全部运行",
     "instanceRunningReplace": "关闭并启动此实例",
@@ -643,7 +646,8 @@
     "portConflictKillConfirmMessage": "这将强制停止当前使用此端口的进程。该 ComfyUI 实例中未保存的工作将丢失。",
     "portConflictKilling": "正在停止…",
     "portConflictKillFailed": "无法释放端口 {port}。该进程可能需要手动终止。",
-    "duplicateName": "名为 \"{name}\" 的安装已存在。请选择其他名称。"
+    "duplicateName": "名为 \"{name}\" 的安装已存在。请选择其他名称。",
+    "nameRequired": "请输入名称。"
   },
 
   "tooltips": {
