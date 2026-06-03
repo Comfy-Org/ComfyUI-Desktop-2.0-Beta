@@ -80,6 +80,15 @@ export interface UseComfyUISettingsApi {
   loading: Ref<boolean>
   error: Ref<string | null>
 
+  /** Install id whose payload currently sits in `sections` /
+   *  `diskSpace` / `installSize`. Lags `installation?.id` during the
+   *  brief switch window (sections are no longer blanked on switch
+   *  to kill the "Loading…" flicker — #782), so hosts can gate
+   *  per-install actions on freshness (`sectionsInstallationId ===
+   *  installation.id`) instead of trusting whatever `sections`
+   *  happens to currently hold. `null` while no install is selected. */
+  sectionsInstallationId: Ref<string | null>
+
   /** Transient, non-blocking status line (e.g. a manual "Check for
    *  update" that found nothing). Set with an auto-clear timer; the host
    *  renders it inline and fades it out rather than blocking on a modal. */
@@ -209,10 +218,16 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
   // Inline error pill auto-clear window. Long enough to read, short
   // enough not to nag.
   const ERROR_TAG_TTL_MS = 4000
-  /** Last install id `loadAll` was called with — drives the
-   *  clear-before-await decision so same-install reloads (field edits,
-   *  action completions) don't blank the pane, only row switches do. */
+  /** Last install id `loadAll` was called with — used by
+   *  `refreshSection` to drop late same-install splices after a switch. */
   let lastLoadedId: string | null = null
+  /** Install id whose payload currently sits in `sections` /
+   *  `diskSpace` / `installSize`. Tracks "what's painted" rather than
+   *  "what we asked for". Hosts read it as `sectionsInstallationId`
+   *  to gate actions (e.g. the footer More menu) on freshness so a
+   *  click during the brief switch window can't run an action defined
+   *  by the previous install's payload. */
+  const sectionsInstallationId = ref<string | null>(null)
   /** Monotonically increasing request id. Each `loadAll` /
    *  `refreshSection` call captures the next value and only writes
    *  results back into the refs if it is still the latest in-flight
@@ -221,17 +236,18 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
   let requestSeq = 0
 
   async function loadAll(installationId: string, installPath: string): Promise<void> {
-    // Only clear the visible state on an actual install switch so a
-    // same-install reload (after `updateField` / action completion)
-    // doesn't flash "Loading…" — that flicker would be a regression on
-    // its own. Row switches inside the picker DO clear, which is the
-    // bug we wanted to fix (#582).
-    const isInstallSwitch = installationId !== lastLoadedId
-    if (isInstallSwitch) {
-      sections.value = []
-      diskSpace.value = null
-      installSize.value = null
-    }
+    // We deliberately do NOT blank `sections` / `diskSpace` /
+    // `installSize` here on install switch. Blanking caused a visible
+    // "Loading…" flash for the (very brief) IPC window on every row
+    // click in the instance picker (#782). Keeping the previous
+    // payload in place trades the flicker for a soft swap when the
+    // new payload lands. The new install's identity is the prop
+    // already; only the body has to await, and the crossfade on the
+    // host (`ComfyUISettingsContent.vue`, keyed on install id) makes
+    // the transition read as intentional. `sectionsInstallationId`
+    // below still reflects the previous install until the new payload
+    // resolves, so hosts can gate per-install action invocations on
+    // freshness (the footer More menu does this).
     lastLoadedId = installationId
     loading.value = true
     error.value = null
@@ -244,6 +260,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
       if (seq !== requestSeq) return
       sections.value = secs
       diskSpace.value = disk
+      sectionsInstallationId.value = installationId
     } catch (e) {
       if (seq !== requestSeq) return
       error.value = e instanceof Error ? e.message : String(e)
@@ -270,6 +287,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
       sections.value = []
       diskSpace.value = null
       installSize.value = null
+      sectionsInstallationId.value = null
       lastLoadedId = null
       // Bump the sequence so any in-flight loadAll for a previous
       // install can't write into our now-cleared refs.
@@ -832,6 +850,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     diskSpace,
     loading,
     error,
+    sectionsInstallationId,
     notice,
     reload,
     refreshSection,

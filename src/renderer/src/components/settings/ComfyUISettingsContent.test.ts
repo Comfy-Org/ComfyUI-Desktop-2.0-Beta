@@ -82,6 +82,11 @@ const useComfyUISettingsState = {
   sections: ref<unknown[]>([{ tab: 'update', fields: [] }, { tab: 'status', fields: [] }, { tab: 'snapshots' }]),
   loading: ref(false),
   error: ref<null>(null),
+  // Default to the SAMPLE_INSTALL.id below — most tests don't care
+  // about freshness gating and want the host to render in its normal
+  // (fresh) state. The "switch staleness" tests override this with a
+  // stale id to exercise the `.is-stale` / More-menu gates.
+  sectionsInstallationId: ref<string | null>('inst-1'),
   runningActionIds: ref<Set<string>>(new Set()),
   pendingRestartFieldIds: ref<Set<string>>(new Set()),
   fieldErrorMessages: ref<Record<string, string>>({}),
@@ -495,6 +500,69 @@ describe('ComfyUISettingsContent', () => {
       expect(w.find('.settings-v2-relaunch').text()).toBe('Switch')
       await w.find('.settings-v2-relaunch').trigger('click')
       expect(w.emitted('primary-action')).toEqual([[false]])
+    })
+  })
+
+  // Issue #782 — clicking a row in the central pill drawer used to
+  // flash "Loading…" while the new install's `get-detail-sections`
+  // IPC was in flight. The composable no longer blanks `sections` on
+  // switch; this component must (a) keep the body painted, (b) mark
+  // the body root `.is-stale` so a click in the brief window doesn't
+  // run against the previous install's payload, and (c) disable the
+  // footer More menu until the new payload lands.
+  describe('switch staleness (#782)', () => {
+    function setStale(value: boolean): void {
+      // Match SAMPLE_INSTALL.id ('inst-1') for fresh; any other id is
+      // stale. Mirrors how the real composable assigns
+      // `sectionsInstallationId` only after the new IPC resolves.
+      useComfyUISettingsState.sectionsInstallationId.value = value ? 'previous-inst' : 'inst-1'
+    }
+
+    it('does NOT show the "Loading…" placeholder when sections are still painted (fresh OR stale)', async () => {
+      setStale(true)
+      // `loading: true` simulates the in-flight switch window. The
+      // placeholder must NOT appear because the previous payload's
+      // visibleSections.length > 0 — that is the whole point of the
+      // #782 fix.
+      useComfyUISettingsState.loading.value = true
+      const w = await mountContent()
+      expect(w.find('[data-testid="picker-settings-loading"]').exists()).toBe(false)
+      // The settings body root is still rendered so the user keeps
+      // seeing recognizable content during the IPC.
+      expect(w.find('[data-testid="picker-settings-sections"]').exists()).toBe(true)
+      useComfyUISettingsState.loading.value = false
+    })
+
+    it('still shows the "Loading…" placeholder on a true first load (no prior sections)', async () => {
+      // First mount with no payload yet: blank sections + loading.
+      // This is the only case where the placeholder is legitimate.
+      const priorSections = useComfyUISettingsState.sections.value
+      useComfyUISettingsState.sections.value = []
+      useComfyUISettingsState.loading.value = true
+      const w = await mountContent()
+      expect(w.find('[data-testid="picker-settings-loading"]').exists()).toBe(true)
+      useComfyUISettingsState.sections.value = priorSections
+      useComfyUISettingsState.loading.value = false
+    })
+
+    it('marks the body root .is-stale while the new install\'s sections are still in flight', async () => {
+      setStale(true)
+      const w = await mountContent()
+      const root = w.find('[data-testid="picker-settings-sections"]')
+      expect(root.classes()).toContain('is-stale')
+      setStale(false)
+      await nextTick()
+      expect(root.classes()).not.toContain('is-stale')
+    })
+
+    it('disables the footer More menu while sections are stale, re-enables when fresh', async () => {
+      setStale(true)
+      const w = await mountContent()
+      const more = w.find('.settings-v2-more')
+      expect((more.element as HTMLButtonElement).disabled).toBe(true)
+      setStale(false)
+      await nextTick()
+      expect((more.element as HTMLButtonElement).disabled).toBe(false)
     })
   })
 

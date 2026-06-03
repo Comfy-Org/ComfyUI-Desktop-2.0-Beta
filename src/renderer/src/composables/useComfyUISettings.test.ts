@@ -111,12 +111,12 @@ function installMockApi(overrides: Partial<MockApi> = {}): MockApi {
   return api
 }
 
-describe('useComfyUISettings — staleness clearing (regression for #582)', () => {
+describe('useComfyUISettings — switch staleness behaviour (#782 / #582)', () => {
   beforeEach(() => {
     setActivePinia(createTestingPinia({ stubActions: false }))
   })
 
-  it('clears sections + diskSpace synchronously when the install id changes so the old install\'s data does not flash', async () => {
+  it('keeps the previous install\'s sections + diskSpace painted during the switch window so the right pane does not flash "Loading…" (#782)', async () => {
     // Two installs with distinct section payloads. The IPC for install B
     // is held open until we explicitly resolve it — this models the
     // real disk-bound delay in `getDetailSections` for an install with
@@ -150,20 +150,27 @@ describe('useComfyUISettings — staleness clearing (regression for #582)', () =
     expect(composable.sections.value.map((s) => s.title)).toEqual([
       'Sections for A',
     ])
+    expect(composable.sectionsInstallationId.value).toBe('a')
 
-    // Now switch to install B. The watcher fires `reload(B)` which
-    // calls `loadAll('b', ...)`. The fix clears `sections.value`
-    // BEFORE awaiting, so the next microtask should already see an
-    // empty sections array (and `loading: true`).
+    // Switch to install B. The watcher fires `reload(B)` which calls
+    // `loadAll('b', ...)`. The fix for #782 deliberately does NOT
+    // blank sections/diskSpace synchronously — the previous payload
+    // stays painted so the host's `v-else-if="loading &&
+    // !visibleSections.length"` placeholder never triggers and the
+    // "Loading…" text doesn't flash. `sectionsInstallationId` still
+    // reflects A so the host can mark the pane stale (pointer-events:
+    // none, More menu disabled) until the new IPC lands.
     installation.value = makeInstall('b', 'B')
     await nextTick()
 
     expect(composable.loading.value).toBe(true)
-    expect(composable.sections.value).toEqual([])
-    expect(composable.diskSpace.value).toBeNull()
+    expect(composable.sections.value.map((s) => s.title)).toEqual([
+      'Sections for A',
+    ])
+    expect(composable.sectionsInstallationId.value).toBe('a')
 
-    // Resolve install B's IPC; sections + loading flip to the new
-    // payload.
+    // Resolve install B's IPC; sections + sectionsInstallationId flip
+    // atomically to the new payload.
     resolveB!([makeSection('B')])
     await Promise.resolve()
     await Promise.resolve()
@@ -173,6 +180,7 @@ describe('useComfyUISettings — staleness clearing (regression for #582)', () =
     expect(composable.sections.value.map((s) => s.title)).toEqual([
       'Sections for B',
     ])
+    expect(composable.sectionsInstallationId.value).toBe('b')
     expect(api.getDetailSections).toHaveBeenCalledTimes(2)
     scope.stop()
   })
@@ -199,6 +207,7 @@ describe('useComfyUISettings — staleness clearing (regression for #582)', () =
     await nextTick()
     expect(composable.sections.value).toEqual([])
     expect(composable.diskSpace.value).toBeNull()
+    expect(composable.sectionsInstallationId.value).toBeNull()
     scope.stop()
   })
 

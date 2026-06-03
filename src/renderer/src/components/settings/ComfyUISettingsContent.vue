@@ -147,6 +147,7 @@ const {
   loading,
   error,
   notice,
+  sectionsInstallationId,
   updateField,
   pendingRestartFieldIds,
   fieldErrorMessages,
@@ -373,6 +374,18 @@ const visibleSections = computed(() => {
 const statusSections = computed(() => sectionsForTab('status').value)
 
 const storageSections = computed(() => sectionsForTab('storage').value)
+
+/** True when the currently-painted `sections` payload belongs to the
+ *  currently-selected install. Lags briefly during a picker row
+ *  switch because we intentionally keep the previous install's
+ *  sections visible while the new install's `get-detail-sections`
+ *  IPC is in flight (#782 — eliminates the "Loading…" flicker).
+ *  Used to gate per-install action invocations (footer More menu,
+ *  body pointer-events) so a click during the stale window can't
+ *  run an action defined by the previous install's payload. */
+const sectionsFresh = computed(
+  () => !!props.installation && sectionsInstallationId.value === props.installation.id
+)
 
 const rootRef = useTemplateRef<HTMLElement>('root')
 const tabsRef = useTemplateRef<HTMLElement>('tabs')
@@ -734,6 +747,7 @@ defineExpose({
           v-else
           key="subpage-root"
           class="settings-v2-body-root"
+          :class="{ 'is-stale': !sectionsFresh }"
           :data-testid="TID.pickerSettingsSections"
           :data-install-id="installation?.id"
         >
@@ -931,7 +945,7 @@ defineExpose({
           aria-haspopup="menu"
           :aria-expanded="moreMenuOpen"
           :aria-label="t('comfyUISettings.more', 'More')"
-          :disabled="!installation || pinBottomActions.length === 0 || opInflight"
+          :disabled="!installation || pinBottomActions.length === 0 || opInflight || !sectionsFresh"
           @click="toggleMoreMenu"
         >
           {{ t('comfyUISettings.more', 'More') }}
@@ -1078,6 +1092,17 @@ defineExpose({
   flex-direction: column;
   gap: inherit;
   flex: 1 1 auto;
+}
+
+/* Stale state during a picker-row switch: the previous install's
+ * sections are still painted while the new install's
+ * `get-detail-sections` IPC is in flight (#782). Block pointer
+ * interactions so a click in that brief window can't act on a field
+ * or button defined by the previous install's payload. No visual
+ * change — adding opacity/grayscale here would itself read as a
+ * flicker, which is exactly the regression this work fixes. */
+.settings-v2-body-root.is-stale {
+  pointer-events: none;
 }
 
 /* Inner tab-swap wrapper. Mirrors `.settings-v2-body-root`'s flex
