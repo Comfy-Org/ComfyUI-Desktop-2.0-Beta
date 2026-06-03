@@ -161,6 +161,32 @@ describe('GlobalSettingsView', () => {
     expect(bridge.openPathCalls).toEqual(['/home/u/ComfyUI/models'])
   })
 
+  // Covers the Shared Directories half of GlobalStorageSections —
+  // a SettingsSectionList field write routes through
+  // `globalSettingsUpdateField`, not just the model-dir actions.
+  it('Storage tab routes a Shared Directories field update through the bridge', async () => {
+    const bridge = installMockBridge()
+    const snapshot = makeSnapshot({
+      sharedDirectoriesFields: [
+        {
+          id: 'sharedOutputDir',
+          label: 'Shared output dir',
+          value: false,
+          editable: true,
+          editType: 'boolean',
+        },
+      ],
+    })
+    const wrapper = mountView(snapshot)
+    await wrapper.findAll('.gs-tab').find((t) => t.text() === 'Storage')!.trigger('click')
+    await nextTick()
+    const toggle = wrapper.find('.settings-v2-boolean-row button')
+    expect(toggle.exists()).toBe(true)
+    await toggle.trigger('click')
+    await flushPromises()
+    expect(bridge.updateFieldCalls).toEqual([{ id: 'sharedOutputDir', value: true }])
+  })
+
   it('close button routes to bridge.close', async () => {
     const bridge = installMockBridge()
     const wrapper = mountView()
