@@ -598,6 +598,33 @@ describe('ComfyUISettingsContent', () => {
     })
   })
 
+  // Switching between installs in the central pill drawer should always
+  // give the user a visible motion cue — even when the same tab exists
+  // on both installs (e.g. Status → Status). The inner `<Transition>`
+  // only fires when its child key changes, so we key each pane by the
+  // install id; this test pins that contract by asserting the active
+  // pane's DOM element is replaced on install switch (which is exactly
+  // what makes the `tabTransition` animation fire).
+  describe('install-switch transition cue', () => {
+    it('remounts the inner tab pane when the installation changes (same tab)', async () => {
+      const w = await mountContent({ initialTab: 'status' })
+      const paneBefore = w.find('.settings-v2-tab-pane').element
+      expect(paneBefore).toBeTruthy()
+
+      const other = {
+        ...SAMPLE_INSTALL,
+        id: 'inst-2',
+        name: 'Other Install',
+      } as unknown as Installation
+      await w.setProps({ installation: other })
+      await flushPromises()
+
+      const paneAfter = w.find('.settings-v2-tab-pane').element
+      expect(paneAfter).toBeTruthy()
+      expect(paneAfter).not.toBe(paneBefore)
+    })
+  })
+
   describe('op-event relay from SnapshotsView', () => {
     it('forwards op-cancel / op-retry / op-dismiss up to the host', async () => {
       const w = await mountContent({ initialTab: 'snapshots' })
