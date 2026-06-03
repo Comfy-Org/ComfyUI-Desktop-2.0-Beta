@@ -85,8 +85,11 @@ const emit = defineEmits<{
    *  → `runAction('migrate-to-standalone', …)` via `show-progress`)
    *  on the auto-tracked desktop install and marks `firstUseCompleted`
    *  once the migration finishes successfully. Same shape as
-   *  `chain-local` — host owns completion + auto-launch. */
-  'chain-migrate': []
+   *  `chain-local` — host owns completion + auto-launch.
+   *  `express: true` lets the host skip the migrate confirm surface
+   *  (preview + auto-pick + run, no user-confirm step) the same way
+   *  Express skips the Configure screen on chain-local. */
+  'chain-migrate': [{ express: boolean }]
 }>()
 
 const step = ref<Step>('start')
@@ -342,11 +345,13 @@ async function routePostStart(): Promise<void> {
     // straight to chain-migrate. The checkbox is only rendered when a
     // legacy install was detected, so its `true` value is an explicit
     // opt-in to bring the existing install over instead of installing
-    // fresh — and it takes precedence over Express, since Express
-    // controls a fresh install path and migrate replaces that path.
+    // fresh. Express applies the same opt-out-of-confirm semantics it
+    // does on chain-local: with both ticked, the host runs the
+    // migration straight through (preview + auto-pick + run) without
+    // surfacing the confirm step.
     emitTelemetryAction('desktop2.first_use.local_branch_chosen', { choice: 'migrate' })
     emitCompleted('local-migrate')
-    emit('chain-migrate')
+    emit('chain-migrate', { express: expressInstall.value })
   } else if (hasLegacyDesktop.value && !expressInstall.value) {
     // Legacy detected but the user opted out of migrate and Express:
     // surface the localBranch fork so they can still pick migrate-vs-
@@ -395,7 +400,10 @@ function onWhyCloudTryCloud(): void {
 function chooseMigrate(): void {
   emitTelemetryAction('desktop2.first_use.local_branch_chosen', { choice: 'migrate' })
   emitCompleted('local-migrate')
-  emit('chain-migrate')
+  // localBranch sub-step is only reached when Express was unticked on
+  // the start screen, so this path is never the express-bypass path —
+  // pass `express: false` so the host renders the confirm surface.
+  emit('chain-migrate', { express: false })
 }
 
 /** Radiogroup arrow-key handler for the Cloud / Local / Migrate cards.

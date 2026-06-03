@@ -59,8 +59,10 @@ export interface FirstUseChainApi {
     cameFromLocalBranch?: boolean
     express?: boolean
   }) => Promise<void>
-  /** FirstUseTakeover `chain-migrate` emit. */
-  handleFirstUseChainMigrate: () => Promise<void>
+  /** FirstUseTakeover `chain-migrate` emit. The `express` flag mirrors
+   *  the same option on `chain-local` — true skips the migrate confirm
+   *  surface and runs preview + auto-pick + run straight through. */
+  handleFirstUseChainMigrate: (payload?: { express?: boolean }) => Promise<void>
   /** InstallWizardModal `close` / `navigate-list` emit when mounted as a
    *  takeover. */
   handleNewInstallTakeoverClose: () => Promise<void>
@@ -429,7 +431,7 @@ export function useFirstUseChain(opts: FirstUseChainOpts): FirstUseChainApi {
    *  `pendingFirstUseAutoLaunchId` for the resulting Standalone install
    *  along the way. The auto-launch watcher fires once the op finishes
    *  successfully. */
-  async function handleFirstUseChainMigrate(): Promise<void> {
+  async function handleFirstUseChainMigrate(payload?: { express?: boolean }): Promise<void> {
     let legacy = installationStore.installations.find((i) => i.sourceId === 'desktop') ?? null
     if (!legacy) {
       try {
@@ -451,7 +453,11 @@ export function useFirstUseChain(opts: FirstUseChainOpts): FirstUseChainApi {
     // still on the start step with `isContinuing` left true from the
     // click that triggered chain-migrate, so clear the spinner before
     // returning so the user can retry Continue from the same picker.
-    const result = await confirmMigration(legacy)
+    //
+    // Express bypasses the confirm surface entirely (preview +
+    // auto-pick still run; failure on those still routes to null and
+    // the spinner reset below).
+    const result = await confirmMigration(legacy, { express: payload?.express === true })
     if (!result) {
       opts.resetFirstUseSpinner()
       return
