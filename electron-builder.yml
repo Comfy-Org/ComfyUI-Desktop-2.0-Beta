@@ -42,13 +42,36 @@ mac:
   target:
     - dmg
     - zip
-  icon: assets/Comfy_Logo_x1024.png
+  # Padded variant: rounded-square logo at 824x824 centered in 1024x1024
+  # transparent canvas (Apple's macOS Big Sur+ "safe area" template).
+  # Without the padding the icon visually dominates other platforms'
+  # icons in side-by-side comparisons (#758).
+  icon: assets/Comfy_Logo_mac_x1024.png
   category: public.app-category.developer-tools
   extraResources:
     - from: bootstrap-python/mac-arm64
       to: bootstrap-python
       filter:
         - '**/*'
+dmg:
+  # Styled install window — defaults give a tiny untemplated window;
+  # this gives a fixed 540x380 window with a branded dark background,
+  # the app icon on the left, and an Applications shortcut on the
+  # right with an arrow between them (#709).
+  title: ${productName}
+  iconSize: 100
+  background: resources/dmg-background.png
+  window:
+    width: 540
+    height: 380
+  contents:
+    - x: 140
+      y: 190
+      type: file
+    - x: 400
+      y: 190
+      type: link
+      path: /Applications
 linux:
   target:
     - AppImage
