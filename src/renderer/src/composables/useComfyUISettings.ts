@@ -80,14 +80,15 @@ export interface UseComfyUISettingsApi {
   loading: Ref<boolean>
   error: Ref<string | null>
 
-  /** Install id whose payload currently sits in `sections` /
-   *  `diskSpace` / `installSize`. Lags `installation?.id` during the
-   *  brief switch window (sections are no longer blanked on switch
-   *  to kill the "Loading…" flicker — #782), so hosts can gate
-   *  per-install actions on freshness (`sectionsInstallationId ===
-   *  installation.id`) instead of trusting whatever `sections`
-   *  happens to currently hold. `null` while no install is selected. */
-  sectionsInstallationId: Ref<string | null>
+  /** True when the currently-painted `sections` / `diskSpace` /
+   *  `installSize` payload belongs to the currently-selected install.
+   *  Lags briefly during a picker row switch — the previous install's
+   *  payload stays painted until the new install's IPC resolves so
+   *  the right pane doesn't flash "Loading…" (#782). Hosts gate
+   *  per-install action invocations on this (footer More menu, body
+   *  pointer-events) so a click during the stale window can't run
+   *  an action defined by the previous install's payload. */
+  sectionsFresh: ComputedRef<boolean>
 
   /** Transient, non-blocking status line (e.g. a manual "Check for
    *  update" that found nothing). Set with an auto-clear timer; the host
@@ -222,12 +223,10 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
    *  `refreshSection` to drop late same-install splices after a switch. */
   let lastLoadedId: string | null = null
   /** Install id whose payload currently sits in `sections` /
-   *  `diskSpace` / `installSize`. Tracks "what's painted" rather than
-   *  "what we asked for". Hosts read it as `sectionsInstallationId`
-   *  to gate actions (e.g. the footer More menu) on freshness so a
-   *  click during the brief switch window can't run an action defined
-   *  by the previous install's payload. */
-  const sectionsInstallationId = ref<string | null>(null)
+   *  `diskSpace` / `installSize`. Tracks "what's painted" rather
+   *  than "what we asked for"; backs the public `sectionsFresh`
+   *  computed below. */
+  const sectionsPayloadId = ref<string | null>(null)
   /** Monotonically increasing request id. Each `loadAll` /
    *  `refreshSection` call captures the next value and only writes
    *  results back into the refs if it is still the latest in-flight
@@ -260,7 +259,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
       if (seq !== requestSeq) return
       sections.value = secs
       diskSpace.value = disk
-      sectionsInstallationId.value = installationId
+      sectionsPayloadId.value = installationId
     } catch (e) {
       if (seq !== requestSeq) return
       error.value = e instanceof Error ? e.message : String(e)
@@ -287,7 +286,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
       sections.value = []
       diskSpace.value = null
       installSize.value = null
-      sectionsInstallationId.value = null
+      sectionsPayloadId.value = null
       lastLoadedId = null
       // Bump the sequence so any in-flight loadAll for a previous
       // install can't write into our now-cleared refs.
@@ -845,12 +844,17 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     },
   )
 
+  const sectionsFresh = computed<boolean>(() => {
+    const inst = toValue(opts.installation)
+    return !!inst && sectionsPayloadId.value === inst.id
+  })
+
   return {
     sections,
     diskSpace,
     loading,
     error,
-    sectionsInstallationId,
+    sectionsFresh,
     notice,
     reload,
     refreshSection,

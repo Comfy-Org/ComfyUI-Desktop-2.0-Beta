@@ -147,7 +147,7 @@ const {
   loading,
   error,
   notice,
-  sectionsInstallationId,
+  sectionsFresh,
   updateField,
   pendingRestartFieldIds,
   fieldErrorMessages,
@@ -374,18 +374,6 @@ const visibleSections = computed(() => {
 const statusSections = computed(() => sectionsForTab('status').value)
 
 const storageSections = computed(() => sectionsForTab('storage').value)
-
-/** True when the currently-painted `sections` payload belongs to the
- *  currently-selected install. Lags briefly during a picker row
- *  switch because we intentionally keep the previous install's
- *  sections visible while the new install's `get-detail-sections`
- *  IPC is in flight (#782 — eliminates the "Loading…" flicker).
- *  Used to gate per-install action invocations (footer More menu,
- *  body pointer-events) so a click during the stale window can't
- *  run an action defined by the previous install's payload. */
-const sectionsFresh = computed(
-  () => !!props.installation && sectionsInstallationId.value === props.installation.id
-)
 
 const rootRef = useTemplateRef<HTMLElement>('root')
 const tabsRef = useTemplateRef<HTMLElement>('tabs')

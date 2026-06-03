@@ -150,16 +150,16 @@ describe('useComfyUISettings — switch staleness behaviour (#782 / #582)', () =
     expect(composable.sections.value.map((s) => s.title)).toEqual([
       'Sections for A',
     ])
-    expect(composable.sectionsInstallationId.value).toBe('a')
+    expect(composable.sectionsFresh.value).toBe(true)
 
     // Switch to install B. The watcher fires `reload(B)` which calls
     // `loadAll('b', ...)`. The fix for #782 deliberately does NOT
     // blank sections/diskSpace synchronously — the previous payload
     // stays painted so the host's `v-else-if="loading &&
     // !visibleSections.length"` placeholder never triggers and the
-    // "Loading…" text doesn't flash. `sectionsInstallationId` still
-    // reflects A so the host can mark the pane stale (pointer-events:
-    // none, More menu disabled) until the new IPC lands.
+    // "Loading…" text doesn't flash. `sectionsFresh` flips to false
+    // so the host can mark the pane stale (pointer-events: none,
+    // More menu disabled) until the new IPC lands.
     installation.value = makeInstall('b', 'B')
     await nextTick()
 
@@ -167,10 +167,10 @@ describe('useComfyUISettings — switch staleness behaviour (#782 / #582)', () =
     expect(composable.sections.value.map((s) => s.title)).toEqual([
       'Sections for A',
     ])
-    expect(composable.sectionsInstallationId.value).toBe('a')
+    expect(composable.sectionsFresh.value).toBe(false)
 
-    // Resolve install B's IPC; sections + sectionsInstallationId flip
-    // atomically to the new payload.
+    // Resolve install B's IPC; sections flip to B and sectionsFresh
+    // returns true atomically.
     resolveB!([makeSection('B')])
     await Promise.resolve()
     await Promise.resolve()
@@ -180,7 +180,7 @@ describe('useComfyUISettings — switch staleness behaviour (#782 / #582)', () =
     expect(composable.sections.value.map((s) => s.title)).toEqual([
       'Sections for B',
     ])
-    expect(composable.sectionsInstallationId.value).toBe('b')
+    expect(composable.sectionsFresh.value).toBe(true)
     expect(api.getDetailSections).toHaveBeenCalledTimes(2)
     scope.stop()
   })
@@ -207,7 +207,7 @@ describe('useComfyUISettings — switch staleness behaviour (#782 / #582)', () =
     await nextTick()
     expect(composable.sections.value).toEqual([])
     expect(composable.diskSpace.value).toBeNull()
-    expect(composable.sectionsInstallationId.value).toBeNull()
+    expect(composable.sectionsFresh.value).toBe(false)
     scope.stop()
   })
 

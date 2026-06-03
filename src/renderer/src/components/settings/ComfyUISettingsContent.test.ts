@@ -82,11 +82,11 @@ const useComfyUISettingsState = {
   sections: ref<unknown[]>([{ tab: 'update', fields: [] }, { tab: 'status', fields: [] }, { tab: 'snapshots' }]),
   loading: ref(false),
   error: ref<null>(null),
-  // Default to the SAMPLE_INSTALL.id below — most tests don't care
-  // about freshness gating and want the host to render in its normal
-  // (fresh) state. The "switch staleness" tests override this with a
-  // stale id to exercise the `.is-stale` / More-menu gates.
-  sectionsInstallationId: ref<string | null>('inst-1'),
+  // Default to fresh — most tests don't care about freshness gating
+  // and want the host to render in its normal state. The "switch
+  // staleness" tests override this with `false` to exercise the
+  // `.is-stale` / More-menu gates.
+  sectionsFresh: ref<boolean>(true),
   runningActionIds: ref<Set<string>>(new Set()),
   pendingRestartFieldIds: ref<Set<string>>(new Set()),
   fieldErrorMessages: ref<Record<string, string>>({}),
@@ -512,10 +512,9 @@ describe('ComfyUISettingsContent', () => {
   // footer More menu until the new payload lands.
   describe('switch staleness (#782)', () => {
     function setStale(value: boolean): void {
-      // Match SAMPLE_INSTALL.id ('inst-1') for fresh; any other id is
-      // stale. Mirrors how the real composable assigns
-      // `sectionsInstallationId` only after the new IPC resolves.
-      useComfyUISettingsState.sectionsInstallationId.value = value ? 'previous-inst' : 'inst-1'
+      // `sectionsFresh = false` mirrors the real composable's state
+      // between an install switch and the new IPC resolving.
+      useComfyUISettingsState.sectionsFresh.value = !value
     }
 
     it('does NOT show the "Loading…" placeholder when sections are still painted (fresh OR stale)', async () => {
