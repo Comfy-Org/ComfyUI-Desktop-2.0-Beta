@@ -19,45 +19,34 @@ function mountList(fields: DetailField[]) {
 
 describe('SettingsSectionList', () => {
   // Regression: the Chinese mirrors toggle's description was silently
-  // dropped along the new title-popup pipeline (issue #779). The
-  // renderer must surface it whenever main attaches one — and in both
-  // boolean states so users know what flipping the toggle will do
-  // *before* they touch it.
+  // dropped along the new title-popup pipeline (issue #779). When main
+  // attaches a `description`, the renderer must surface it under the
+  // control. (The OFF/ON gating itself lives main-side in
+  // buildSettingsSections; the renderer just renders what it gets.)
   describe('field descriptions', () => {
-    const description =
-      'Git repositories clone from gitcode.com instead of github.com.'
-
-    function makeBooleanField(value: boolean): DetailField {
-      return {
-        id: 'useChineseMirrors',
-        label: 'Use Chinese Mirrors (Git & PyPI)',
-        value,
-        editable: true,
-        editType: 'boolean',
-        description,
-      }
-    }
-
-    it('renders the description below the control when the boolean is OFF', () => {
-      const wrapper = mountList([makeBooleanField(false)])
-      const desc = wrapper.find('.settings-v2-field-description')
-      expect(desc.exists()).toBe(true)
-      expect(desc.text()).toContain('gitcode.com')
-    })
-
-    it('renders the description below the control when the boolean is ON', async () => {
-      const wrapper = mountList([makeBooleanField(true)])
-      const desc = wrapper.find('.settings-v2-field-description')
-      expect(desc.exists()).toBe(true)
-      expect(desc.text()).toContain('gitcode.com')
-    })
-
-    it('does not render the description block for fields without one', () => {
+    it('renders the description below the control when one is attached', () => {
       const wrapper = mountList([
         {
-          id: 'autoInstallUpdates',
-          label: 'Auto-install updates',
+          id: 'useChineseMirrors',
+          label: 'Use Chinese Mirrors (Git & PyPI)',
           value: true,
+          editable: true,
+          editType: 'boolean',
+          description:
+            'Git repositories clone from gitcode.com instead of github.com.',
+        },
+      ])
+      const desc = wrapper.find('.settings-v2-field-description')
+      expect(desc.exists()).toBe(true)
+      expect(desc.text()).toContain('gitcode.com')
+    })
+
+    it('does not render the description block when none is attached', () => {
+      const wrapper = mountList([
+        {
+          id: 'useChineseMirrors',
+          label: 'Use Chinese Mirrors (Git & PyPI)',
+          value: false,
           editable: true,
           editType: 'boolean',
         },
@@ -80,6 +69,23 @@ describe('SettingsSectionList', () => {
       const desc = wrapper.find('.settings-v2-field-description')
       expect(desc.exists()).toBe(true)
       expect(desc.text()).toContain('default index')
+    })
+
+    it('renders an InfoTooltip trigger when a field has a tooltip', () => {
+      const wrapper = mountList([
+        {
+          id: 'useChineseMirrors',
+          label: 'Use Chinese Mirrors (Git & PyPI)',
+          value: false,
+          editable: true,
+          editType: 'boolean',
+          tooltip:
+            'Git repositories clone from gitcode.com instead of github.com.',
+        },
+      ])
+      const trigger = wrapper.find('.info-tooltip-trigger')
+      expect(trigger.exists()).toBe(true)
+      expect(trigger.attributes('aria-label')).toContain('gitcode.com')
     })
   })
 })

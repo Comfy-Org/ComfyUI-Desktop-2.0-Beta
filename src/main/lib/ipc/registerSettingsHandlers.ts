@@ -25,16 +25,19 @@ import type { SettingsSection } from '../../../types/ipc'
  *  path without going through IPC. */
 export function buildSettingsSections(): SettingsSection[] {
   const s = settings.getAll()
-  // Always attach the description — the wording explains what hosts
-  // the toggle swaps, which is exactly the info users need to decide
-  // whether to enable it. Gating on the current value left the OFF
-  // state with no explanation at all.
+  // The tooltip (info-icon hover) explains what the toggle does in
+  // either state. The inline description only appears once the toggle
+  // is ON so it reads as "here's what's currently in use", not "here's
+  // what will happen if you flip this".
   const chineseMirrorsField = {
     id: 'useChineseMirrors',
     label: i18n.t('settings.useChineseMirrors'),
     type: 'boolean' as const,
     value: s.useChineseMirrors === true,
-    description: i18n.t('settings.chineseMirrorsDescription')
+    tooltip: i18n.t('settings.chineseMirrorsDescription'),
+    ...(s.useChineseMirrors === true
+      ? { description: i18n.t('settings.chineseMirrorsDescription') }
+      : {})
   }
   const isChinese = i18n.getLocale().startsWith('zh')
   const appSections: SettingsSection[] = [
