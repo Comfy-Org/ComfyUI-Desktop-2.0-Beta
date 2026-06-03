@@ -51,6 +51,7 @@ import WhyTryCloudModal from '../components/WhyTryCloudModal.vue'
 import TermsModal from '../components/TermsModal.vue'
 import Tooltip from '../components/ui/Tooltip.vue'
 import BrandTakeoverLayout from '../components/BrandTakeoverLayout.vue'
+import InlineRichText from '../components/InlineRichText.vue'
 import { emitTelemetryAction } from '../lib/telemetry'
 import { useCloudCapacity } from '../composables/useCloudCapacity'
 
@@ -112,7 +113,14 @@ const capacityReady = ref(false)
  *  resolved capacity status. */
 const initialDefaultChoice = ref<'cloud' | 'local'>('cloud')
 function deriveDefaultChoice(): 'cloud' | 'local' {
-  return cloudCapacity.isDisabled() ? 'local' : 'cloud'
+  // Returning Desktop user with a detected legacy install lands on
+  // Local by default: the migrate-existing-install path is the obvious
+  // next step for them and pre-selecting Local lines the start screen
+  // up so they only press Continue. Cloud disabled still wins (no
+  // viable cloud path) so the precedence is disabled > legacy > cloud.
+  if (cloudCapacity.isDisabled()) return 'local'
+  if (hasLegacyDesktop.value) return 'local'
+  return 'cloud'
 }
 onMounted(async () => {
   await cloudCapacity.whenReady()
@@ -597,6 +605,27 @@ defineExpose({ open })
           />
         </div>
         <label
+          v-if="hasLegacyDesktop"
+          class="brand-checkbox start-migrate-existing"
+          :class="{ 'start-migrate-existing--hidden': !showMigrateExisting }"
+          :aria-hidden="!showMigrateExisting"
+          data-testid="first-use-migrate-existing"
+        >
+          <input
+            v-model="migrateExisting"
+            type="checkbox"
+            :tabindex="showMigrateExisting ? 0 : -1"
+          />
+          <span class="start-migrate-existing__body">
+            <span class="start-migrate-existing__label">
+              {{ $t('firstUse.migrateExistingLine') }}
+            </span>
+            <span class="start-migrate-existing__desc">
+              <InlineRichText :text="$t('firstUse.migrateExistingDesc')" />
+            </span>
+          </span>
+        </label>
+        <label
           class="brand-checkbox start-express"
           :class="{ 'start-express--hidden': pickedChoice !== 'local' }"
           :aria-hidden="pickedChoice !== 'local'"
@@ -622,22 +651,6 @@ defineExpose({ open })
               </template>
               <template v-else>&nbsp;</template>
             </span>
-          </span>
-        </label>
-        <label
-          v-if="hasLegacyDesktop"
-          class="brand-checkbox start-migrate-existing"
-          :class="{ 'start-migrate-existing--hidden': !showMigrateExisting }"
-          :aria-hidden="!showMigrateExisting"
-          data-testid="first-use-migrate-existing"
-        >
-          <input
-            v-model="migrateExisting"
-            type="checkbox"
-            :tabindex="showMigrateExisting ? 0 : -1"
-          />
-          <span class="start-migrate-existing__label">
-            {{ $t('firstUse.migrateExistingLine') }}
           </span>
         </label>
       </div>
@@ -967,17 +980,21 @@ defineExpose({ open })
   }
 }
 
-/* Peer checkbox sibling of `.start-express`. Mirrors the same metrics
- * (gap, font-size, color, transition timing) so the two read as a row
- * of equal-weight modifiers on the Local pick, not as a parent/child
- * pair. Same hide-with-class pattern as `.start-express--hidden` so
- * the row stays in the DOM (no layout jump when toggled). */
+/* Peer checkbox sibling of `.start-express`. Rendered ABOVE Express
+ * on the legacy-detected path so the primary action for a returning
+ * Desktop user (bring the existing install over) reads first — and so
+ * Express below it doesn't look like a sub-option being nested under
+ * it. Body has a primary label + a description sub-line mirroring
+ * Express's GPU hint so the two read as a row of equal-weight
+ * modifiers carrying the same amount of detail. */
 .start-migrate-existing {
   display: inline-flex;
   align-self: center;
   align-items: flex-start;
   gap: 8px;
-  margin-top: 2px;
+  /* Small bottom margin separates this row from Express so the two
+   * read as discrete peers rather than a stacked pair. */
+  margin-bottom: 4px;
   font-size: 13px;
   color: var(--neutral-300);
   opacity: 1;
@@ -991,8 +1008,24 @@ defineExpose({ open })
   transform: translateY(-4px);
   pointer-events: none;
 }
+.start-migrate-existing__body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+}
 .start-migrate-existing__label {
   line-height: 1.4;
+}
+.start-migrate-existing__desc {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--neutral-400);
+}
+.start-migrate-existing__desc :deep(strong) {
+  color: var(--neutral-100);
+  font-weight: 500;
 }
 @media (prefers-reduced-motion: reduce) {
   .start-migrate-existing {
