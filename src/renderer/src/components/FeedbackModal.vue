@@ -70,7 +70,7 @@ function handleTypeformMessage(event: MessageEvent): void {
   // `form-submit`) but always include `submit`.
   if (typeof type !== 'string' || !type.toLowerCase().includes('submit')) return
   submitted.value = true
-  emitTelemetryAction('desktop2.feedback.submitted', {})
+  emitTelemetryAction('comfy.desktop.feedback.submitted', {})
   autocloseTimer = setTimeout(() => {
     autocloseTimer = null
     emit('close')

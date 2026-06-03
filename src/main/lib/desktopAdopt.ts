@@ -6,7 +6,7 @@ import {
   detectDesktopInstall,
   captureDesktopSnapshot,
   ADOPT_MARKER_FILE,
-  type DesktopInstallInfo,
+  type DesktopInstallInfo
 } from './desktopDetect'
 import { defaultInstallDir, allocateUniqueDir, sanitizeDirName } from './paths'
 import { gitClone, gitCheckoutCommit } from './git'
@@ -47,13 +47,16 @@ export interface AdoptTools {
 export interface AdoptDeps {
   detectDesktopInstall: typeof detectDesktopInstall
   captureDesktopSnapshot: typeof captureDesktopSnapshot
-  validateLegacyVenv: (pythonPath: string, signal: AbortSignal) => Promise<{ ok: true } | { ok: false; message: string }>
+  validateLegacyVenv: (
+    pythonPath: string,
+    signal: AbortSignal
+  ) => Promise<{ ok: true } | { ok: false; message: string }>
   copyStagedSource: (src: string, dest: string) => Promise<void>
   cloneSourceFromGit: (
     url: string,
     dest: string,
     sendOutput: (t: string) => void,
-    signal: AbortSignal,
+    signal: AbortSignal
   ) => Promise<{ ok: true } | { ok: false; message: string }>
   now: () => Date
 }
@@ -111,7 +114,7 @@ function looksLikeChineseMirror(url: string | undefined): boolean {
  */
 export function validateLegacyVenvDefault(
   pythonPath: string,
-  signal: AbortSignal,
+  signal: AbortSignal
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   return new Promise((resolve) => {
     if (signal.aborted) {
@@ -128,7 +131,8 @@ export function validateLegacyVenvDefault(
           return
         }
         if (err) {
-          const out = (stderr || '').toString().trim() || (stdout || '').toString().trim() || err.message
+          const out =
+            (stderr || '').toString().trim() || (stdout || '').toString().trim() || err.message
           resolve({ ok: false, message: out.slice(0, 1000) })
           return
         }
@@ -137,10 +141,12 @@ export function validateLegacyVenvDefault(
           return
         }
         resolve({ ok: true })
-      },
+      }
     )
     const onAbort = (): void => {
-      try { child.kill() } catch {}
+      try {
+        child.kill()
+      } catch {}
     }
     signal.addEventListener('abort', onAbort, { once: true })
   })
@@ -168,7 +174,7 @@ export async function cloneSourceFromGitDefault(
   url: string,
   dest: string,
   sendOutput: (t: string) => void,
-  signal: AbortSignal,
+  signal: AbortSignal
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   const cloneResult = await gitClone(url, dest, sendOutput, signal)
   if (cloneResult.exitCode !== 0) {
@@ -189,7 +195,10 @@ export function parseExtraModelsYaml(content: string): string[] {
     const m = line.match(/^\s+base_path\s*:\s*(.+?)\s*$/)
     if (!m) continue
     let value = m[1]!.trim()
-    if ((value.startsWith("'") && value.endsWith("'")) || (value.startsWith('"') && value.endsWith('"'))) {
+    if (
+      (value.startsWith("'") && value.endsWith("'")) ||
+      (value.startsWith('"') && value.endsWith('"'))
+    ) {
       value = value.slice(1, -1)
     }
     if (value) out.push(value)
@@ -210,7 +219,7 @@ const STRIPPED_LAUNCH_KEYS: ReadonlySet<string> = new Set([
   'extra-model-paths-config',
   'front-end-root',
   'log-stdout',
-  'database-url',
+  'database-url'
 ])
 
 /**
@@ -218,10 +227,7 @@ const STRIPPED_LAUNCH_KEYS: ReadonlySet<string> = new Set([
  * per-install record fields. Removed from the editable string so they
  * show up in the v2 settings UI as dedicated folder pickers instead.
  */
-const PROMOTED_LAUNCH_KEYS: ReadonlySet<string> = new Set([
-  'input-directory',
-  'output-directory',
-])
+const PROMOTED_LAUNCH_KEYS: ReadonlySet<string> = new Set(['input-directory', 'output-directory'])
 
 export interface DerivedLaunchArgs {
   /** Final user-facing `launchArgs` string written to the record. */
@@ -257,9 +263,8 @@ export interface DerivedLaunchArgs {
  */
 export function deriveLaunchArgs(comfySettings: Record<string, unknown>): DerivedLaunchArgs {
   const raw = comfySettings['Comfy.Server.LaunchArgs']
-  const launchArgsMap: Record<string, unknown> = (raw && typeof raw === 'object' && !Array.isArray(raw))
-    ? raw as Record<string, unknown>
-    : {}
+  const launchArgsMap: Record<string, unknown> =
+    raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {}
 
   const parts: string[] = []
   const pathOverrides: DerivedLaunchArgs['pathOverrides'] = {}
@@ -310,12 +315,13 @@ function readLegacyComfySettings(configDir: string): Record<string, unknown> {
 }
 
 function readLegacyComfyPrefs(raw: Record<string, unknown>): LegacyComfySettings {
-  const asBool = (v: unknown): boolean | undefined => typeof v === 'boolean' ? v : undefined
-  const asNonEmptyString = (v: unknown): string | undefined => typeof v === 'string' && v.trim() !== '' ? v : undefined
+  const asBool = (v: unknown): boolean | undefined => (typeof v === 'boolean' ? v : undefined)
+  const asNonEmptyString = (v: unknown): string | undefined =>
+    typeof v === 'string' && v.trim() !== '' ? v : undefined
   return {
     sendStatistics: asBool(raw['Comfy-Desktop.SendStatistics']),
     autoUpdate: asBool(raw['Comfy-Desktop.AutoUpdate']),
-    pypiMirror: asNonEmptyString(raw['Comfy-Desktop.UV.PypiInstallMirror']),
+    pypiMirror: asNonEmptyString(raw['Comfy-Desktop.UV.PypiInstallMirror'])
   }
 }
 
@@ -359,7 +365,7 @@ function readLegacyAppVersion(executablePath: string | null): string | null {
 export function computeModelsDirsToCarry(
   basePath: string,
   extraYamlContent: string | null,
-  existing: string[],
+  existing: string[]
 ): string[] {
   const candidates: string[] = []
   candidates.push(path.join(basePath, 'models'))
@@ -383,7 +389,11 @@ export function computeModelsDirsToCarry(
  * Best-effort copy of legacy userData files into a timestamped backup folder.
  * Logged on failure but never throws so adoption can continue.
  */
-async function backupLegacyState(configDir: string, timestamp: string, sendOutput: (t: string) => void): Promise<void> {
+async function backupLegacyState(
+  configDir: string,
+  timestamp: string,
+  sendOutput: (t: string) => void
+): Promise<void> {
   const destDir = path.join(configDir, BACKUP_REL, timestamp)
   try {
     await fs.promises.mkdir(destDir, { recursive: true })
@@ -474,13 +484,13 @@ async function installAdoptedRequirements(
   installPath: string,
   pythonPath: string,
   basePath: string,
-  tools: AdoptTools,
+  tools: AdoptTools
 ): Promise<RequirementsInstallReport> {
   const uvPath = getLegacyVenvUvPath(basePath)
   if (!fs.existsSync(uvPath)) {
     tools.sendOutput(
       `Warning: legacy venv uv not found at ${uvPath} — skipping ComfyUI requirements install. ` +
-      `You may need to manually run \`pip install -r requirements.txt\` later if launches fail.\n`,
+        `You may need to manually run \`pip install -r requirements.txt\` later if launches fail.\n`
     )
     return { uvAvailable: false, coreExitCode: null, managerExitCode: null, pygit2ExitCode: null }
   }
@@ -490,16 +500,21 @@ async function installAdoptedRequirements(
     uvAvailable: true,
     coreExitCode: null,
     managerExitCode: null,
-    pygit2ExitCode: null,
+    pygit2ExitCode: null
   }
 
   const coreReqs = path.join(destSource, 'requirements.txt')
   if (fs.existsSync(coreReqs)) {
     tools.sendOutput('Installing ComfyUI requirements into legacy venv via uv…\n')
     const code = await installFilteredRequirements(
-      coreReqs, uvPath, pythonPath, installPath,
+      coreReqs,
+      uvPath,
+      pythonPath,
+      installPath,
       '.adopt-core-reqs.txt',
-      tools.sendOutput, tools.signal, mirrors,
+      tools.sendOutput,
+      tools.signal,
+      mirrors
     )
     report.coreExitCode = code
     if (code !== 0) {
@@ -513,9 +528,14 @@ async function installAdoptedRequirements(
   if (fs.existsSync(mgrReqs)) {
     tools.sendOutput('Installing ComfyUI-Manager requirements…\n')
     const code = await installFilteredRequirements(
-      mgrReqs, uvPath, pythonPath, installPath,
+      mgrReqs,
+      uvPath,
+      pythonPath,
+      installPath,
       '.adopt-mgr-reqs.txt',
-      tools.sendOutput, tools.signal, mirrors,
+      tools.sendOutput,
+      tools.signal,
+      mirrors
     )
     report.managerExitCode = code
     if (code !== 0) {
@@ -531,17 +551,24 @@ async function installAdoptedRequirements(
   tools.sendOutput('Installing pygit2 into legacy venv (enables Manager + in-place updates)…\n')
   const pygit2Code = await runUvPip(
     uvPath,
-    ['pip', 'install', 'pygit2', '--python', pythonPath, ...getPipIndexArgs(mirrors.pypiMirror, mirrors.useChineseMirrors)],
+    [
+      'pip',
+      'install',
+      'pygit2',
+      '--python',
+      pythonPath,
+      ...getPipIndexArgs(mirrors.pypiMirror, mirrors.useChineseMirrors)
+    ],
     installPath,
     tools.sendOutput,
-    tools.signal,
+    tools.signal
   )
   report.pygit2ExitCode = pygit2Code
   if (pygit2Code !== 0) {
     tools.sendOutput(
       `Warning: pygit2 install exited with code ${pygit2Code}. Manager will fall back ` +
-      `to GitPython (requires system git) and in-place ComfyUI updates will be unavailable ` +
-      `until pygit2 is installed manually or via "Copy & Update".\n`,
+        `to GitPython (requires system git) and in-place ComfyUI updates will be unavailable ` +
+        `until pygit2 is installed manually or via "Copy & Update".\n`
     )
   }
 
@@ -575,7 +602,7 @@ async function sourceComfyUI(
   info: DesktopInstallInfo,
   destDir: string,
   tools: AdoptTools,
-  deps: AdoptDeps,
+  deps: AdoptDeps
 ): Promise<{ mode: AdoptSourceMode } | { mode: 'failed'; message: string }> {
   const stagedDir = path.join(info.configDir, STAGED_SOURCE_REL)
   if (fs.existsSync(stagedDir) && isStagedSourceValid(stagedDir)) {
@@ -584,7 +611,9 @@ async function sourceComfyUI(
       tools.sendOutput(`Sourced ComfyUI from pre-swap copy at ${stagedDir}\n`)
       return { mode: 'pre-swap-copy' }
     } catch (err) {
-      tools.sendOutput(`Pre-swap copy failed: ${(err as Error).message}; falling back to git clone\n`)
+      tools.sendOutput(
+        `Pre-swap copy failed: ${(err as Error).message}; falling back to git clone\n`
+      )
     }
   }
   const url = getComfyUIRemoteUrl(settings.get('useChineseMirrors') === true)
@@ -641,14 +670,16 @@ function carryLegacySettings(
   basePath: string,
   configDir: string,
   legacy: LegacyComfySettings,
-  sendOutput: (t: string) => void,
+  sendOutput: (t: string) => void
 ): CarryReport {
   let extraYamlContent: string | null = null
   try {
     extraYamlContent = fs.readFileSync(path.join(configDir, EXTRA_MODELS_YAML), 'utf-8')
   } catch {}
 
-  const currentModelsDirs = (settings.get('modelsDirs') as string[] | undefined) ?? [...settings.defaults.modelsDirs]
+  const currentModelsDirs = (settings.get('modelsDirs') as string[] | undefined) ?? [
+    ...settings.defaults.modelsDirs
+  ]
   const additions = computeModelsDirsToCarry(basePath, extraYamlContent, currentModelsDirs)
   if (additions.length > 0) {
     settings.set('modelsDirs', [...currentModelsDirs, ...additions])
@@ -723,18 +754,29 @@ function carryLegacySettings(
 async function reconcileAdoptedRequirements(
   existing: InstallationRecord,
   info: DesktopInstallInfo,
-  tools: AdoptTools,
+  tools: AdoptTools
 ): Promise<void> {
   const destSource = path.join(existing.installPath, 'ComfyUI')
-  const pythonPath = (existing.adoptedPythonPath as string | undefined)
-    ?? (process.platform === 'win32'
+  const pythonPath =
+    (existing.adoptedPythonPath as string | undefined) ??
+    (process.platform === 'win32'
       ? path.join(info.basePath, '.venv', 'Scripts', 'python.exe')
       : path.join(info.basePath, '.venv', 'bin', 'python3'))
   const basePath = (existing.adoptedBaseDir as string | undefined) ?? info.basePath
   try {
-    await telemetry.trackedStep('desktop2.adopt.requirements_reconcile', { installation_id: existing.id }, async () => {
-      await installAdoptedRequirements(destSource, existing.installPath, pythonPath, basePath, tools)
-    })
+    await telemetry.trackedStep(
+      'comfy.desktop.adopt.requirements_reconcile',
+      { installation_id: existing.id },
+      async () => {
+        await installAdoptedRequirements(
+          destSource,
+          existing.installPath,
+          pythonPath,
+          basePath,
+          tools
+        )
+      }
+    )
   } catch (err) {
     tools.sendOutput(`Warning: requirements reconcile threw: ${(err as Error).message}\n`)
   }
@@ -756,12 +798,12 @@ export async function adoptDesktopInstall(opts: AdoptOptions): Promise<Installat
     validateLegacyVenv: opts.deps?.validateLegacyVenv ?? validateLegacyVenvDefault,
     copyStagedSource: opts.deps?.copyStagedSource ?? copyStagedSourceDefault,
     cloneSourceFromGit: opts.deps?.cloneSourceFromGit ?? cloneSourceFromGitDefault,
-    now: opts.deps?.now ?? (() => new Date()),
+    now: opts.deps?.now ?? (() => new Date())
   }
 
   const info = deps.detectDesktopInstall()
   if (!info) {
-    telemetry.capture('desktop2.adopt.failed', { error_bucket: 'no-legacy-install' })
+    telemetry.capture('comfy.desktop.adopt.failed', { error_bucket: 'no-legacy-install' })
     throw new Error('no-legacy-install')
   }
 
@@ -792,16 +834,16 @@ export async function adoptDesktopInstall(opts: AdoptOptions): Promise<Installat
     return existing
   }
 
-  telemetry.capture('desktop2.adopt.started', {})
+  telemetry.capture('comfy.desktop.adopt.started', {})
 
   try {
     const result = await runAdoption(info, tools, deps)
     return result
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    telemetry.capture('desktop2.adopt.failed', {
+    telemetry.capture('comfy.desktop.adopt.failed', {
       error_bucket: telemetry.bucketError(message),
-      error_message: message.slice(0, 500),
+      error_message: message.slice(0, 500)
     })
     throw err
   }
@@ -810,19 +852,19 @@ export async function adoptDesktopInstall(opts: AdoptOptions): Promise<Installat
 async function runAdoption(
   info: DesktopInstallInfo,
   tools: AdoptTools,
-  deps: AdoptDeps,
+  deps: AdoptDeps
 ): Promise<InstallationRecord> {
   const { sendProgress, sendOutput, signal } = tools
   const timestamp = deps.now().toISOString().replace(/[:.]/g, '-')
 
   sendProgress('backup', { percent: 0 })
-  await telemetry.trackedStep('desktop2.adopt.backup', {}, async () => {
+  await telemetry.trackedStep('comfy.desktop.adopt.backup', {}, async () => {
     await backupLegacyState(info.configDir, timestamp, sendOutput)
   })
 
   if (process.platform === 'darwin') {
     sendProgress('tcc', { percent: 0 })
-    await telemetry.trackedStep('desktop2.adopt.tcc', {}, async () => {
+    await telemetry.trackedStep('comfy.desktop.adopt.tcc', {}, async () => {
       try {
         await fs.promises.readdir(info.basePath)
       } catch (err) {
@@ -837,31 +879,40 @@ async function runAdoption(
   }
 
   sendProgress('venv', { percent: 0 })
-  const pythonPath = process.platform === 'win32'
-    ? path.join(info.basePath, '.venv', 'Scripts', 'python.exe')
-    : path.join(info.basePath, '.venv', 'bin', 'python3')
+  const pythonPath =
+    process.platform === 'win32'
+      ? path.join(info.basePath, '.venv', 'Scripts', 'python.exe')
+      : path.join(info.basePath, '.venv', 'bin', 'python3')
 
-  await telemetry.trackedStep('desktop2.adopt.validate_venv', {}, async () => {
+  await telemetry.trackedStep('comfy.desktop.adopt.validate_venv', {}, async () => {
     if (!fs.existsSync(pythonPath)) {
       const choice = await tools.promptUser('venv-broken', { reason: 'venv-missing', pythonPath })
-      if (choice.kind === 'venv-broken' && choice.choice === 'cancel') throw new Error('venv-broken-cancelled')
+      if (choice.kind === 'venv-broken' && choice.choice === 'cancel')
+        throw new Error('venv-broken-cancelled')
       return
     }
     const result = await deps.validateLegacyVenv(pythonPath, signal)
     if (!result.ok) {
-      const choice = await tools.promptUser('venv-broken', { reason: 'import-failed', message: result.message })
-      if (choice.kind === 'venv-broken' && choice.choice === 'cancel') throw new Error('venv-broken-cancelled')
+      const choice = await tools.promptUser('venv-broken', {
+        reason: 'import-failed',
+        message: result.message
+      })
+      if (choice.kind === 'venv-broken' && choice.choice === 'cancel')
+        throw new Error('venv-broken-cancelled')
     }
   })
 
   sendProgress('snapshot', { percent: 0 })
-  await telemetry.trackedStep('desktop2.adopt.snapshot', {}, async () => {
+  await telemetry.trackedStep('comfy.desktop.adopt.snapshot', {}, async () => {
     try {
       const snap = await deps.captureDesktopSnapshot(info)
       const snapshotsDir = path.join(info.basePath, SNAPSHOTS_REL)
       await fs.promises.mkdir(snapshotsDir, { recursive: true })
       const snapshotFile = path.join(snapshotsDir, `legacy-adopted-${timestamp}.json`)
-      await fs.promises.writeFile(snapshotFile, JSON.stringify({ ...snap, skipPipSync: true }, null, 2))
+      await fs.promises.writeFile(
+        snapshotFile,
+        JSON.stringify({ ...snap, skipPipSync: true }, null, 2)
+      )
     } catch (err) {
       sendOutput(`Warning: forensic snapshot failed: ${(err as Error).message}\n`)
     }
@@ -877,14 +928,21 @@ async function runAdoption(
   let sourceAttempts = 0
   while (sourceMode === null) {
     sourceAttempts++
-    const sourceResult = await telemetry.trackedStep('desktop2.adopt.source', { attempt: sourceAttempts }, async () => {
-      return sourceComfyUI(info, destSource, tools, deps)
-    })
+    const sourceResult = await telemetry.trackedStep(
+      'comfy.desktop.adopt.source',
+      { attempt: sourceAttempts },
+      async () => {
+        return sourceComfyUI(info, destSource, tools, deps)
+      }
+    )
     if (sourceResult.mode !== 'failed') {
       sourceMode = sourceResult.mode
       break
     }
-    const choice = await tools.promptUser('source-missing', { message: sourceResult.message, attempts: sourceAttempts })
+    const choice = await tools.promptUser('source-missing', {
+      message: sourceResult.message,
+      attempts: sourceAttempts
+    })
     if (choice.kind !== 'source-missing') break
     if (choice.choice === 'cancel') {
       throw new Error(`source-missing: ${sourceResult.message}`)
@@ -904,37 +962,60 @@ async function runAdoption(
   // 2.0's standard policy that ComfyUI updates are opt-in per install.
   // Non-fatal: a stale source is still a working install.
   sendProgress('comfy-update', { percent: 0 })
-  const updateInfo = await telemetry.trackedStep('desktop2.adopt.comfy_update', {}, async () => {
-    return updateComfyToStable(destSource, tools)
-  })
+  const updateInfo = await telemetry.trackedStep(
+    'comfy.desktop.adopt.comfy_update',
+    {},
+    async () => {
+      return updateComfyToStable(destSource, tools)
+    }
+  )
 
   sendProgress('requirements', { percent: 0 })
-  const reqReport = await telemetry.trackedStep('desktop2.adopt.requirements', {}, async () => {
-    try {
-      return await installAdoptedRequirements(destSource, installPath, pythonPath, info.basePath, tools)
-    } catch (err) {
-      sendOutput(`Warning: requirements install threw: ${(err as Error).message}\n`)
-      return { uvAvailable: false, coreExitCode: null, managerExitCode: null, pygit2ExitCode: null }
+  const reqReport = await telemetry.trackedStep(
+    'comfy.desktop.adopt.requirements',
+    {},
+    async () => {
+      try {
+        return await installAdoptedRequirements(
+          destSource,
+          installPath,
+          pythonPath,
+          info.basePath,
+          tools
+        )
+      } catch (err) {
+        sendOutput(`Warning: requirements install threw: ${(err as Error).message}\n`)
+        return {
+          uvAvailable: false,
+          coreExitCode: null,
+          managerExitCode: null,
+          pygit2ExitCode: null
+        }
+      }
     }
-  })
+  )
 
   const rawComfySettings = readLegacyComfySettings(info.configDir)
   const prefs = readLegacyComfyPrefs(rawComfySettings)
   const derived = deriveLaunchArgs(rawComfySettings)
   const legacyDesktopConfig = readLegacyDesktopConfig(info.configDir)
   const legacyAppVersion = readLegacyAppVersion(info.executablePath)
-  const detectedGpu = typeof legacyDesktopConfig['detectedGpu'] === 'string'
-    ? legacyDesktopConfig['detectedGpu'] as string : null
-  const selectedDevice = typeof legacyDesktopConfig['selectedDevice'] === 'string'
-    ? legacyDesktopConfig['selectedDevice'] as string : null
+  const detectedGpu =
+    typeof legacyDesktopConfig['detectedGpu'] === 'string'
+      ? (legacyDesktopConfig['detectedGpu'] as string)
+      : null
+  const selectedDevice =
+    typeof legacyDesktopConfig['selectedDevice'] === 'string'
+      ? (legacyDesktopConfig['selectedDevice'] as string)
+      : null
 
   sendProgress('settings', { percent: 0 })
-  const carry = await telemetry.trackedStep('desktop2.adopt.carry_settings', {}, async () => {
+  const carry = await telemetry.trackedStep('comfy.desktop.adopt.carry_settings', {}, async () => {
     return carryLegacySettings(info.basePath, info.configDir, prefs, sendOutput)
   })
 
   sendProgress('register', { percent: 0 })
-  const record = await telemetry.trackedStep('desktop2.adopt.register', {}, async () => {
+  const record = await telemetry.trackedStep('comfy.desktop.adopt.register', {}, async () => {
     // Re-read post-update so the recorded version matches the checkout.
     const comfyVersion = readComfyVersion(destSource) ?? undefined
 
@@ -982,7 +1063,7 @@ async function runAdoption(
       copiedFrom: 'legacy-desktop',
       copyReason: 'in-place-adoption',
       status: 'installed',
-      seen: false,
+      seen: false
     }
     const entry = await installations.add(recordData)
     // Marker is written only after the record exists so a crash in between
@@ -1006,7 +1087,9 @@ async function runAdoption(
       await fs.promises.writeFile(path.join(info.basePath, MARKER_FILE), entry.id)
       await fs.promises.writeFile(path.join(installPath, MARKER_FILE), entry.id)
     } catch (err) {
-      try { await installations.remove(entry.id) } catch {}
+      try {
+        await installations.remove(entry.id)
+      } catch {}
       throw err
     }
     // Drop the auto-tracked legacy desktop card now that the adopted
@@ -1028,7 +1111,7 @@ async function runAdoption(
     return entry
   })
 
-  telemetry.capture('desktop2.adopt.succeeded', {
+  telemetry.capture('comfy.desktop.adopt.succeeded', {
     installation_id: record.id,
     legacy_version: legacyAppVersion ?? null,
     adopted_source_mode: sourceMode,
@@ -1045,7 +1128,7 @@ async function runAdoption(
     requirements_manager_exit: reqReport.managerExitCode,
     requirements_pygit2_exit: reqReport.pygit2ExitCode,
     gpu: detectedGpu,
-    selected_device: selectedDevice,
+    selected_device: selectedDevice
   })
 
   sendProgress('done', { percent: 100 })
@@ -1063,7 +1146,7 @@ async function runAdoption(
  */
 async function updateComfyToStable(
   destSource: string,
-  tools: AdoptTools,
+  tools: AdoptTools
 ): Promise<{ tag: string | null }> {
   if (!fs.existsSync(path.join(destSource, '.git'))) {
     tools.sendOutput('Skipping post-adoption ComfyUI update: source is not a git checkout.\n')
@@ -1076,7 +1159,9 @@ async function updateComfyToStable(
     tag = null
   }
   if (!tag) {
-    tools.sendOutput('Skipping post-adoption ComfyUI update: could not resolve latest stable tag.\n')
+    tools.sendOutput(
+      'Skipping post-adoption ComfyUI update: could not resolve latest stable tag.\n'
+    )
     return { tag: null }
   }
   tools.sendOutput(`Checking out latest stable ComfyUI tag (${tag})…\n`)
@@ -1085,7 +1170,7 @@ async function updateComfyToStable(
     if (result.exitCode !== 0) {
       tools.sendOutput(
         `Warning: ComfyUI checkout of ${tag} failed (exit ${result.exitCode}). ` +
-        `Continuing with whatever was cloned; user can update from Settings later.\n`,
+          `Continuing with whatever was cloned; user can update from Settings later.\n`
       )
       return { tag: null }
     }

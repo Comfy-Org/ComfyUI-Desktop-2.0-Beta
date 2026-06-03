@@ -5,17 +5,27 @@ import { snapshotsDir, formatTimestamp } from './store'
 import * as telemetry from '../telemetry'
 import type { Snapshot, SnapshotEntry, SnapshotExportEnvelope } from './types'
 
-export function buildExportEnvelope(installationName: string, entries: SnapshotEntry[]): SnapshotExportEnvelope {
+export function buildExportEnvelope(
+  installationName: string,
+  entries: SnapshotEntry[]
+): SnapshotExportEnvelope {
   return {
     type: 'comfyui-desktop-2-snapshot',
     version: 1,
     exportedAt: new Date().toISOString(),
     installationName,
-    snapshots: entries.map((e) => e.snapshot),
+    snapshots: entries.map((e) => e.snapshot)
   }
 }
 
-const VALID_TRIGGERS = new Set(['boot', 'restart', 'manual', 'pre-update', 'post-update', 'post-restore'])
+const VALID_TRIGGERS = new Set([
+  'boot',
+  'restart',
+  'manual',
+  'pre-update',
+  'post-update',
+  'post-restore'
+])
 
 // PyPI package names: letters, digits, dots, hyphens, underscores (PEP 508).
 // Must not start with '-' to avoid argument injection when passed to uv pip.
@@ -58,9 +68,11 @@ function isValidSnapshot(s: unknown): s is Snapshot {
 export function validateExportEnvelope(data: unknown): SnapshotExportEnvelope {
   if (!data || typeof data !== 'object') throw new Error('Invalid file: not a JSON object')
   const obj = data as Record<string, unknown>
-  if (obj.type !== 'comfyui-desktop-2-snapshot') throw new Error('Invalid file: not a Comfy Desktop snapshot export')
+  if (obj.type !== 'comfyui-desktop-2-snapshot')
+    throw new Error('Invalid file: not a Comfy Desktop snapshot export')
   if (obj.version !== 1) throw new Error(`Unsupported snapshot version: ${obj.version}`)
-  if (!Array.isArray(obj.snapshots) || obj.snapshots.length === 0) throw new Error('File contains no snapshots')
+  if (!Array.isArray(obj.snapshots) || obj.snapshots.length === 0)
+    throw new Error('File contains no snapshots')
   for (let i = 0; i < obj.snapshots.length; i++) {
     if (!isValidSnapshot(obj.snapshots[i])) throw new Error(`Invalid snapshot at index ${i}`)
   }
@@ -70,7 +82,7 @@ export function validateExportEnvelope(data: unknown): SnapshotExportEnvelope {
 export async function importSnapshots(
   installPath: string,
   envelope: SnapshotExportEnvelope,
-  installationId: string,
+  installationId: string
 ): Promise<{ imported: number; filenames: string[] }> {
   const dir = snapshotsDir(installPath)
   await fs.promises.mkdir(dir, { recursive: true })
@@ -104,21 +116,21 @@ export async function importSnapshots(
 
     // Per-snapshot emit (not a single batch event) so the trigger / size
     // distribution of imported snapshots is queryable the same way as
-    // `desktop2.snapshot.created`. `batch_size` + `batch_index` let dashboards
+    // `comfy.desktop.snapshot.created`. `batch_size` + `batch_index` let dashboards
     // recover the import-operation grouping when they care about it.
     //
-    // Distinct event from `desktop2.snapshot.created` because the snapshot
+    // Distinct event from `comfy.desktop.snapshot.created` because the snapshot
     // wasn't *taken* on this install — it was copied in from an export
     // envelope (manual import or standalone migration), and we want the
     // "how often does an install snapshot itself" metric to stay clean.
-    telemetry.emit('desktop2.snapshot.imported', {
+    telemetry.emit('comfy.desktop.snapshot.imported', {
       installation_id: installationId,
       original_trigger: snapshot.trigger,
       custom_nodes_count: snapshot.customNodes.length,
       pip_packages_count: Object.keys(snapshot.pipPackages).length,
       has_label: !!(snapshot.label && snapshot.label.length > 0),
       batch_size: count,
-      batch_index: i,
+      batch_index: i
     })
   }
 

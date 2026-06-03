@@ -417,7 +417,7 @@ async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Prom
       (_, k: string) => String((mutableAction.data as Record<string, unknown>)?.[k] ?? k)
     )
     const title = `${rawTitle} — ${instName}`
-    emitTelemetryAction('desktop2.action.invoked', {
+    emitTelemetryAction('comfy.desktop.action.invoked', {
       action_id: mutableAction.id,
       ...telemetryContext
     })
@@ -479,7 +479,7 @@ async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Prom
     btn.classList.add('loading')
   }
   try {
-    emitTelemetryAction('desktop2.action.invoked', {
+    emitTelemetryAction('comfy.desktop.action.invoked', {
       action_id: mutableAction.id,
       ...telemetryContext
     })
@@ -505,7 +505,7 @@ async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Prom
       await window.api.runAction(instId, 'launch')
     }
     const resultValue = result.cancelled ? 'cancelled' : result.ok === false ? 'failed' : 'ok'
-    emitTelemetryAction('desktop2.action.result', {
+    emitTelemetryAction('comfy.desktop.action.result', {
       action_id: mutableAction.id,
       result: resultValue,
       ...telemetryContext
@@ -519,7 +519,7 @@ async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Prom
       await modal.alert({ title: mutableAction.label, message: result.message })
     }
   } catch (error: unknown) {
-    emitTelemetryAction('desktop2.action.result', {
+    emitTelemetryAction('comfy.desktop.action.result', {
       action_id: mutableAction.id,
       result: 'failed',
       error_bucket: toErrorBucket(error),

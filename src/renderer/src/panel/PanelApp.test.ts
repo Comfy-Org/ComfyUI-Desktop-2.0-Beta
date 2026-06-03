@@ -2,8 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../main', () => ({
   i18n: {
-    global: { t: (key: string) => key },
-  },
+    global: { t: (key: string) => key }
+  }
 }))
 
 vi.mock('../composables/useTheme', () => ({ useTheme: () => ({ theme: 'dark' }) }))
@@ -13,10 +13,10 @@ vi.mock('../composables/useTheme', () => ({ useTheme: () => ({ theme: 'dark' }) 
 const mockModal = {
   alert: vi.fn(),
   confirm: vi.fn(),
-  close: vi.fn(),
+  close: vi.fn()
 }
 vi.mock('../composables/useModal', () => ({
-  useModal: () => mockModal,
+  useModal: () => mockModal
 }))
 
 // Stub the heavy children so we can assert which sub-panel is rendered.
@@ -26,20 +26,19 @@ vi.mock('../views/DetailModal.vue', () => ({
     // DetailModal has no `inline` prop — it renders one way and the
     // parent owns the close behaviour.
     props: ['installation', 'initialTab', 'autoAction'],
-    template:
-      '<div data-testid="detail-modal" :data-installation-id="installation?.id" />',
-  },
+    template: '<div data-testid="detail-modal" :data-installation-id="installation?.id" />'
+  }
 }))
 vi.mock('../views/ProgressModal.vue', () => ({
   default: {
     name: 'ProgressModal',
     props: ['installationId'],
     template: '<div data-testid="progress-modal" />',
-    methods: { startOperation: vi.fn(), showOperation: vi.fn() },
-  },
+    methods: { startOperation: vi.fn(), showOperation: vi.fn() }
+  }
 }))
 vi.mock('../components/ModalDialog.vue', () => ({
-  default: { name: 'ModalDialog', template: '<div />' },
+  default: { name: 'ModalDialog', template: '<div />' }
 }))
 // Modal teleports its slot to <body>; replace with a transparent
 // pass-through so wrapper.find() can still see the slotted children.
@@ -47,56 +46,55 @@ vi.mock('../components/Modal.vue', () => ({
   default: {
     name: 'Modal',
     props: ['binding', 'opacity', 'width', 'contentClass', 'inline'],
-    template: '<div data-testid="modal-stub"><slot /></div>',
-  },
+    template: '<div data-testid="modal-stub"><slot /></div>'
+  }
 }))
 vi.mock('./ComfyLifecycleView.vue', () => ({
   default: {
     name: 'ComfyLifecycleView',
     props: ['installation', 'installationId'],
-    template:
-      '<div data-testid="comfy-lifecycle" :data-installation-id="installationId" />',
-  },
+    template: '<div data-testid="comfy-lifecycle" :data-installation-id="installationId" />'
+  }
 }))
 vi.mock('../views/ChooserView.vue', () => ({
   default: {
     name: 'ChooserView',
     emits: ['pick', 'show-new-install'],
     template:
-      '<div data-testid="chooser-view"><button data-testid="chooser-new-install" @click="$emit(\'show-new-install\')">New</button></div>',
-  },
+      '<div data-testid="chooser-view"><button data-testid="chooser-new-install" @click="$emit(\'show-new-install\')">New</button></div>'
+  }
 }))
 vi.mock('../views/InstallWizardModal.vue', () => ({
   default: {
     name: 'InstallWizardModal',
     emits: ['close', 'navigate-list', 'show-progress'],
     template: '<div data-testid="new-install-modal" />',
-    methods: { open: vi.fn() },
-  },
+    methods: { open: vi.fn() }
+  }
 }))
 vi.mock('../views/TrackModal.vue', () => ({
   default: {
     name: 'TrackModal',
     emits: ['close', 'navigate-list'],
     template: '<div data-testid="track-modal" />',
-    methods: { open: vi.fn() },
-  },
+    methods: { open: vi.fn() }
+  }
 }))
 vi.mock('../views/LoadSnapshotModal.vue', () => ({
   default: {
     name: 'LoadSnapshotModal',
     emits: ['close', 'show-progress'],
     template: '<div data-testid="load-snapshot-modal" />',
-    methods: { open: vi.fn() },
-  },
+    methods: { open: vi.fn() }
+  }
 }))
 vi.mock('../views/QuickInstallModal.vue', () => ({
   default: {
     name: 'QuickInstallModal',
     emits: ['close', 'show-progress'],
     template: '<div data-testid="quick-install-modal" />',
-    methods: { open: vi.fn() },
-  },
+    methods: { open: vi.fn() }
+  }
 }))
 vi.mock('../views/FirstUseTakeover.vue', () => ({
   default: {
@@ -112,24 +110,24 @@ vi.mock('../views/FirstUseTakeover.vue', () => ({
       '<button data-testid="first-use-local" @click="$emit(\'chain-local\')">Local</button>' +
       '<button data-testid="first-use-close" @click="$emit(\'close\')">Close</button>' +
       '</div>',
-    methods: { open: vi.fn() },
-  },
+    methods: { open: vi.fn() }
+  }
 }))
 vi.mock('../components/DownloadsModal.vue', () => ({
   default: {
     name: 'DownloadsModal',
     props: ['open'],
     emits: ['close'],
-    template: '<div data-testid="downloads-modal" />',
-  },
+    template: '<div data-testid="downloads-modal" />'
+  }
 }))
 vi.mock('../views/MigrateConfirmTakeover.vue', () => ({
   default: {
     name: 'MigrateConfirmTakeover',
     emits: ['close'],
     template: '<div data-testid="migrate-confirm-takeover" />',
-    methods: { open: vi.fn() },
-  },
+    methods: { open: vi.fn() }
+  }
 }))
 import { mount, flushPromises } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
@@ -137,10 +135,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import PanelApp from './PanelApp.vue'
 import { __resetLauncherPrefsForTest } from '../composables/useLauncherPrefs'
 import { useOverlay } from '../composables/useOverlay'
-import {
-  TELEMETRY_ACTION_EVENT_NAME,
-  type TelemetryActionEventDetail,
-} from '../lib/telemetry'
+import { TELEMETRY_ACTION_EVENT_NAME, type TelemetryActionEventDetail } from '../lib/telemetry'
 
 const messages = {
   en: {
@@ -149,12 +144,12 @@ const messages = {
       panelInstallSettings: 'Install Settings',
       panelLauncherSettings: 'Launcher Settings',
       installSettingsComingSoon: 'Coming soon',
-      installationLabel: 'Installation',
+      installationLabel: 'Installation'
     },
     common: {
-      loading: 'Loading…',
-    },
-  },
+      loading: 'Loading…'
+    }
+  }
 }
 
 function createTestI18n() {
@@ -169,10 +164,7 @@ interface InstallationLike {
 }
 
 type PanelTriggerPayload = {
-  kind:
-    | 'install-update'
-    | 'app-update-restart-prompt'
-    | 'app-update-download-prompt'
+  kind: 'install-update' | 'app-update-restart-prompt' | 'app-update-download-prompt'
   installationId?: string
   version?: string | null
 }
@@ -227,7 +219,7 @@ function installMockApi(initial?: {
     getAppVersion: vi.fn(async () => '0.5.0'),
     settings: { firstUseCompleted: true, ...initial?.settings },
     installUpdate: vi.fn(async () => {}),
-    downloadUpdate: vi.fn(async () => {}),
+    downloadUpdate: vi.fn(async () => {})
   }
   const api = {
     getLocaleMessages: vi.fn().mockResolvedValue(messages.en),
@@ -321,7 +313,7 @@ function installMockApi(initial?: {
     focusComfyWindow: vi.fn(async () => {}),
     getListActions: vi.fn(async () => []),
     openGlobalSettings: vi.fn(),
-    openInstancePicker: vi.fn(),
+    openInstancePicker: vi.fn()
   }
   ;(window as unknown as { api: typeof api }).api = api
   return state
@@ -329,7 +321,7 @@ function installMockApi(initial?: {
 
 function mountPanel() {
   return mount(PanelApp, {
-    global: { plugins: [createTestI18n(), createPinia()] },
+    global: { plugins: [createTestI18n(), createPinia()] }
   })
 }
 
@@ -337,7 +329,7 @@ const SAMPLE_INSTALL: InstallationLike = {
   id: 'test-id',
   name: 'Test Install',
   sourceLabel: 'Standalone',
-  sourceCategory: 'local',
+  sourceCategory: 'local'
 }
 
 describe('PanelApp', () => {
@@ -371,7 +363,7 @@ describe('PanelApp', () => {
     expect(wrapper.find('[data-testid="comfy-lifecycle"]').exists()).toBe(true)
   })
 
-it('ignores unknown panel keys from onPanelSwitch', async () => {
+  it('ignores unknown panel keys from onPanelSwitch', async () => {
     const wrapper = mountPanel()
     await flushPromises()
     expect(wrapper.find('[data-testid="comfy-lifecycle"]').exists()).toBe(true)
@@ -395,10 +387,14 @@ it('ignores unknown panel keys from onPanelSwitch', async () => {
     expect(mockState.getInstallations).toHaveBeenCalledTimes(2)
   })
 
-it('renders the comfy-lifecycle view when initialised with that panel', async () => {
+  it('renders the comfy-lifecycle view when initialised with that panel', async () => {
     // Main initialises panel.html with `panel=comfy-lifecycle` when the
     // Comfy tab body needs to show the lifecycle UI (instance not running).
-    window.history.replaceState({}, '', '/?installationId=test-id&panel=comfy-lifecycle&firstUseCompleted=true')
+    window.history.replaceState(
+      {},
+      '',
+      '/?installationId=test-id&panel=comfy-lifecycle&firstUseCompleted=true'
+    )
     const wrapper = mountPanel()
     await flushPromises()
     const lifecycle = wrapper.find('[data-testid="comfy-lifecycle"]')
@@ -406,7 +402,7 @@ it('renders the comfy-lifecycle view when initialised with that panel', async ()
     expect(lifecycle.attributes('data-installation-id')).toBe('test-id')
   })
 
-it('opens the new-install takeover above the chooser body when show-new-install fires', async () => {
+  it('opens the new-install takeover above the chooser body when show-new-install fires', async () => {
     // Flow modals are Tier 3 takeover overlays. The chooser stays
     // mounted underneath the takeover, so dismissing the takeover
     // drops the user back into the chooser tile they came from with
@@ -459,31 +455,48 @@ it('opens the new-install takeover above the chooser body when show-new-install 
 
   it.each([
     { panel: 'track', selector: '[data-testid="track-modal"]', name: 'TrackModal' },
-    { panel: 'load-snapshot', selector: '[data-testid="load-snapshot-modal"]', name: 'LoadSnapshotModal' },
-    { panel: 'quick-install', selector: '[data-testid="quick-install-modal"]', name: 'QuickInstallModal' },
-    { panel: 'new-install', selector: '[data-testid="new-install-modal"]', name: 'InstallWizardModal' },
-  ])('IPCs closeCurrentPanel when the $panel takeover dismisses, so main\'s activePanel resets and the file menu can re-open it', async ({ panel, selector, name }) => {
-    // Without this IPC, main's `entry.activePanel` stays stuck on the
-    // wizard key after the renderer-side dismiss; the next file-menu
-    // pick of the same item hits `setActivePanel`'s same-panel
-    // early-return and the modal silently fails to reopen
-    // (Comfy-Org/Comfy-Desktop#486).
-    window.history.replaceState({}, '', `/?panel=${panel}&firstUseCompleted=true`)
-    const wrapper = mountPanel()
-    await flushPromises()
-    expect(wrapper.find(selector).exists()).toBe(true)
+    {
+      panel: 'load-snapshot',
+      selector: '[data-testid="load-snapshot-modal"]',
+      name: 'LoadSnapshotModal'
+    },
+    {
+      panel: 'quick-install',
+      selector: '[data-testid="quick-install-modal"]',
+      name: 'QuickInstallModal'
+    },
+    {
+      panel: 'new-install',
+      selector: '[data-testid="new-install-modal"]',
+      name: 'InstallWizardModal'
+    }
+  ])(
+    "IPCs closeCurrentPanel when the $panel takeover dismisses, so main's activePanel resets and the file menu can re-open it",
+    async ({ panel, selector, name }) => {
+      // Without this IPC, main's `entry.activePanel` stays stuck on the
+      // wizard key after the renderer-side dismiss; the next file-menu
+      // pick of the same item hits `setActivePanel`'s same-panel
+      // early-return and the modal silently fails to reopen
+      // (Comfy-Org/Comfy-Desktop#486).
+      window.history.replaceState({}, '', `/?panel=${panel}&firstUseCompleted=true`)
+      const wrapper = mountPanel()
+      await flushPromises()
+      expect(wrapper.find(selector).exists()).toBe(true)
 
-    const closeCurrentPanel = (window as unknown as {
-      api: { closeCurrentPanel: ReturnType<typeof vi.fn> }
-    }).api.closeCurrentPanel
-    expect(closeCurrentPanel).not.toHaveBeenCalled()
+      const closeCurrentPanel = (
+        window as unknown as {
+          api: { closeCurrentPanel: ReturnType<typeof vi.fn> }
+        }
+      ).api.closeCurrentPanel
+      expect(closeCurrentPanel).not.toHaveBeenCalled()
 
-    await wrapper.findComponent({ name }).vm.$emit('close')
-    await flushPromises()
+      await wrapper.findComponent({ name }).vm.$emit('close')
+      await flushPromises()
 
-    expect(closeCurrentPanel).toHaveBeenCalledTimes(1)
-    expect(wrapper.find(selector).exists()).toBe(false)
-  })
+      expect(closeCurrentPanel).toHaveBeenCalledTimes(1)
+      expect(wrapper.find(selector).exists()).toBe(false)
+    }
+  )
 
   it('does NOT auto-mount the first-use takeover when firstUseCompleted is true', async () => {
     // Default mock state has firstUseCompleted: true; the takeover
@@ -517,17 +530,19 @@ it('opens the new-install takeover above the chooser body when show-new-install 
     // returning-user `complete-skip` test below can credibly assert
     // the opposite.
     mockState.installations = [
-      { id: 'cloud-id', name: 'Comfy Cloud', sourceLabel: 'Cloud', sourceCategory: 'cloud' },
+      { id: 'cloud-id', name: 'Comfy Cloud', sourceLabel: 'Cloud', sourceCategory: 'cloud' }
     ]
     window.history.replaceState({}, '', '/?panel=chooser')
     const wrapper = mountPanel()
     await flushPromises()
-    const api = (window as unknown as {
-      api: {
-        setSetting: ReturnType<typeof vi.fn>
-        getListActions: ReturnType<typeof vi.fn>
+    const api = (
+      window as unknown as {
+        api: {
+          setSetting: ReturnType<typeof vi.fn>
+          getListActions: ReturnType<typeof vi.fn>
+        }
       }
-    }).api
+    ).api
     expect(api.setSetting).not.toHaveBeenCalledWith('firstUseCompleted', true)
 
     await wrapper.find('[data-testid="first-use-cloud"]').trigger('click')
@@ -552,17 +567,19 @@ it('opens the new-install takeover above the chooser body when show-new-install 
     mockState.settings.firstUseCompleted = false
     mockState.installations = [
       { id: 'cloud-id', name: 'Comfy Cloud', sourceLabel: 'Cloud', sourceCategory: 'cloud' },
-      SAMPLE_INSTALL,
+      SAMPLE_INSTALL
     ]
     window.history.replaceState({}, '', '/?panel=chooser')
     const wrapper = mountPanel()
     await flushPromises()
-    const api = (window as unknown as {
-      api: {
-        setSetting: ReturnType<typeof vi.fn>
-        getListActions: ReturnType<typeof vi.fn>
+    const api = (
+      window as unknown as {
+        api: {
+          setSetting: ReturnType<typeof vi.fn>
+          getListActions: ReturnType<typeof vi.fn>
+        }
       }
-    }).api
+    ).api
     expect(api.setSetting).not.toHaveBeenCalledWith('firstUseCompleted', true)
 
     await wrapper.find('[data-testid="first-use-skip"]').trigger('click')
@@ -588,9 +605,11 @@ it('opens the new-install takeover above the chooser body when show-new-install 
     expect(wrapper.find('[data-testid="first-use-takeover"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="new-install-modal"]').exists()).toBe(true)
 
-    const setSetting = (window as unknown as {
-      api: { setSetting: ReturnType<typeof vi.fn> }
-    }).api.setSetting
+    const setSetting = (
+      window as unknown as {
+        api: { setSetting: ReturnType<typeof vi.fn> }
+      }
+    ).api.setSetting
     expect(setSetting).not.toHaveBeenCalledWith('firstUseCompleted', true)
 
     // New-install close (success or cancel) flips the persisted gate.
@@ -613,9 +632,11 @@ it('opens the new-install takeover above the chooser body when show-new-install 
     await flushPromises()
     expect(wrapper.find('[data-testid="first-use-takeover"]').exists()).toBe(true)
 
-    const setSetting = (window as unknown as {
-      api: { setSetting: ReturnType<typeof vi.fn> }
-    }).api.setSetting
+    const setSetting = (
+      window as unknown as {
+        api: { setSetting: ReturnType<typeof vi.fn> }
+      }
+    ).api.setSetting
     expect(setSetting).not.toHaveBeenCalledWith('firstUseCompleted', true)
 
     // Simulate the main → renderer Skip Onboarding push.
@@ -629,7 +650,7 @@ it('opens the new-install takeover above the chooser body when show-new-install 
     expect(wrapper.find('[data-testid="chooser-view"]').exists()).toBe(true)
   })
 
-  it('emits desktop2.feedback.opened with the originating source and opens the support URL', async () => {
+  it('emits comfy.desktop.feedback.opened with the originating source and opens the support URL', async () => {
     // Both the title-bar feedback button and the file-menu "Send
     // Feedback" entry route through main's `comfy-panel:open-feedback`
     // IPC. The panel renderer is the natural home for the click side-
@@ -662,7 +683,7 @@ it('opens the new-install takeover above the chooser body when show-new-install 
     window.removeEventListener('launcher-telemetry-action', listener)
 
     const feedbackTelemetry = telemetryEvents.filter(
-      (e) => e.actionName === 'desktop2.feedback.opened',
+      (e) => e.actionName === 'comfy.desktop.feedback.opened'
     )
     expect(feedbackTelemetry.map((e) => e.context?.source)).toEqual(['titlebar', 'menu'])
     // FeedbackModal teleports its iframe to <body>, so query the
@@ -712,12 +733,10 @@ it('opens the new-install takeover above the chooser body when show-new-install 
     // update-confirm modal rather than just staring at the Update tab.
     mountPanel()
     await flushPromises()
-    const api = (
-      window as unknown as { api: { openInstancePicker: ReturnType<typeof vi.fn> } }
-    ).api
+    const api = (window as unknown as { api: { openInstancePicker: ReturnType<typeof vi.fn> } }).api
 
     mockState.panelTriggerOverlayCallbacks.forEach((cb) =>
-      cb({ kind: 'install-update', installationId: 'test-id' }),
+      cb({ kind: 'install-update', installationId: 'test-id' })
     )
     await flushPromises()
 
@@ -725,7 +744,7 @@ it('opens the new-install takeover above the chooser body when show-new-install 
     expect(api.openInstancePicker).toHaveBeenCalledWith({
       installationId: 'test-id',
       initialTab: 'update',
-      autoAction: 'update-comfyui',
+      autoAction: 'update-comfyui'
     })
   })
 
@@ -736,21 +755,23 @@ it('opens the new-install takeover above the chooser body when show-new-install 
     mountPanel()
     await flushPromises()
     const api = (
-      window as unknown as { api: {
-        openInstancePicker: ReturnType<typeof vi.fn>
-        openGlobalSettings: ReturnType<typeof vi.fn>
-      } }
+      window as unknown as {
+        api: {
+          openInstancePicker: ReturnType<typeof vi.fn>
+          openGlobalSettings: ReturnType<typeof vi.fn>
+        }
+      }
     ).api
 
     mockState.panelTriggerOverlayCallbacks.forEach((cb) =>
-      cb({ kind: 'open-settings', settingsTab: 'comfy' }),
+      cb({ kind: 'open-settings', settingsTab: 'comfy' })
     )
     await flushPromises()
 
     expect(api.openInstancePicker).toHaveBeenCalledTimes(1)
     expect(api.openInstancePicker).toHaveBeenCalledWith({
       installationId: 'test-id',
-      initialTab: 'config',
+      initialTab: 'config'
     })
     expect(api.openGlobalSettings).not.toHaveBeenCalled()
   })
@@ -761,14 +782,16 @@ it('opens the new-install takeover above the chooser body when show-new-install 
     mountPanel()
     await flushPromises()
     const api = (
-      window as unknown as { api: {
-        openInstancePicker: ReturnType<typeof vi.fn>
-        openGlobalSettings: ReturnType<typeof vi.fn>
-      } }
+      window as unknown as {
+        api: {
+          openInstancePicker: ReturnType<typeof vi.fn>
+          openGlobalSettings: ReturnType<typeof vi.fn>
+        }
+      }
     ).api
 
     mockState.panelTriggerOverlayCallbacks.forEach((cb) =>
-      cb({ kind: 'open-settings', settingsTab: 'global' }),
+      cb({ kind: 'open-settings', settingsTab: 'global' })
     )
     await flushPromises()
 
@@ -787,14 +810,14 @@ it('opens the new-install takeover above the chooser body when show-new-install 
     await flushPromises()
 
     mockState.panelTriggerOverlayCallbacks.forEach((cb) =>
-      cb({ kind: 'app-update-restart-prompt', version: '1.2.3' }),
+      cb({ kind: 'app-update-restart-prompt', version: '1.2.3' })
     )
     await flushPromises()
 
     expect(mockModal.confirm).toHaveBeenCalledTimes(1)
     expect(mockModal.confirm.mock.calls[0]?.[0]).toMatchObject({
       title: 'appUpdate.readyTitle',
-      confirmLabel: 'appUpdate.restartNow',
+      confirmLabel: 'appUpdate.restartNow'
     })
     expect(mockState.installUpdate).toHaveBeenCalledTimes(1)
   })
@@ -805,7 +828,7 @@ it('opens the new-install takeover above the chooser body when show-new-install 
     await flushPromises()
 
     mockState.panelTriggerOverlayCallbacks.forEach((cb) =>
-      cb({ kind: 'app-update-restart-prompt', version: '1.2.3' }),
+      cb({ kind: 'app-update-restart-prompt', version: '1.2.3' })
     )
     await flushPromises()
 
@@ -823,14 +846,14 @@ it('opens the new-install takeover above the chooser body when show-new-install 
     await flushPromises()
 
     mockState.panelTriggerOverlayCallbacks.forEach((cb) =>
-      cb({ kind: 'app-update-download-prompt', version: '1.2.3' }),
+      cb({ kind: 'app-update-download-prompt', version: '1.2.3' })
     )
     await flushPromises()
 
     expect(mockModal.confirm).toHaveBeenCalledTimes(1)
     expect(mockModal.confirm.mock.calls[0]?.[0]).toMatchObject({
       title: 'appUpdate.availableTitle',
-      confirmLabel: 'appUpdate.download',
+      confirmLabel: 'appUpdate.download'
     })
     expect(mockState.downloadUpdate).toHaveBeenCalledTimes(1)
   })
@@ -847,7 +870,7 @@ it('opens the new-install takeover above the chooser body when show-new-install 
 
     expect(mockModal.confirm).toHaveBeenCalledTimes(1)
     expect(mockModal.confirm.mock.calls[0]?.[0]).toMatchObject({
-      title: 'appUpdate.readyTitle',
+      title: 'appUpdate.readyTitle'
     })
     expect(mockState.installUpdate).toHaveBeenCalledTimes(1)
   })
@@ -856,15 +879,13 @@ it('opens the new-install takeover above the chooser body when show-new-install 
     mountPanel()
     await flushPromises()
 
-    mockState.appUpdateUserActionFailedCallbacks.forEach((cb) =>
-      cb({ message: 'network down' }),
-    )
+    mockState.appUpdateUserActionFailedCallbacks.forEach((cb) => cb({ message: 'network down' }))
     await flushPromises()
 
     expect(mockModal.alert).toHaveBeenCalledTimes(1)
     expect(mockModal.alert.mock.calls[0]?.[0]).toMatchObject({
       title: 'appUpdate.errorTitle',
-      message: 'network down',
+      message: 'network down'
     })
   })
 
@@ -874,15 +895,15 @@ it('opens the new-install takeover above the chooser body when show-new-install 
     const wrapper = mountPanel()
     await flushPromises()
     mockState.panelTriggerOverlayCallbacks.forEach((cb) =>
-      cb({ kind: 'install-update', installationId: 'someone-else' }),
+      cb({ kind: 'install-update', installationId: 'someone-else' })
     )
     await flushPromises()
     expect(wrapper.find('[data-testid="detail-modal"]').exists()).toBe(false)
   })
 
   // ---------------------------------------------------------------------------
-  // Telemetry (issue #485) — verify `desktop2.install.flow.opened`
-  // and `desktop2.view.opened` fire from PanelApp's
+  // Telemetry (issue #485) — verify `comfy.desktop.install.flow.opened`
+  // and `comfy.desktop.view.opened` fire from PanelApp's
   // `openFlowTakeover` / `switchPanel`.
   //
   // Captures CustomEvents on the `window` (the same channel
@@ -898,33 +919,33 @@ it('opens the new-install takeover above the chooser body when show-new-install 
       return events
     }
 
-    it('fires desktop2.install.flow.opened with entrypoint=chooser when chooser empty-state CTA fires', async () => {
+    it('fires comfy.desktop.install.flow.opened with entrypoint=chooser when chooser empty-state CTA fires', async () => {
       window.history.replaceState({}, '', '/?panel=chooser&firstUseCompleted=true')
       const wrapper = mountPanel()
       await flushPromises()
       const events = captureTelemetry()
       await wrapper.find('[data-testid="chooser-new-install"]').trigger('click')
       await flushPromises()
-      const flowEvents = events.filter((e) => e.actionName === 'desktop2.install.flow.opened')
+      const flowEvents = events.filter((e) => e.actionName === 'comfy.desktop.install.flow.opened')
       expect(flowEvents).toHaveLength(1)
       expect(flowEvents[0].context).toMatchObject({
         flow: 'new_install',
-        entrypoint: 'chooser',
+        entrypoint: 'chooser'
       })
     })
 
-    it('fires desktop2.install.flow.opened with entrypoint=titlebar for a panel-switch IPC', async () => {
+    it('fires comfy.desktop.install.flow.opened with entrypoint=titlebar for a panel-switch IPC', async () => {
       window.history.replaceState({}, '', '/?panel=chooser&firstUseCompleted=true')
       mountPanel()
       await flushPromises()
       const events = captureTelemetry()
       mockState.panelSwitchCallbacks.forEach((cb) => cb({ panel: 'quick-install' }))
       await flushPromises()
-      const flowEvents = events.filter((e) => e.actionName === 'desktop2.install.flow.opened')
+      const flowEvents = events.filter((e) => e.actionName === 'comfy.desktop.install.flow.opened')
       expect(flowEvents).toHaveLength(1)
       expect(flowEvents[0].context).toMatchObject({
         flow: 'quick_install',
-        entrypoint: 'titlebar',
+        entrypoint: 'titlebar'
       })
     })
 
@@ -937,39 +958,41 @@ it('opens the new-install takeover above the chooser body when show-new-install 
         { panel: 'new-install', flow: 'new_install' },
         { panel: 'track', flow: 'track_existing' },
         { panel: 'load-snapshot', flow: 'load_snapshot' },
-        { panel: 'quick-install', flow: 'quick_install' },
+        { panel: 'quick-install', flow: 'quick_install' }
       ]
       for (const { panel } of cases) {
         mockState.panelSwitchCallbacks.forEach((cb) => cb({ panel }))
         await flushPromises()
         // The takeover slot only holds one component; emit close so the
         // next case can open. Each *Modal stub emits 'close'.
-        const open = events.filter((e) => e.actionName === 'desktop2.install.flow.opened').pop()
+        const open = events
+          .filter((e) => e.actionName === 'comfy.desktop.install.flow.opened')
+          .pop()
         // Dismiss whatever takeover is currently mounted.
         useOverlay().current.value = null
         await flushPromises()
         expect(open?.context?.flow, `panel=${panel}`).toBe(
-          cases.find((c) => c.panel === panel)?.flow,
+          cases.find((c) => c.panel === panel)?.flow
         )
       }
     })
 
-    it('fires desktop2.install.flow.opened with entrypoint=url when the URL initial panel is a flow', async () => {
+    it('fires comfy.desktop.install.flow.opened with entrypoint=url when the URL initial panel is a flow', async () => {
       // Captures must be installed BEFORE mount because the URL-driven
       // initial-panel branch fires from inside `onMounted`.
       const events = captureTelemetry()
       window.history.replaceState({}, '', '/?panel=load-snapshot&firstUseCompleted=true')
       mountPanel()
       await flushPromises()
-      const flowEvents = events.filter((e) => e.actionName === 'desktop2.install.flow.opened')
+      const flowEvents = events.filter((e) => e.actionName === 'comfy.desktop.install.flow.opened')
       expect(flowEvents).toHaveLength(1)
       expect(flowEvents[0].context).toMatchObject({
         flow: 'load_snapshot',
-        entrypoint: 'url',
+        entrypoint: 'url'
       })
     })
 
-    it('fires desktop2.install.flow.opened with entrypoint=first_use on the first-use Local-branch chain', async () => {
+    it('fires comfy.desktop.install.flow.opened with entrypoint=first_use on the first-use Local-branch chain', async () => {
       mockState.settings.firstUseCompleted = false
       window.history.replaceState({}, '', '/?panel=chooser')
       const wrapper = mountPanel()
@@ -977,25 +1000,25 @@ it('opens the new-install takeover above the chooser body when show-new-install 
       const events = captureTelemetry()
       await wrapper.find('[data-testid="first-use-local"]').trigger('click')
       await flushPromises()
-      const flowEvents = events.filter((e) => e.actionName === 'desktop2.install.flow.opened')
+      const flowEvents = events.filter((e) => e.actionName === 'comfy.desktop.install.flow.opened')
       expect(flowEvents).toHaveLength(1)
       expect(flowEvents[0].context).toMatchObject({
         flow: 'new_install',
-        entrypoint: 'first_use',
+        entrypoint: 'first_use'
       })
     })
 
-it('does NOT fire desktop2.view.opened when a panel-switch IPC re-confirms the active body panel', async () => {
+    it('does NOT fire comfy.desktop.view.opened when a panel-switch IPC re-confirms the active body panel', async () => {
       mountPanel()
       await flushPromises()
       const events = captureTelemetry()
       // Default body is comfy-lifecycle; re-confirming it is a no-op.
       mockState.panelSwitchCallbacks.forEach((cb) => cb({ panel: 'comfy-lifecycle' }))
       await flushPromises()
-      expect(events.filter((e) => e.actionName === 'desktop2.view.opened')).toHaveLength(0)
+      expect(events.filter((e) => e.actionName === 'comfy.desktop.view.opened')).toHaveLength(0)
     })
 
-    it('does NOT fire desktop2.install.flow.opened when openFlowTakeover is rejected by an in-flight Tier 2 op', async () => {
+    it('does NOT fire comfy.desktop.install.flow.opened when openFlowTakeover is rejected by an in-flight Tier 2 op', async () => {
       // useOverlay's tier-collision rules can reject a Tier 3 open if a
       // Tier 2 progress op is in flight and the user cancels the
       // confirm-prompt. The renderer must not fire the telemetry event
@@ -1012,7 +1035,7 @@ it('does NOT fire desktop2.view.opened when a panel-switch IPC re-confirms the a
         kind: 'progress',
         installationId: 'test-id',
         operationName: 'install',
-        onCancel: () => {},
+        onCancel: () => {}
       }
       const events = captureTelemetry()
       // Trigger the flow open. The collision logic in useOverlay will
@@ -1021,7 +1044,9 @@ it('does NOT fire desktop2.view.opened when a panel-switch IPC re-confirms the a
       // bail before emitting telemetry.
       mockState.panelSwitchCallbacks.forEach((cb) => cb({ panel: 'new-install' }))
       await flushPromises()
-      expect(events.filter((e) => e.actionName === 'desktop2.install.flow.opened')).toHaveLength(0)
+      expect(
+        events.filter((e) => e.actionName === 'comfy.desktop.install.flow.opened')
+      ).toHaveLength(0)
     })
   })
 
@@ -1038,7 +1063,8 @@ it('does NOT fire desktop2.view.opened when a panel-switch IPC re-confirms the a
       await flushPromises()
 
       expect(mockModal.confirm).not.toHaveBeenCalled()
-      const api = (window as unknown as { api: { respondCloseRequest: ReturnType<typeof vi.fn> } }).api
+      const api = (window as unknown as { api: { respondCloseRequest: ReturnType<typeof vi.fn> } })
+        .api
       expect(api.respondCloseRequest).toHaveBeenCalledWith({ requestId: 'req-1', defer: true })
     })
 
@@ -1051,7 +1077,8 @@ it('does NOT fire desktop2.view.opened when a panel-switch IPC re-confirms the a
       await flushPromises()
 
       expect(mockModal.confirm).not.toHaveBeenCalled()
-      const api = (window as unknown as { api: { respondCloseRequest: ReturnType<typeof vi.fn> } }).api
+      const api = (window as unknown as { api: { respondCloseRequest: ReturnType<typeof vi.fn> } })
+        .api
       expect(api.respondCloseRequest).toHaveBeenCalledWith({ requestId: 'req-2', defer: true })
     })
   })

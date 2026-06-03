@@ -25,7 +25,7 @@ interface ErrorInstance {
    *  doesn't have to dig into the log file to see what blew up. */
   lastStderr?: string
   /** Wall-clock ms when the crash was first recorded. Used to measure
-   *  crash-to-relaunch latency on `desktop2.instance.relaunched_after_crash`. */
+   *  crash-to-relaunch latency on `comfy.desktop.instance.relaunched_after_crash`. */
   crashedAtMs?: number
 }
 

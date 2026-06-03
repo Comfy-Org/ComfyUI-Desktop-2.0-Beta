@@ -210,7 +210,7 @@ describe('telemetry default event properties', () => {
     telemetry.setConsentState('granted')
     captured.length = 0
 
-    telemetry.capture('desktop2.test.event', { foo: 'bar' })
+    telemetry.capture('comfy.desktop.test.event', { foo: 'bar' })
 
     expect(captured).toHaveLength(1)
     expect(captured[0]!.properties).toMatchObject({
@@ -328,11 +328,11 @@ describe('telemetry consent state (3-state)', () => {
     telemetry.identify('test-distinct-id')
     captured.length = 0
 
-    telemetry.capture('desktop2.execution.started', { foo: 'bar' })
-    telemetry.capture('desktop2.first_use.consent_decision', { accepted: false })
+    telemetry.capture('comfy.desktop.execution.started', { foo: 'bar' })
+    telemetry.capture('comfy.desktop.first_use.consent_decision', { accepted: false })
 
     const events = captured.map((c) => c.event)
-    expect(events).toEqual(['desktop2.first_use.consent_decision'])
+    expect(events).toEqual(['comfy.desktop.first_use.consent_decision'])
   })
 
   it('denied suppresses everything EXCEPT the consent_decision allow-list entry', async () => {
@@ -346,13 +346,13 @@ describe('telemetry consent state (3-state)', () => {
     telemetry.identify('test-distinct-id')
     captured.length = 0
 
-    telemetry.capture('desktop2.execution.started', {})
-    telemetry.capture('desktop2.first_use.consent_decision', {
+    telemetry.capture('comfy.desktop.execution.started', {})
+    telemetry.capture('comfy.desktop.first_use.consent_decision', {
       decision: 'decline',
       telemetry_enabled: false
     })
 
-    expect(captured.map((c) => c.event)).toEqual(['desktop2.first_use.consent_decision'])
+    expect(captured.map((c) => c.event)).toEqual(['comfy.desktop.first_use.consent_decision'])
     expect(captured[0]?.properties).toMatchObject({
       decision: 'decline',
       telemetry_enabled: false
@@ -369,8 +369,8 @@ describe('telemetry consent state (3-state)', () => {
     telemetry.setConsentState('granted')
 
     const events = captured.map((c) => c.event)
-    expect(events).toContain('desktop2.session.started')
-    expect(captured.find((c) => c.event === 'desktop2.session.started')?.distinctId).toBe(
+    expect(events).toContain('comfy.desktop.session.started')
+    expect(captured.find((c) => c.event === 'comfy.desktop.session.started')?.distinctId).toBe(
       'deferred-id'
     )
   })
@@ -504,7 +504,7 @@ describe('telemetry deferMigrationAlias', () => {
     await new Promise((r) => setTimeout(r, 0))
 
     expect(aliases).toContainEqual({ distinctId: 'new-id', alias: 'legacy-uuid-abc' })
-    const migrated = captured.find((c) => c.event === 'desktop2.identity.migrated')
+    const migrated = captured.find((c) => c.event === 'comfy.desktop.identity.migrated')
     expect(migrated?.properties).toMatchObject({
       installation_id: 'new-id',
       id_class: 'machine_derived'
@@ -534,14 +534,14 @@ describe('telemetry deferMigrationAlias', () => {
     // Nothing should have shipped while undecided.
     await new Promise((r) => setTimeout(r, 0))
     expect(aliases).toHaveLength(0)
-    expect(captured.find((c) => c.event === 'desktop2.identity.migrated')).toBeUndefined()
+    expect(captured.find((c) => c.event === 'comfy.desktop.identity.migrated')).toBeUndefined()
     expect(onAliased).not.toHaveBeenCalled()
 
     telemetry.setConsentState('granted')
     await new Promise((r) => setTimeout(r, 0))
 
     expect(aliases).toContainEqual({ distinctId: 'new-id', alias: 'legacy-uuid-abc' })
-    expect(captured.find((c) => c.event === 'desktop2.identity.migrated')).toBeDefined()
+    expect(captured.find((c) => c.event === 'comfy.desktop.identity.migrated')).toBeDefined()
     expect(onAliased).toHaveBeenCalledTimes(1)
   })
 
@@ -683,13 +683,13 @@ describe('telemetry.forwardToRenderer + telemetry-relay registry', () => {
     telemetry.registerTelemetryRelayTarget(a.wc)
     telemetry.registerTelemetryRelayTarget(b.wc)
 
-    telemetry.forwardToRenderer('desktop2.execution.error', { foo: 'bar' })
+    telemetry.forwardToRenderer('comfy.desktop.execution.error', { foo: 'bar' })
 
     expect(a.sends).toHaveLength(1)
     expect(a.sends[0]).toMatchObject({
       channel: 'telemetry-action-from-main',
       data: {
-        event: 'desktop2.execution.error',
+        event: 'comfy.desktop.execution.error',
         context: { foo: 'bar' },
         mainAlreadyCaptured: true
       }
@@ -705,17 +705,17 @@ describe('telemetry.forwardToRenderer + telemetry-relay registry', () => {
     telemetry.registerTelemetryRelayTarget(a.wc)
 
     // Use a name that is in the Datadog allow-list so the forward path runs.
-    telemetry.emit('desktop2.execution.error', { variant: 'standalone' })
+    telemetry.emit('comfy.desktop.execution.error', { variant: 'standalone' })
 
     // PostHog Node side
-    expect(captured.map((c) => c.event)).toEqual(['desktop2.execution.error'])
+    expect(captured.map((c) => c.event)).toEqual(['comfy.desktop.execution.error'])
     expect(captured[0]!.properties).toMatchObject({ variant: 'standalone' })
     // Relay side — exactly one IPC send to the registered target
     expect(a.sends).toHaveLength(1)
     expect(a.sends[0]).toMatchObject({
       channel: 'telemetry-action-from-main',
       data: {
-        event: 'desktop2.execution.error',
+        event: 'comfy.desktop.execution.error',
         context: { variant: 'standalone' },
         mainAlreadyCaptured: true
       }
@@ -725,10 +725,10 @@ describe('telemetry.forwardToRenderer + telemetry-relay registry', () => {
   it('forwards with no relay targets is a no-op (event still captured by PostHog Node)', () => {
     expect(telemetry._telemetryRelayTargetCount()).toBe(0)
     // Use a name in the Datadog allow-list so the forward path actually fires.
-    telemetry.emit('desktop2.execution.error', {})
+    telemetry.emit('comfy.desktop.execution.error', {})
     // Event still captured by PostHog Node even with no renderer alive yet —
     // the architectural guarantee that "telemetry works no matter what".
-    expect(captured.map((c) => c.event)).toEqual(['desktop2.execution.error'])
+    expect(captured.map((c) => c.event)).toEqual(['comfy.desktop.execution.error'])
   })
 
   it('skips forwarding for events NOT in the Datadog mirror allow-list (provider split)', () => {
@@ -736,10 +736,10 @@ describe('telemetry.forwardToRenderer + telemetry-relay registry', () => {
     telemetry.registerTelemetryRelayTarget(a.wc)
 
     // Product / funnel events stay PostHog-only and do not ride the relay.
-    telemetry.emit('desktop2.install.flow.opened', { variant: 'standalone' })
+    telemetry.emit('comfy.desktop.install.flow.opened', { variant: 'standalone' })
 
     // PostHog Node still captured it.
-    expect(captured.map((c) => c.event)).toEqual(['desktop2.install.flow.opened'])
+    expect(captured.map((c) => c.event)).toEqual(['comfy.desktop.install.flow.opened'])
     // But the renderer never sees it — no Datadog mirror needed for a product event.
     expect(a.sends).toHaveLength(0)
   })
@@ -748,7 +748,7 @@ describe('telemetry.forwardToRenderer + telemetry-relay registry', () => {
     const a = makeStubWebContents()
     telemetry.registerTelemetryRelayTarget(a.wc)
     telemetry.setConsent(false)
-    telemetry.forwardToRenderer('desktop2.execution.error', {})
+    telemetry.forwardToRenderer('comfy.desktop.execution.error', {})
     expect(a.sends).toHaveLength(0)
     telemetry.setConsent(true)
   })
@@ -760,7 +760,7 @@ describe('telemetry.forwardToRenderer + telemetry-relay registry', () => {
     telemetry.registerTelemetryRelayTarget(b.wc)
     a.destroy()
 
-    telemetry.forwardToRenderer('desktop2.execution.error', {})
+    telemetry.forwardToRenderer('comfy.desktop.execution.error', {})
 
     expect(a.sends).toHaveLength(0)
     expect(b.sends).toHaveLength(1)
@@ -783,7 +783,7 @@ describe('telemetry.forwardToRenderer + telemetry-relay registry', () => {
     telemetry.unregisterTelemetryRelayTarget(a.wc)
     expect(telemetry._telemetryRelayTargetCount()).toBe(0)
 
-    telemetry.forwardToRenderer('desktop2.execution.error', {})
+    telemetry.forwardToRenderer('comfy.desktop.execution.error', {})
     expect(a.sends).toHaveLength(0)
   })
 })
@@ -797,7 +797,7 @@ describe('telemetry SDK-level volume guards', () => {
     telemetry.setConsent(true)
     telemetry._test_resetVolumeGuards()
     // Clear AFTER setConsent — granting consent flushes the deferred
-    // `desktop2.session.started` event into `captured`, which would
+    // `comfy.desktop.session.started` event into `captured`, which would
     // otherwise count toward each test's product-event totals and
     // throw the per-process cap assertions off by one (and make the
     // 5000-cap test loop runaway-guard out, eating the 5s timeout).
@@ -811,14 +811,14 @@ describe('telemetry SDK-level volume guards', () => {
 
   it('per-event sliding window caps at 60/window and emits exactly one rate_limited warning', () => {
     for (let i = 0; i < 100; i++) {
-      telemetry.capture('desktop2.test.event', { i })
+      telemetry.capture('comfy.desktop.test.event', { i })
     }
-    const product = captured.filter((c) => c.event === 'desktop2.test.event')
-    const warnings = captured.filter((c) => c.event === 'desktop2.telemetry.rate_limited')
+    const product = captured.filter((c) => c.event === 'comfy.desktop.test.event')
+    const warnings = captured.filter((c) => c.event === 'comfy.desktop.telemetry.rate_limited')
     expect(product).toHaveLength(60)
     expect(warnings).toHaveLength(1)
     expect(warnings[0]?.properties).toMatchObject({
-      event_name: 'desktop2.test.event',
+      event_name: 'comfy.desktop.test.event',
       limit: 60,
       window_ms: 60_000
     })
@@ -826,38 +826,38 @@ describe('telemetry SDK-level volume guards', () => {
 
   it('warning fires once per (event-name, process) — no warning spam', () => {
     for (let i = 0; i < 200; i++) {
-      telemetry.capture('desktop2.test.event', { i })
+      telemetry.capture('comfy.desktop.test.event', { i })
     }
-    const warnings = captured.filter((c) => c.event === 'desktop2.telemetry.rate_limited')
+    const warnings = captured.filter((c) => c.event === 'comfy.desktop.telemetry.rate_limited')
     expect(warnings).toHaveLength(1)
   })
 
   it('different event names have independent windows', () => {
     for (let i = 0; i < 100; i++) {
-      telemetry.capture('desktop2.test.a', { i })
-      telemetry.capture('desktop2.test.b', { i })
+      telemetry.capture('comfy.desktop.test.a', { i })
+      telemetry.capture('comfy.desktop.test.b', { i })
     }
-    const a = captured.filter((c) => c.event === 'desktop2.test.a')
-    const b = captured.filter((c) => c.event === 'desktop2.test.b')
+    const a = captured.filter((c) => c.event === 'comfy.desktop.test.a')
+    const b = captured.filter((c) => c.event === 'comfy.desktop.test.b')
     expect(a).toHaveLength(60)
     expect(b).toHaveLength(60)
   })
 
   it('*.error events bypass the per-event rate limit', () => {
     for (let i = 0; i < 200; i++) {
-      telemetry.capture('desktop2.execution.error', { i })
+      telemetry.capture('comfy.desktop.execution.error', { i })
     }
-    const errors = captured.filter((c) => c.event === 'desktop2.execution.error')
+    const errors = captured.filter((c) => c.event === 'comfy.desktop.execution.error')
     expect(errors).toHaveLength(200)
-    const warnings = captured.filter((c) => c.event === 'desktop2.telemetry.rate_limited')
+    const warnings = captured.filter((c) => c.event === 'comfy.desktop.telemetry.rate_limited')
     expect(warnings).toHaveLength(0)
   })
 
   it('telemetry-self events bypass the rate limit (no recursion when warning fires)', () => {
     for (let i = 0; i < 200; i++) {
-      telemetry.capture('desktop2.telemetry.rate_limited', { i })
+      telemetry.capture('comfy.desktop.telemetry.rate_limited', { i })
     }
-    const selfEvents = captured.filter((c) => c.event === 'desktop2.telemetry.rate_limited')
+    const selfEvents = captured.filter((c) => c.event === 'comfy.desktop.telemetry.rate_limited')
     expect(selfEvents).toHaveLength(200)
   })
 
@@ -870,11 +870,13 @@ describe('telemetry SDK-level volume guards', () => {
     // while-condition variant is O(N²) and blows the 5s test timeout
     // on slower CI hosts.
     for (let i = 0; i < 6000; i++) {
-      telemetry.capture('desktop2.execution.error', { i })
+      telemetry.capture('comfy.desktop.execution.error', { i })
     }
-    const productEvents = captured.filter((c) => c.event !== 'desktop2.telemetry.session_cap_hit')
+    const productEvents = captured.filter(
+      (c) => c.event !== 'comfy.desktop.telemetry.session_cap_hit'
+    )
     const sessionCapWarnings = captured.filter(
-      (c) => c.event === 'desktop2.telemetry.session_cap_hit'
+      (c) => c.event === 'comfy.desktop.telemetry.session_cap_hit'
     )
     expect(productEvents).toHaveLength(5000)
     expect(sessionCapWarnings).toHaveLength(1)

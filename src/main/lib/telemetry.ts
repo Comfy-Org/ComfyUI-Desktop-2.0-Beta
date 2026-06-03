@@ -17,8 +17,8 @@
  *
  * ## Adding a product event — checklist
  *
- *   1. Pick a name. Convention: `desktop2.<area>.<verb>` snake_case
- *      (e.g. `desktop2.instance.switched`). Add to whichever code path
+ *   1. Pick a name. Convention: `comfy.desktop.<area>.<verb>` snake_case
+ *      (e.g. `comfy.desktop.instance.switched`). Add to whichever code path
  *      naturally owns the event.
  *   2. Use `capture(event, properties)` in main, or
  *      `emitTelemetryAction(event, props)` in a Vue component. Never call
@@ -56,7 +56,7 @@
  *   - `'granted'`   — collect everything.
  *   - `'denied'`    — collect nothing.
  *   - `'undecided'` — fresh install or Desktop-1 migrator; collect ONLY
- *                     `desktop2.first_use.consent_decision` until the
+ *                     `comfy.desktop.first_use.consent_decision` until the
  *                     user makes a choice.
  *
  *   Every capture path here is consent-gated. `setConsentState(state)` is
@@ -267,7 +267,7 @@ export type ConsentState = 'granted' | 'denied' | 'undecided'
 let consentState: ConsentState = 'undecided'
 
 const PRE_CONSENT_ALLOWED_EVENTS: ReadonlySet<string> = new Set([
-  'desktop2.first_use.consent_decision'
+  'comfy.desktop.first_use.consent_decision'
 ])
 
 function isAllowedToFire(event: string): boolean {
@@ -285,7 +285,7 @@ function isAllowedToFire(event: string): boolean {
  * the per-call-site dedup guards that individual emit paths add.
  *
  * Motivation: the 2026-06-02 volume incident shipped 3M+ events of the
- * same four `desktop2.app_update.*` names in 24h before anyone noticed.
+ * same four `comfy.desktop.app_update.*` names in 24h before anyone noticed.
  * The per-call fix in `updater.ts` prevents *that specific* loop, but
  * any future emit-in-a-tight-loop bug (a Vue watcher that fires on
  * every render, an IPC handler called every animation frame, a
@@ -298,7 +298,7 @@ function isAllowedToFire(event: string): boolean {
  *   60/min is well above any legitimate product event rate (the
  *   loudest healthy event was `execution.completed` at ~36/user/day)
  *   and well below any loop signature (the incident was ~2/sec).
- *   One `desktop2.telemetry.rate_limited` warning fires per (event ×
+ *   One `comfy.desktop.telemetry.rate_limited` warning fires per (event ×
  *   process) so dashboards surface that it happened.
  *
  * Layer 2: per-process total cap.
@@ -306,7 +306,7 @@ function isAllowedToFire(event: string): boolean {
  *   no-ops. 5000 covers a heavy multi-hour workflow user (~500–1000
  *   events) with 5–10x headroom, and turns "millions of events" into
  *   "at most 5000" for any single runaway install. One
- *   `desktop2.telemetry.session_cap_hit` warning fires once when the
+ *   `comfy.desktop.telemetry.session_cap_hit` warning fires once when the
  *   cap is crossed.
  *
  * `*.error` events bypass Layer 1 — error volume is exactly the signal
@@ -326,7 +326,7 @@ function _bypassRateLimit(event: string): boolean {
   // Failure events are reliability signal we never want to silently
   // throttle. Telemetry-self events bypass to avoid recursion when
   // we emit the warning events below.
-  return event.endsWith('.error') || event.startsWith('desktop2.telemetry.')
+  return event.endsWith('.error') || event.startsWith('comfy.desktop.telemetry.')
 }
 
 function _emitWarning(event: string, properties: TelemetryContext): void {
@@ -346,7 +346,7 @@ function _checkRateLimit(event: string): boolean {
   if (_eventsCapturedThisProcess >= SESSION_EVENT_CAP) {
     if (!_sessionCapWarned) {
       _sessionCapWarned = true
-      _emitWarning('desktop2.telemetry.session_cap_hit', {
+      _emitWarning('comfy.desktop.telemetry.session_cap_hit', {
         cap: SESSION_EVENT_CAP,
         last_event: event
       })
@@ -366,7 +366,7 @@ function _checkRateLimit(event: string): boolean {
   if (stamps.length >= RATE_LIMIT_COUNT) {
     if (!_rateLimitWarned.has(event)) {
       _rateLimitWarned.add(event)
-      _emitWarning('desktop2.telemetry.rate_limited', {
+      _emitWarning('comfy.desktop.telemetry.rate_limited', {
         event_name: event,
         limit: RATE_LIMIT_COUNT,
         window_ms: RATE_LIMIT_WINDOW_MS
@@ -391,7 +391,7 @@ export function _test_resetVolumeGuards(): void {
 }
 
 /**
- * Set the current consent state. The deferred `desktop2.session.started`
+ * Set the current consent state. The deferred `comfy.desktop.session.started`
  * event (and the deferred `identify` person-property update) fire as soon
  * as state transitions to `'granted'`.
  */
@@ -560,7 +560,7 @@ function tryFlushDeferred(): void {
       // again on a regular event would scatter it across the event
       // properties column where it shows up in every export and
       // ad-hoc query — unnecessary proliferation of an identifier.
-      capture('desktop2.identity.migrated', {
+      capture('comfy.desktop.identity.migrated', {
         installation_id: m.installationId,
         id_class: m.idClass
       })
@@ -573,7 +573,7 @@ function tryFlushDeferred(): void {
     })()
   }
   if (pendingSessionStart) {
-    capture('desktop2.session.started', pendingSessionStart)
+    capture('comfy.desktop.session.started', pendingSessionStart)
     pendingSessionStart = null
   }
 }
@@ -920,7 +920,7 @@ export async function shutdown(reason: string): Promise<void> {
   if (!client) return
   const uptimeMs = Date.now() - bootstrapTimeMs
   try {
-    capture('desktop2.session.ended', {
+    capture('comfy.desktop.session.ended', {
       reason,
       uptime_ms: uptimeMs,
       uptime_seconds: Math.round(uptimeMs / 1000)

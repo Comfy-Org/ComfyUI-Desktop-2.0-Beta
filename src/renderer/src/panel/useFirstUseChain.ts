@@ -309,12 +309,14 @@ export function useFirstUseChain(opts: FirstUseChainOpts): FirstUseChainApi {
     // path the user took, and `express.fallback {reason}` records when
     // express bailed to Configure (so the funnel can separate
     // "express succeeded" from "express attempted but fell back").
-    emitTelemetryAction('desktop2.install.express.started', {})
+    emitTelemetryAction('comfy.desktop.install.express.started', {})
     try {
       const hardware = await window.api.validateHardware()
       if (!hardware.supported) {
         console.warn('[firstUseChain] express: hardware unsupported', hardware)
-        emitTelemetryAction('desktop2.install.express.fallback', { reason: 'unsupported_hardware' })
+        emitTelemetryAction('comfy.desktop.install.express.fallback', {
+          reason: 'unsupported_hardware'
+        })
         return false
       }
 
@@ -325,7 +327,9 @@ export function useFirstUseChain(opts: FirstUseChainOpts): FirstUseChainApi {
       const standalone = sources.find((s: Source) => s.id === 'standalone')
       if (!standalone) {
         console.warn('[firstUseChain] express: standalone source missing', { sources })
-        emitTelemetryAction('desktop2.install.express.fallback', { reason: 'precondition_failed' })
+        emitTelemetryAction('comfy.desktop.install.express.fallback', {
+          reason: 'precondition_failed'
+        })
         return false
       }
 
@@ -345,14 +349,14 @@ export function useFirstUseChain(opts: FirstUseChainOpts): FirstUseChainApi {
         )
         if (!options || options.length === 0) {
           console.warn('[firstUseChain] express: no options for field', field.id)
-          emitTelemetryAction('desktop2.install.express.fallback', {
+          emitTelemetryAction('comfy.desktop.install.express.fallback', {
             reason: 'precondition_failed'
           })
           return false
         }
         const pick = options.find((o) => o.recommended) ?? options[0]
         if (!pick) {
-          emitTelemetryAction('desktop2.install.express.fallback', {
+          emitTelemetryAction('comfy.desktop.install.express.fallback', {
             reason: 'precondition_failed'
           })
           return false
@@ -371,7 +375,9 @@ export function useFirstUseChain(opts: FirstUseChainOpts): FirstUseChainApi {
       })
       if (!result.ok || !result.entry) {
         console.warn('[firstUseChain] express: addInstallation failed', result)
-        emitTelemetryAction('desktop2.install.express.fallback', { reason: 'precondition_failed' })
+        emitTelemetryAction('comfy.desktop.install.express.fallback', {
+          reason: 'precondition_failed'
+        })
         return false
       }
 
@@ -393,7 +399,7 @@ export function useFirstUseChain(opts: FirstUseChainOpts): FirstUseChainApi {
       return true
     } catch (err) {
       console.warn('[firstUseChain] express install failed; falling back to Configure', err)
-      emitTelemetryAction('desktop2.install.express.fallback', { reason: 'error' })
+      emitTelemetryAction('comfy.desktop.install.express.fallback', { reason: 'error' })
       chainingFirstUseToNewInstall.value = false
       pendingFirstUseAutoLaunchId.value = null
       return false

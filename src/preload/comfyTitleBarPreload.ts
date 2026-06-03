@@ -3,12 +3,7 @@ import type { IpcRendererEvent } from 'electron'
 import { buildElectronApi } from './api'
 import { normaliseFirstUseMode, type FirstUseMode } from '../shared/firstUseMode'
 
-export type ComfyPanelKey =
-  | 'comfy'
-  | 'new-install'
-  | 'track'
-  | 'load-snapshot'
-  | 'quick-install'
+export type ComfyPanelKey = 'comfy' | 'new-install' | 'track' | 'load-snapshot' | 'quick-install'
 
 /** Anchor coordinates for a native title-bar menu — title-bar-local
  *  pixels (x = button left, y = button bottom). The titleBarView sits
@@ -89,9 +84,7 @@ export interface ComfyTitleBarBridge {
    *  (the blur-driven dismiss handles the close on its own). On
    *  macOS the click event can fire before the dismiss propagates,
    *  so a timestamp-only guard isn't reliable. */
-  onMenuOpened(
-    cb: (info: { menu: 'menu' | 'downloads' | 'instance-picker' }) => void,
-  ): () => void
+  onMenuOpened(cb: (info: { menu: 'menu' | 'downloads' | 'instance-picker' }) => void): () => void
   /** Subscribe to title-bar popup close events. Fires when the popup
    *  view (waffle menu, downloads tray, OR instance-picker) closes,
    *  after the user picks an item or dismisses by clicking outside.
@@ -99,9 +92,7 @@ export interface ComfyTitleBarBridge {
    *  same click that dismissed the popup also re-targets the opener
    *  button. The payload carries which kind closed so the per-button
    *  reopen guards stay independent. */
-  onMenuClosed(
-    cb: (info: { menu: 'menu' | 'downloads' | 'instance-picker' }) => void,
-  ): () => void
+  onMenuClosed(cb: (info: { menu: 'menu' | 'downloads' | 'instance-picker' }) => void): () => void
   /** Subscribe to first-use takeover step changes. Mode mirrors
    *  `firstUseMode` on the entry — see `FirstUseMode` in
    *  `src/shared/firstUseMode.ts` for the full union. The title bar
@@ -141,7 +132,7 @@ export interface ComfyTitleBarBridge {
       kind: 'available' | 'downloading' | 'ready' | null
       version: string | null
       autoUpdate: boolean
-    }) => void,
+    }) => void
   ): () => void
   /** Subscribe to install-update state pushes (status pills).
    *  `available` is `true` when the install's
@@ -151,7 +142,7 @@ export interface ComfyTitleBarBridge {
    *  "Update available". Only relevant on install-backed host
    *  windows; install-less hosts never receive this signal. */
   onInstallUpdateAvailable(
-    cb: (state: { available: boolean; version: string | null }) => void,
+    cb: (state: { available: boolean; version: string | null }) => void
   ): () => void
   /** Click handler for the app-update pill. Main responds by sending
    *  `panel-trigger-overlay` to the host's panelView so the renderer
@@ -179,7 +170,7 @@ export interface ComfyTitleBarBridge {
   /** Click handler for the title-bar Send Feedback button. Main
    *  resolves the host entry from the sender and forwards
    *  `comfy-panel:open-feedback` to the panel renderer, which fires
-   *  the `desktop2.feedback.opened` telemetry action and opens the
+   *  the `comfy.desktop.feedback.opened` telemetry action and opens the
    *  support URL via `openExternal`. */
   clickFeedback(): void
   /** Click handler for the title-bar cloud-instance refresh button.
@@ -427,9 +418,8 @@ const bridge: ComfyTitleBarBridge = {
   },
   ready: () => {
     ipcRenderer.send('comfy-window:title-bar-ready')
-  },
+  }
 }
-
 
 // Expose the standard window.api bridge alongside __comfyTitleBar so the
 // title-bar renderer can call initializeRendererBootstrap() (which depends

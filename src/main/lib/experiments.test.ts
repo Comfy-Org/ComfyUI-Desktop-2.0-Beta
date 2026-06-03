@@ -212,12 +212,12 @@ describe('experiments', () => {
   })
 
   describe('recordExposure', () => {
-    it('fires desktop2.experiment.exposed once per (experiment, variant) per session', () => {
+    it('fires comfy.desktop.experiment.exposed once per (experiment, variant) per session', () => {
       experiments.recordExposure('auth_banner_smoketest_v1', 'treatment', 'cache')
       experiments.recordExposure('auth_banner_smoketest_v1', 'treatment', 'cache')
       experiments.recordExposure('auth_banner_smoketest_v1', 'treatment', 'remote')
 
-      const events = captured.filter((c) => c.event === 'desktop2.experiment.exposed')
+      const events = captured.filter((c) => c.event === 'comfy.desktop.experiment.exposed')
       expect(events).toHaveLength(1)
       expect(events[0]?.properties).toMatchObject({
         experiment_key: 'auth_banner_smoketest_v1',
@@ -230,7 +230,7 @@ describe('experiments', () => {
       experiments.recordExposure('auth_banner_smoketest_v1', 'control', 'cache')
       experiments.recordExposure('auth_banner_smoketest_v1', 'treatment', 'cache')
 
-      const events = captured.filter((c) => c.event === 'desktop2.experiment.exposed')
+      const events = captured.filter((c) => c.event === 'comfy.desktop.experiment.exposed')
       expect(events).toHaveLength(2)
     })
   })

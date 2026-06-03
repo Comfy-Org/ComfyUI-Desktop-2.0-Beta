@@ -223,7 +223,7 @@ export function registerInstallationHandlers(): void {
     }
 
     // Capture the prior comfyVersion BEFORE the install runs so we can fire
-    // desktop2.comfyui.update.applied at the end. An install on a record that
+    // comfy.desktop.comfyui.update.applied at the end. An install on a record that
     // already has a comfyVersion is a *version update*, not a fresh install
     // (per 04 cross-cutting Add #5). Fresh installs have no prior version
     // populated; this handler runs the same source.install() for both, so
@@ -286,7 +286,7 @@ export function registerInstallationHandlers(): void {
         _operationAborts.delete(installationId)
         if (abort.signal.aborted) {
           if (isComfyUpdate) {
-            mainTelemetry.emit('desktop2.comfyui.update.applied', {
+            mainTelemetry.emit('comfy.desktop.comfyui.update.applied', {
               installation_id: installationId,
               from_version: formatComfyVersion(priorComfyVersion, 'short'),
               to_version: null,
@@ -342,7 +342,7 @@ export function registerInstallationHandlers(): void {
         }
         await installations.update(installationId, { status: 'failed' })
         if (isComfyUpdate) {
-          mainTelemetry.emit('desktop2.comfyui.update.applied', {
+          mainTelemetry.emit('comfy.desktop.comfyui.update.applied', {
             installation_id: installationId,
             from_version: formatComfyVersion(priorComfyVersion, 'short'),
             to_version: null,
@@ -359,7 +359,7 @@ export function registerInstallationHandlers(): void {
       if (isComfyUpdate) {
         const freshInst = await installations.get(installationId)
         const newComfyVersion = freshInst?.comfyVersion as ComfyVersion | undefined
-        mainTelemetry.emit('desktop2.comfyui.update.applied', {
+        mainTelemetry.emit('comfy.desktop.comfyui.update.applied', {
           installation_id: installationId,
           from_version: formatComfyVersion(priorComfyVersion, 'short'),
           to_version: newComfyVersion ? formatComfyVersion(newComfyVersion, 'short') : null,

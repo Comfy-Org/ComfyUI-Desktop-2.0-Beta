@@ -180,7 +180,7 @@ interface Bridge {
   clickInstallPill: (anchor: MenuAnchor) => void
   /** Click handler for the title-bar Send Feedback button. Main
    *  forwards `comfy-panel:open-feedback` to the panel renderer,
-   *  which fires the `desktop2.feedback.opened` telemetry action and
+   *  which fires the `comfy.desktop.feedback.opened` telemetry action and
    *  opens the support URL via `openExternal`. */
   clickFeedback: () => void
   /** Click handler for the cloud-instance refresh button. Re-navigates
@@ -269,7 +269,7 @@ const {
 
 /** Title-bar Send Feedback button. Routes through main, which forwards
  *  `comfy-panel:open-feedback` to the panel renderer — the renderer
- *  fires the `desktop2.feedback.opened` telemetry action and opens the
+ *  fires the `comfy.desktop.feedback.opened` telemetry action and opens the
  *  support URL via `openExternal`. The waffle menu's "Send Feedback"
  *  entry lands on the same panel-side handler. */
 function handleFeedback(): void {

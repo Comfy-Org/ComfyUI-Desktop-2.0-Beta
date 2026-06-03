@@ -45,7 +45,7 @@ export function useListAction(uiSurface: string, callbacks: ListActionCallbacks)
   async function executeAction(
     inst: Installation,
     action: ListAction,
-    hooks?: ListActionInvocationHooks,
+    hooks?: ListActionInvocationHooks
   ): Promise<void> {
     const telemetryContext = {
       source_category: inst.sourceCategory || 'unknown',
@@ -83,7 +83,7 @@ export function useListAction(uiSurface: string, callbacks: ListActionCallbacks)
         confirmStyle: action.style || 'danger'
       })
       if (!confirmed) {
-        emitTelemetryAction('desktop2.action.result', {
+        emitTelemetryAction('comfy.desktop.action.result', {
           action_id: action.id,
           result: 'cancelled',
           ...telemetryContext
@@ -95,7 +95,7 @@ export function useListAction(uiSurface: string, callbacks: ListActionCallbacks)
     if (action.id === 'launch') {
       const canLaunch = await localInstanceGuard.checkBeforeLaunch(inst.id)
       if (!canLaunch) {
-        emitTelemetryAction('desktop2.action.result', {
+        emitTelemetryAction('comfy.desktop.action.result', {
           action_id: action.id,
           result: 'cancelled',
           ...telemetryContext
@@ -115,14 +115,21 @@ export function useListAction(uiSurface: string, callbacks: ListActionCallbacks)
         title: t('desktop.migrateBeforeLaunchTitle'),
         message: t('desktop.migrateBeforeLaunchMessage'),
         confirmLabel: t('desktop.migrateBeforeLaunchConfirm'),
-        confirmStyle: 'primary',
+        confirmStyle: 'primary'
       })
       if (!confirmed) {
-        emitTelemetryAction('desktop2.action.result', { action_id: action.id, result: 'cancelled', ...telemetryContext })
+        emitTelemetryAction('comfy.desktop.action.result', {
+          action_id: action.id,
+          result: 'cancelled',
+          ...telemetryContext
+        })
         return
       }
       sessionStore.clearErrorInstance(inst.id)
-      emitTelemetryAction('desktop2.action.invoked', { action_id: action.id, ...telemetryContext })
+      emitTelemetryAction('comfy.desktop.action.invoked', {
+        action_id: action.id,
+        ...telemetryContext
+      })
       callbacks.showProgress({
         installationId: inst.id,
         title: `${t('desktop.migrating')} — ${inst.name}`,
@@ -135,7 +142,7 @@ export function useListAction(uiSurface: string, callbacks: ListActionCallbacks)
         },
         cancellable: true,
         triggersInstanceStart: true,
-        opKind: 'launch',
+        opKind: 'launch'
       })
       return
     }
@@ -146,7 +153,10 @@ export function useListAction(uiSurface: string, callbacks: ListActionCallbacks)
     if (hooks?.onGuardsPassed) await hooks.onGuardsPassed()
 
     sessionStore.clearErrorInstance(inst.id)
-    emitTelemetryAction('desktop2.action.invoked', { action_id: action.id, ...telemetryContext })
+    emitTelemetryAction('comfy.desktop.action.invoked', {
+      action_id: action.id,
+      ...telemetryContext
+    })
 
     const needsSelfStop = wasRunning && requiresStoppedGuard
     const wantsRelaunch = needsSelfStop && IN_PLACE_RELAUNCH.has(action.id)
@@ -195,7 +205,7 @@ export function useListAction(uiSurface: string, callbacks: ListActionCallbacks)
         await window.api.runAction(inst.id, 'launch')
       }
       const resultValue = result.cancelled ? 'cancelled' : result.ok === false ? 'failed' : 'ok'
-      emitTelemetryAction('desktop2.action.result', {
+      emitTelemetryAction('comfy.desktop.action.result', {
         action_id: action.id,
         result: resultValue,
         ...telemetryContext
@@ -206,7 +216,7 @@ export function useListAction(uiSurface: string, callbacks: ListActionCallbacks)
         await modal.alert({ title: action.label, message: result.message })
       }
     } catch (error: unknown) {
-      emitTelemetryAction('desktop2.action.result', {
+      emitTelemetryAction('comfy.desktop.action.result', {
         action_id: action.id,
         result: 'failed',
         error_bucket: toErrorBucket(error),
