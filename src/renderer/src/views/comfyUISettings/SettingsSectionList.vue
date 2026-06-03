@@ -345,6 +345,11 @@ function fieldOwnsLabel(field: DetailField): boolean {
 
           <span v-else class="settings-v2-field-readonly">{{ asString(field.value) }}</span>
         </template>
+
+        <p v-if="field.description" class="settings-v2-field-description" role="note">
+          <ShieldAlert :size="14" class="settings-v2-field-description-icon" aria-hidden="true" />
+          <span>{{ field.description }}</span>
+        </p>
       </div>
 
       <div
@@ -500,6 +505,26 @@ function fieldOwnsLabel(field: DetailField): boolean {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+/* Inline explanation rendered beneath the control for fields whose
+ * effect isn't self-evident from the label (e.g. the Chinese mirrors
+ * toggle lists which hosts it swaps). Mirrors the env-vars notice
+ * styling so both inline-info surfaces read as one family. */
+.settings-v2-field-description {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: -2px 0 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.settings-v2-field-description-icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--info, var(--neutral-100));
 }
 
 /* Dependent (nested) fields are revealed by the toggle directly above

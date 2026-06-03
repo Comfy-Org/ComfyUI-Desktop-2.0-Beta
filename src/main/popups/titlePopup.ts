@@ -1395,8 +1395,16 @@ function openTitlePopup(opts: OpenTitlePopupOpts): void {
     config = { kind: 'downloads', theme: opts.theme }
   } else if (opts.kind === 'instance-picker') {
     config = { kind: 'instance-picker', snapshot: opts.snapshot, theme: opts.theme }
+    // Seed the broadcast-dedupe cache with the snapshot we're about to
+    // ship as the initial config. Without this, a subsequent live
+    // broadcast that happens to equal a *previous* session's last
+    // broadcast (but differs from the snapshot the renderer is currently
+    // displaying) would be silently skipped by the dedupe check in
+    // `broadcastInstancePickerUpdate` / `broadcastGlobalSettingsUpdate`.
+    entry.lastPickerBroadcastJson = JSON.stringify(opts.snapshot)
   } else {
     config = { kind: 'global-settings', snapshot: opts.snapshot, theme: opts.theme }
+    entry.lastGlobalSettingsBroadcastJson = JSON.stringify(opts.snapshot)
   }
   const configJson = JSON.stringify(config)
 
@@ -1769,10 +1777,9 @@ function activateTitlePopupMenuItem(
       : null
     void bindings.confirmAndCloseAllHostWindows(parentWindow)
   } else if (id === 'settings') {
-    // Open the new Global Settings popup (centred card, picker chrome)
-    // instead of routing to the legacy SettingsModal panel. The host's
-    // active installation (null on chooser hosts) drives the install-
-    // scoped Update Channel + Copy & Update controls.
+    // Open the Global Settings popup. The host's active installation
+    // (null on chooser hosts) drives the install-scoped Update Channel
+    // + Copy & Update controls.
     if (parentEntry && !parentEntry.window.isDestroyed()) {
       releaseFocusToParent = false
       openGlobalSettingsForHost(
@@ -1873,10 +1880,8 @@ const SETTINGS_TYPE_TO_DETAIL_EDIT_TYPE: Record<string, string | undefined> = {
 }
 
 /** Map a main-side `SettingsField` into the loose-typed `DetailField`
- *  shape the renderer's `SettingsSectionList` expects. Keeps the
- *  popup view pure-display by doing the field-shape translation here
- *  rather than in `useGlobalSettings.ts` (which only ran in the panel
- *  renderer). */
+ *  shape the renderer's `SettingsSectionList` expects. Done main-side
+ *  so the popup view stays pure-display. */
 function toDetailField(
   f: ReturnType<typeof buildSettingsSections>[number]['fields'][number],
 ): Record<string, unknown> {
@@ -1889,6 +1894,7 @@ function toDetailField(
     editType,
     options: f.options?.map((o) => ({ value: o.value, label: o.label })),
     tooltip: f.tooltip,
+    description: f.description,
     placeholder: f.placeholder,
     min: f.min,
     max: f.max,
@@ -2683,8 +2689,7 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
 
   // Panel renderer → open the Global Settings popup for the sender's
   // host window. Used by the panel-side file-menu "Settings" item and
-  // the `comfy://open-settings?tab=global` deep link, both of which
-  // previously opened the legacy SettingsModal overlay.
+  // the `comfy://open-settings?tab=global` deep link.
   ipcMain.on('comfy-titlepopup:open-global-settings', (event) => {
     recordIpcInvocation('comfy-titlepopup:open-global-settings')
     const win = BrowserWindow.fromWebContents(event.sender)
