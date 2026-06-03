@@ -4,6 +4,7 @@
   "description": "Comfy Desktop",
   "author": {
     "name": "Comfy Org",
+    "email": "support@comfy.org",
     "url": "https://www.comfy.org"
   },
   "repository": "github:Comfy-Org/ComfyUI-Desktop-2.0-Beta",
