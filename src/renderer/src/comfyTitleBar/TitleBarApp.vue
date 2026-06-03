@@ -1012,7 +1012,11 @@ onUnmounted(() => {
   -webkit-app-region: no-drag;
   display: inline-flex;
   align-items: center;
-  justify-content: space-between;
+  /* Explicit gap (not space-between) so the leading icon ↔ name ↔ caret
+     keep a guaranteed minimum separation even when the pill hits its
+     min-width floor — the cramped short-name case. The flex:1 center
+     slot still absorbs slack and stays centered. */
+  gap: 8px;
   /* Shrink-to-content with bounded floor + ceiling. `inline-size:
      fit-content` lets the pill tighten around short install names
      (e.g. "ComfyUI") so the layout budget isn't held hostage by a
@@ -1021,11 +1025,17 @@ onUnmounted(() => {
      fluid 22cqi growth up to a 360px ceiling, with ellipsis on the
      name beyond that — matching the dashboard pill. */
   inline-size: fit-content;
-  min-inline-size: 176px;
-  max-inline-size: clamp(176px, 22cqi, 360px);
+  min-inline-size: 200px;
+  max-inline-size: clamp(200px, 22cqi, 360px);
   height: 28px;
-  padding: 5px 8px;
+  /* Slightly tighter on the right: the ChevronDown glyph carries a little
+     baked-in whitespace on its right edge, so an equal 12px both sides reads
+     right-heavy. 10px on the right optically balances the inset. */
+  padding: 5px 10px 5px 12px;
   border-radius: 999px;
+  /* Transparent border at base so the .is-open state can lift it to brand
+     yellow without a layout shift (border-color alone paints nothing). */
+  border: 1px solid transparent;
   background: var(--chooser-surface-bg);
   color: var(--neutral-100);
   font: inherit;
@@ -1044,17 +1054,25 @@ onUnmounted(() => {
 .title-install-pill.is-interactive {
   cursor: pointer;
 }
-.title-install-pill.is-interactive:hover,
+/* Hover/focus: a restrained lift that previews — but doesn't fully commit to —
+ * the open state. Surface warms, the transparent base border picks up a faint
+ * yellow, and the muted resting text/icons (`--neutral-100`) step toward brand
+ * yellow. Gated behind `.is-hover-active` so it matches every sibling titlebar
+ * control and stays suppressed during window drag / when unfocused. The full
+ * yellow border + text is reserved for `.is-open`. */
 .title-install-pill.is-interactive:focus-visible {
-  background: var(--brand-surface-bg-hover);
   outline: none;
 }
-.title-install-pill.is-interactive.is-open,
-.title-install-pill.is-interactive.is-coachmark {
-  /* Lift border + text to brand yellow when the picker is showing OR the
-   * first-instance coachmark is pointing at the pill. The brand mark +
-   * caret both use `currentColor` so they inherit this lift automatically
-   * — one source of truth for the open tint. */
+.title-bar.is-hover-active .title-install-pill.is-interactive:hover:not(.is-open),
+.title-install-pill.is-interactive:focus-visible:not(.is-open) {
+  background: var(--chooser-surface-bg-hover);
+  border-color: color-mix(in srgb, var(--neutral-50) 35%, transparent);
+  color: color-mix(in srgb, var(--neutral-50) 70%, var(--neutral-100));
+}
+.title-install-pill.is-interactive.is-open {
+  /* Lift border + text to brand yellow when the picker is showing.
+   * The brand mark + caret both use `currentColor` so they inherit
+   * this lift automatically — one source of truth for the open tint. */
   border-color: var(--neutral-50);
   color: var(--neutral-50);
 }
@@ -1149,9 +1167,15 @@ onUnmounted(() => {
   opacity: 0.85;
 }
 
+/* Leading + trailing slots are equal fixed width and center their icon,
+   so the icon-to-pill-edge inset is identical on both sides regardless of
+   the icon's own size (16px home mark vs 12px caret). Mirrored side slots
+   keep the pill visually symmetric — equal left/right insets, centered
+   name — at any content width. */
 .title-install-slot {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   flex: 0 0 18px;
 }
 .title-install-slot--center {
