@@ -297,10 +297,7 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
         `if(!document.getElementById('__comfyDesktopHideDownloadCta')){` +
           `var st=document.createElement('style');` +
           `st.id='__comfyDesktopHideDownloadCta';` +
-          `st.textContent=` +
-            `'div.absolute.inset-0.flex.flex-col.justify-end.px-14.pb-\\\\[64px\\\\]'+` +
-            `':has(> .flex > .flex.items-center.gap-3){display:none !important}'+` +
-            `'[data-comfy-desktop-hide="download-cta"]{display:none !important}';` +
+          `st.textContent='[data-comfy-desktop-hide="download-cta"]{display:none !important}';` +
           `(document.head||document.documentElement).appendChild(st);` +
         `}` +
       `}catch(_){}` +
@@ -313,33 +310,54 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
         `var root=(n.closest&&n.closest('.p-toast-message,.p-toast-item,[role=alert]'))||n;` +
         `try{root.remove()}catch(_){}` +
       `}` +
-      `function tagDownloadCta(n){` +
-        `if(!n||n.nodeType!==1)return;` +
-        `var btns=(n.tagName==='BUTTON')?[n]:(n.querySelectorAll?n.querySelectorAll('button'):[]);` +
-        `for(var i=0;i<btns.length;i++){` +
-          `var b=btns[i];` +
-          `if(!b||(b.textContent||'').trim()!=='Download ComfyUI')continue;` +
-          `var host=(b.closest&&b.closest('div.absolute.inset-0.flex.flex-col.justify-end'))||b.parentElement;` +
-          `if(host&&host.setAttribute)host.setAttribute('data-comfy-desktop-hide','download-cta');` +
-        `}` +
-      `}` +
-      `tagDownloadCta(document.body);` +
-      `new MutationObserver(function(muts){` +
-        `for(var i=0;i<muts.length;i++){` +
-          `var added=muts[i].addedNodes;` +
-          `for(var j=0;j<added.length;j++){` +
-            `var n=added[j];` +
-            `if(looksBlocked(n)){nukeToast(n);continue;}` +
-            `if(n.querySelectorAll){` +
-              `var hits=n.querySelectorAll('*');` +
-              `for(var k=0;k<hits.length;k++){` +
-                `if(looksBlocked(hits[k])){nukeToast(hits[k]);break;}` +
-              `}` +
+      `function tagDownloadCta(){` +
+        `var els=document.querySelectorAll('button,a,[role="button"]');` +
+        `for(var i=0;i<els.length;i++){` +
+          `var el=els[i];` +
+          `if(!el)continue;` +
+          `var t=(el.textContent||'').trim().toLowerCase();` +
+          `if(t!=='download comfyui')continue;` +
+          `el.setAttribute('data-comfy-desktop-hide','download-cta');` +
+          `var cur=el.parentElement,tagged=false;` +
+          `while(cur&&cur!==document.body){` +
+            `var ct=(cur.textContent||'').toLowerCase();` +
+            `if(ct.indexOf('want to run')>=0&&ct.indexOf('comfyui')>=0){` +
+              `cur.setAttribute('data-comfy-desktop-hide','download-cta');` +
+              `tagged=true;break;` +
             `}` +
-            `tagDownloadCta(n);` +
+            `cur=cur.parentElement;` +
+          `}` +
+          `if(!tagged&&el.parentElement&&el.parentElement.setAttribute){` +
+            `el.parentElement.setAttribute('data-comfy-desktop-hide','download-cta');` +
           `}` +
         `}` +
-      `}).observe(document.documentElement,{childList:true,subtree:true});` +
+      `}` +
+      `tagDownloadCta();` +
+      `try{` +
+        `new MutationObserver(function(muts){` +
+          `for(var i=0;i<muts.length;i++){` +
+            `var added=muts[i].addedNodes;` +
+            `for(var j=0;j<added.length;j++){` +
+              `var n=added[j];` +
+              `if(looksBlocked(n)){nukeToast(n);continue;}` +
+              `if(n.querySelectorAll){` +
+                `var hits=n.querySelectorAll('*');` +
+                `for(var k=0;k<hits.length;k++){` +
+                  `if(looksBlocked(hits[k])){nukeToast(hits[k]);break;}` +
+                `}` +
+              `}` +
+            `}` +
+          `}` +
+          `tagDownloadCta();` +
+        `}).observe(document.documentElement,{childList:true,subtree:true});` +
+      `}catch(_){}` +
+      `try{` +
+        `var __ctaPolls=0;` +
+        `var __ctaPoll=setInterval(function(){` +
+          `tagDownloadCta();` +
+          `__ctaPolls++;if(__ctaPolls>60)clearInterval(__ctaPoll);` +
+        `},500);` +
+      `}catch(_){}` +
     `})()`
 
   const onDomReady = (): void => {
