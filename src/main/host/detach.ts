@@ -327,7 +327,7 @@ export async function confirmCloseInstanceWindow(
       message: isLastWindow
         ? 'Close this window? This stops ComfyUI and returns you to the dashboard.'
         : 'Close this window? This stops the running ComfyUI instance.',
-      confirmLabel: isLastWindow ? 'Close & Return to Dashboard' : 'Close Window',
+      confirmLabel: isLastWindow ? 'Return to Dashboard' : 'Close Window',
       cancelLabel: 'Cancel',
       confirmStyle: 'danger',
       theme,
