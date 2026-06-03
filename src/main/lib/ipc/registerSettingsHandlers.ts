@@ -25,14 +25,16 @@ import type { SettingsSection } from '../../../types/ipc'
  *  path without going through IPC. */
 export function buildSettingsSections(): SettingsSection[] {
   const s = settings.getAll()
+  // Always attach the description — the wording explains what hosts
+  // the toggle swaps, which is exactly the info users need to decide
+  // whether to enable it. Gating on the current value left the OFF
+  // state with no explanation at all.
   const chineseMirrorsField = {
     id: 'useChineseMirrors',
     label: i18n.t('settings.useChineseMirrors'),
     type: 'boolean' as const,
     value: s.useChineseMirrors === true,
-    ...(s.useChineseMirrors === true
-      ? { description: i18n.t('settings.chineseMirrorsDescription') }
-      : {})
+    description: i18n.t('settings.chineseMirrorsDescription')
   }
   const isChinese = i18n.getLocale().startsWith('zh')
   const appSections: SettingsSection[] = [

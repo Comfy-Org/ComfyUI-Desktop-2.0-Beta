@@ -1769,10 +1769,9 @@ function activateTitlePopupMenuItem(
       : null
     void bindings.confirmAndCloseAllHostWindows(parentWindow)
   } else if (id === 'settings') {
-    // Open the new Global Settings popup (centred card, picker chrome)
-    // instead of routing to the legacy SettingsModal panel. The host's
-    // active installation (null on chooser hosts) drives the install-
-    // scoped Update Channel + Copy & Update controls.
+    // Open the Global Settings popup. The host's active installation
+    // (null on chooser hosts) drives the install-scoped Update Channel
+    // + Copy & Update controls.
     if (parentEntry && !parentEntry.window.isDestroyed()) {
       releaseFocusToParent = false
       openGlobalSettingsForHost(
@@ -1889,6 +1888,7 @@ function toDetailField(
     editType,
     options: f.options?.map((o) => ({ value: o.value, label: o.label })),
     tooltip: f.tooltip,
+    description: f.description,
     placeholder: f.placeholder,
     min: f.min,
     max: f.max,
@@ -2683,8 +2683,7 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
 
   // Panel renderer → open the Global Settings popup for the sender's
   // host window. Used by the panel-side file-menu "Settings" item and
-  // the `comfy://open-settings?tab=global` deep link, both of which
-  // previously opened the legacy SettingsModal overlay.
+  // the `comfy://open-settings?tab=global` deep link.
   ipcMain.on('comfy-titlepopup:open-global-settings', (event) => {
     recordIpcInvocation('comfy-titlepopup:open-global-settings')
     const win = BrowserWindow.fromWebContents(event.sender)
