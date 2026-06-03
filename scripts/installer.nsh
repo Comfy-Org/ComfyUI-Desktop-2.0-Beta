@@ -292,5 +292,18 @@
       ${StdUtils.ExecShellAsUser} $0 "$launchLink" "open" "--updated"
       Abort
     ${endif}
+
+    ; Mark that we're on the Finish page so .onUserAbort (set in
+    ; customHeader) knows to Quit cleanly when Cancel / X fires here.
+    StrCpy $IsOnFinishPage "1"
+
+    ; Force-enable the title-bar X. Something in electron-builder's
+    ; install-time setup (likely SpiderBanner combined with the
+    ; un-destroyed ShutdownBlockReason) leaves the system-menu Close
+    ; item greyed when the Finish page renders. Re-enable it explicitly
+    ; via GetSystemMenu + EnableMenuItem (SC_CLOSE = 0xF060,
+    ; MF_ENABLED = 0). Safe to call even if it was already enabled.
+    System::Call 'user32::GetSystemMenu(p $HWNDPARENT, i 0) p.r0'
+    System::Call 'user32::EnableMenuItem(p r0, i 0xF060, i 0)'
   FunctionEnd
 !macroend
