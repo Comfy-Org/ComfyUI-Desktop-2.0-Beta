@@ -70,7 +70,10 @@ async function findBestBackportTag(
   //
   // Sanity check: in shallow clones, countUniqueCommits can return wildly
   // inflated values because the truncated graph prevents patch-id matching.
-  // If any result exceeds ancestorDist, bail out so the caller can fall back
+  // The pygit2 fallback hits the same inflation on backport branches because
+  // libgit2 doesn't expose patch-id comparison and so cannot honour
+  // `--cherry-pick` — it counts cherry-picked commits as unique.  Either way,
+  // if any result exceeds ancestorDist, bail out so the caller can fall back
   // to the merge-base approach.
   let best: { tag: string; commitsAhead: number } | undefined
   for (let pos = candidates.length - 1; pos >= 0; pos--) {

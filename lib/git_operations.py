@@ -274,8 +274,18 @@ def cmd_cherry_pick_count(repo_path, ref1, ref2):
     """Count unique commits (approximation of git rev-list --count --cherry-pick --left-only ref1...ref2).
 
     Uses merge-base to find the common ancestor, then counts commits
-    reachable from ref1 but not from the merge-base. This is a simpler
-    approximation since pygit2 doesn't expose patch-id comparison.
+    reachable from ref1 but not from the merge-base.
+
+    KNOWN PARITY GAP: libgit2/pygit2 does not expose patch-id comparison,
+    so this counts EVERY commit between merge-base and ref1 — including
+    commits that were cherry-picked from ref2 onto ref1.  On backport
+    branches that cherry-pick from master, the result is therefore
+    inflated relative to system git's `--cherry-pick`.
+
+    Callers (see version-resolve.findBestBackportTag) already protect
+    against this by bailing out when the count exceeds the ancestor
+    distance, falling back to a merge-base-based display.  Not fixable
+    without upstream libgit2 changes.
     """
     repo = open_repo(repo_path)
     oid1 = resolve_ref(repo, ref1)
@@ -449,40 +459,105 @@ def cmd_clone(url, dest):
         sys.exit(1)
 
 
+def _ensure_commit_local(repo, commit):
+    """Make a best effort to ensure `commit` is in the local object store.
+
+    Tries (in order): explicit SHA refspec via
+    `allow-reachable-sha1-in-want`, unshallow, then a plain default
+    fetch.  Returns (ok, last_error) — does NOT exit; caller decides how
+    to react.  Mirrors the strict pattern in cmd_fetch_commit so callers
+    fail honestly when the fetch chain doesn't actually deliver the
+    requested object.
+    """
+    # Fast path: commit already present locally.
+    try:
+        repo[commit]
+        return True, None
+    except (KeyError, ValueError):
+        pass
+
+    origin = get_origin(repo)
+    last_error = None
+
+    # Primary: ask the remote for this exact SHA.  GitHub honours this
+    # via allow-reachable-sha1-in-want; a plain default-refspec fetch
+    # can succeed without bringing the requested object.
+    try:
+        origin.fetch([commit])
+    except Exception as e:
+        last_error = e
+        # Fallback: unshallow so the full default-branch history is local.
+        try:
+            origin.fetch(depth=0)
+        except Exception as e2:
+            last_error = e2
+            # Final fallback: plain default-refspec fetch.
+            try:
+                origin.fetch()
+            except Exception as e3:
+                last_error = e3
+
+    try:
+        repo[commit]
+        return True, None
+    except (KeyError, ValueError):
+        return False, last_error
+
+
+def _try_checkout_existing(repo, commit, strategy):
+    """Attempt to resolve + checkout `commit`.
+
+    Returns the oid string on success, None if the commit can't be
+    resolved (e.g. missing from the object store) so the caller can
+    fall back to fetching.  Re-raises unexpected exceptions.
+
+    Note: resolve_ref() itself calls sys.exit(1) when a ref can't be
+    resolved.  That's SystemExit, which derives from BaseException and
+    is NOT caught by `except Exception` — so callers MUST check the
+    object's presence via `repo[commit]` before invoking this helper,
+    or catch SystemExit explicitly.
+    """
+    try:
+        repo[commit]
+    except (KeyError, ValueError):
+        return None
+    oid = resolve_ref(repo, commit)
+    commit_obj = repo.get(oid)
+    repo.checkout_tree(commit_obj, strategy=strategy)
+    repo.set_head(oid)
+    return str(oid)
+
+
 def cmd_checkout(repo_path, commit):
     """Checkout a specific commit.
 
     If the commit is not available locally, fetch from origin first
-    (unshallow if needed), then retry.
+    (preferring an explicit SHA refspec, then unshallow, then plain
+    fetch), verify the object actually landed, then retry.  Fails
+    honestly when the fetch chain does not deliver the requested SHA.
     """
     repo = open_repo(repo_path)
 
-    # Try direct checkout first
-    try:
-        oid = resolve_ref(repo, commit)
-        commit_obj = repo.get(oid)
-        repo.checkout_tree(commit_obj, strategy=pygit2.GIT_CHECKOUT_SAFE)
-        repo.set_head(oid)
-        print("Checked out %s" % str(oid), file=sys.stderr)
+    # Try direct checkout first (works for full clones where the commit
+    # is already local).
+    existing = _try_checkout_existing(repo, commit, pygit2.GIT_CHECKOUT_SAFE)
+    if existing is not None:
+        print("Checked out %s" % existing, file=sys.stderr)
         return
-    except Exception:
-        pass
 
-    # Fetch from origin and retry
+    # Commit not local — fetch and verify.
     print("Commit not found locally, fetching from origin...", file=sys.stderr)
-    origin = get_origin(repo)
+    ok, last_error = _ensure_commit_local(repo, commit)
+    if not ok:
+        msg = (
+            "fetch did not deliver commit %s" % commit
+            if last_error is None
+            else "fetch failed for commit %s: %s" % (commit, last_error)
+        )
+        print("Error: %s" % msg, file=sys.stderr)
+        sys.exit(1)
 
-    # Try unshallow fetch
-    try:
-        origin.fetch(depth=0)
-    except Exception:
-        try:
-            origin.fetch()
-        except Exception as e:
-            print("Error: fetch failed: %s" % e, file=sys.stderr)
-            sys.exit(1)
-
-    # Retry checkout
+    # Retry checkout — the object is now provably in the store.
     try:
         oid = resolve_ref(repo, commit)
         commit_obj = repo.get(oid)
@@ -498,6 +573,9 @@ def cmd_fetch_and_checkout(repo_path, commit):
     """Fetch master from origin + checkout a specific commit.
 
     Ensures local master branch exists (mirrors update_comfyui.py behavior).
+    After the master refspec fetch, verifies the requested commit actually
+    landed; if not (e.g. the commit is not on master HEAD's reachable
+    history), falls back to an explicit SHA fetch before checking out.
     """
     repo = open_repo(repo_path)
     origin = get_origin(repo)
@@ -536,6 +614,22 @@ def cmd_fetch_and_checkout(repo_path, commit):
             branch.set_target(remote_id)
     except Exception as e:
         print("Warning: could not update local master branch: %s" % e, file=sys.stderr)
+
+    # Verify the requested commit actually arrived; if not, ask for it
+    # explicitly via the same strict-fetch path cmd_fetch_commit uses.
+    try:
+        repo[commit]
+    except (KeyError, ValueError):
+        print("Requested commit not in fetched history; retrying with explicit SHA...", file=sys.stderr)
+        ok, last_error = _ensure_commit_local(repo, commit)
+        if not ok:
+            msg = (
+                "fetch did not deliver commit %s" % commit
+                if last_error is None
+                else "fetch failed for commit %s: %s" % (commit, last_error)
+            )
+            print("Error: %s" % msg, file=sys.stderr)
+            sys.exit(1)
 
     # Checkout the target commit
     try:
