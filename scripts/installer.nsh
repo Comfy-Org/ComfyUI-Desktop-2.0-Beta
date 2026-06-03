@@ -105,14 +105,19 @@
     ${VersionCompare} "$1" "${VC_REDIST_VERSION}" $2
   ${EndIf}
 
+  # SetDetailsPrint mode for all DetailPrint lines in this macro:
+  #   both     = status-bar text AND a line in the Show-Details log
+  #
+  # electron-builder defaults to `none` (no log lines, no status bar)
+  # for interactive installs. We flip to `both` so the user sees what's
+  # happening AND can review every step via the "Show Details" button on
+  # the install page. We leave it on `both` at the end so subsequent
+  # electron-builder operations (file extract, shortcuts, registry,
+  # uninstaller write) also appear in the log instead of looking blank.
+  SetDetailsPrint both
+
   ${If} $2 == 2
-    # electron-builder calls SetDetailsPrint none for interactive installs,
-    # which silences DetailPrint output. Switch to textonly so users see what
-    # is happening in the installer's status bar while the redist runs; this
-    # message stays on screen for the full duration of the VC++ install.
-    SetDetailsPrint textonly
-    DetailPrint "Installing Microsoft Visual C++ Redistributable (this may take several minutes)..."
-    SetDetailsPrint none
+    DetailPrint "Step 1 of 2 — Installing Microsoft Visual C++ Redistributable (this may take several minutes)..."
 
     File /oname=$PLUGINSDIR\vc_redist.x64.exe "${BUILD_RESOURCES_DIR}\vc_redist.x64.exe"
     # Launch the redist elevated via ShellExecuteEx's "runas" verb (NOT
@@ -135,9 +140,7 @@
     BringToFront
 
     ${If} $R8 == "ERR"
-      SetDetailsPrint textonly
-      DetailPrint "Microsoft Visual C++ Redistributable was not installed."
-      SetDetailsPrint none
+      DetailPrint "Microsoft Visual C++ Redistributable was not installed (permission prompt declined)."
       BringToFront
       # Abort / Retry / Ignore is the only built-in MessageBox set with an
       # "Abort" button (Windows has no 2-button Retry|Abort).
@@ -149,17 +152,16 @@
       Quit
     ${EndIf}
 
+    DetailPrint "Microsoft Visual C++ Redistributable installed."
     Goto vcRedistDone
     vcRedistIgnore:
-    SetDetailsPrint textonly
-    DetailPrint "Skipping Microsoft Visual C++ Redistributable — ComfyUI may not start until it is installed."
-    SetDetailsPrint none
+    DetailPrint "Continuing without the Microsoft Visual C++ Redistributable — ComfyUI may not start until it is installed."
     vcRedistDone:
   ${Else}
-    SetDetailsPrint textonly
-    DetailPrint "Microsoft Visual C++ Redistributable $1 already installed (>= bundled ${VC_REDIST_VERSION}); skipping."
-    SetDetailsPrint none
+    DetailPrint "Step 1 of 2 — Microsoft Visual C++ Redistributable v$1 is already up to date (bundled v${VC_REDIST_VERSION})."
   ${EndIf}
+
+  DetailPrint "Step 2 of 2 — Installing ComfyUI Desktop files..."
 
   Pop $R8
   Pop $2
@@ -211,6 +213,14 @@
   !define MUI_FINISHPAGE_SHOWREADME ""
   !define MUI_FINISHPAGE_SHOWREADME_TEXT "Add a desktop shortcut"
   !define MUI_FINISHPAGE_SHOWREADME_FUNCTION "CreateUserDesktopShortcut"
+
+  # Keep the install (details) page visible after the install completes
+  # instead of auto-advancing to the Finish page. Pairs with
+  # `SetDetailsPrint both` in installVcRedist — the user can hit the
+  # standard NSIS "Show Details" toggle on the install page and review
+  # every step (redist phase, file extraction, shortcut creation, etc.)
+  # before clicking Next to reach the Finish page.
+  !define MUI_FINISHPAGE_NOAUTOCLOSE
 
   !define MUI_PAGE_CUSTOMFUNCTION_PRE FinishPagePreCheck
   !insertmacro MUI_PAGE_FINISH
