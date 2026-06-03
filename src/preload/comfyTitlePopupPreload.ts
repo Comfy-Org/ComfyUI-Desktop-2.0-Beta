@@ -194,9 +194,8 @@ export type PopupDownloadAction =
   | { action: 'clear-finished' }
 
 /** Settings tabs the popup can deep-link the host's panelView into.
- *  Mirrors `SettingsTab` in `views/SettingsModal.vue` — kept inline
- *  because the popup's tsconfig slice can't see the renderer's view
- *  layer. */
+ *  Defined inline because the popup's tsconfig slice can't see the
+ *  renderer's view layer. */
 export type PopupSettingsTab = 'comfy' | 'directories' | 'downloads' | 'global'
 
 export interface ComfyTitlePopupBridge {
