@@ -37,6 +37,11 @@ nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
+  # Disable the built-in unconditional desktop-shortcut creation. The
+  # installer surfaces an "Add a desktop shortcut" checkbox on the
+  # Finish page (default checked) instead — same default outcome, but
+  # the user can opt out. See scripts/installer.nsh → customFinishPage.
+  createDesktopShortcut: false
   include: scripts/installer.nsh
 mac:
   target:

@@ -27,6 +27,25 @@
   LangString perMachineInstall 1033 "$(^Name) is installed for all users.$\r$\n"
   LangString reinstallUpgrade 1033 "Setup will update your existing installation."
   !pragma warning enable 6030
+
+  ; Pre-install Section that runs the Visual C++ Redistributable BEFORE
+  ; electron-builder's main "install" section. The default electron-builder
+  ; section order is: files → start-menu shortcut → desktop shortcut →
+  ; customInstall (where the redist *used* to run). That ordering let the
+  ; user click the freshly-created desktop / Start-menu shortcut and open
+  ; the app while VC++ was still installing (#715). Moving the redist into
+  ; a hidden Section declared in customHeader places it BEFORE
+  ; `Section "install"` (installer.nsi line ~94), so the redist completes
+  ; before any shortcut is placed.
+  ;
+  ; The leading "-" makes the section unselectable / hidden; it has no
+  ; component-page entry and always runs. Skipped on update — main install
+  ; already-installed check elsewhere; mirrors the prior gate.
+  Section "-VcRedistPreInstall"
+    ${IfNot} ${isUpdated}
+      !insertmacro installVcRedist
+    ${EndIf}
+  SectionEnd
 !macroend
 
 ; Optional installer command-line overrides:
@@ -148,9 +167,10 @@
 !macroend
 
 !macro customInstall
-  ${IfNot} ${isUpdated}
-    !insertmacro installVcRedist
-  ${EndIf}
+  ; VC++ Redistributable is now installed by the -VcRedistPreInstall
+  ; Section declared in customHeader so it runs BEFORE shortcuts are
+  ; placed (#715). Kept defined so electron-builder's `!ifmacrodef
+  ; customInstall` guard stays satisfied.
 !macroend
 
 # Custom finish page: launch the app as the current user (not elevated)
@@ -169,10 +189,35 @@
     !define MUI_FINISHPAGE_RUN_FUNCTION "StartApp"
   !endif
 
+  # Opt-out desktop-shortcut checkbox (#682). Pairs with
+  # `nsis.createDesktopShortcut: false` in electron-builder.yml so the
+  # install section no longer drops a shortcut unconditionally — the user
+  # decides on the Finish page. Default is CHECKED so a user clicking
+  # straight through still gets a shortcut (no UX regression for the 90%
+  # who don't change defaults); only users who actively uncheck skip it.
+  #
+  # MUI2 trick: setting MUI_FINISHPAGE_SHOWREADME to an empty string makes
+  # the checkbox call the FUNCTION instead of trying to open a file/URL.
+  # Shortcut creation mirrors what electron-builder's addDesktopLink macro
+  # would have done (CreateShortCut → SetLnkAUMI → SHChangeNotify) so the
+  # resulting .lnk is identical to the previous always-on path.
+  Function CreateUserDesktopShortcut
+    CreateShortCut "$newDesktopLink" "$appExe" "" "$appExe" 0 "" "" "${APP_DESCRIPTION}"
+    ClearErrors
+    WinShell::SetLnkAUMI "$newDesktopLink" "${APP_ID}"
+    System::Call 'Shell32::SHChangeNotify(i 0x8000000, i 0, i 0, i 0)'
+  FunctionEnd
+
+  !define MUI_FINISHPAGE_SHOWREADME ""
+  !define MUI_FINISHPAGE_SHOWREADME_TEXT "Add a desktop shortcut"
+  !define MUI_FINISHPAGE_SHOWREADME_FUNCTION "CreateUserDesktopShortcut"
+
   !define MUI_PAGE_CUSTOMFUNCTION_PRE FinishPagePreCheck
   !insertmacro MUI_PAGE_FINISH
 
-  # Skip finish page during updates — auto-launch instead
+  # Skip finish page during updates — auto-launch instead. (Updates keep
+  # the existing desktop shortcut as-is — electron-builder's keepShortcuts
+  # handling is unaffected by createDesktopShortcut: false on update.)
   Function FinishPagePreCheck
     ${if} ${isUpdated}
       ${StdUtils.ExecShellAsUser} $0 "$launchLink" "open" "--updated"
