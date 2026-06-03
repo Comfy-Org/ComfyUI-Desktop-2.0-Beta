@@ -29,9 +29,9 @@ interface Bridge {
 const bridge = (window as unknown as { __comfyTitleTooltip?: Bridge }).__comfyTitleTooltip
 
 const text = ref<string>('')
-const themeBg = ref<string>('#262729')
-const themeText = ref<string>('#dddddd')
-const themeBorder = ref<string>('#494a50')
+const themeBg = ref<string>('#211927')
+const themeText = ref<string>('#ffffff')
+const themeBorder = ref<string>('#38303d')
 /** Token from the most recently applied config — echoed back to main
  *  in every render-ack so main can discard stale acks. */
 let currentConfigToken = ''
