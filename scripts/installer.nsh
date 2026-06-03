@@ -28,6 +28,23 @@
   LangString reinstallUpgrade 1033 "Setup will update your existing installation."
   !pragma warning enable 6030
 
+  ; Tracks whether the wizard is currently sitting on the Finish page so
+  ; .onUserAbort can quit cleanly there instead of falling through to the
+  ; default "Are you sure you want to abort?" prompt (which is wrong on a
+  ; finished install). Set in FinishPagePreCheck, never reset.
+  Var IsOnFinishPage
+
+  ; .onUserAbort fires on Cancel button or title-bar X. On every page
+  ; before Finish, fall through (no Abort/Quit) so NSIS shows its
+  ; standard abort-confirm dialog. On Finish, the install is done — Quit
+  ; the installer cleanly without any prompt.
+  Function .onUserAbort
+    ${If} $IsOnFinishPage == "1"
+      SetErrorLevel 0
+      Quit
+    ${EndIf}
+  FunctionEnd
+
   ; Reveal the install-details list view during install. electron-builder's
   ; common.nsh (included at installer.nsi line 8) defaults to
   ; `ShowInstDetails nevershow`, which hides the standard NSIS Show-Details
