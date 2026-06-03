@@ -105,6 +105,7 @@ interface MountedChain {
   dismissTakeoverDirect: ReturnType<typeof vi.fn>
   performChooserLaunch: ReturnType<typeof vi.fn>
   openFirstUseTakeover: ReturnType<typeof vi.fn>
+  resetFirstUseSpinner: ReturnType<typeof vi.fn>
 }
 
 function mountChain(): MountedChain {
@@ -113,6 +114,7 @@ function mountChain(): MountedChain {
   const dismissTakeoverDirect = vi.fn()
   const performChooserLaunch = vi.fn().mockResolvedValue('launched')
   const openFirstUseTakeover = vi.fn().mockResolvedValue(undefined)
+  const resetFirstUseSpinner = vi.fn()
 
   const apiRef: Ref<FirstUseChainApi | null> = ref(null)
 
@@ -123,7 +125,8 @@ function mountChain(): MountedChain {
         switchPanel,
         dismissTakeoverDirect,
         performChooserLaunch,
-        openFirstUseTakeover
+        openFirstUseTakeover,
+        resetFirstUseSpinner
       })
       return () => h('div')
     }
@@ -137,7 +140,8 @@ function mountChain(): MountedChain {
     switchPanel,
     dismissTakeoverDirect,
     performChooserLaunch,
-    openFirstUseTakeover
+    openFirstUseTakeover,
+    resetFirstUseSpinner
   }
 }
 

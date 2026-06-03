@@ -51,6 +51,7 @@ import WhyTryCloudModal from '../components/WhyTryCloudModal.vue'
 import TermsModal from '../components/TermsModal.vue'
 import Tooltip from '../components/ui/Tooltip.vue'
 import BrandTakeoverLayout from '../components/BrandTakeoverLayout.vue'
+import InlineRichText from '../components/InlineRichText.vue'
 import { emitTelemetryAction } from '../lib/telemetry'
 import { useCloudCapacity } from '../composables/useCloudCapacity'
 
@@ -84,8 +85,11 @@ const emit = defineEmits<{
    *  → `runAction('migrate-to-standalone', …)` via `show-progress`)
    *  on the auto-tracked desktop install and marks `firstUseCompleted`
    *  once the migration finishes successfully. Same shape as
-   *  `chain-local` — host owns completion + auto-launch. */
-  'chain-migrate': []
+   *  `chain-local` — host owns completion + auto-launch.
+   *  `express: true` lets the host skip the migrate confirm surface
+   *  (preview + auto-pick + run, no user-confirm step) the same way
+   *  Express skips the Configure screen on chain-local. */
+  'chain-migrate': [{ express: boolean }]
 }>()
 
 const step = ref<Step>('start')
@@ -112,7 +116,14 @@ const capacityReady = ref(false)
  *  resolved capacity status. */
 const initialDefaultChoice = ref<'cloud' | 'local'>('cloud')
 function deriveDefaultChoice(): 'cloud' | 'local' {
-  return cloudCapacity.isDisabled() ? 'local' : 'cloud'
+  // Returning Desktop user with a detected legacy install lands on
+  // Local by default: the migrate-existing-install path is the obvious
+  // next step for them and pre-selecting Local lines the start screen
+  // up so they only press Continue. Cloud disabled still wins (no
+  // viable cloud path) so the precedence is disabled > legacy > cloud.
+  if (cloudCapacity.isDisabled()) return 'local'
+  if (hasLegacyDesktop.value) return 'local'
+  return 'cloud'
 }
 onMounted(async () => {
   await cloudCapacity.whenReady()
@@ -136,6 +147,15 @@ const cloudDescriptionKey = computed(() => {
  *  Functional wiring (skipping optional setup steps) lands separately;
  *  for now the value is captured for telemetry only. */
 const expressInstall = ref(true)
+/** Peer modifier alongside Express Install, only rendered when an
+ *  auto-tracked legacy install was detected on the machine. When
+ *  checked, Continue routes straight to chain-migrate so the existing
+ *  install is brought over instead of installing fresh. Pre-ticked so
+ *  returning Desktop users land on the migration path by default. */
+const migrateExisting = ref(true)
+const showMigrateExisting = computed(
+  () => pickedChoice.value === 'local' && hasLegacyDesktop.value
+)
 /** Detected GPU vendor — populated by `window.api.detectGPU()` on
  *  `open()`. Surfaces as an inline confirmation line under the Express
  *  checkbox so users on the wrong hardware can untick Express before
@@ -320,10 +340,22 @@ async function routePostStart(): Promise<void> {
     }
     emitCompleted('cloud')
     emit('complete-cloud')
+  } else if (hasLegacyDesktop.value && migrateExisting.value) {
+    // Local + the "Migrate existing install" peer checkbox: route
+    // straight to chain-migrate. The checkbox is only rendered when a
+    // legacy install was detected, so its `true` value is an explicit
+    // opt-in to bring the existing install over instead of installing
+    // fresh. Express applies the same opt-out-of-confirm semantics it
+    // does on chain-local: with both ticked, the host runs the
+    // migration straight through (preview + auto-pick + run) without
+    // surfacing the confirm step.
+    emitTelemetryAction('desktop2.first_use.local_branch_chosen', { choice: 'migrate' })
+    emitCompleted('local-migrate')
+    emit('chain-migrate', { express: expressInstall.value })
   } else if (hasLegacyDesktop.value && !expressInstall.value) {
-    // Express takes precedence: when checked, skip the migrate-vs-fresh
-    // sub-step and head straight to the express Standalone install. Only
-    // surface the localBranch fork when Express is unticked.
+    // Legacy detected but the user opted out of migrate and Express:
+    // surface the localBranch fork so they can still pick migrate-vs-
+    // fresh manually from the more detailed sub-step.
     step.value = 'localBranch'
     isContinuing.value = false
   } else {
@@ -368,18 +400,23 @@ function onWhyCloudTryCloud(): void {
 function chooseMigrate(): void {
   emitTelemetryAction('comfy.desktop.first_use.local_branch_chosen', { choice: 'migrate' })
   emitCompleted('local-migrate')
-  emit('chain-migrate')
+  // localBranch sub-step is only reached when Express was unticked on
+  // the start screen, so this path is never the express-bypass path —
+  // pass `express: false` so the host renders the confirm surface.
+  emit('chain-migrate', { express: false })
 }
 
-/** Radiogroup arrow-key handler for the Cloud/Local cards. WAI-ARIA
- *  APG §3.15: arrow keys cycle the checked radio and move DOM focus
- *  along with it. Without this, keyboard-only users can't switch
- *  between the two cards. */
+/** Radiogroup arrow-key handler for the Cloud / Local / Migrate cards.
+ *  WAI-ARIA APG §3.15: arrow keys cycle the checked radio and move DOM
+ *  focus along with it. The Migrate card is only present when
+ *  `hasLegacyDesktop` is true, so the cycle order is built dynamically
+ *  to match what's actually rendered. */
 function onStartCardsKeydown(e: KeyboardEvent): void {
   const target = e.target as HTMLElement | null
   if (!target?.closest('[role="radio"]')) return
   const order = ['cloud', 'local'] as const
   const currentIndex = order.indexOf(pickedChoice.value)
+  if (currentIndex < 0) return
   let next: number
   if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
     next = (currentIndex + 1) % order.length
@@ -437,6 +474,14 @@ async function open(opts: OpenOpts = {}): Promise<void> {
   pickedChoice.value = deriveDefaultChoice()
   initialDefaultChoice.value = deriveDefaultChoice()
   expressInstall.value = true
+  migrateExisting.value = true
+  // `onContinue` keeps `isContinuing` true past `routePostStart()`
+  // because the chain handlers normally unmount this takeover within
+  // ms — but on the chain-migrate / chain-local cancel-and-return
+  // path, the host re-invokes `open()` on a still-mounted instance
+  // whose Continue spinner is still flagged. Reset here so the
+  // replayed start screen surfaces a fresh, clickable CTA.
+  isContinuing.value = false
   // Reset funnel-completion bookkeeping so a takeover replay measures
   // duration / steps from the replay, not from the original mount.
   mountedAt = Date.now()
@@ -518,7 +563,17 @@ onUnmounted(() => {
   window.api.setFirstUseMode('none')
 })
 
-defineExpose({ open })
+/** Host-callable: clears the Continue-button spinner without resetting
+ *  picker state. Used by chain handlers (most prominently
+ *  `handleFirstUseChainMigrate`) when their post-emit confirm modal
+ *  returns null — the takeover stays mounted on the start step with
+ *  all selections preserved, but the spinner needs to clear so the
+ *  user can retry Continue. */
+function resetContinue(): void {
+  isContinuing.value = false
+}
+
+defineExpose({ open, resetContinue })
 </script>
 
 <template>
@@ -580,6 +635,34 @@ defineExpose({ open })
             @click="pickedChoice = 'local'"
           />
         </div>
+        <!-- Modifier checkboxes (Migrate + Express). Wrapped in a
+             fit-content container so the two labels share the same
+             left edge and read as left-aligned peers — without the
+             wrapper, each label was an `inline-flex` that centered
+             independently, so a longer description text would push
+             one row off-axis from the other. -->
+        <div class="start-modifiers">
+        <label
+          v-if="hasLegacyDesktop"
+          class="brand-checkbox start-migrate-existing"
+          :class="{ 'start-migrate-existing--hidden': !showMigrateExisting }"
+          :aria-hidden="!showMigrateExisting"
+          data-testid="first-use-migrate-existing"
+        >
+          <input
+            v-model="migrateExisting"
+            type="checkbox"
+            :tabindex="showMigrateExisting ? 0 : -1"
+          />
+          <span class="start-migrate-existing__body">
+            <span class="start-migrate-existing__label">
+              {{ $t('firstUse.migrateExistingLine') }}
+            </span>
+            <span class="start-migrate-existing__desc">
+              <InlineRichText :text="$t('firstUse.migrateExistingDesc')" />
+            </span>
+          </span>
+        </label>
         <label
           class="brand-checkbox start-express"
           :class="{ 'start-express--hidden': pickedChoice !== 'local' }"
@@ -608,6 +691,7 @@ defineExpose({ open })
             </span>
           </span>
         </label>
+        </div>
       </div>
       <div class="start-bottom">
         <div class="start-consent-strip">
@@ -879,16 +963,29 @@ defineExpose({ open })
   outline-offset: 2px;
 }
 
+/* Modifier-checkbox container. Both rows (Migrate + Express) live
+ * inside this so they share the same left edge: the wrapper itself is
+ * `width: fit-content` (shrinks to the WIDEST child) and centred in
+ * the start-hero column via `margin-inline: auto`. The labels inside
+ * are then plain block-level rows with no centring of their own, so a
+ * shorter row no longer floats to its own centre — they all start at
+ * the wrapper's left edge. */
+.start-modifiers {
+  display: flex;
+  flex-direction: column;
+  width: fit-content;
+  margin-inline: auto;
+  gap: 8px;
+  margin-top: 4px;
+}
 /* Express Install — intentionally low-weight: left-aligned single
  * line with the standard brand-checkbox box, smaller font + muted
  * text colour so it reads as an opt-out modifier, not a primary
  * decision. */
 .start-express {
   display: inline-flex;
-  align-self: center;
   align-items: flex-start;
   gap: 8px;
-  margin-top: 4px;
   font-size: 13px;
   color: var(--neutral-300);
   opacity: 1;
@@ -931,6 +1028,55 @@ defineExpose({ open })
 }
 @media (prefers-reduced-motion: reduce) {
   .start-express {
+    transition: none;
+  }
+}
+
+/* Peer checkbox sibling of `.start-express`. Rendered ABOVE Express
+ * on the legacy-detected path so the primary action for a returning
+ * Desktop user (bring the existing install over) reads first — and so
+ * Express below it doesn't look like a sub-option being nested under
+ * it. Body has a primary label + a description sub-line mirroring
+ * Express's GPU hint so the two read as a row of equal-weight
+ * modifiers carrying the same amount of detail. */
+.start-migrate-existing {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--neutral-300);
+  opacity: 1;
+  transform: translateY(0);
+  transition:
+    opacity 180ms ease-out,
+    transform 180ms ease-out;
+}
+.start-migrate-existing--hidden {
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
+}
+.start-migrate-existing__body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+}
+.start-migrate-existing__label {
+  line-height: 1.4;
+}
+.start-migrate-existing__desc {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--neutral-400);
+}
+.start-migrate-existing__desc :deep(strong) {
+  color: var(--neutral-100);
+  font-weight: 500;
+}
+@media (prefers-reduced-motion: reduce) {
+  .start-migrate-existing {
     transition: none;
   }
 }

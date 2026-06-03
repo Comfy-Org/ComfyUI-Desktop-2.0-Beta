@@ -180,25 +180,7 @@ describe('FirstUseTakeover start step', () => {
     expect(emitted![0]).toEqual([{ express: false }])
   })
 
-  it('Express takes precedence over hasLegacyDesktop — emits `chain-local` with `express: true` instead of opening the localBranch sub-step', async () => {
-    const wrapper = mountTakeover()
-    // Simulate the host telling the takeover that a Legacy Desktop
-    // install was detected (normally plumbed via `getFirstUseState()`).
-    await (wrapper.vm as unknown as { open: (opts: { hasLegacyDesktop: boolean }) => Promise<void> }).open({
-      hasLegacyDesktop: true,
-    })
-    await wrapper
-      .find('[data-testid="first-use-consent-tos"] input[type="checkbox"]')
-      .setValue(true)
-    await wrapper.find('[data-testid="first-use-pick-local"]').trigger('click')
-    await wrapper.find('[data-testid="first-use-continue"]').trigger('click')
-
-    const emitted = wrapper.emitted('chain-local')
-    expect(emitted).toBeTruthy()
-    expect(emitted![0]).toEqual([{ express: true }])
-  })
-
-  it('hasLegacyDesktop + Express OFF routes to the localBranch sub-step (migrate-vs-fresh fork preserved)', async () => {
+  it('hasLegacyDesktop + Express OFF + migrate OFF routes to the localBranch sub-step', async () => {
     const wrapper = mountTakeover()
     await (wrapper.vm as unknown as { open: (opts: { hasLegacyDesktop: boolean }) => Promise<void> }).open({
       hasLegacyDesktop: true,
@@ -210,12 +192,100 @@ describe('FirstUseTakeover start step', () => {
     await wrapper
       .find('[data-testid="first-use-express-install"] input[type="checkbox"]')
       .setValue(false)
+    // Migrate is pre-ticked when legacy is detected; the localBranch
+    // fork is only reachable when the user explicitly opts out of
+    // BOTH express and migrate-existing.
+    await wrapper
+      .find('[data-testid="first-use-migrate-existing"] input[type="checkbox"]')
+      .setValue(false)
     await wrapper.find('[data-testid="first-use-continue"]').trigger('click')
 
     // No chain-local fires — the user lands on the localBranch sub-step
-    // to make the migrate-vs-fresh decision.
+    // to make the migrate-vs-fresh decision manually.
     expect(wrapper.emitted('chain-local')).toBeFalsy()
     expect(wrapper.find('[data-testid="first-use-local-migrate"]').exists()).toBe(true)
+  })
+
+  it('renders the "Migrate existing install" checkbox only when hasLegacyDesktop is true', async () => {
+    const wrapper = mountTakeover()
+    // Default open() has hasLegacyDesktop = false — the row is not in
+    // the DOM at all (v-if), so no test-id should resolve. No legacy
+    // install means Cloud stays the brand-anchor default with no
+    // migrate-related affordance shown anywhere on the start screen.
+    expect(wrapper.find('[data-testid="first-use-migrate-existing"]').exists()).toBe(false)
+    // After the host plumbs the detected legacy install in, the
+    // checkbox mounts as a peer of Express. Visibility is then driven
+    // by the Local pick via the hidden-class pattern.
+    await (wrapper.vm as unknown as { open: (opts: { hasLegacyDesktop: boolean }) => Promise<void> }).open({
+      hasLegacyDesktop: true,
+    })
+    expect(wrapper.find('[data-testid="first-use-migrate-existing"]').exists()).toBe(true)
+  })
+
+  it('routes Local + migrate-existing + Express to `chain-migrate` with express: true', async () => {
+    const wrapper = mountTakeover()
+    await (wrapper.vm as unknown as { open: (opts: { hasLegacyDesktop: boolean }) => Promise<void> }).open({
+      hasLegacyDesktop: true,
+    })
+    await wrapper
+      .find('[data-testid="first-use-consent-tos"] input[type="checkbox"]')
+      .setValue(true)
+    await wrapper.find('[data-testid="first-use-pick-local"]').trigger('click')
+    // Migrate AND Express are both pre-ticked on the legacy-desktop
+    // path — just press Continue. The host uses the `express: true`
+    // payload to skip the migrate confirm surface and run preview +
+    // auto-pick + run straight through.
+    await wrapper.find('[data-testid="first-use-continue"]').trigger('click')
+
+    const emitted = wrapper.emitted('chain-migrate')
+    expect(emitted).toBeTruthy()
+    expect(emitted![0]).toEqual([{ express: true }])
+    expect(wrapper.emitted('chain-local')).toBeFalsy()
+    expect(wrapper.emitted('complete-cloud')).toBeFalsy()
+    expect(wrapper.find('[data-testid="first-use-local-migrate"]').exists()).toBe(false)
+  })
+
+  it('routes Local + migrate-existing + Express OFF to `chain-migrate` with express: false (confirm surface still shown by host)', async () => {
+    const wrapper = mountTakeover()
+    await (wrapper.vm as unknown as { open: (opts: { hasLegacyDesktop: boolean }) => Promise<void> }).open({
+      hasLegacyDesktop: true,
+    })
+    await wrapper
+      .find('[data-testid="first-use-consent-tos"] input[type="checkbox"]')
+      .setValue(true)
+    await wrapper.find('[data-testid="first-use-pick-local"]').trigger('click')
+    // Untick Express but leave Migrate on: the user wants migration
+    // but with the confirm surface (not the express-skip path).
+    await wrapper
+      .find('[data-testid="first-use-express-install"] input[type="checkbox"]')
+      .setValue(false)
+    await wrapper.find('[data-testid="first-use-continue"]').trigger('click')
+
+    const emitted = wrapper.emitted('chain-migrate')
+    expect(emitted).toBeTruthy()
+    expect(emitted![0]).toEqual([{ express: false }])
+  })
+
+  it('routes Local + Express + migrate-existing OFF to `chain-local` (fresh express install)', async () => {
+    const wrapper = mountTakeover()
+    await (wrapper.vm as unknown as { open: (opts: { hasLegacyDesktop: boolean }) => Promise<void> }).open({
+      hasLegacyDesktop: true,
+    })
+    await wrapper
+      .find('[data-testid="first-use-consent-tos"] input[type="checkbox"]')
+      .setValue(true)
+    await wrapper.find('[data-testid="first-use-pick-local"]').trigger('click')
+    // Untick the migrate checkbox: returning user explicitly opts out
+    // and wants a clean Standalone install instead.
+    await wrapper
+      .find('[data-testid="first-use-migrate-existing"] input[type="checkbox"]')
+      .setValue(false)
+    await wrapper.find('[data-testid="first-use-continue"]').trigger('click')
+
+    expect(wrapper.emitted('chain-migrate')).toBeFalsy()
+    const emitted = wrapper.emitted('chain-local')
+    expect(emitted).toBeTruthy()
+    expect(emitted![0]).toEqual([{ express: true }])
   })
 
   it('emits `complete-cloud` (not `chain-local`) when Cloud is picked, regardless of Express', async () => {
@@ -243,6 +313,32 @@ describe('FirstUseTakeover start step', () => {
     expect(btn.text()).toBe('firstUse.startContinueBusy')
     expect(btn.attributes('disabled')).toBeDefined()
     expect(btn.attributes('aria-busy')).toBe('true')
+  })
+
+  it('open() resets the Continue spinner so the cancel-and-return path lands on a fresh CTA', async () => {
+    // Reproduces the start → uncheck express → Continue → cancel
+    // mid-chain → open() again loop. `onContinue()` keeps the spinner
+    // flag true past `routePostStart()` (the chain handlers normally
+    // unmount), so on a cancel-and-return the host re-invokes open()
+    // on the still-mounted instance with a stale `isContinuing=true`
+    // — open() must reset it.
+    const wrapper = mountTakeover()
+    await wrapper
+      .find('[data-testid="first-use-consent-tos"] input[type="checkbox"]')
+      .setValue(true)
+    await wrapper.find('[data-testid="first-use-continue"]').trigger('click')
+    // Sanity-check: the Continue button IS in the spinner state right
+    // after click (the chain hasn't unmounted in the isolated test).
+    const btnBusy = wrapper.find('[data-testid="first-use-continue"]')
+    expect(btnBusy.text()).toBe('firstUse.startContinueBusy')
+    expect(btnBusy.attributes('disabled')).toBeDefined()
+
+    await (wrapper.vm as unknown as { open: () => Promise<void> }).open()
+
+    const btnFresh = wrapper.find('[data-testid="first-use-continue"]')
+    expect(btnFresh.text()).toBe('firstUse.startContinue')
+    expect(btnFresh.attributes('disabled')).toBeUndefined()
+    expect(btnFresh.attributes('aria-busy')).toBe('false')
   })
 
   it('closing the terms modal clears termsDoc (modal unmounts)', async () => {

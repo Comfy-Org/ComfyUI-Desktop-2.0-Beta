@@ -23,6 +23,14 @@ interface MigrateConfirmOptions {
   title?: string
   message?: string
   confirmLabel?: string
+  /** Skip the confirm UI entirely and resolve as soon as the preview +
+   *  variant lookup finish. Used by the first-use chain when the user
+   *  ticked Express Install alongside Migrate-existing — the express
+   *  semantics ("skip optional setup, use recommended defaults") apply
+   *  to the migrate path the same way they apply to a fresh install.
+   *  Preflight failures (busy check, preview error, release lookup) still
+   *  return null; only the user-facing confirm step is bypassed. */
+  express?: boolean
 }
 
 /** Host-registered takeover surface for the brand-wrapped Migrate confirm.
@@ -95,7 +103,14 @@ export function useMigrateAction(opts?: { surface?: 'modal' | 'takeover' }) {
       return null
     }
 
-    const useTakeover = surface === 'takeover' && registeredTakeover !== null
+    const isExpress = confirm?.express === true
+    // Express-install path skips the user confirm surface entirely —
+    // no takeover/modal is opened, the surface promise resolves
+    // immediately as `confirmed: true` with default checkbox values.
+    // Preview + variant lookup still run because runAction needs the
+    // snapshotPath + target, and a failure on either still routes to
+    // the same null return below.
+    const useTakeover = !isExpress && surface === 'takeover' && registeredTakeover !== null
     const takeover = useTakeover ? registeredTakeover! : null
     const wasRunning = sessionStore.isRunning(installation.id)
 
@@ -114,9 +129,14 @@ export function useMigrateAction(opts?: { surface?: 'modal' | 'takeover' }) {
 
     // Show the surface (Modal OR brand takeover) with a loading state.
     // Both paths return the same { confirmed, checkboxValues } shape so
-    // the rest of this function stays surface-agnostic.
+    // the rest of this function stays surface-agnostic. Express skips
+    // the surface — the promise resolves to `confirmed: true` with the
+    // checkbox defaults so the rest of this function reads the same
+    // result shape downstream.
     let surfacePromise: Promise<{ confirmed: boolean; checkboxValues: Record<string, boolean> }>
-    if (takeover) {
+    if (isExpress) {
+      surfacePromise = Promise.resolve({ confirmed: true, checkboxValues: {} })
+    } else if (takeover) {
       surfacePromise = takeover.open(dialogTitle, dialogConfirmLabel)
     } else {
       const modalConfirmPromise = modal.confirm({
@@ -132,13 +152,17 @@ export function useMigrateAction(opts?: { surface?: 'modal' | 'takeover' }) {
       }))
     }
 
-    // Fetch the preview in the background
+    // Fetch the preview in the background. Express skips all surface
+    // updates because no surface was opened — preflight failures still
+    // alert the user (the chain handler would otherwise show no
+    // feedback) but the success path simply moves on to release
+    // lookup + the immediate confirmed resolve.
     let previewResult: Awaited<ReturnType<typeof window.api.previewLocalMigration>>
     try {
       previewResult = await window.api.previewLocalMigration(installation.id)
     } catch (err) {
       if (takeover) takeover.update({ loading: false })
-      else modal.close(false)
+      else if (!isExpress) modal.close(false)
       await modal.alert({
         title: t('migrate.migrateToStandalone'),
         message: (err as Error)?.message ?? String(err),
@@ -147,7 +171,7 @@ export function useMigrateAction(opts?: { surface?: 'modal' | 'takeover' }) {
     }
     if (!previewResult.ok) {
       if (takeover) takeover.update({ loading: false })
-      else modal.close(false)
+      else if (!isExpress) modal.close(false)
       if (previewResult.message) {
         await modal.alert({ title: t('migrate.migrateToStandalone'), message: previewResult.message })
       }
@@ -168,7 +192,7 @@ export function useMigrateAction(opts?: { surface?: 'modal' | 'takeover' }) {
         details: detailsPayload,
         checkboxes: checkboxesPayload,
       })
-    } else {
+    } else if (!isExpress) {
       // Update the modal with the loaded preview data. The device-picker
       // UI was dropped per CTO ask — the device hasn't changed since the
       // prior install, so we silently pre-pick the recommended variant
