@@ -144,7 +144,7 @@ let rendererRole: RendererRole = 'panel'
  * `telemetryEnabled` setting. `undefined` means "the user has not yet
  * decided" (first-run, before the consent step is completed). The only
  * event allowed to fire pre-decision is
- * `desktop2.first_use.consent_decision` itself — the act of recording
+ * `comfy.desktop.first_use.consent_decision` itself — the act of recording
  * the decision. Everything else is dropped at the renderer-side gate
  * so we never even attempt to ship a payload to RUM / PostHog before
  * the user has affirmatively (or negatively) chosen.
@@ -158,7 +158,7 @@ let resolvedTelemetryEnabled: boolean | undefined = undefined
  * consent decision. Strictly the consent decision itself — adding to
  * this list is a privacy / compliance change, not a code change. */
 const PRE_CONSENT_ALLOWED_EVENTS: ReadonlySet<string> = new Set([
-  'desktop2.first_use.consent_decision'
+  'comfy.desktop.first_use.consent_decision'
 ])
 
 function isTelemetryEmitAllowed(actionName: string): boolean {
@@ -354,7 +354,7 @@ async function initializeProviders(): Promise<void> {
   // PostHog Browser SDK init removed Main process owns
   // PostHog capture via `posthog-node`; renderer forwards every event
   // through `window.api.captureTelemetry` / `captureExceptionTelemetry` /
-  // `registerTelemetryProperties` IPC bridges. The `desktop2.session.started`
+  // `registerTelemetryProperties` IPC bridges. The `comfy.desktop.session.started`
   // event is still owned by main's `identify()` and fires on consent grant.
 
   // Cohort context + device-id binding fire regardless of Datadog state —
@@ -389,18 +389,18 @@ async function initializeProviders(): Promise<void> {
       .then((inventory) => {
         if (!inventory) return
         // Honor the pre-consent gate even on the bypass path.
-        if (!isTelemetryEmitAllowed('desktop2.session.installs_inventory')) return
+        if (!isTelemetryEmitAllowed('comfy.desktop.session.installs_inventory')) return
         if (isDatadogInitialized) {
           try {
             datadogRum.addAction(
-              'desktop2.session.installs_inventory',
+              'comfy.desktop.session.installs_inventory',
               inventory as unknown as Record<string, unknown>
             )
           } catch {}
         }
         try {
           window.api.captureTelemetry(
-            'desktop2.session.installs_inventory',
+            'comfy.desktop.session.installs_inventory',
             inventory as unknown as Record<string, unknown>
           )
         } catch {
@@ -441,7 +441,7 @@ async function initializeProviders(): Promise<void> {
         gpu_tier: gpuTier
       }
       if (rendererRole === 'panel') {
-        trackTelemetryAction('desktop2.session.system_info', enriched)
+        trackTelemetryAction('comfy.desktop.session.system_info', enriched)
       }
       // Promote durable hardware traits to PostHog person-profile properties
       // so cohort filters work across sessions without joining against the
@@ -619,7 +619,7 @@ export function initializeRendererBootstrap(role: RendererRole = 'panel'): void 
   // event on Datadog/PostHog when both renderers are mounted.
   if (rendererRole === 'panel') {
     window.api.onComfyExited((data) => {
-      trackTelemetryAction('desktop2.comfyui.exited', {
+      trackTelemetryAction('comfy.desktop.comfyui.exited', {
         installation_id: data.installationId,
         crashed: data.crashed ?? false,
         exit_code: data.exitCode ?? null,
@@ -628,7 +628,7 @@ export function initializeRendererBootstrap(role: RendererRole = 'panel'): void 
     })
 
     window.api.onComfyBootLog((data) => {
-      trackTelemetryAction('desktop2.comfyui.boot_log', {
+      trackTelemetryAction('comfy.desktop.comfyui.boot_log', {
         installation_id: data.installationId,
         boot_stderr: data.bootStderr
       })
@@ -643,7 +643,7 @@ export function initializeRendererBootstrap(role: RendererRole = 'panel'): void 
         .then((ctx) => {
           if (!ctx) return
           const { snapshot_diffs, ...metadata } = ctx
-          trackTelemetryAction('desktop2.session.installation_started', {
+          trackTelemetryAction('comfy.desktop.session.installation_started', {
             ...(metadata as unknown as Record<
               string,
               string | number | boolean | null | undefined
@@ -655,14 +655,14 @@ export function initializeRendererBootstrap(role: RendererRole = 'panel'): void 
             // natively; bypass the typed bridge via a fresh call.
             if (isDatadogInitialized) {
               try {
-                datadogRum.addAction('desktop2.session.snapshot_history', {
+                datadogRum.addAction('comfy.desktop.session.snapshot_history', {
                   installation_id: ctx.installation_id,
                   snapshot_diffs
                 })
               } catch {}
             }
             try {
-              window.api.captureTelemetry('desktop2.session.snapshot_history', {
+              window.api.captureTelemetry('comfy.desktop.session.snapshot_history', {
                 installation_id: ctx.installation_id,
                 snapshot_diffs
               } as unknown as Record<string, unknown>)

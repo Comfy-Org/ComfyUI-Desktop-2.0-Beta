@@ -1,11 +1,26 @@
 import {
-  ipcMain, dialog, shell, BrowserWindow,
-  fs, path, os,
-  sources, installations, settings,
-  defaultInstallDir, getDiskSpace, getDirectorySize, validateInstallPath,
-  detectGPU, validateHardware, checkNvidiaDriver,
-  sourceMap, getAppVersion, openPath,
-  listSnapshots, diffSnapshots,
+  ipcMain,
+  dialog,
+  shell,
+  BrowserWindow,
+  fs,
+  path,
+  os,
+  sources,
+  installations,
+  settings,
+  defaultInstallDir,
+  getDiskSpace,
+  getDirectorySize,
+  validateInstallPath,
+  detectGPU,
+  validateHardware,
+  checkNvidiaDriver,
+  sourceMap,
+  getAppVersion,
+  openPath,
+  listSnapshots,
+  diffSnapshots
 } from './shared'
 import si from 'systeminformation'
 import type { FieldOption } from './shared'
@@ -36,26 +51,43 @@ export function registerAppHandlers(): void {
     sources
       .filter((s) => s.category !== 'cloud' && !s.hidden)
       .filter((s) => !s.platforms || s.platforms.includes(process.platform))
-      .map((s) => ({ id: s.id, label: s.label, category: s.category, description: s.description, fields: s.fields, skipInstall: !!s.skipInstall, hideInstallPath: !!s.skipInstall }))
+      .map((s) => ({
+        id: s.id,
+        label: s.label,
+        category: s.category,
+        description: s.description,
+        fields: s.fields,
+        skipInstall: !!s.skipInstall,
+        hideInstallPath: !!s.skipInstall
+      }))
   )
 
-  ipcMain.handle('get-field-options', async (_event, sourceId: string, fieldId: string, selections: Record<string, unknown>, extraContext?: Record<string, unknown>) => {
-    const source = sourceMap[sourceId]
-    if (!source) return []
-    let gpuPromise = getGpuPromise()
-    if (!gpuPromise) {
-      gpuPromise = detectGPU().catch(() => null)
-      setGpuPromise(gpuPromise)
+  ipcMain.handle(
+    'get-field-options',
+    async (
+      _event,
+      sourceId: string,
+      fieldId: string,
+      selections: Record<string, unknown>,
+      extraContext?: Record<string, unknown>
+    ) => {
+      const source = sourceMap[sourceId]
+      if (!source) return []
+      let gpuPromise = getGpuPromise()
+      if (!gpuPromise) {
+        gpuPromise = detectGPU().catch(() => null)
+        setGpuPromise(gpuPromise)
+      }
+      const gpu = await gpuPromise
+      if (!source.getFieldOptions) return []
+      const options = await source.getFieldOptions(
+        fieldId,
+        selections as Record<string, FieldOption | undefined>,
+        { gpu: gpu && gpu.id, ...extraContext }
+      )
+      return options
     }
-    const gpu = await gpuPromise
-    if (!source.getFieldOptions) return []
-    const options = await source.getFieldOptions(
-      fieldId,
-      selections as Record<string, FieldOption | undefined>,
-      { gpu: gpu && gpu.id, ...extraContext }
-    )
-    return options
-  })
+  )
 
   ipcMain.handle('detect-gpu', async () => {
     let gpuPromise = getGpuPromise()
@@ -70,25 +102,28 @@ export function registerAppHandlers(): void {
     const result = await validateHardware()
     // Emit a single event whether hardware passes or fails so we can build
     // funnels like "% of users who hit hardware-not-supported during install".
-    mainTelemetry.emit('desktop2.install.validation', {
+    mainTelemetry.emit('comfy.desktop.install.validation', {
       passed: result.supported,
       platform: process.platform,
       arch: process.arch,
-      reason: result.supported ? null : (result.error ?? 'unsupported'),
+      reason: result.supported ? null : (result.error ?? 'unsupported')
     })
     return result
   })
   ipcMain.handle('check-nvidia-driver', () => checkNvidiaDriver())
 
-  ipcMain.handle('build-installation', (_event, sourceId: string, selections: Record<string, unknown>) => {
-    const source = sourceMap[sourceId]
-    if (!source) return null
-    return {
-      sourceId: source.id,
-      sourceLabel: source.label,
-      ...source.buildInstallation(selections as Record<string, FieldOption | undefined>),
+  ipcMain.handle(
+    'build-installation',
+    (_event, sourceId: string, selections: Record<string, unknown>) => {
+      const source = sourceMap[sourceId]
+      if (!source) return null
+      return {
+        sourceId: source.id,
+        sourceLabel: source.label,
+        ...source.buildInstallation(selections as Record<string, FieldOption | undefined>)
+      }
     }
-  })
+  )
 
   // Paths
   ipcMain.handle('get-default-install-dir', () => defaultInstallDir())
@@ -98,7 +133,7 @@ export function registerAppHandlers(): void {
     if (!win) return null
     const { canceled, filePaths } = await dialog.showOpenDialog(win, {
       defaultPath: defaultPath || defaultInstallDir(),
-      properties: ['openDirectory', 'createDirectory'],
+      properties: ['openDirectory', 'createDirectory']
     })
     if (canceled || filePaths.length === 0) return null
     return filePaths[0]
@@ -117,7 +152,9 @@ export function registerAppHandlers(): void {
     return shell.openExternal(url)
   })
   ipcMain.handle('get-disk-space', (_event, targetPath: string) => getDiskSpace(targetPath))
-  ipcMain.handle('validate-install-path', (_event, targetPath: string) => validateInstallPath(targetPath))
+  ipcMain.handle('validate-install-path', (_event, targetPath: string) =>
+    validateInstallPath(targetPath)
+  )
   let activeSizeAc: AbortController | null = null
   let activeSizeInstId: string | null = null
   ipcMain.handle('get-installation-size', async (_event, installationId: string) => {
@@ -163,11 +200,16 @@ export function registerAppHandlers(): void {
     let cpuManufacturer: string | null = null
     let cpuPhysicalCores: number | null = null
     let cpuSpeedGhz: number | null = null
-    let allGpus: Array<{ vendor: string; model: string; vram_mb: number | null; driver_version: string | null }> = []
+    let allGpus: Array<{
+      vendor: string
+      model: string
+      vram_mb: number | null
+      driver_version: string | null
+    }> = []
     const [osResult, cpuResult, gpuResult] = await Promise.allSettled([
       si.osInfo(),
       si.cpu(),
-      si.graphics(),
+      si.graphics()
     ])
     if (osResult.status === 'fulfilled') {
       osDistro = osResult.value.distro || null
@@ -184,7 +226,7 @@ export function registerAppHandlers(): void {
         vendor: ctrl.vendor || '',
         model: ctrl.model || '',
         vram_mb: ctrl.vram ?? null,
-        driver_version: ctrl.driverVersion?.trim() || null,
+        driver_version: ctrl.driverVersion?.trim() || null
       }))
     }
 
@@ -221,13 +263,13 @@ export function registerAppHandlers(): void {
         source_id: (inst.sourceId as string) || '',
         variant: (inst.variant as string) || '',
         update_channel: (inst.updateChannel as string) || 'stable',
-        status: (inst.status as string) || 'ready',
-      })),
+        status: (inst.status as string) || 'ready'
+      }))
     }
   })
 
   // Per-session boot census of every persisted installation, sorted
-  // most-recently-launched first. Powers `desktop2.session.installs_inventory`
+  // most-recently-launched first. Powers `comfy.desktop.session.installs_inventory`
   // so dashboards can see the user's full install footprint without
   // having to wait for them to launch each one. Capped to 200 KB total
   // (Datadog RUM hard-caps action context at ~256 KB; 200 KB matches the
@@ -245,21 +287,19 @@ export function registerAppHandlers(): void {
     visible.sort(
       (a, b) =>
         ((b.lastLaunchedAt as number | undefined) ?? 0) -
-        ((a.lastLaunchedAt as number | undefined) ?? 0),
+        ((a.lastLaunchedAt as number | undefined) ?? 0)
     )
 
     const result = {
       total_install_count: visible.length,
       included_install_count: 0,
       truncated: false,
-      installs: [] as Array<Record<string, unknown>>,
+      installs: [] as Array<Record<string, unknown>>
     }
     let runningSize = JSON.stringify(result).length
 
     for (const inst of visible) {
-      const entries = inst.installPath
-        ? await listSnapshots(inst.installPath).catch(() => [])
-        : []
+      const entries = inst.installPath ? await listSnapshots(inst.installPath).catch(() => []) : []
       const latest = entries.length > 0 ? entries[0]!.snapshot : null
 
       const entry: Record<string, unknown> = {
@@ -284,13 +324,13 @@ export function registerAppHandlers(): void {
               comfyui: {
                 ref: latest.comfyui.ref,
                 commit: latest.comfyui.commit,
-                releaseTag: latest.comfyui.releaseTag,
+                releaseTag: latest.comfyui.releaseTag
               },
               custom_nodes_count: latest.customNodes.length,
-              pip_packages_count: Object.keys(latest.pipPackages).length,
+              pip_packages_count: Object.keys(latest.pipPackages).length
             }
           : null,
-        snapshot_diffs: [] as Array<Record<string, unknown>>,
+        snapshot_diffs: [] as Array<Record<string, unknown>>
       }
 
       // Pack as many diffs (newest → oldest) as fit under the
@@ -313,7 +353,7 @@ export function registerAppHandlers(): void {
           pipsRemoved: d.pipsRemoved.length,
           pipsChanged: d.pipsChanged.length,
           comfyuiChanged: d.comfyuiChanged,
-          updateChannelChanged: d.updateChannelChanged,
+          updateChannelChanged: d.updateChannelChanged
         }
         const diffSize = JSON.stringify(diffEntry).length + 1
         if (perInstallSize + diffSize > MAX_PER_INSTALL_BYTES) break
@@ -364,29 +404,31 @@ export function registerAppHandlers(): void {
       snapshot_count: entries.length,
       disk_free_gb: diskFreeGb,
       disk_total_gb: diskTotalGb,
-      latest_snapshot: latest ? {
-        createdAt: latest.createdAt,
-        trigger: latest.trigger,
-        label: latest.label,
-        comfyui: {
-          ref: latest.comfyui.ref,
-          commit: latest.comfyui.commit,
-          releaseTag: latest.comfyui.releaseTag,
-          variant: latest.comfyui.variant,
-        },
-        customNodes: latest.customNodes.map((n) => ({
-          id: n.id,
-          type: n.type,
-          dirName: n.dirName,
-          enabled: n.enabled,
-          version: n.version,
-          commit: n.commit,
-        })),
-        pipPackages: latest.pipPackages,
-        pythonVersion: latest.pythonVersion,
-        updateChannel: latest.updateChannel,
-      } : null,
-      snapshot_diffs: [] as Array<Record<string, unknown>>,
+      latest_snapshot: latest
+        ? {
+            createdAt: latest.createdAt,
+            trigger: latest.trigger,
+            label: latest.label,
+            comfyui: {
+              ref: latest.comfyui.ref,
+              commit: latest.comfyui.commit,
+              releaseTag: latest.comfyui.releaseTag,
+              variant: latest.comfyui.variant
+            },
+            customNodes: latest.customNodes.map((n) => ({
+              id: n.id,
+              type: n.type,
+              dirName: n.dirName,
+              enabled: n.enabled,
+              version: n.version,
+              commit: n.commit
+            })),
+            pipPackages: latest.pipPackages,
+            pythonVersion: latest.pythonVersion,
+            updateChannel: latest.updateChannel
+          }
+        : null,
+      snapshot_diffs: [] as Array<Record<string, unknown>>
     }
 
     let runningSize = JSON.stringify(result).length
@@ -398,19 +440,33 @@ export function registerAppHandlers(): void {
         createdAt: newer.createdAt,
         trigger: newer.trigger,
         label: newer.label,
-        nodesAdded: diff.nodesAdded.map((n) => ({ id: n.id, type: n.type, dirName: n.dirName, enabled: n.enabled, version: n.version, commit: n.commit })),
-        nodesRemoved: diff.nodesRemoved.map((n) => ({ id: n.id, type: n.type, dirName: n.dirName, enabled: n.enabled, version: n.version, commit: n.commit })),
+        nodesAdded: diff.nodesAdded.map((n) => ({
+          id: n.id,
+          type: n.type,
+          dirName: n.dirName,
+          enabled: n.enabled,
+          version: n.version,
+          commit: n.commit
+        })),
+        nodesRemoved: diff.nodesRemoved.map((n) => ({
+          id: n.id,
+          type: n.type,
+          dirName: n.dirName,
+          enabled: n.enabled,
+          version: n.version,
+          commit: n.commit
+        })),
         nodesChanged: diff.nodesChanged.map((n) => ({ id: n.id, from: n.from, to: n.to })),
         pipsAdded: diff.pipsAdded,
         pipsRemoved: diff.pipsRemoved,
         pipsChanged: diff.pipsChanged,
         comfyuiChanged: diff.comfyuiChanged,
-        updateChannelChanged: diff.updateChannelChanged,
+        updateChannelChanged: diff.updateChannelChanged
       }
       if (diff.comfyui) {
         entry.comfyui = {
           from: { ref: diff.comfyui.from.ref, commit: diff.comfyui.from.commit },
-          to: { ref: diff.comfyui.to.ref, commit: diff.comfyui.to.commit },
+          to: { ref: diff.comfyui.to.ref, commit: diff.comfyui.to.commit }
         }
       }
       if (diff.updateChannel) {

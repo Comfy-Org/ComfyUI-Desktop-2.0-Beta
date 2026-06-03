@@ -17,7 +17,7 @@ import {
   formatRelative as _formatRelative,
   copyReasonLabel as _copyReasonLabel,
   changeSummary as _changeSummary,
-  diffHasChanges,
+  diffHasChanges
 } from '../lib/snapshots'
 import type {
   ActionDef,
@@ -26,7 +26,7 @@ import type {
   SnapshotListData,
   SnapshotDetailData,
   SnapshotDiffData,
-  SnapshotFilePreview,
+  SnapshotFilePreview
 } from '../types/ipc'
 
 interface Props {
@@ -75,7 +75,9 @@ const timelineItems = computed<TimelineItem[]>(() => {
   let si = 0
   let ci = 0
   const snaps = snapshots.value
-  const copies = [...copyEvents.value].sort((a, b) => new Date(b.copiedAt).getTime() - new Date(a.copiedAt).getTime())
+  const copies = [...copyEvents.value].sort(
+    (a, b) => new Date(b.copiedAt).getTime() - new Date(a.copiedAt).getTime()
+  )
   while (si < snaps.length || ci < copies.length) {
     const snapTime = si < snaps.length ? new Date(snaps[si]!.createdAt).getTime() : -Infinity
     const copyTime = ci < copies.length ? new Date(copies[ci]!.copiedAt).getTime() : -Infinity
@@ -101,18 +103,22 @@ async function load(): Promise<void> {
   }
 }
 
-watch(() => props.installationId, () => {
-  selectedFilename.value = null
-  detail.value = null
-  diffData.value = null
-  diffMode.value = null
-  restorePreviewFilename.value = null
-  restorePreviewDiff.value = null
-  importPreview.value = null
-  importPreviewLoading.value = false
-  pendingImport.value = false
-  load()
-}, { immediate: true })
+watch(
+  () => props.installationId,
+  () => {
+    selectedFilename.value = null
+    detail.value = null
+    diffData.value = null
+    diffMode.value = null
+    restorePreviewFilename.value = null
+    restorePreviewDiff.value = null
+    importPreview.value = null
+    importPreviewLoading.value = false
+    pendingImport.value = false
+    load()
+  },
+  { immediate: true }
+)
 
 const triggerLabel = (trigger: string): string => _triggerLabel(trigger, t)
 const formatRelative = (iso: string): string => _formatRelative(iso, t)
@@ -150,7 +156,11 @@ async function loadDiff(mode: 'previous' | 'current'): Promise<void> {
   diffMode.value = mode
   diffLoading.value = true
   try {
-    diffData.value = await window.api.getSnapshotDiff(props.installationId, selectedFilename.value, mode)
+    diffData.value = await window.api.getSnapshotDiff(
+      props.installationId,
+      selectedFilename.value,
+      mode
+    )
   } finally {
     diffLoading.value = false
   }
@@ -162,18 +172,21 @@ async function saveSnapshot(): Promise<void> {
     message: t('standalone.snapshotCreateMessage'),
     placeholder: t('standalone.snapshotLabelPlaceholder'),
     confirmLabel: t('snapshots.createSnapshot'),
-    required: false,
+    required: false
   })
   if (label === null) return
   try {
     await window.api.runAction(props.installationId, 'snapshot-save', { label: label || undefined })
   } catch (err: unknown) {
-    await modal.alert({ title: t('snapshots.createSnapshot'), message: (err as Error).message || String(err) })
+    await modal.alert({
+      title: t('snapshots.createSnapshot'),
+      message: (err as Error).message || String(err)
+    })
     return
   }
-  emitTelemetryAction('desktop2.snapshot.flow', {
+  emitTelemetryAction('comfy.desktop.snapshot.flow', {
     action: 'save',
-    snapshot_count_bucket: toCountBucket(snapshots.value.length),
+    snapshot_count_bucket: toCountBucket(snapshots.value.length)
   })
   selectedFilename.value = null
   detail.value = null
@@ -191,14 +204,18 @@ async function handleRestore(filename: string): Promise<void> {
   restorePreviewFilename.value = filename
   restorePreviewLoading.value = true
   try {
-    restorePreviewDiff.value = await window.api.getSnapshotDiff(props.installationId, filename, 'current')
+    restorePreviewDiff.value = await window.api.getSnapshotDiff(
+      props.installationId,
+      filename,
+      'current'
+    )
   } finally {
     restorePreviewLoading.value = false
   }
-  emitTelemetryAction('desktop2.snapshot.flow', {
+  emitTelemetryAction('comfy.desktop.snapshot.flow', {
     action: 'restore_start',
     snapshot_count_bucket: toCountBucket(snapshots.value.length),
-    has_diff: restorePreviewDiff.value ? diffHasChanges(restorePreviewDiff.value.diff) : undefined,
+    has_diff: restorePreviewDiff.value ? diffHasChanges(restorePreviewDiff.value.diff) : undefined
   })
 }
 
@@ -209,7 +226,9 @@ function cancelRestore(): void {
 }
 
 async function confirmRestore(): Promise<void> {
-  const hasDiff = restorePreviewDiff.value ? diffHasChanges(restorePreviewDiff.value.diff) : undefined
+  const hasDiff = restorePreviewDiff.value
+    ? diffHasChanges(restorePreviewDiff.value.diff)
+    : undefined
   let filename = restorePreviewFilename.value
 
   if (pendingImport.value) {
@@ -223,10 +242,10 @@ async function confirmRestore(): Promise<void> {
     // auto-restores from the newest one, so racing an in-flight op
     // (copy / release-update / migrate / running launch) would clobber
     // both surfaces.
-    if (!await actionGuard.checkBeforeAction(
-      props.installationId,
-      t('snapshots.importSnapshots'),
-    )) return
+    if (
+      !(await actionGuard.checkBeforeAction(props.installationId, t('snapshots.importSnapshots')))
+    )
+      return
     const result = await window.api.importSnapshotsConfirm(props.installationId)
     if (!result.ok) {
       if (result.message) {
@@ -234,10 +253,10 @@ async function confirmRestore(): Promise<void> {
       }
       return
     }
-    emitTelemetryAction('desktop2.snapshot.flow', {
+    emitTelemetryAction('comfy.desktop.snapshot.flow', {
       action: 'import',
       snapshot_count_bucket: toCountBucket(snapshots.value.length),
-      imported_bucket: toCountBucket(result.imported ?? 0),
+      imported_bucket: toCountBucket(result.imported ?? 0)
     })
     filename = result.restoreFile ?? null
     await load()
@@ -255,12 +274,12 @@ async function confirmRestore(): Promise<void> {
     data: { file: filename },
     showProgress: true,
     progressTitle: t('standalone.snapshotRestoringTitle'),
-    cancellable: true,
+    cancellable: true
   }
-  emitTelemetryAction('desktop2.snapshot.flow', {
+  emitTelemetryAction('comfy.desktop.snapshot.flow', {
     action: 'restore_complete',
     snapshot_count_bucket: toCountBucket(snapshots.value.length),
-    has_diff: hasDiff,
+    has_diff: hasDiff
   })
   emit('run-action', action, null)
 }
@@ -268,13 +287,13 @@ async function confirmRestore(): Promise<void> {
 async function handleDelete(filename: string): Promise<void> {
   const confirmed = await modal.confirm({
     title: t('standalone.snapshotDelete'),
-    message: t('snapshots.deleteConfirm'),
+    message: t('snapshots.deleteConfirm')
   })
   if (!confirmed) return
   await window.api.runAction(props.installationId, 'snapshot-delete', { file: filename })
-  emitTelemetryAction('desktop2.snapshot.flow', {
+  emitTelemetryAction('comfy.desktop.snapshot.flow', {
     action: 'delete',
-    snapshot_count_bucket: toCountBucket(snapshots.value.length),
+    snapshot_count_bucket: toCountBucket(snapshots.value.length)
   })
   if (selectedFilename.value === filename) {
     selectedFilename.value = null
@@ -288,17 +307,17 @@ async function handleDelete(filename: string): Promise<void> {
 
 async function handleExport(filename: string): Promise<void> {
   await window.api.exportSnapshot(props.installationId, filename)
-  emitTelemetryAction('desktop2.snapshot.flow', {
+  emitTelemetryAction('comfy.desktop.snapshot.flow', {
     action: 'export_one',
-    snapshot_count_bucket: toCountBucket(snapshots.value.length),
+    snapshot_count_bucket: toCountBucket(snapshots.value.length)
   })
 }
 
 async function handleExportAll(): Promise<void> {
   await window.api.exportAllSnapshots(props.installationId)
-  emitTelemetryAction('desktop2.snapshot.flow', {
+  emitTelemetryAction('comfy.desktop.snapshot.flow', {
     action: 'export_all',
-    snapshot_count_bucket: toCountBucket(snapshots.value.length),
+    snapshot_count_bucket: toCountBucket(snapshots.value.length)
   })
 }
 
@@ -362,23 +381,37 @@ async function confirmImportPreview(): Promise<void> {
     <div v-if="loading" class="snapshot-loading with-spinner">{{ t('common.loading') }}</div>
 
     <div v-if="!loading && snapshots.length > 0" class="snapshot-timeline">
-      <template v-for="(item, index) in timelineItems" :key="item.kind === 'snapshot' ? item.snapshot.filename : `copy-${item.event.installationId}`">
+      <template
+        v-for="(item, index) in timelineItems"
+        :key="
+          item.kind === 'snapshot' ? item.snapshot.filename : `copy-${item.event.installationId}`
+        "
+      >
         <div v-if="item.kind === 'copy'" class="timeline-entry">
           <div class="timeline-gutter">
             <div class="timeline-line timeline-line-top" :class="{ invisible: index === 0 }" />
             <div class="timeline-dot trigger-copy" />
-            <div class="timeline-line-rest" :class="{ invisible: index === timelineItems.length - 1 }" />
+            <div
+              class="timeline-line-rest"
+              :class="{ invisible: index === timelineItems.length - 1 }"
+            />
           </div>
           <div class="timeline-content">
             <div class="timeline-copy-card">
-              <span class="timeline-trigger trigger-copy">{{ copyReasonLabel(item.event.copyReason) }}</span>
+              <span class="timeline-trigger trigger-copy">{{
+                copyReasonLabel(item.event.copyReason)
+              }}</span>
               <button
                 v-if="item.event.exists"
                 class="timeline-copy-name clickable"
                 @click="emit('navigate-installation', item.event.installationId)"
-              >{{ item.event.installationName }}</button>
+              >
+                {{ item.event.installationName }}
+              </button>
               <span v-else class="timeline-copy-name">{{ item.event.installationName }}</span>
-              <span class="timeline-time" :title="formatDate(item.event.copiedAt)">{{ formatRelative(item.event.copiedAt) }}</span>
+              <span class="timeline-time" :title="formatDate(item.event.copiedAt)">{{
+                formatRelative(item.event.copiedAt)
+              }}</span>
             </div>
           </div>
         </div>
@@ -391,24 +424,43 @@ async function confirmImportPreview(): Promise<void> {
           <div class="timeline-gutter">
             <div class="timeline-line timeline-line-top" :class="{ invisible: index === 0 }" />
             <div class="timeline-dot" :class="triggerClass(item.snapshot.trigger)" />
-            <div class="timeline-line-rest" :class="{ invisible: index === timelineItems.length - 1 }" />
+            <div
+              class="timeline-line-rest"
+              :class="{ invisible: index === timelineItems.length - 1 }"
+            />
           </div>
 
           <div class="timeline-content">
             <div class="timeline-card" @click="selectSnapshot(item.snapshot.filename)">
               <div class="timeline-card-header">
-                <span class="timeline-trigger" :class="triggerClass(item.snapshot.trigger)">{{ triggerLabel(item.snapshot.trigger) }}</span>
-                <span v-if="item.snapshotIndex === 0" class="timeline-current-tag">{{ t('snapshots.current') }}</span>
-                <span class="timeline-time" :title="formatDate(item.snapshot.createdAt)">{{ formatRelative(item.snapshot.createdAt) }}</span>
+                <span class="timeline-trigger" :class="triggerClass(item.snapshot.trigger)">{{
+                  triggerLabel(item.snapshot.trigger)
+                }}</span>
+                <span v-if="item.snapshotIndex === 0" class="timeline-current-tag">{{
+                  t('snapshots.current')
+                }}</span>
+                <span class="timeline-time" :title="formatDate(item.snapshot.createdAt)">{{
+                  formatRelative(item.snapshot.createdAt)
+                }}</span>
               </div>
-              <div v-if="item.snapshot.label && !['after-update', 'before-update', 'after-restore'].includes(item.snapshot.label)" class="timeline-label">{{ item.snapshot.label }}</div>
+              <div
+                v-if="
+                  item.snapshot.label &&
+                  !['after-update', 'before-update', 'after-restore'].includes(item.snapshot.label)
+                "
+                class="timeline-label"
+              >
+                {{ item.snapshot.label }}
+              </div>
               <div class="timeline-card-body">
                 <div class="timeline-meta">
                   <span>{{ item.snapshot.comfyuiVersion }}</span>
                   <span class="timeline-meta-sep">·</span>
                   <span>{{ t('snapshots.nodesCount', { count: item.snapshot.nodeCount }) }}</span>
                   <span class="timeline-meta-sep">·</span>
-                  <span>{{ t('snapshots.packagesCount', { count: item.snapshot.pipPackageCount }) }}</span>
+                  <span>{{
+                    t('snapshots.packagesCount', { count: item.snapshot.pipPackageCount })
+                  }}</span>
                 </div>
                 <button
                   v-if="item.snapshotIndex > 0"
@@ -427,11 +479,22 @@ async function confirmImportPreview(): Promise<void> {
                   v-if="item.snapshot.trigger === 'manual'"
                   class="timeline-action-btn timeline-delete-btn"
                   @click.stop="handleDelete(item.snapshot.filename)"
-                >✕</button>
-                <ChevronDown :size="14" class="timeline-expand-icon" :class="{ expanded: selectedFilename === item.snapshot.filename }" />
+                >
+                  ✕
+                </button>
+                <ChevronDown
+                  :size="14"
+                  class="timeline-expand-icon"
+                  :class="{ expanded: selectedFilename === item.snapshot.filename }"
+                />
               </div>
               <div v-if="changeSummary(item.snapshot).length > 0" class="timeline-changes">
-                <span v-for="part in changeSummary(item.snapshot)" :key="part" class="timeline-change-badge">{{ part }}</span>
+                <span
+                  v-for="part in changeSummary(item.snapshot)"
+                  :key="part"
+                  class="timeline-change-badge"
+                  >{{ part }}</span
+                >
               </div>
             </div>
 
@@ -581,13 +644,27 @@ async function confirmImportPreview(): Promise<void> {
   border: 2px solid var(--surface);
   box-sizing: content-box;
 }
-.timeline-dot.trigger-boot { background: var(--text-muted); }
-.timeline-dot.trigger-manual { background: var(--success); }
-.timeline-dot.trigger-preupdate { background: var(--success); }
-.timeline-dot.trigger-postupdate { background: var(--warning); }
-.timeline-dot.trigger-postrestore { background: var(--warning); }
-.timeline-dot.trigger-restart { background: var(--info); }
-.timeline-dot.trigger-copy { background: var(--text-muted); }
+.timeline-dot.trigger-boot {
+  background: var(--text-muted);
+}
+.timeline-dot.trigger-manual {
+  background: var(--success);
+}
+.timeline-dot.trigger-preupdate {
+  background: var(--success);
+}
+.timeline-dot.trigger-postupdate {
+  background: var(--warning);
+}
+.timeline-dot.trigger-postrestore {
+  background: var(--warning);
+}
+.timeline-dot.trigger-restart {
+  background: var(--info);
+}
+.timeline-dot.trigger-copy {
+  background: var(--text-muted);
+}
 
 .timeline-card {
   background: var(--surface);
@@ -625,13 +702,27 @@ async function confirmImportPreview(): Promise<void> {
   border-radius: 3px;
   background: var(--bg);
 }
-.timeline-trigger.trigger-boot { color: var(--text-muted); }
-.timeline-trigger.trigger-manual { color: var(--success); }
-.timeline-trigger.trigger-preupdate { color: var(--success); }
-.timeline-trigger.trigger-postupdate { color: var(--warning); }
-.timeline-trigger.trigger-postrestore { color: var(--warning); }
-.timeline-trigger.trigger-restart { color: var(--info); }
-.timeline-trigger.trigger-copy { color: var(--text-muted); }
+.timeline-trigger.trigger-boot {
+  color: var(--text-muted);
+}
+.timeline-trigger.trigger-manual {
+  color: var(--success);
+}
+.timeline-trigger.trigger-preupdate {
+  color: var(--success);
+}
+.timeline-trigger.trigger-postupdate {
+  color: var(--warning);
+}
+.timeline-trigger.trigger-postrestore {
+  color: var(--warning);
+}
+.timeline-trigger.trigger-restart {
+  color: var(--info);
+}
+.timeline-trigger.trigger-copy {
+  color: var(--text-muted);
+}
 
 .timeline-copy-card {
   display: flex;

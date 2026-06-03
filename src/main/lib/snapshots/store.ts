@@ -274,7 +274,7 @@ async function deduplicateRestartSnapshot(
 }
 
 /**
- * Emit `desktop2.snapshot.created` for every successful snapshot write.
+ * Emit `comfy.desktop.snapshot.created` for every successful snapshot write.
  *
  * Centralized here (instead of inside `writeSnapshot`) because the wrapper
  * functions own the `InstallationRecord` (for `installation_id`) and the
@@ -304,7 +304,7 @@ function emitSnapshotCreated(opts: {
   // stay on. `manual` in particular is what we use to measure actual
   // user-initiated snapshotting.
   if (opts.trigger === 'boot') return
-  telemetry.emit('desktop2.snapshot.created', {
+  telemetry.emit('comfy.desktop.snapshot.created', {
     installation_id: opts.installation.id,
     trigger: opts.trigger,
     custom_nodes_count: opts.customNodesCount,

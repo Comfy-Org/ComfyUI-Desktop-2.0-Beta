@@ -14,7 +14,7 @@ interface UseSendFeedbackApi {
 /**
  * Title-bar Send Feedback button + file-menu "Send Feedback" entry
  * both forward through main to `onOpenFeedback`. Fires the
- * `desktop2.feedback.opened` telemetry action with the originating
+ * `comfy.desktop.feedback.opened` telemetry action with the originating
  * affordance and opens the in-app feedback modal (iframe-embedded
  * typeform — see `components/FeedbackModal.vue`) so the user never
  * leaves the desktop window.
@@ -31,7 +31,7 @@ export function useSendFeedback(): UseSendFeedbackApi {
   let unsubOpenFeedback: (() => void) | null = null
 
   function handleOpenFeedback(source: 'titlebar' | 'menu'): void {
-    emitTelemetryAction('desktop2.feedback.opened', { source })
+    emitTelemetryAction('comfy.desktop.feedback.opened', { source })
     feedbackUrl.value = buildSupportUrl(appVersion.value || undefined)
     feedbackOpen.value = true
   }

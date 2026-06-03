@@ -719,7 +719,7 @@ async function returnToDashboard(reason: ReturnToDashboardReason): Promise<void>
   if (reason === 'in_flight' && op && !op.finished && id) {
     progressStore.cancelOperation(id)
   }
-  emitTelemetryAction('desktop2.instance.return_to_dashboard', { from: 'progress', reason })
+  emitTelemetryAction('comfy.desktop.instance.return_to_dashboard', { from: 'progress', reason })
   emit('close')
   // No-op when the calling host isn't install-backed (chooser host
   // launches that errored before the swap).
@@ -759,7 +759,7 @@ async function cancelDestructiveOp(): Promise<void> {
   const installation = installationStore.getById(id) ?? null
   const ok = await confirmReturnToDashboard(installation, 'in_flight')
   if (!ok) return
-  emitTelemetryAction('desktop2.instance.return_to_dashboard', {
+  emitTelemetryAction('comfy.desktop.instance.return_to_dashboard', {
     from: 'progress',
     reason: 'in_flight'
   })
@@ -1006,7 +1006,12 @@ defineExpose({ startOperation, showOperation })
              the primary Reboot CTA with the failure context instead of
              stranding it bottom-left in the footer. -->
         <div
-          v-if="currentOp.finished && !!currentOp.error && !currentOp.cancelRequested && !isPortConflictOpen"
+          v-if="
+            currentOp.finished &&
+            !!currentOp.error &&
+            !currentOp.cancelRequested &&
+            !isPortConflictOpen
+          "
           class="brand-progress__error-actions"
         >
           <button

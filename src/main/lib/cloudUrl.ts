@@ -1,8 +1,8 @@
 const CLOUD_DISTRIBUTION_HOST = 'cloud.comfy.org'
 
 const DEFAULT_UTM_PARAMS: Record<string, string> = {
-  utm_source: 'comfyui_desktop_2',
-  utm_medium: 'app_feature',
+  utm_source: 'comfy.desktop',
+  utm_medium: 'app_feature'
 }
 
 function warnSkippedUtm(reason: string, details: Record<string, string>): void {
@@ -20,7 +20,7 @@ export function withCloudDistributionUtm(rawUrl: string): string {
   if (url.hostname.toLowerCase() !== CLOUD_DISTRIBUTION_HOST) {
     warnSkippedUtm('Skipped UTM tagging because host is not cloud.comfy.org', {
       host: url.hostname,
-      rawUrl: url.href,
+      rawUrl: url.href
     })
     return rawUrl
   }

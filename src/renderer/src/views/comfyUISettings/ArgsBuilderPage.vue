@@ -95,7 +95,7 @@ async function fetchSchema(): Promise<void> {
 // that the user edited a given arg, not the per-character intermediate
 // states.
 const emitArgsChanged = useDebounceFn((argKey: string, valueKind: ComfyArgDef['type']) => {
-  emitTelemetryAction('desktop2.args.changed', {
+  emitTelemetryAction('comfy.desktop.args.changed', {
     installation_id: props.installationId,
     arg_key: argKey,
     value_kind: valueKind
@@ -103,7 +103,7 @@ const emitArgsChanged = useDebounceFn((argKey: string, valueKind: ComfyArgDef['t
 }, 500)
 
 onMounted(() => {
-  emitTelemetryAction('desktop2.args.builder.opened', {
+  emitTelemetryAction('comfy.desktop.args.builder.opened', {
     installation_id: props.installationId
   })
   void fetchSchema()

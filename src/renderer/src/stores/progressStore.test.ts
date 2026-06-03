@@ -13,7 +13,7 @@ vi.mock('vue-i18n', () => ({
   })
 }))
 
-// progressStore now emits `desktop2.op.result` via `emitTelemetryAction`,
+// progressStore now emits `comfy.desktop.op.result` via `emitTelemetryAction`,
 // which dispatches a CustomEvent on `window`. The `vi.stubGlobal('window',
 // …)` below replaces window with a plain object that drops prototype
 // methods like `dispatchEvent`, so stub the telemetry helper out — these

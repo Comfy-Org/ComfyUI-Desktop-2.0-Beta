@@ -781,7 +781,7 @@ function _broadcastDownloadsToTitleBars(): void {
 
 /**
  * Forward a Send Feedback request to the host's panel renderer.
- * Panel-side (`PanelApp.vue`) fires the `desktop2.feedback.opened`
+ * Panel-side (`PanelApp.vue`) fires the `comfy.desktop.feedback.opened`
  * telemetry action and opens the typeform support URL via
  * `openExternal`. The renderer is the natural home because
  * `buildSupportUrl()` reads `navigator.userAgent` and the telemetry
@@ -789,7 +789,7 @@ function _broadcastDownloadsToTitleBars(): void {
  * Feedback" entry and the title-bar feedback button.
  *
  * `source` is forwarded into the renderer's telemetry context as
- * `desktop2.feedback.opened` `{ source }` so we can tell which
+ * `comfy.desktop.feedback.opened` `{ source }` so we can tell which
  * affordance the user reached for.
  *
  * In Comfy instance windows the panelView is constructed lazily on
@@ -1097,7 +1097,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     installAppMenu(process.platform, undefined, {
       onCheckForUpdates: () => {
         void updater.runCheck('app-menu').catch(() => {})
-      },
+      }
     })
 
     // Bring up main-process telemetry as early as possible so install/migrate
@@ -1278,7 +1278,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
         // Multi-instance validation signal. Fired once per picker swap
         // (with or without a confirm); other paths (fresh chooser pick,
         // new-window launch) are NOT swaps.
-        mainTelemetry.emit('desktop2.instance.switched', {
+        mainTelemetry.emit('comfy.desktop.instance.switched', {
           from_installation_id: parentEntry.installationId,
           to_installation_id: installationId,
           method: 'picker'
@@ -1372,7 +1372,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
           // `source: 'picker'`, symmetric with the panel path (which emits
           // action.invoked from the drawer + op.result from progressStore).
           const opStartMs = Date.now()
-          mainTelemetry.capture('desktop2.action.invoked', {
+          mainTelemetry.capture('comfy.desktop.action.invoked', {
             action_id: actionId,
             installation_id: installationId,
             source: 'picker'
@@ -1381,7 +1381,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
             opResult: 'success' | 'failed' | 'cancelled_user',
             errorMessage?: string | null
           ): void => {
-            mainTelemetry.emit('desktop2.op.result', {
+            mainTelemetry.emit('comfy.desktop.op.result', {
               installation_id: installationId,
               action_id: actionId,
               source: 'picker',

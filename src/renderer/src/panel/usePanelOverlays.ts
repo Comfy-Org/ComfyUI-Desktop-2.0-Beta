@@ -61,7 +61,7 @@ const FLOW_PANELS: ReadonlySet<PanelKey> = new Set([
   'quick-install'
 ])
 
-/** Stable `flow:` strings for `desktop2.install.flow.opened`. */
+/** Stable `flow:` strings for `comfy.desktop.install.flow.opened`. */
 const FLOW_TELEMETRY_NAMES: Record<FlowComponent, string> = {
   'new-install': 'new_install',
   'quick-install': 'quick_install',
@@ -318,7 +318,7 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
     // there is no main-side rollback to fire, just a wizard to dismiss.
     const ok = await openOverlay({ kind: 'takeover', component, cancelCopyKey: 'discard-setup' })
     if (!ok) return
-    emitTelemetryAction('desktop2.install.flow.opened', {
+    emitTelemetryAction('comfy.desktop.install.flow.opened', {
       flow: FLOW_TELEMETRY_NAMES[component],
       entrypoint
     })
@@ -432,7 +432,7 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
     // already there) doesn't generate a noise event.
     if (panel === fromView) return
     activePanel.value = panel
-    emitTelemetryAction('desktop2.view.opened', { view: panel, from_view: fromView })
+    emitTelemetryAction('comfy.desktop.view.opened', { view: panel, from_view: fromView })
   }
 
   return {

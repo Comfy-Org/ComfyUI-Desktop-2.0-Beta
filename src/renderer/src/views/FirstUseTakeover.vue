@@ -146,7 +146,7 @@ const detectedGpuLabel = ref<string | null>(null)
 const showGpuHint = computed(
   () => pickedChoice.value === 'local' && expressInstall.value && detectedGpuLabel.value !== null
 )
-/** Funnel-completion bookkeeping for `desktop2.first_use.completed`.
+/** Funnel-completion bookkeeping for `comfy.desktop.first_use.completed`.
  *  `mountedAt` is reset in `open()` so a takeover replay measures
  *  duration from the replay, not from the original mount.
  *  `stepsSeen` is a Set so re-visiting a step (back-navigation, replay)
@@ -163,7 +163,7 @@ function emitCompleted(exitPath: 'cloud' | 'local-new' | 'local-migrate' | 'skip
   // returning-user, and Desktop-1-migrator splits via had_legacy /
   // had_existing_install. Without these, the funnel's drop-off
   // analysis collapses all three audiences into one bucket.
-  emitTelemetryAction('desktop2.first_use.completed', {
+  emitTelemetryAction('comfy.desktop.first_use.completed', {
     exit_path: exitPath,
     steps_seen: stepsSeen.size,
     duration_ms: durationMs,
@@ -250,12 +250,12 @@ async function onContinue(): Promise<void> {
 
   await window.api.setSetting('telemetryEnabled', telemetryEnabled.value)
 
-  emitTelemetryAction('desktop2.first_use.consent_decision', {
+  emitTelemetryAction('comfy.desktop.first_use.consent_decision', {
     decision: telemetryEnabled.value ? 'accept' : 'decline',
     telemetry_enabled: telemetryEnabled.value,
     locale: locale.value
   })
-  emitTelemetryAction('desktop2.first_use.fork_chosen', {
+  emitTelemetryAction('comfy.desktop.first_use.fork_chosen', {
     choice: pickedChoice.value,
     has_legacy_desktop: hasLegacyDesktop.value,
     express_install: expressInstall.value,
@@ -309,7 +309,7 @@ async function routePostStart(): Promise<void> {
       // kill-switch was hard-off (composable returned false directly);
       // `degraded_declined` means the user saw the heavy-load modal
       // and backed out.
-      emitTelemetryAction('desktop2.first_use.cloud_blocked', {
+      emitTelemetryAction('comfy.desktop.first_use.cloud_blocked', {
         reason: cloudCapacity.isDisabled() ? 'disabled' : 'degraded_declined',
         capacity_status: cloudCapacity.status.value,
         user_tier: cloudCapacity.tier.value
@@ -341,23 +341,23 @@ async function chooseMirrors(useMirrors: boolean): Promise<void> {
     window.api.setSetting('useChineseMirrors', useMirrors),
     window.api.setSetting('chineseMirrorsPrompted', true)
   ])
-  emitTelemetryAction('desktop2.first_use.mirrors_chosen', { use_mirrors: useMirrors })
+  emitTelemetryAction('comfy.desktop.first_use.mirrors_chosen', { use_mirrors: useMirrors })
   void routePostStart()
 }
 
 function openWhyCloud(): void {
   whyCloudOpen.value = true
-  emitTelemetryAction('desktop2.first_use.why_cloud_opened', {})
+  emitTelemetryAction('comfy.desktop.first_use.why_cloud_opened', {})
 }
 
 function dismissWhyCloud(action: 'maybe_later' | 'dismiss'): void {
   whyCloudOpen.value = false
-  emitTelemetryAction('desktop2.first_use.why_cloud_action', { action })
+  emitTelemetryAction('comfy.desktop.first_use.why_cloud_action', { action })
 }
 
 function onWhyCloudTryCloud(): void {
   whyCloudOpen.value = false
-  emitTelemetryAction('desktop2.first_use.why_cloud_action', { action: 'try_cloud' })
+  emitTelemetryAction('comfy.desktop.first_use.why_cloud_action', { action: 'try_cloud' })
   // "Try Cloud" inside the explainer modal flips the start-screen
   // selection to Cloud but leaves the user on the screen so they can
   // accept T&C and press Continue. The legal gate is non-negotiable —
@@ -366,7 +366,7 @@ function onWhyCloudTryCloud(): void {
 }
 
 function chooseMigrate(): void {
-  emitTelemetryAction('desktop2.first_use.local_branch_chosen', { choice: 'migrate' })
+  emitTelemetryAction('comfy.desktop.first_use.local_branch_chosen', { choice: 'migrate' })
   emitCompleted('local-migrate')
   emit('chain-migrate')
 }
@@ -401,7 +401,7 @@ function onStartCardsKeydown(e: KeyboardEvent): void {
 }
 
 function chooseInstallNew(): void {
-  emitTelemetryAction('desktop2.first_use.local_branch_chosen', { choice: 'install_new' })
+  emitTelemetryAction('comfy.desktop.first_use.local_branch_chosen', { choice: 'install_new' })
   // Skip the dedicated name screen — naming now happens inline on the
   // Configure screen (InstallWizardModal brand-config). Flag the origin so
   // Configure surfaces a Back link returning to localBranch.
@@ -496,7 +496,7 @@ watch(
     const mode = current === 'start' ? 'consent-lockdown' : 'post-consent'
     window.api.setFirstUseMode(mode)
     stepsSeen.add(current)
-    emitTelemetryAction('desktop2.first_use.step_viewed', {
+    emitTelemetryAction('comfy.desktop.first_use.step_viewed', {
       step: current,
       skip_pick: skipPick.value,
       has_legacy_desktop: hasLegacyDesktop.value
@@ -545,7 +545,13 @@ defineExpose({ open })
             :aria-disabled="cloudCapacity.isDisabled() ? true : undefined"
             glow
             :label="$t('cloud.label')"
-            :tagline="cloudCapacity.isDisabled() ? $t('cloud.capacityDisabled') : (cloudCapacity.isDegraded() ? $t('cloud.capacityDegraded') : $t('firstUse.cloudTagline'))"
+            :tagline="
+              cloudCapacity.isDisabled()
+                ? $t('cloud.capacityDisabled')
+                : cloudCapacity.isDegraded()
+                  ? $t('cloud.capacityDegraded')
+                  : $t('firstUse.cloudTagline')
+            "
             :description="$t(cloudDescriptionKey)"
             data-testid="first-use-pick-cloud"
             @click="cloudCapacity.isDisabled() ? null : (pickedChoice = 'cloud')"

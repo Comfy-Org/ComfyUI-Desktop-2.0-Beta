@@ -180,7 +180,7 @@ export function clearPendingAlias(): void {
  * Returns the legacy id ONLY if a one-shot migration just happened from a
  * pre-v1 random-UUID `device-id.txt`. The caller is expected to fire
  * `posthog.aliasImmediate({ distinctId: installation_id, alias: legacyId })`
- * and a `desktop2.identity.migrated` event, then call
+ * and a `comfy.desktop.identity.migrated` event, then call
  * `markIdentityMigrationCompleted()` so the alias does not re-fire on
  * subsequent launches.
  *

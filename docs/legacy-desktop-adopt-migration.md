@@ -29,8 +29,8 @@ handler changed.
    in a single progress overlay.
 
 3. **First-use takeover → Local → Migrate** — `useFirstUseChain.
-   handleFirstUseChainMigrate()` fires the same `runAction(inst.id,
-   'migrate-to-standalone')` against the auto-tracked legacy desktop
+handleFirstUseChainMigrate()` fires the same `runAction(inst.id,
+'migrate-to-standalone')` against the auto-tracked legacy desktop
    install. Gated by `detectFirstUseState().hasLegacyDesktop` so the
    sub-step only appears when there's something to migrate.
 
@@ -87,15 +87,15 @@ Applies a "v2 user choice wins" rule via `settings.has()` (which reads
 the raw `settings.json` and ignores built-in defaults) so a key the
 user has already configured in v2 is never overwritten.
 
-| v2 key | Legacy source | Notes |
-|---|---|---|
-| `modelsDirs` | `<basePath>/models` + every `base_path` in `extra_models_config.yaml` | Always appended (never blocked by `has()`) — model dirs are additive. |
-| `telemetryEnabled` | `Comfy-Desktop.SendStatistics` | |
-| `autoInstallUpdates` | force `true` | Desktop-app silent-update toggle. **Not** carried from `Comfy-Desktop.AutoUpdate` — the cutover ships as an in-place app update from Legacy Desktop, and inheriting a legacy `false` would lock users out of future Desktop 2.0 updates including fixes to the adoption flow itself. Forced on once at adoption; respects any later v2-side toggle. |
-| `pypiMirror` | `Comfy-Desktop.UV.PypiInstallMirror` | Feeds every `uv pip install` v2 runs (adoption requirements, custom-node installs, manager extras, snapshot restore). |
-| `useChineseMirrors` + `chineseMirrorsPrompted` | inferred from `pypiMirror` matching `aliyun`/`tencent`/`tsinghua`/`mirrors.cernet.edu.cn` | Suppresses the locale-triggered first-launch CN-mirror prompt. |
-| `firstUseCompleted` | force `true` | Skips the first-use takeover for adopted users. |
-| `inputDir` / `outputDir` (global) | `<basePath>/input` / `<basePath>/output` | Only when v2 hasn't already persisted a choice. Seeds fresh managed installs created later by the same user. |
+| v2 key                                         | Legacy source                                                                             | Notes                                                                                                                                                                                                                                                                                                                                               |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `modelsDirs`                                   | `<basePath>/models` + every `base_path` in `extra_models_config.yaml`                     | Always appended (never blocked by `has()`) — model dirs are additive.                                                                                                                                                                                                                                                                               |
+| `telemetryEnabled`                             | `Comfy-Desktop.SendStatistics`                                                            |                                                                                                                                                                                                                                                                                                                                                     |
+| `autoInstallUpdates`                           | force `true`                                                                              | Desktop-app silent-update toggle. **Not** carried from `Comfy-Desktop.AutoUpdate` — the cutover ships as an in-place app update from Legacy Desktop, and inheriting a legacy `false` would lock users out of future Desktop 2.0 updates including fixes to the adoption flow itself. Forced on once at adoption; respects any later v2-side toggle. |
+| `pypiMirror`                                   | `Comfy-Desktop.UV.PypiInstallMirror`                                                      | Feeds every `uv pip install` v2 runs (adoption requirements, custom-node installs, manager extras, snapshot restore).                                                                                                                                                                                                                               |
+| `useChineseMirrors` + `chineseMirrorsPrompted` | inferred from `pypiMirror` matching `aliyun`/`tencent`/`tsinghua`/`mirrors.cernet.edu.cn` | Suppresses the locale-triggered first-launch CN-mirror prompt.                                                                                                                                                                                                                                                                                      |
+| `firstUseCompleted`                            | force `true`                                                                              | Skips the first-use takeover for adopted users.                                                                                                                                                                                                                                                                                                     |
+| `inputDir` / `outputDir` (global)              | `<basePath>/input` / `<basePath>/output`                                                  | Only when v2 hasn't already persisted a choice. Seeds fresh managed installs created later by the same user.                                                                                                                                                                                                                                        |
 
 Intentionally NOT carried:
 
@@ -166,12 +166,12 @@ via a `promptUser(kind, ctx)` callback. The dispatcher
 `src/main/lib/ipc/sessionActions/migrate.ts`) wires this to native
 `dialog.showMessageBox` modals anchored to the focused window.
 
-| `kind` | When | Cancel behavior |
-|---|---|---|
-| `tcc` | macOS denies access to the legacy folder | throws `tcc-denied` |
-| `venv-broken` | `.venv` missing or `import torch` fails | throws `venv-broken-cancelled`; "Adopt anyway" proceeds |
-| `source-missing` | Both staged copy and git clone failed | throws synthetic `source-missing-switch-to-managed` → dispatcher routes the renderer to the new-install flow |
-| `confirm-adopt` | Reserved for runtime escalations | (unused today) |
+| `kind`           | When                                     | Cancel behavior                                                                                              |
+| ---------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `tcc`            | macOS denies access to the legacy folder | throws `tcc-denied`                                                                                          |
+| `venv-broken`    | `.venv` missing or `import torch` fails  | throws `venv-broken-cancelled`; "Adopt anyway" proceeds                                                      |
+| `source-missing` | Both staged copy and git clone failed    | throws synthetic `source-missing-switch-to-managed` → dispatcher routes the renderer to the new-install flow |
+| `confirm-adopt`  | Reserved for runtime escalations         | (unused today)                                                                                               |
 
 ## Adopted-launch path
 
@@ -193,12 +193,12 @@ no duplicate args.
 
 ## Telemetry
 
-| Event | Properties |
-|---|---|
-| `desktop2.adopt.started` | (none) |
-| `desktop2.adopt.succeeded` | `installation_id`, `legacy_version`, `adopted_source_mode`, `has_venv`, `has_extra_models_yaml`, `models_dir_count`, `carried_keys[]`, `carry_skipped_keys[]`, `adopted_path_override_input`, `adopted_path_override_output`, `adopted_comfy_tag_at_migration`, `requirements_uv_available`, `requirements_core_exit`, `requirements_manager_exit`, `requirements_pygit2_exit`, `gpu`, `selected_device` |
-| `desktop2.adopt.failed` | `error_bucket`, `error_message` (first 500 chars) |
-| `desktop2.adopt.*` step events | `desktop2.adopt.backup`, `tcc`, `validate_venv`, `snapshot`, `source`, `comfy_update`, `requirements`, `requirements_reconcile`, `carry_settings`, `register` — all wrapped in `telemetry.trackedStep` |
+| Event                               | Properties                                                                                                                                                                                                                                                                                                                                                                                               |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `comfy.desktop.adopt.started`       | (none)                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `comfy.desktop.adopt.succeeded`     | `installation_id`, `legacy_version`, `adopted_source_mode`, `has_venv`, `has_extra_models_yaml`, `models_dir_count`, `carried_keys[]`, `carry_skipped_keys[]`, `adopted_path_override_input`, `adopted_path_override_output`, `adopted_comfy_tag_at_migration`, `requirements_uv_available`, `requirements_core_exit`, `requirements_manager_exit`, `requirements_pygit2_exit`, `gpu`, `selected_device` |
+| `comfy.desktop.adopt.failed`        | `error_bucket`, `error_message` (first 500 chars)                                                                                                                                                                                                                                                                                                                                                        |
+| `comfy.desktop.adopt.*` step events | `comfy.desktop.adopt.backup`, `tcc`, `validate_venv`, `snapshot`, `source`, `comfy_update`, `requirements`, `requirements_reconcile`, `carry_settings`, `register` — all wrapped in `telemetry.trackedStep`                                                                                                                                                                                              |
 
 ## Adopted-install parity with managed standalone
 
@@ -230,7 +230,7 @@ adopted installs. After the wrapper tree is copied to `destPath`,
 `standalone.fixupCopy(inst, destPath, …)` pulls the per-install
 state out of `<adoptedBaseDir>` into the new install:
 
-- `.venv` → `<destPath>/ComfyUI/.venv`  (preserves the user's
+- `.venv` → `<destPath>/ComfyUI/.venv` (preserves the user's
   exact pytorch + python versions)
 - `user`, `custom_nodes`, `input`, `output` → `<destPath>/ComfyUI/…`
 - `models` is NOT copied — `useSharedModels: true` keeps them
@@ -287,5 +287,5 @@ Items pending to close the loop:
 - Auto-trigger adoption from the first-launch takeover (or skip the
   takeover entirely when `hasLegacyDesktop`) so the user lands directly
   in their adopted ComfyUI window.
-- Wire `desktop2.adopt.*` telemetry properties so the migration funnel
+- Wire `comfy.desktop.adopt.*` telemetry properties so the migration funnel
   is visible end-to-end in PostHog.

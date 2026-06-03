@@ -5,7 +5,7 @@ import path from 'path'
 
 vi.mock('electron', () => ({
   app: { getPath: () => '' },
-  net: { fetch: vi.fn() },
+  net: { fetch: vi.fn() }
 }))
 
 vi.mock('./pip', async (importOriginal) => {
@@ -13,17 +13,27 @@ vi.mock('./pip', async (importOriginal) => {
   return {
     ...(actual as object),
     pipFreeze: vi.fn((actual as Record<string, unknown>).pipFreeze as () => unknown),
-    runUvPip: vi.fn((actual as Record<string, unknown>).runUvPip as () => unknown),
+    runUvPip: vi.fn((actual as Record<string, unknown>).runUvPip as () => unknown)
   }
 })
 
 vi.mock('./telemetry', () => ({
   emit: vi.fn(),
   trackedStep: vi.fn(async (_event: string, _ctx: unknown, fn: () => unknown) => fn()),
-  capture: vi.fn(),
+  capture: vi.fn()
 }))
 
-import { buildExportEnvelope, validateExportEnvelope, importSnapshots, diffSnapshots, listSnapshots, restoreComfyUIVersion, buildPostRestoreState, restorePipPackages, formatSnapshotVersion } from './snapshots'
+import {
+  buildExportEnvelope,
+  validateExportEnvelope,
+  importSnapshots,
+  diffSnapshots,
+  listSnapshots,
+  restoreComfyUIVersion,
+  buildPostRestoreState,
+  restorePipPackages,
+  formatSnapshotVersion
+} from './snapshots'
 import type { Snapshot, SnapshotEntry, SnapshotExportEnvelope } from './snapshots'
 import type { ScannedNode } from './nodes'
 import type { InstallationRecord } from '../installations'
@@ -43,7 +53,7 @@ function makeNode(overrides?: Partial<ScannedNode>): ScannedNode {
     dirName: 'test-node',
     enabled: true,
     version: '1.0.0',
-    ...overrides,
+    ...overrides
   }
 }
 
@@ -57,11 +67,11 @@ function makeSnapshot(overrides?: Partial<Snapshot>): Snapshot {
       ref: 'v0.3.10',
       commit: 'abc1234',
       releaseTag: 'v0.2.1',
-      variant: 'win-nvidia-cu128',
+      variant: 'win-nvidia-cu128'
     },
     customNodes: [],
     pipPackages: {},
-    ...overrides,
+    ...overrides
   }
 }
 
@@ -75,7 +85,7 @@ function makeEnvelope(snapshots?: Snapshot[]): SnapshotExportEnvelope {
     version: 1,
     exportedAt: '2026-03-02T12:00:00.000Z',
     installationName: 'Test Install',
-    snapshots: snapshots ?? [makeSnapshot()],
+    snapshots: snapshots ?? [makeSnapshot()]
   }
 }
 
@@ -89,10 +99,12 @@ describe('validateExportEnvelope', () => {
   })
 
   it('accepts envelope with multiple snapshots', () => {
-    const result = validateExportEnvelope(makeEnvelope([
-      makeSnapshot({ trigger: 'boot' }),
-      makeSnapshot({ trigger: 'manual', createdAt: '2026-02-28T10:00:00.000Z' }),
-    ]))
+    const result = validateExportEnvelope(
+      makeEnvelope([
+        makeSnapshot({ trigger: 'boot' }),
+        makeSnapshot({ trigger: 'manual', createdAt: '2026-02-28T10:00:00.000Z' })
+      ])
+    )
     expect(result.snapshots).toHaveLength(2)
   })
 
@@ -105,7 +117,9 @@ describe('validateExportEnvelope', () => {
   })
 
   it('rejects wrong type field', () => {
-    expect(() => validateExportEnvelope({ ...makeEnvelope(), type: 'wrong' })).toThrow('not a Comfy Desktop snapshot export')
+    expect(() => validateExportEnvelope({ ...makeEnvelope(), type: 'wrong' })).toThrow(
+      'not a Comfy Desktop snapshot export'
+    )
   })
 
   it('rejects missing type field', () => {
@@ -115,15 +129,21 @@ describe('validateExportEnvelope', () => {
   })
 
   it('rejects wrong version', () => {
-    expect(() => validateExportEnvelope({ ...makeEnvelope(), version: 2 })).toThrow('Unsupported snapshot version')
+    expect(() => validateExportEnvelope({ ...makeEnvelope(), version: 2 })).toThrow(
+      'Unsupported snapshot version'
+    )
   })
 
   it('rejects empty snapshots array', () => {
-    expect(() => validateExportEnvelope({ ...makeEnvelope(), snapshots: [] })).toThrow('no snapshots')
+    expect(() => validateExportEnvelope({ ...makeEnvelope(), snapshots: [] })).toThrow(
+      'no snapshots'
+    )
   })
 
   it('rejects non-array snapshots', () => {
-    expect(() => validateExportEnvelope({ ...makeEnvelope(), snapshots: 'not-array' })).toThrow('no snapshots')
+    expect(() => validateExportEnvelope({ ...makeEnvelope(), snapshots: 'not-array' })).toThrow(
+      'no snapshots'
+    )
   })
 
   it('rejects missing snapshots field', () => {
@@ -135,46 +155,55 @@ describe('validateExportEnvelope', () => {
   // Snapshot-level validation
 
   it('rejects snapshot with wrong version', () => {
-    expect(() => validateExportEnvelope(makeEnvelope([
-      { ...makeSnapshot(), version: 2 as never },
-    ]))).toThrow('Invalid snapshot at index 0')
+    expect(() =>
+      validateExportEnvelope(makeEnvelope([{ ...makeSnapshot(), version: 2 as never }]))
+    ).toThrow('Invalid snapshot at index 0')
   })
 
   it('rejects snapshot with invalid trigger', () => {
-    expect(() => validateExportEnvelope(makeEnvelope([
-      { ...makeSnapshot(), trigger: 'invalid' as never },
-    ]))).toThrow('Invalid snapshot at index 0')
+    expect(() =>
+      validateExportEnvelope(makeEnvelope([{ ...makeSnapshot(), trigger: 'invalid' as never }]))
+    ).toThrow('Invalid snapshot at index 0')
   })
 
   it('rejects snapshot with unparseable createdAt', () => {
-    expect(() => validateExportEnvelope(makeEnvelope([
-      { ...makeSnapshot(), createdAt: 'not-a-date' },
-    ]))).toThrow('Invalid snapshot at index 0')
+    expect(() =>
+      validateExportEnvelope(makeEnvelope([{ ...makeSnapshot(), createdAt: 'not-a-date' }]))
+    ).toThrow('Invalid snapshot at index 0')
   })
 
   it('rejects snapshot with missing comfyui', () => {
     const { comfyui: _, ...rest } = makeSnapshot()
-    expect(() => validateExportEnvelope(makeEnvelope([
-      { ...rest, comfyui: null } as unknown as Snapshot,
-    ]))).toThrow('Invalid snapshot at index 0')
+    expect(() =>
+      validateExportEnvelope(makeEnvelope([{ ...rest, comfyui: null } as unknown as Snapshot]))
+    ).toThrow('Invalid snapshot at index 0')
   })
 
   it('rejects snapshot with non-array customNodes', () => {
     const { customNodes: _, ...rest } = makeSnapshot()
-    expect(() => validateExportEnvelope(makeEnvelope([
-      { ...rest, customNodes: 'not-array' } as unknown as Snapshot,
-    ]))).toThrow('Invalid snapshot at index 0')
+    expect(() =>
+      validateExportEnvelope(
+        makeEnvelope([{ ...rest, customNodes: 'not-array' } as unknown as Snapshot])
+      )
+    ).toThrow('Invalid snapshot at index 0')
   })
 
   it('rejects snapshot with missing pipPackages', () => {
     const { pipPackages: _, ...rest } = makeSnapshot()
-    expect(() => validateExportEnvelope(makeEnvelope([
-      { ...rest, pipPackages: null } as unknown as Snapshot,
-    ]))).toThrow('Invalid snapshot at index 0')
+    expect(() =>
+      validateExportEnvelope(makeEnvelope([{ ...rest, pipPackages: null } as unknown as Snapshot]))
+    ).toThrow('Invalid snapshot at index 0')
   })
 
   it('accepts all valid trigger types', () => {
-    const triggers = ['boot', 'restart', 'manual', 'pre-update', 'post-update', 'post-restore'] as const
+    const triggers = [
+      'boot',
+      'restart',
+      'manual',
+      'pre-update',
+      'post-update',
+      'post-restore'
+    ] as const
     for (const trigger of triggers) {
       const result = validateExportEnvelope(makeEnvelope([makeSnapshot({ trigger })]))
       expect(result.snapshots[0]!.trigger).toBe(trigger)
@@ -184,34 +213,40 @@ describe('validateExportEnvelope', () => {
   // Custom node validation
 
   it('rejects custom node with path traversal in dirName', () => {
-    expect(() => validateExportEnvelope(makeEnvelope([
-      makeSnapshot({ customNodes: [makeNode({ dirName: '../escape' })] }),
-    ]))).toThrow('Invalid snapshot at index 0')
+    expect(() =>
+      validateExportEnvelope(
+        makeEnvelope([makeSnapshot({ customNodes: [makeNode({ dirName: '../escape' })] })])
+      )
+    ).toThrow('Invalid snapshot at index 0')
   })
 
   it('rejects custom node with slash in dirName', () => {
-    expect(() => validateExportEnvelope(makeEnvelope([
-      makeSnapshot({ customNodes: [makeNode({ dirName: 'foo/bar' })] }),
-    ]))).toThrow('Invalid snapshot at index 0')
+    expect(() =>
+      validateExportEnvelope(
+        makeEnvelope([makeSnapshot({ customNodes: [makeNode({ dirName: 'foo/bar' })] })])
+      )
+    ).toThrow('Invalid snapshot at index 0')
   })
 
   it('rejects custom node with empty id', () => {
-    expect(() => validateExportEnvelope(makeEnvelope([
-      makeSnapshot({ customNodes: [makeNode({ id: '' })] }),
-    ]))).toThrow('Invalid snapshot at index 0')
+    expect(() =>
+      validateExportEnvelope(makeEnvelope([makeSnapshot({ customNodes: [makeNode({ id: '' })] })]))
+    ).toThrow('Invalid snapshot at index 0')
   })
 
   it('rejects custom node with unknown type', () => {
-    expect(() => validateExportEnvelope(makeEnvelope([
-      makeSnapshot({ customNodes: [makeNode({ type: 'unknown' as never })] }),
-    ]))).toThrow('Invalid snapshot at index 0')
+    expect(() =>
+      validateExportEnvelope(
+        makeEnvelope([makeSnapshot({ customNodes: [makeNode({ type: 'unknown' as never })] })])
+      )
+    ).toThrow('Invalid snapshot at index 0')
   })
 
   it('accepts valid custom node types', () => {
     for (const type of ['cnr', 'git', 'file'] as const) {
-      const result = validateExportEnvelope(makeEnvelope([
-        makeSnapshot({ customNodes: [makeNode({ type })] }),
-      ]))
+      const result = validateExportEnvelope(
+        makeEnvelope([makeSnapshot({ customNodes: [makeNode({ type })] })])
+      )
       expect(result.snapshots[0]!.customNodes[0]!.type).toBe(type)
     }
   })
@@ -219,43 +254,53 @@ describe('validateExportEnvelope', () => {
   // Pip package name validation
 
   it('rejects pip name starting with hyphen (argument injection)', () => {
-    expect(() => validateExportEnvelope(makeEnvelope([
-      makeSnapshot({ pipPackages: { '-e evil': '1.0' } }),
-    ]))).toThrow('Invalid snapshot at index 0')
+    expect(() =>
+      validateExportEnvelope(makeEnvelope([makeSnapshot({ pipPackages: { '-e evil': '1.0' } })]))
+    ).toThrow('Invalid snapshot at index 0')
   })
 
   it('rejects pip name with shell metacharacters', () => {
-    expect(() => validateExportEnvelope(makeEnvelope([
-      makeSnapshot({ pipPackages: { 'pkg;rm -rf /': '1.0' } }),
-    ]))).toThrow('Invalid snapshot at index 0')
+    expect(() =>
+      validateExportEnvelope(
+        makeEnvelope([makeSnapshot({ pipPackages: { 'pkg;rm -rf /': '1.0' } })])
+      )
+    ).toThrow('Invalid snapshot at index 0')
   })
 
   it('rejects pip package with non-string version', () => {
-    expect(() => validateExportEnvelope(makeEnvelope([
-      makeSnapshot({ pipPackages: { numpy: 42 } as unknown as Record<string, string> }),
-    ]))).toThrow('Invalid snapshot at index 0')
+    expect(() =>
+      validateExportEnvelope(
+        makeEnvelope([
+          makeSnapshot({ pipPackages: { numpy: 42 } as unknown as Record<string, string> })
+        ])
+      )
+    ).toThrow('Invalid snapshot at index 0')
   })
 
   it('accepts valid pip package names', () => {
-    const result = validateExportEnvelope(makeEnvelope([
-      makeSnapshot({ pipPackages: {
-        numpy: '1.24.0',
-        'Pillow': '10.0.0',
-        'my.package': '2.0',
-        'my-package': '3.0',
-        'my_package': '4.0',
-        'A123': '0.1',
-      } }),
-    ]))
+    const result = validateExportEnvelope(
+      makeEnvelope([
+        makeSnapshot({
+          pipPackages: {
+            numpy: '1.24.0',
+            Pillow: '10.0.0',
+            'my.package': '2.0',
+            'my-package': '3.0',
+            my_package: '4.0',
+            A123: '0.1'
+          }
+        })
+      ])
+    )
     expect(Object.keys(result.snapshots[0]!.pipPackages)).toHaveLength(6)
   })
 
   it('reports correct index for invalid snapshot in multi-snapshot envelope', () => {
-    expect(() => validateExportEnvelope(makeEnvelope([
-      makeSnapshot(),
-      makeSnapshot(),
-      { ...makeSnapshot(), version: 99 as never },
-    ]))).toThrow('Invalid snapshot at index 2')
+    expect(() =>
+      validateExportEnvelope(
+        makeEnvelope([makeSnapshot(), makeSnapshot(), { ...makeSnapshot(), version: 99 as never }])
+      )
+    ).toThrow('Invalid snapshot at index 2')
   })
 })
 
@@ -276,7 +321,7 @@ describe('buildExportEnvelope', () => {
   it('wraps multiple snapshots preserving order', () => {
     const entries = [
       makeEntry({ trigger: 'boot' }),
-      makeEntry({ trigger: 'manual', createdAt: '2026-02-28T10:00:00.000Z' }),
+      makeEntry({ trigger: 'manual', createdAt: '2026-02-28T10:00:00.000Z' })
     ]
     const result = buildExportEnvelope('Install', entries)
     expect(result.snapshots).toHaveLength(2)
@@ -307,8 +352,12 @@ describe('diffSnapshots', () => {
   })
 
   it('detects comfyui ref change', () => {
-    const a = makeSnapshot({ comfyui: { ref: 'v0.3.9', commit: 'aaa', releaseTag: 'v0.2.0', variant: 'win-nvidia-cu128' } })
-    const b = makeSnapshot({ comfyui: { ref: 'v0.3.10', commit: 'bbb', releaseTag: 'v0.2.1', variant: 'win-nvidia-cu128' } })
+    const a = makeSnapshot({
+      comfyui: { ref: 'v0.3.9', commit: 'aaa', releaseTag: 'v0.2.0', variant: 'win-nvidia-cu128' }
+    })
+    const b = makeSnapshot({
+      comfyui: { ref: 'v0.3.10', commit: 'bbb', releaseTag: 'v0.2.1', variant: 'win-nvidia-cu128' }
+    })
     const diff = diffSnapshots(a, b)
     expect(diff.comfyuiChanged).toBe(true)
     expect(diff.comfyui!.from.ref).toBe('v0.3.9')
@@ -316,14 +365,23 @@ describe('diffSnapshots', () => {
   })
 
   it('detects comfyui commit change with same ref', () => {
-    const a = makeSnapshot({ comfyui: { ref: 'v0.3.10', commit: 'aaa', releaseTag: 'v0.2.1', variant: 'win-nvidia-cu128' } })
-    const b = makeSnapshot({ comfyui: { ref: 'v0.3.10', commit: 'bbb', releaseTag: 'v0.2.1', variant: 'win-nvidia-cu128' } })
+    const a = makeSnapshot({
+      comfyui: { ref: 'v0.3.10', commit: 'aaa', releaseTag: 'v0.2.1', variant: 'win-nvidia-cu128' }
+    })
+    const b = makeSnapshot({
+      comfyui: { ref: 'v0.3.10', commit: 'bbb', releaseTag: 'v0.2.1', variant: 'win-nvidia-cu128' }
+    })
     const diff = diffSnapshots(a, b)
     expect(diff.comfyuiChanged).toBe(true)
   })
 
   it('does not flag comfyui change when ref and commit are same', () => {
-    const comfyui = { ref: 'v0.3.10', commit: 'abc', releaseTag: 'v0.2.1', variant: 'win-nvidia-cu128' }
+    const comfyui = {
+      ref: 'v0.3.10',
+      commit: 'abc',
+      releaseTag: 'v0.2.1',
+      variant: 'win-nvidia-cu128'
+    }
     const diff = diffSnapshots(makeSnapshot({ comfyui }), makeSnapshot({ comfyui }))
     expect(diff.comfyuiChanged).toBe(false)
     expect(diff.comfyui).toBeUndefined()
@@ -404,7 +462,10 @@ describe('diffSnapshots', () => {
 
   it('does not flag unchanged nodes', () => {
     const nodes = [makeNode({ id: 'stable', dirName: 'stable', version: '1.0.0' })]
-    const diff = diffSnapshots(makeSnapshot({ customNodes: nodes }), makeSnapshot({ customNodes: nodes }))
+    const diff = diffSnapshots(
+      makeSnapshot({ customNodes: nodes }),
+      makeSnapshot({ customNodes: nodes })
+    )
     expect(diff.nodesAdded).toHaveLength(0)
     expect(diff.nodesRemoved).toHaveLength(0)
     expect(diff.nodesChanged).toHaveLength(0)
@@ -438,7 +499,10 @@ describe('diffSnapshots', () => {
 
   it('does not flag unchanged pip packages', () => {
     const pips = { numpy: '1.24.0', torch: '2.0.0' }
-    const diff = diffSnapshots(makeSnapshot({ pipPackages: pips }), makeSnapshot({ pipPackages: pips }))
+    const diff = diffSnapshots(
+      makeSnapshot({ pipPackages: pips }),
+      makeSnapshot({ pipPackages: pips })
+    )
     expect(diff.pipsAdded).toHaveLength(0)
     expect(diff.pipsRemoved).toHaveLength(0)
     expect(diff.pipsChanged).toHaveLength(0)
@@ -451,17 +515,17 @@ describe('diffSnapshots', () => {
       comfyui: { ref: 'v1', commit: 'c1', releaseTag: 'r1', variant: 'v' },
       customNodes: [
         makeNode({ id: 'removed', dirName: 'removed' }),
-        makeNode({ id: 'changed', dirName: 'changed', version: '1.0' }),
+        makeNode({ id: 'changed', dirName: 'changed', version: '1.0' })
       ],
-      pipPackages: { removed_pkg: '1.0', changed_pkg: '1.0' },
+      pipPackages: { removed_pkg: '1.0', changed_pkg: '1.0' }
     })
     const b = makeSnapshot({
       comfyui: { ref: 'v2', commit: 'c2', releaseTag: 'r2', variant: 'v' },
       customNodes: [
         makeNode({ id: 'added', dirName: 'added' }),
-        makeNode({ id: 'changed', dirName: 'changed', version: '2.0' }),
+        makeNode({ id: 'changed', dirName: 'changed', version: '2.0' })
       ],
-      pipPackages: { added_pkg: '2.0', changed_pkg: '2.0' },
+      pipPackages: { added_pkg: '2.0', changed_pkg: '2.0' }
     })
     const diff = diffSnapshots(a, b)
     expect(diff.comfyuiChanged).toBe(true)
@@ -490,7 +554,7 @@ describe('importSnapshots', () => {
   it('imports snapshots into an empty directory', async () => {
     const envelope = makeEnvelope([
       makeSnapshot({ createdAt: '2026-03-01T12:00:00.000Z', trigger: 'boot' }),
-      makeSnapshot({ createdAt: '2026-03-02T12:00:00.000Z', trigger: 'manual' }),
+      makeSnapshot({ createdAt: '2026-03-02T12:00:00.000Z', trigger: 'manual' })
     ])
     const result = await importSnapshots(tmpDir, envelope, 'test-install')
     expect(result.imported).toBe(2)
@@ -501,7 +565,7 @@ describe('importSnapshots', () => {
 
   it('imports same snapshot file twice (timeline allows duplicates)', async () => {
     const envelope = makeEnvelope([
-      makeSnapshot({ createdAt: '2026-03-01T12:00:00.000Z', trigger: 'boot' }),
+      makeSnapshot({ createdAt: '2026-03-01T12:00:00.000Z', trigger: 'boot' })
     ])
     await importSnapshots(tmpDir, envelope, 'test-install')
     const result = await importSnapshots(tmpDir, envelope, 'test-install')
@@ -513,13 +577,13 @@ describe('importSnapshots', () => {
 
   it('imports all snapshots from envelope regardless of existing history', async () => {
     const first = makeEnvelope([
-      makeSnapshot({ createdAt: '2026-03-01T12:00:00.000Z', trigger: 'boot' }),
+      makeSnapshot({ createdAt: '2026-03-01T12:00:00.000Z', trigger: 'boot' })
     ])
     await importSnapshots(tmpDir, first, 'test-install')
 
     const second = makeEnvelope([
       makeSnapshot({ createdAt: '2026-03-01T12:00:00.000Z', trigger: 'boot' }),
-      makeSnapshot({ createdAt: '2026-03-02T12:00:00.000Z', trigger: 'manual' }),
+      makeSnapshot({ createdAt: '2026-03-02T12:00:00.000Z', trigger: 'manual' })
     ])
     const result = await importSnapshots(tmpDir, second, 'test-install')
     expect(result.imported).toBe(2)
@@ -530,7 +594,7 @@ describe('importSnapshots', () => {
       createdAt: '2026-03-01T12:00:00.000Z',
       trigger: 'boot',
       customNodes: [makeNode({ id: 'my-node', dirName: 'my-node', version: '1.0.0' })],
-      pipPackages: { numpy: '1.24.0', pillow: '10.0.0' },
+      pipPackages: { numpy: '1.24.0', pillow: '10.0.0' }
     })
     await importSnapshots(tmpDir, makeEnvelope([original]), 'test-install')
 
@@ -550,7 +614,7 @@ describe('importSnapshots', () => {
     const envelope = makeEnvelope([
       makeSnapshot({ createdAt: '2026-03-01T12:00:00.000Z', trigger: 'boot' }),
       makeSnapshot({ createdAt: '2026-03-03T12:00:00.000Z', trigger: 'manual' }),
-      makeSnapshot({ createdAt: '2026-03-02T12:00:00.000Z', trigger: 'restart' }),
+      makeSnapshot({ createdAt: '2026-03-02T12:00:00.000Z', trigger: 'restart' })
     ])
     await importSnapshots(tmpDir, envelope, 'test-install')
 
@@ -558,7 +622,9 @@ describe('importSnapshots', () => {
     expect(entries).toHaveLength(3)
     // All three should have fresh timestamps (not the original ones)
     for (const e of entries) {
-      expect(new Date(e.snapshot.createdAt).getTime()).toBeGreaterThan(new Date('2026-03-03T12:00:00.000Z').getTime())
+      expect(new Date(e.snapshot.createdAt).getTime()).toBeGreaterThan(
+        new Date('2026-03-03T12:00:00.000Z').getTime()
+      )
     }
     // Newest-first: first in envelope (boot) gets the highest timestamp
     expect(entries[0]!.snapshot.trigger).toBe('boot')
@@ -569,13 +635,13 @@ describe('importSnapshots', () => {
   it('imports identical snapshots within a single envelope', async () => {
     const envelope = makeEnvelope([
       makeSnapshot({ createdAt: '2026-03-01T12:00:00.000Z', trigger: 'boot' }),
-      makeSnapshot({ createdAt: '2026-03-01T12:00:00.000Z', trigger: 'boot' }),
+      makeSnapshot({ createdAt: '2026-03-01T12:00:00.000Z', trigger: 'boot' })
     ])
     const result = await importSnapshots(tmpDir, envelope, 'test-install')
     expect(result.imported).toBe(2)
   })
 
-  it('emits desktop2.snapshot.imported once per imported snapshot with batch context', async () => {
+  it('emits comfy.desktop.snapshot.imported once per imported snapshot with batch context', async () => {
     mockedTelemetryEmit.mockClear()
     const envelope = makeEnvelope([
       makeSnapshot({
@@ -583,38 +649,38 @@ describe('importSnapshots', () => {
         trigger: 'manual',
         label: 'release-cut',
         customNodes: [makeNode({ id: 'n1', dirName: 'n1' })],
-        pipPackages: { numpy: '1.24.0', pillow: '10.0.0' },
+        pipPackages: { numpy: '1.24.0', pillow: '10.0.0' }
       }),
       makeSnapshot({
         createdAt: '2026-03-01T12:00:00.000Z',
         trigger: 'boot',
         customNodes: [],
-        pipPackages: {},
-      }),
+        pipPackages: {}
+      })
     ])
 
     await importSnapshots(tmpDir, envelope, 'install-99')
 
     expect(mockedTelemetryEmit).toHaveBeenCalledTimes(2)
     // First (envelope index 0) — labeled manual snapshot with nodes + pip
-    expect(mockedTelemetryEmit).toHaveBeenNthCalledWith(1, 'desktop2.snapshot.imported', {
+    expect(mockedTelemetryEmit).toHaveBeenNthCalledWith(1, 'comfy.desktop.snapshot.imported', {
       installation_id: 'install-99',
       original_trigger: 'manual',
       custom_nodes_count: 1,
       pip_packages_count: 2,
       has_label: true,
       batch_size: 2,
-      batch_index: 0,
+      batch_index: 0
     })
     // Second (envelope index 1) — empty boot snapshot
-    expect(mockedTelemetryEmit).toHaveBeenNthCalledWith(2, 'desktop2.snapshot.imported', {
+    expect(mockedTelemetryEmit).toHaveBeenNthCalledWith(2, 'comfy.desktop.snapshot.imported', {
       installation_id: 'install-99',
       original_trigger: 'boot',
       custom_nodes_count: 0,
       pip_packages_count: 0,
       has_label: false,
       batch_size: 2,
-      batch_index: 1,
+      batch_index: 1
     })
   })
 })
@@ -633,7 +699,9 @@ describe('restoreComfyUIVersion', () => {
   })
 
   it('returns changed: false when snapshot has no commit', async () => {
-    const snapshot = makeSnapshot({ comfyui: { ref: 'v0.3.10', commit: null, releaseTag: 'v0.2.1', variant: 'win-nvidia-cu128' } })
+    const snapshot = makeSnapshot({
+      comfyui: { ref: 'v0.3.10', commit: null, releaseTag: 'v0.2.1', variant: 'win-nvidia-cu128' }
+    })
     const output: string[] = []
     const result = await restoreComfyUIVersion('/fake/path', snapshot, (t) => output.push(t))
     expect(result.changed).toBe(false)
@@ -641,7 +709,14 @@ describe('restoreComfyUIVersion', () => {
   })
 
   it('returns error when .git directory does not exist', async () => {
-    const snapshot = makeSnapshot({ comfyui: { ref: 'v0.3.10', commit: 'deadbeef1234', releaseTag: 'v0.2.1', variant: 'win-nvidia-cu128' } })
+    const snapshot = makeSnapshot({
+      comfyui: {
+        ref: 'v0.3.10',
+        commit: 'deadbeef1234',
+        releaseTag: 'v0.2.1',
+        variant: 'win-nvidia-cu128'
+      }
+    })
     const output: string[] = []
     const result = await restoreComfyUIVersion(restoreTmpDir, snapshot, (t) => output.push(t))
     expect(result.changed).toBe(false)
@@ -654,11 +729,23 @@ describe('restoreComfyUIVersion', () => {
 
 describe('buildPostRestoreState', () => {
   it('includes comfyVersion and lastRollback when comfyResult has no error', () => {
-    const snapshot = makeSnapshot({ updateChannel: 'stable', comfyui: { ref: 'v0.3.10', commit: 'abc1234', releaseTag: 'v0.2.1', variant: 'win-nvidia-cu128' } })
+    const snapshot = makeSnapshot({
+      updateChannel: 'stable',
+      comfyui: {
+        ref: 'v0.3.10',
+        commit: 'abc1234',
+        releaseTag: 'v0.2.1',
+        variant: 'win-nvidia-cu128'
+      }
+    })
     const comfyResult = { changed: true, commit: 'abc1234' }
     const state = buildPostRestoreState(snapshot, comfyResult, undefined)
     expect(state.updateChannel).toBe('stable')
-    expect(state.comfyVersion).toEqual({ commit: 'abc1234', baseTag: undefined, commitsAhead: undefined })
+    expect(state.comfyVersion).toEqual({
+      commit: 'abc1234',
+      baseTag: undefined,
+      commitsAhead: undefined
+    })
     expect(state.lastRollback).toBeDefined()
     expect((state.lastRollback as Record<string, unknown>).channel).toBe('stable')
     expect((state.lastRollback as Record<string, unknown>).postUpdateHead).toBe('abc1234')
@@ -666,7 +753,15 @@ describe('buildPostRestoreState', () => {
   })
 
   it('keeps current comfyVersion when comfyResult has an error', () => {
-    const snapshot = makeSnapshot({ updateChannel: 'latest', comfyui: { ref: 'v0.3.10', commit: 'abc1234', releaseTag: 'v0.2.1', variant: 'win-nvidia-cu128' } })
+    const snapshot = makeSnapshot({
+      updateChannel: 'latest',
+      comfyui: {
+        ref: 'v0.3.10',
+        commit: 'abc1234',
+        releaseTag: 'v0.2.1',
+        variant: 'win-nvidia-cu128'
+      }
+    })
     const comfyResult = { changed: false, commit: null, error: 'git checkout failed' }
     const currentCv = { commit: 'old1234', baseTag: 'v0.1.0', commitsAhead: 5 }
     const state = buildPostRestoreState(snapshot, comfyResult, undefined, currentCv)
@@ -680,7 +775,16 @@ describe('buildPostRestoreState', () => {
   })
 
   it('builds comfyVersion with baseTag and commitsAhead from snapshot', () => {
-    const snapshot = makeSnapshot({ comfyui: { ref: 'v0.3.10', commit: 'abc1234', releaseTag: 'v0.2.1', variant: 'win-nvidia-cu128', baseTag: 'v0.2.1', commitsAhead: 10 } })
+    const snapshot = makeSnapshot({
+      comfyui: {
+        ref: 'v0.3.10',
+        commit: 'abc1234',
+        releaseTag: 'v0.2.1',
+        variant: 'win-nvidia-cu128',
+        baseTag: 'v0.2.1',
+        commitsAhead: 10
+      }
+    })
     const comfyResult = { changed: true, commit: 'abc1234' }
     const state = buildPostRestoreState(snapshot, comfyResult, undefined)
     expect(state.comfyVersion).toEqual({ commit: 'abc1234', baseTag: 'v0.2.1', commitsAhead: 10 })
@@ -734,7 +838,7 @@ describe('restorePipPackages', () => {
       name: 'Test',
       createdAt: '2026-03-01T00:00:00.000Z',
       installPath: tmpDir,
-      sourceId: 'test',
+      sourceId: 'test'
     }
   })
 
@@ -751,29 +855,32 @@ describe('restorePipPackages', () => {
     const uvCalls: string[][] = []
     const ac = new AbortController()
 
-    mockedRunUvPip.mockImplementation(
-      async (_uvPath, args, _cwd, _sendOutput, _signal?) => {
-        uvCalls.push([...args])
-        // Simulate: the bulk install is running when the signal aborts.
-        // The bulk install returns non-zero (killed), and result.installed
-        // is never populated because the bulk path only populates it on
-        // success (exit code 0).
-        if (args.includes('install')) {
-          ac.abort()
-          return 1
-        }
-        // Uninstall calls during revert should succeed
-        return 0
+    mockedRunUvPip.mockImplementation(async (_uvPath, args, _cwd, _sendOutput, _signal?) => {
+      uvCalls.push([...args])
+      // Simulate: the bulk install is running when the signal aborts.
+      // The bulk install returns non-zero (killed), and result.installed
+      // is never populated because the bulk path only populates it on
+      // success (exit code 0).
+      if (args.includes('install')) {
+        ac.abort()
+        return 1
       }
-    )
+      // Uninstall calls during revert should succeed
+      return 0
+    })
 
     const snapshot = makeSnapshot({
-      pipPackages: { 'new-pkg-a': '1.0.0', 'new-pkg-b': '2.0.0' },
+      pipPackages: { 'new-pkg-a': '1.0.0', 'new-pkg-b': '2.0.0' }
     })
     const noop = () => {}
 
     const result = await restorePipPackages(
-      tmpDir, installation, snapshot, noop as never, noop, ac.signal
+      tmpDir,
+      installation,
+      snapshot,
+      noop as never,
+      noop,
+      ac.signal
     )
 
     // The function should have reverted
@@ -794,13 +901,23 @@ describe('restorePipPackages', () => {
 
 describe('formatSnapshotVersion', () => {
   it('uses stored baseTag and commitsAhead when present', () => {
-    const comfyui = { ref: 'v0.17.1', commit: '0904cc3fe5a551e3716851f12a568e481badd301', baseTag: 'v0.17.2', commitsAhead: 12 }
+    const comfyui = {
+      ref: 'v0.17.1',
+      commit: '0904cc3fe5a551e3716851f12a568e481badd301',
+      baseTag: 'v0.17.2',
+      commitsAhead: 12
+    }
     expect(formatSnapshotVersion(comfyui, 'short')).toBe('v0.17.2+12')
     expect(formatSnapshotVersion(comfyui, 'detail')).toBe('v0.17.2 + 12 commits (0904cc3)')
   })
 
   it('uses stored baseTag when commitsAhead is 0 (exact tag match)', () => {
-    const comfyui = { ref: 'v0.18.3', commit: 'deadbeef12345678', baseTag: 'v0.18.3', commitsAhead: 0 }
+    const comfyui = {
+      ref: 'v0.18.3',
+      commit: 'deadbeef12345678',
+      baseTag: 'v0.18.3',
+      commitsAhead: 0
+    }
     expect(formatSnapshotVersion(comfyui, 'short')).toBe('v0.18.3')
     expect(formatSnapshotVersion(comfyui, 'detail')).toBe('v0.18.3')
   })
