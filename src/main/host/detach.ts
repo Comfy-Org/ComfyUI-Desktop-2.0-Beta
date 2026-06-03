@@ -188,7 +188,7 @@ export function closeAllHostWindows(): void {
  *   - Panel destroyed (chooser-pick attach drops the panelView and
  *     it stays gone until the user opens Settings / the lifecycle
  *     body) → no overlay can be in flight, so we fall back to a
- *     shell system modal with the same "Stop & Return" copy.
+ *     shell system modal with the same "Return to Dashboard" copy.
  * Cloud / remote installs and stopped sessions clear silently in
  * both paths.
  */
@@ -205,7 +205,7 @@ export async function returnToDashboard(parentEntryId: number): Promise<void> {
 }
 
 /**
- * "Stop & Return" confirm rendered as a shell system modal when the
+ * "Return to Dashboard" confirm rendered as a shell system modal when the
  * install-backed panelView has been destroyed (chooser-pick attach
  * drops it, only rebuilt lazily on Settings / lifecycle access).
  * Mirrors `useReturnToDashboardConfirm` semantics — skips the prompt
@@ -224,7 +224,7 @@ async function confirmReturnToDashboardViaSystemModal(
     spec: {
       title: 'Return to Dashboard?',
       message: 'This will stop the current ComfyUI.',
-      confirmLabel: 'Stop & Return',
+      confirmLabel: 'Return to Dashboard',
       cancelLabel: 'Cancel',
       confirmStyle: 'danger',
       theme: entry.lastTheme,
@@ -327,7 +327,7 @@ export async function confirmCloseInstanceWindow(
       message: isLastWindow
         ? 'Close this window? This stops ComfyUI and returns you to the dashboard.'
         : 'Close this window? This stops the running ComfyUI instance.',
-      confirmLabel: isLastWindow ? 'Close & Return to Dashboard' : 'Close Window',
+      confirmLabel: isLastWindow ? 'Return to Dashboard' : 'Close Window',
       cancelLabel: 'Cancel',
       confirmStyle: 'danger',
       theme,

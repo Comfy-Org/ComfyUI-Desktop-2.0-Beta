@@ -147,6 +147,7 @@ const {
   loading,
   error,
   notice,
+  sectionsFresh,
   updateField,
   pendingRestartFieldIds,
   fieldErrorMessages,
@@ -192,11 +193,15 @@ watch(
   [
     () => autoActionKey.value,
     () => props.installation?.id ?? null,
-    () => loading.value,
-    () => sections.value.length
+    () => sectionsFresh.value
   ],
-  async ([key, installId, isLoading, sectionsLen]) => {
-    if (!installId || !key || isLoading || sectionsLen === 0) return
+  async ([key, installId, isFresh]) => {
+    // `isFresh` guards against acting on a previous install's
+    // stale payload — sections are no longer blanked on switch
+    // (#782), so we must wait until the new install's sections
+    // have actually landed before resolving an autoAction id
+    // against them.
+    if (!installId || !key || !isFresh) return
     if (consumedAutoActionKey.value === key) return
     const autoAction = props.autoAction
     if (!autoAction) return
@@ -247,9 +252,15 @@ watch(
 // than 6 fetches/minute/channel.
 const refreshedChannelKeys = new Set<string>()
 watch(
-  [() => activeTab.value, () => props.installation?.id ?? null, () => sections.value.length],
-  ([tab, installId, sectionsLen]) => {
-    if (tab !== 'update' || !installId || sectionsLen === 0) return
+  [() => activeTab.value, () => props.installation?.id ?? null, () => sectionsFresh.value],
+  ([tab, installId, isFresh]) => {
+    // `isFresh` is critical: sections are no longer blanked on
+    // install switch (#782), so without this guard the watcher would
+    // walk the previous install's stale sections, find a
+    // `check-update` action, and fire it against the NEW install —
+    // which on Cloud / remote URL installs returns
+    // `Action "check-update" not yet implemented.` (alert modal).
+    if (tab !== 'update' || !installId || !isFresh) return
 
     const channelField = sections.value
       .flatMap((s) => s.fields ?? [])
@@ -481,14 +492,28 @@ function selectTab(key: ComfyUISettingsTab): void {
 }
 
 // Reset the sub-page + close the More menu when the install changes —
-// re-mounting between installs starts fresh.
+// re-mounting between installs starts fresh. Also force the inner
+// tab-swap transition into "push" direction so every install switch
+// reads as a forward motion cue regardless of where we last came
+// from (the keyed panes below include the install id, so the
+// transition is guaranteed to fire even when the active tab key
+// itself doesn't change).
 watch(
   () => props.installation?.id ?? null,
   () => {
     subPage.value = null
     moreMenuOpen.value = false
+    tabTransition.value = 'subpage-push'
   }
 )
+
+// Identity used to key the inner tab panes so that switching between
+// installs — even while staying on the same tab — remounts the pane
+// and fires the `tabTransition` animation. Without this the keys
+// would be tab-stable (e.g. `tab-status`) and Vue would reuse the
+// same vnode across installs, suppressing the motion cue users
+// rely on to see "something changed".
+const paneInstallKey = computed(() => props.installation?.id ?? 'none')
 
 const argsField = computed<DetailField | null>(() => {
   for (const s of sectionsForTab('settings').value) {
@@ -734,6 +759,7 @@ defineExpose({
           v-else
           key="subpage-root"
           class="settings-v2-body-root"
+          :class="{ 'is-stale': !sectionsFresh }"
           :data-testid="TID.pickerSettingsSections"
           :data-install-id="installation?.id"
         >
@@ -757,7 +783,7 @@ defineExpose({
           <Transition :name="tabTransition" mode="out-in">
             <div
               v-if="activeTab === 'snapshots' && installation"
-              key="tab-snapshots"
+              :key="`tab-snapshots-${paneInstallKey}`"
               class="settings-v2-tab-pane"
             >
               <SnapshotsView
@@ -772,7 +798,7 @@ defineExpose({
             </div>
             <div
               v-else-if="activeTab === 'status' && installation"
-              key="tab-status"
+              :key="`tab-status-${paneInstallKey}`"
               class="settings-v2-tab-pane"
             >
               <StatusFactPanel
@@ -783,7 +809,7 @@ defineExpose({
             </div>
             <div
               v-else-if="activeTab === 'storage'"
-              key="tab-storage"
+              :key="`tab-storage-${paneInstallKey}`"
               class="settings-v2-tab-pane"
             >
               <!-- Lazy-mounted via `v-else-if` so picker opens that
@@ -800,7 +826,7 @@ defineExpose({
                 @update-field="updateField"
               />
             </div>
-            <div v-else :key="`tab-${activeTab}`" class="settings-v2-tab-pane">
+            <div v-else :key="`tab-${activeTab}-${paneInstallKey}`" class="settings-v2-tab-pane">
               <!-- Inline progress overlay: shown when an active operation
                    is tracked for this install and the Update tab is open.
                    The SettingsSectionList fades out; the progress view
@@ -931,7 +957,7 @@ defineExpose({
           aria-haspopup="menu"
           :aria-expanded="moreMenuOpen"
           :aria-label="t('comfyUISettings.more', 'More')"
-          :disabled="!installation || pinBottomActions.length === 0 || opInflight"
+          :disabled="!installation || pinBottomActions.length === 0 || opInflight || !sectionsFresh"
           @click="toggleMoreMenu"
         >
           {{ t('comfyUISettings.more', 'More') }}
@@ -1078,6 +1104,17 @@ defineExpose({
   flex-direction: column;
   gap: inherit;
   flex: 1 1 auto;
+}
+
+/* Stale state during a picker-row switch: the previous install's
+ * sections are still painted while the new install's
+ * `get-detail-sections` IPC is in flight (#782). Block pointer
+ * interactions so a click in that brief window can't act on a field
+ * or button defined by the previous install's payload. No visual
+ * change — adding opacity/grayscale here would itself read as a
+ * flicker, which is exactly the regression this work fixes. */
+.settings-v2-body-root.is-stale {
+  pointer-events: none;
 }
 
 /* Inner tab-swap wrapper. Mirrors `.settings-v2-body-root`'s flex
