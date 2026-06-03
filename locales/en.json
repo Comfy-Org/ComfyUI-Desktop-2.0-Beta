@@ -13,7 +13,7 @@
     "confirmStopLocal": {
       "title": "Return to Dashboard?",
       "message": "This will stop the current ComfyUI.",
-      "confirmLabel": "Stop & Return"
+      "confirmLabel": "Return to Dashboard"
     }
   },
 
@@ -937,9 +937,10 @@
     "waitingTime": "Waiting for ComfyUI to be ready… ({secs}s)",
     "portBusyUsing": "Port {old} is busy — using port {new} instead…",
     "instanceRunningTitle": "An instance is already running",
-    "instanceRunningMessage": "Close \"{name}\" and launch this instance instead, or run both at the same time.",
-    "instanceRunningProceed": "Run Both",
-    "instanceRunningReplace": "Close & Launch This",
+    "instanceRunningMessage": "Choosing \"Close & Launch\" will stop the instances listed below.",
+    "instanceRunningListLabel": "Will be stopped",
+    "instanceRunningProceed": "Run All",
+    "instanceRunningReplace": "Close & Launch",
     "modelFolderRelaunchTitle": "Restarting ComfyUI",
     "modelFolderRelaunchDesc": "New model folders were detected from custom nodes. Restarting so ComfyUI can use them right away.",
     "steps": {

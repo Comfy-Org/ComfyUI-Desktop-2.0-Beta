@@ -36,7 +36,7 @@ const messages = {
       confirmStopLocal: {
         title: 'Return to Dashboard?',
         message: 'This will stop the current ComfyUI.',
-        confirmLabel: 'Stop & Return',
+        confirmLabel: 'Return to Dashboard',
       },
     },
   },
