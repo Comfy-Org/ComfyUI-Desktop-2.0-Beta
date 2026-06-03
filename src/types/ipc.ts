@@ -712,6 +712,11 @@ export interface CopyEvent {
   copiedAt: string
   copyReason: 'copy' | 'copy-update' | 'release-update'
   exists: boolean
+  /** `out` = another install was copied FROM the install whose rail this is
+   *  shown on (installationName is the destination's name).
+   *  `in`  = THIS install was copied from another (installationName is the
+   *  source's name, snapshotted at copy time via `copiedFromName`). */
+  direction: 'in' | 'out'
 }
 
 export interface SnapshotDiffSummary {
