@@ -586,11 +586,14 @@ describe('adoptDesktopInstall', () => {
     } finally { legacy.cleanup() }
   })
 
-  it('carries autoInstallUpdates / pypiMirror and infers Chinese mirror flags', async () => {
+  it('force-enables autoInstallUpdates regardless of legacy value, carries pypiMirror and infers Chinese mirror flags', async () => {
     const legacy = buildFakeLegacy({
       configFiles: {
         'comfy.settings.json': JSON.stringify({
           'Comfy.ColorPalette': 'dark',
+          // Legacy user had Desktop auto-update OFF — must NOT carry that.
+          // Inheriting it would lock them out of future Desktop 2.0
+          // updates after the in-place app cutover.
           'Comfy-Desktop.AutoUpdate': false,
           'Comfy-Desktop.UV.PypiInstallMirror': 'https://mirrors.aliyun.com/pypi/simple/',
           'Comfy-Desktop.UV.TorchInstallMirror': 'https://download.pytorch.org/whl/cu121',
@@ -603,13 +606,33 @@ describe('adoptDesktopInstall', () => {
       // ColorPalette is a frontend canvas-color setting, not equivalent to
       // v2's launcher `theme` — never carried.
       expect(settingsMock.__store).not.toHaveProperty('theme')
-      expect(settingsMock.__store['autoInstallUpdates']).toBe(false)
+      // Force-on at adoption regardless of legacy value.
+      expect(settingsMock.__store['autoInstallUpdates']).toBe(true)
       expect(settingsMock.__store['pypiMirror']).toBe('https://mirrors.aliyun.com/pypi/simple/')
       expect(settingsMock.__store['useChineseMirrors']).toBe(true)
       expect(settingsMock.__store['chineseMirrorsPrompted']).toBe(true)
       // TorchInstallMirror has no v2 consumer (standalone variants ship
       // torch pre-bundled) → never stashed on the record.
       expect(record).not.toHaveProperty('adoptedTorchMirror')
+    } finally { legacy.cleanup() }
+  })
+
+  it('respects a pre-existing v2 autoInstallUpdates choice on reconcile', async () => {
+    // User explicitly disabled Desktop auto-updates in v2 settings after a
+    // prior adoption. A subsequent migrate-to-standalone reconcile pass
+    // must not silently flip it back on.
+    settingsMock.__store['autoInstallUpdates'] = false
+    const legacy = buildFakeLegacy({
+      configFiles: {
+        'comfy.settings.json': JSON.stringify({
+          'Comfy-Desktop.AutoUpdate': true,
+        }),
+      },
+    })
+    try {
+      const tools = buildSilentTools()
+      await adoptDesktopInstall({ tools, deps: buildDeps({}, legacy.info) })
+      expect(settingsMock.__store['autoInstallUpdates']).toBe(false)
     } finally { legacy.cleanup() }
   })
 

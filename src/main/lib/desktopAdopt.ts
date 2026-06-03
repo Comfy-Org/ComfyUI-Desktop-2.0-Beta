@@ -613,7 +613,14 @@ interface CarryReport {
  *                              from `extra_models_config.yaml`
  *                              (always appended; never blocked).
  *   - `telemetryEnabled`     ← `Comfy-Desktop.SendStatistics`
- *   - `autoInstallUpdates`   ← `Comfy-Desktop.AutoUpdate`
+ *   - `autoInstallUpdates`   ← force `true`. Adoption ships as an
+ *                              in-place app update of Legacy Desktop;
+ *                              if the legacy user had `AutoUpdate: false`,
+ *                              inheriting it would lock them out of
+ *                              future Desktop 2.0 updates — including
+ *                              fixes to the adoption flow itself. Forced
+ *                              on once at adoption (respects any later
+ *                              v2-side toggle).
  *   - `pypiMirror`           ← `Comfy-Desktop.UV.PypiInstallMirror`
  *   - `useChineseMirrors` +
  *     `chineseMirrorsPrompted` ← inferred from `pypiMirror`
@@ -658,8 +665,19 @@ function carryLegacySettings(
   }
 
   tryCarry('telemetryEnabled', legacy.sendStatistics)
-  tryCarry('autoInstallUpdates', legacy.autoUpdate)
   tryCarry('pypiMirror', legacy.pypiMirror)
+
+  // Force Desktop auto-updates on at adoption time, regardless of the
+  // legacy `Comfy-Desktop.AutoUpdate` value. The cutover ships as an
+  // in-place app update from Legacy Desktop, so users who had auto-update
+  // off would never receive subsequent Desktop 2.0 updates — including
+  // fixes to the adoption flow itself. We only seed when v2 hasn't already
+  // persisted a choice, so users who explicitly toggle it off in v2
+  // settings after adoption keep their choice on subsequent reconciles.
+  if (!settings.has('autoInstallUpdates')) {
+    settings.set('autoInstallUpdates', true)
+    carriedKeys.push('autoInstallUpdates')
+  }
 
   if (looksLikeChineseMirror(legacy.pypiMirror)) {
     // Both flags carry together: the mirror toggle drives Git+PyPI

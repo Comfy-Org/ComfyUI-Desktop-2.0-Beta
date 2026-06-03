@@ -85,7 +85,7 @@ user has already configured in v2 is never overwritten.
 |---|---|---|
 | `modelsDirs` | `<basePath>/models` + every `base_path` in `extra_models_config.yaml` | Always appended (never blocked by `has()`) — model dirs are additive. |
 | `telemetryEnabled` | `Comfy-Desktop.SendStatistics` | |
-| `autoInstallUpdates` | `Comfy-Desktop.AutoUpdate` | Desktop-app silent-update toggle, not ComfyUI updates. |
+| `autoInstallUpdates` | force `true` | Desktop-app silent-update toggle. **Not** carried from `Comfy-Desktop.AutoUpdate` — the cutover ships as an in-place app update from Legacy Desktop, and inheriting a legacy `false` would lock users out of future Desktop 2.0 updates including fixes to the adoption flow itself. Forced on once at adoption; respects any later v2-side toggle. |
 | `pypiMirror` | `Comfy-Desktop.UV.PypiInstallMirror` | Feeds every `uv pip install` v2 runs (adoption requirements, custom-node installs, manager extras, snapshot restore). |
 | `useChineseMirrors` + `chineseMirrorsPrompted` | inferred from `pypiMirror` matching `aliyun`/`tencent`/`tsinghua`/`mirrors.cernet.edu.cn` | Suppresses the locale-triggered first-launch CN-mirror prompt. |
 | `firstUseCompleted` | force `true` | Skips the first-use takeover for adopted users. |
