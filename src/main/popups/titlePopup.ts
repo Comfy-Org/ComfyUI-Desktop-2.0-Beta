@@ -1013,13 +1013,13 @@ function hideTitlePopup(
     && !entry.view.popup.webContents.isDestroyed()
     && !entry.view.parentWindow.isDestroyed()
   ) {
-    // Embedded WebContentsView: `BrowserWindow.focus()` raises the host
-    // window but doesn't deterministically land keyboard focus in any
-    // child view. Push focus into the title bar (the button that
-    // opened the popup) so subsequent keystrokes go somewhere
-    // sensible. Falls back to a plain window focus if the title-bar
-    // sender is no longer alive.
-    if (!entry.titleBarSender.isDestroyed()) {
+    /** comfyView first: it carries the `before-input-event` zoom
+     *  listener (attach.ts), so focusing elsewhere silently breaks
+     *  Ctrl/Cmd +/-/0. Title bar, then window, are fallbacks. */
+    const comfyContents = comfyWindows.get(entry.parentEntryId)?.comfyView.webContents
+    if (comfyContents && !comfyContents.isDestroyed()) {
+      comfyContents.focus()
+    } else if (!entry.titleBarSender.isDestroyed()) {
       entry.titleBarSender.focus()
     } else {
       entry.view.parentWindow.focus()
