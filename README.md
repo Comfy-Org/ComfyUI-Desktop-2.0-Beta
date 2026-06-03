@@ -1,99 +1,113 @@
+<div align="center">
+
+<img src="assets/Comfy_Logo_x512.png" alt="Comfy Desktop" width="128" />
+
 # Comfy Desktop
 
-[![Latest Release](https://img.shields.io/github/v/release/Comfy-Org/ComfyUI-Desktop-2.0-Beta?style=for-the-badge&display_name=tag)](https://github.com/Comfy-Org/ComfyUI-Desktop-2.0-Beta/releases/latest)
+**Install, run, and manage [ComfyUI](https://github.com/comfyanonymous/ComfyUI) from one app — no dependency hell.**
+
+[![Latest Release](https://img.shields.io/github/v/release/Comfy-Org/ComfyUI-Desktop-2.0-Beta?style=for-the-badge&display_name=tag&color=4f46e5)](https://github.com/Comfy-Org/ComfyUI-Desktop-2.0-Beta/releases/latest)
 [![CI](https://img.shields.io/github/actions/workflow/status/Comfy-Org/ComfyUI-Desktop-2.0-Beta/ci.yml?branch=main&style=for-the-badge&label=CI)](https://github.com/Comfy-Org/ComfyUI-Desktop-2.0-Beta/actions/workflows/ci.yml)
-[![License](https://img.shields.io/github/license/Comfy-Org/ComfyUI-Desktop-2.0-Beta?style=for-the-badge)](https://github.com/Comfy-Org/ComfyUI-Desktop-2.0-Beta/blob/main/LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
+[![Discord](https://img.shields.io/badge/Discord-Join-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://www.comfy.org/discord)
 
-An Electron app for managing multiple ComfyUI installations.
+[**Download**](#download) · [**Getting Started**](#getting-started) · [**Documentation**](#documentation) · [**Contributing**](#development) · [**Discord**](https://www.comfy.org/discord)
 
-## Related Repositories
+</div>
 
-- [ComfyUI-Standalone-Environments](https://github.com/Comfy-Org/ComfyUI-Standalone-Environments) — Standalone environment definitions used by this app to provision Python environments for ComfyUI installations.
+---
 
-## Downloads
+Comfy Desktop is the official desktop application for **ComfyUI**, the node-based engine for generative AI. It installs ComfyUI into a self-contained, GPU-ready environment, lets you run **multiple independent setups side by side**, and keeps them updated — so you spend your time building workflows instead of fighting Python, CUDA, and pip.
 
-### Windows
+<!-- maintainers: drop a hero screenshot / short demo GIF of the app here -->
 
-[![Windows x64](https://img.shields.io/badge/Windows-x64-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://dl.todesktop.com/241130tqe9q3y/windows/nsis/x64)
-[![Windows ARM64](https://img.shields.io/badge/Windows-ARM64-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://dl.todesktop.com/241130tqe9q3y/windows/nsis/arm64)
+## Table of Contents
 
-### macOS
+- [Features](#features)
+- [Download](#download)
+- [Getting Started](#getting-started)
+- [Documentation](#documentation)
+- [Development](#development)
+- [Releasing](#releasing)
+- [Data &amp; Troubleshooting](#data--troubleshooting)
+- [Contributing](#contributing)
+- [Community](#community)
+- [License](#license)
 
-[![macOS Apple Silicon](https://img.shields.io/badge/macOS-Apple%20Silicon-000000?style=for-the-badge&logo=apple&logoColor=white)](https://dl.todesktop.com/241130tqe9q3y/mac/dmg/arm64)
+## Features
 
-## Running
+- 🧩 **Multiple installs, side by side** — run as many independent ComfyUI setups as you like, each with its own version, models, and custom nodes. Switch between them without conflicts.
+- 📦 **Isolated, GPU-ready environments** — each install ships a relocatable Python with PyTorch and GPU wheels prebuilt. No pip/uv failures, no CUDA roulette at install time.
+- 🔄 **Update source independently** — pull the latest ComfyUI via git without re-downloading the whole environment.
+- 📸 **Snapshots & rollback** — back up an install and restore it if an update or a custom node breaks something.
+- 📥 **Bring your existing setup** — adopt and migrate existing ComfyUI installations (portable, git, or a previous desktop install) in place.
+- 🖥️ **Cross-platform** — Windows, macOS, and Linux.
+- ⬆️ **Built-in auto-updates** — the app keeps itself current.
+- 🛠️ **Works without system Git** — bundles a tiny Python + `pygit2` bootstrap so clones work on a clean machine.
 
-### Windows
+## Download
 
-Run the NSIS installer (`.exe`) and launch from the Start Menu or desktop shortcut.
+| Platform | Download |
+|---|---|
+| **Windows** (x64) | [![Windows x64](https://img.shields.io/badge/Download-Windows%20x64-0078D6?style=flat-square&logo=windows&logoColor=white)](https://dl.todesktop.com/241130tqe9q3y/windows/nsis/x64) |
+| **Windows** (ARM64) | [![Windows ARM64](https://img.shields.io/badge/Download-Windows%20ARM64-0078D6?style=flat-square&logo=windows&logoColor=white)](https://dl.todesktop.com/241130tqe9q3y/windows/nsis/arm64) |
+| **macOS** (Apple Silicon) | [![macOS Apple Silicon](https://img.shields.io/badge/Download-macOS%20Apple%20Silicon-000000?style=flat-square&logo=apple&logoColor=white)](https://dl.todesktop.com/241130tqe9q3y/mac/dmg/arm64) |
+| **Linux** | `.AppImage` &amp; `.deb` — see the [latest release](https://github.com/Comfy-Org/ComfyUI-Desktop-2.0-Beta/releases/latest) |
 
-### macOS
+> **New to ComfyUI?** Just download, install, and open the app — it walks you through creating your first setup. No terminal required.
 
-Open the `.dmg`, drag Comfy Desktop to Applications, and launch from there.
+<details>
+<summary><b>Install instructions per platform</b></summary>
 
-### Linux
+**Windows** — run the NSIS installer (`.exe`) and launch from the Start Menu or desktop shortcut.
 
-**`.deb` (Debian/Ubuntu):**
+**macOS** — open the `.dmg`, drag **Comfy Desktop** to Applications, and launch from there.
+
+**Linux** — `.deb` (Debian/Ubuntu), from the directory you downloaded it to:
 ```bash
-sudo apt install ./ComfyUI-Desktop-2.0-*.deb
+sudo apt install ./*.deb
+```
+AppImage:
+```bash
+chmod +x ./*.AppImage
+./*.AppImage --no-sandbox
 ```
 Then launch from your application menu.
 
-**AppImage:**
-```bash
-chmod +x ComfyUI-Desktop-2.0-*.AppImage
-./ComfyUI-Desktop-2.0-*.AppImage --no-sandbox
-```
+</details>
+
+## Getting Started
+
+1. **Download and install** Comfy Desktop for your OS (above).
+2. **Launch the app.**
+3. **Create a new install** — pick a standalone, GPU-ready environment and Comfy Desktop downloads and provisions it for you. (Already have a ComfyUI install? Import it instead.)
+4. **Hit launch** — the app starts ComfyUI and opens it, ready to build.
+
+From there you can add more installs, take snapshots before risky changes, and update ComfyUI or its custom nodes per install.
+
+## Documentation
+
+| Topic | Where |
+|---|---|
+| Architecture &amp; design principles | [`DESIGN_PROCESS.md`](DESIGN_PROCESS.md) |
+| UI style guide | [`DESIGN.md`](DESIGN.md) |
+| Telemetry &amp; privacy | [`docs/telemetry.md`](docs/telemetry.md) |
+| Theming / design tokens | [`docs/theme-colors.md`](docs/theme-colors.md) |
+| ComfyUI-Manager restart handling | [`MANAGER_RESTART.md`](MANAGER_RESTART.md) |
+| Standalone environment definitions | [ComfyUI-Standalone-Environments](https://github.com/Comfy-Org/ComfyUI-Standalone-Environments) |
 
 ## Development
 
+Contributions are welcome. The app is an [Electron](https://www.electronjs.org/) + [Vue 3](https://vuejs.org/) + [TypeScript](https://www.typescriptlang.org/) project built with [electron-vite](https://electron-vite.org/).
+
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) **v22 LTS** or later
-- [pnpm](https://pnpm.io/) **v10** or later (via Corepack recommended)
-
-We recommend using [nvm](https://github.com/nvm-sh/nvm) (or [nvm-windows](https://github.com/coreybutler/nvm-windows)) to manage Node versions:
+- [**Node.js**](https://nodejs.org/) v22 LTS or later
+- [**pnpm**](https://pnpm.io/) v10 or later (via Corepack)
 
 ```bash
-# Install and use Node 22
-nvm install 22
-nvm use 22
-
-# Verify
-node --version   # should print v22.x.x
-
-# Enable pnpm via Corepack (bundled with Node)
-corepack enable
-pnpm --version
-```
-
-### Stack
-
-- **Build tool:** [electron-vite](https://electron-vite.org/)
-- **Renderer:** [Vue 3](https://vuejs.org/) (Composition API) + [TypeScript](https://www.typescriptlang.org/)
-- **State:** [Pinia](https://pinia.vuejs.org/)
-- **i18n:** [vue-i18n](https://vue-i18n.intlify.dev/) (locale files in `locales/`)
-- **Styling:** [Tailwind CSS v4](https://tailwindcss.com/)
-- **Icons:** [Lucide](https://lucide.dev/)
-- **Main process:** TypeScript (`src/main/`)
-- **Linting:** [ESLint](https://eslint.org/) (flat config) + [Prettier](https://prettier.io/)
-- **Testing:** [Vitest](https://vitest.dev/) + [Vue Test Utils](https://test-utils.vuejs.org/)
-
-### Project structure
-
-```
-src/
-  main/          # Electron main process (TypeScript)
-  preload/       # Preload scripts (context bridge)
-  renderer/src/  # Vue 3 renderer
-    components/  # Reusable UI components
-    composables/ # Vue composables (useModal, useTheme, …)
-    stores/      # Pinia stores (session, installation)
-    views/       # Top-level views and modal views
-    types/       # Renderer-side type re-exports
-  types/         # Shared IPC types (single source of truth)
-locales/         # i18n translation files
-sources/         # Installation source plugins
+nvm install 22 && nvm use 22   # recommended — https://github.com/nvm-sh/nvm
+corepack enable                # enables pnpm (bundled with Node)
 ```
 
 ### Setup
@@ -104,208 +118,132 @@ cd ComfyUI-Desktop-2.0-Beta
 pnpm run init
 ```
 
-`pnpm run init` is the recommended one-shot for a fresh clone. It runs `pnpm install` (which also fires the `postinstall` hook and husky `prepare`), then `pnpm run bootstrap` to build the **bootstrap Python** environment described below.
-
-#### Bootstrap Python
-
-The app ships a minimal (~15–20 MB) standalone Python with `pygit2` baked in, under `bootstrap-python/<platform>/`. It provides git operations (clone, fetch, ls-remote) before any standalone ComfyUI environment has been provisioned, so the app works on machines without system `git` installed.
-
-| Command | What it does |
-|---|---|
-| `pnpm run bootstrap` | Build locally via `scripts/build-bootstrap-python.py` (requires Python 3.13). Downloads `python-build-standalone`, installs `pygit2`, strips test/idle/tkinter junk. Auto-detects the host platform; pass `--platform win-x64\|mac-arm64\|linux-x64` to build a different one. |
-| `pnpm run bootstrap:fetch` | Download a prebuilt archive from the [`bootstrap-v1`](https://github.com/Comfy-Org/ComfyUI-Desktop-2.0-Beta/releases/tag/bootstrap-v1) release (faster, no local Python needed). Pass `--tag <name>` to use a different release. Set `GITHUB_TOKEN` to authenticate. |
-
-Both targets write to `bootstrap-python/{win-x64,mac-arm64,linux-x64}/` (gitignored). The directory must exist before running `pnpm run dev` or `pnpm run build:*` — `pnpm run predev` prints a yellow warning if it's missing.
-
-At runtime the main process picks a git backend in priority order ([`src/main/lib/ipc/index.ts`](src/main/lib/ipc/index.ts)): bootstrap pygit2 → standalone-install pygit2 → system `git`. Set `COMFY_FORCE_BOOTSTRAP_GIT=1` to disable the fallbacks (used by `pnpm run dev:bootstrap` to verify the bootstrap path that ships to users without git).
+`pnpm run init` is the one-shot for a fresh clone: it runs `pnpm install` (with the `postinstall` + husky hooks) and `pnpm run bootstrap` to build the bundled bootstrap Python (see below).
 
 ### Run in development
 
-**Windows / macOS:**
 ```bash
-pnpm run dev               # standard dev mode
-pnpm run dev:bootstrap     # force COMFY_FORCE_BOOTSTRAP_GIT=1; auto-builds bootstrap python if missing
+pnpm run dev               # Windows / macOS
+./linux-dev.sh             # Linux
 ```
 
-**Linux:**
-```bash
-./linux-dev.sh
+### Common tasks
+
+| Command | Description |
+|---|---|
+| `pnpm run dev` | Start the app in dev mode |
+| `pnpm test` | Unit tests ([Vitest](https://vitest.dev/)) |
+| `pnpm run test:integration` | Integration suite |
+| `pnpm run test:e2e` | End-to-end tests ([Playwright](https://playwright.dev/)) |
+| `pnpm run typecheck` | Type-check (node + web + e2e + integration) |
+| `pnpm run lint` / `lint:fix` | Lint (ESLint) |
+| `pnpm run format` | Format (Prettier) |
+| `pnpm run build:{win,mac,linux}` | Build local distributables → `dist/` |
+
+### Project structure
+
+```
+src/
+  main/          # Electron main process (TypeScript)
+    sources/     # Install-method plugins (standalone, portable, git, …)
+    lib/         # Shared main-process logic + IPC
+  preload/       # Context-bridge preload scripts
+  renderer/src/  # Vue 3 renderer (components, composables, stores, views)
+  types/         # Shared IPC types (single source of truth)
+locales/         # i18n translations
 ```
 
-### Type checking
+<details>
+<summary><b>Bootstrap Python</b> (the bundled Git backend)</summary>
 
-```bash
-pnpm run typecheck                # node + web + e2e + integration
-pnpm run typecheck:node           # main process only
-pnpm run typecheck:web            # renderer only
-pnpm run typecheck:e2e            # Playwright suite
-pnpm run typecheck:integration    # vitest integration suite
-```
+The app ships a minimal (~15–20 MB) standalone Python with `pygit2` baked in, under `bootstrap-python/<platform>/`. It provides git operations (clone, fetch, ls-remote) before any standalone ComfyUI environment is provisioned, so the app works on machines without system `git`.
 
-### Linting
+| Command | What it does |
+|---|---|
+| `pnpm run bootstrap` | Build locally via `scripts/build-bootstrap-python.py` (requires Python 3.13). Auto-detects the host platform; pass `--platform win-x64\|mac-arm64\|linux-x64` for another. |
+| `pnpm run bootstrap:fetch` | Download a prebuilt archive from the [`bootstrap-v1`](https://github.com/Comfy-Org/ComfyUI-Desktop-2.0-Beta/releases/tag/bootstrap-v1) release (faster; no local Python needed). Set `GITHUB_TOKEN` to authenticate. |
 
-```bash
-pnpm run lint           # check for lint errors
-pnpm run lint:fix       # auto-fix lint errors
-pnpm run format         # format with Prettier
-pnpm run format:check   # check formatting without writing
-```
+Both write to `bootstrap-python/{win-x64,mac-arm64,linux-x64}/` (gitignored). The directory must exist before `pnpm run dev` or `pnpm run build:*`.
 
-### Testing
+At runtime the main process picks a git backend in priority order ([`src/main/lib/ipc/index.ts`](src/main/lib/ipc/index.ts)): bootstrap pygit2 → standalone-install pygit2 → system `git`. Set `COMFY_FORCE_BOOTSTRAP_GIT=1` (or `pnpm run dev:bootstrap`) to verify the bundled path that ships to users without git.
 
-```bash
-pnpm test                  # all unit tests (vitest)
-pnpm run test:watch        # vitest watch mode
-pnpm run test:integration  # integration suite (vitest.integration.config.ts)
-pnpm run test:e2e          # Playwright e2e (use :macos / :windows / :linux to scope)
-```
-
-### Build for distribution
-
-```bash
-# Platform-specific (electron-builder, local install/dev artifacts)
-pnpm run build:win      # Windows (NSIS installer)
-pnpm run build:mac      # macOS (DMG)
-pnpm run build:linux    # Linux (AppImage, .deb)
-```
-
-Output is written to `dist/`. These targets require `bootstrap-python/<platform>/` to exist — run `pnpm run bootstrap` (or `pnpm run bootstrap:fetch`) first.
-
-> Production releases are **not** built locally — they go through ToDesktop in CI (see [Releasing](#releasing)). The ToDesktop pipeline calls `scripts/todesktop-beforeBuild.cjs`, which runs `fetch-bootstrap-python.mjs` to pull the prebuilt bootstrap python for the target platform.
+</details>
 
 ## Releasing
 
-The release pipeline is fully automated via three workflows in [`.github/workflows/`](.github/workflows/):
+> Production builds are **not** built locally — they go through [ToDesktop](https://www.todesktop.com/) in CI.
+
+<details>
+<summary><b>Release pipeline &amp; required secrets</b></summary>
+
+Three workflows in [`.github/workflows/`](.github/workflows/):
 
 | Workflow | Trigger | Role |
 |---|---|---|
-| [`version-bump.yml`](.github/workflows/version-bump.yml) | manual (`workflow_dispatch`) | Opens a `chore: bump version to vX.Y.Z` PR with the `Release` label. |
-| [`release-from-pr-label.yml`](.github/workflows/release-from-pr-label.yml) | `pull_request_target: closed` | When a `Release`-labeled PR merges, creates the `vX.Y.Z` tag on the merge commit and dispatches the build workflow. |
-| [`build-release.yml`](.github/workflows/build-release.yml) | `push` of `v*` tag (or manual) | Runs `pnpm run build`, uploads Datadog sourcemaps, runs `todesktop build`, parses the build log, uploads `release-assets.json`, and creates a **draft** GitHub Release with auto-generated notes. |
+| `version-bump.yml` | manual | Opens a `chore: bump version to vX.Y.Z` PR with the `Release` label. |
+| `release-from-pr-label.yml` | `pull_request_target: closed` | On merge of a `Release`-labeled PR, tags `vX.Y.Z` and dispatches the build. |
+| `build-release.yml` | push of `v*` tag | Runs `pnpm run build`, uploads Datadog sourcemaps, runs `todesktop build`, and creates a **draft** GitHub Release. |
 
-```diagram
-╭──────────────────────────╮  workflow_dispatch   ╭──────────────────────────╮
-│ Version Bump PR          │─────────────────────▶│ PR opened with           │
-│ (version-bump.yml)       │                      │ "Release" label          │
-╰──────────────────────────╯                      ╰────────────┬─────────────╯
-                                                               │ merge
-                                                               ▼
-╭──────────────────────────╮  on: pull_request_target  ╭───────────────────╮
-│ Release From Version PR  │◀──────────────────────────│ closed PR (merged)│
-│ (release-from-pr-label)  │                           ╰───────────────────╯
-│   • detects version bump │
-│   • creates v{x.y.z} tag │
-│   • dispatches build     │
-╰────────┬─────────────────╯
-         │ workflow dispatch on tag
-         ▼
-╭──────────────────────────╮
-│ ToDesktop Build & Release│  • pnpm run build
-│ (build-release.yml)      │  • Datadog sourcemap upload
-│                          │  • todesktop build --ephemeral
-│                          │  • parse log → release-assets.json
-│                          │  • gh release create --draft --generate-notes
-╰──────────────────────────╯
-```
-
-### Recommended (automated) flow
-
-1. **Trigger `Version Bump PR`** from the Actions tab (or via CLI):
-   ```bash
-   gh workflow run version-bump.yml -f bump=patch -f release=true
-   ```
-   This opens a `chore: bump version to vX.Y.Z` PR on a branch like `automation/version-bump/main/v0.5.1`, with the `Release` label applied. `bump` accepts `patch | minor | major`.
-2. **Review & merge** that PR. After it merges, the `release-from-pr-label.yml` workflow notices the `Release` label, creates and pushes the `vX.Y.Z` tag on the merge commit, and dispatches `build-release.yml` for that tag.
-3. **Publish the draft** — `build-release.yml` produces a draft GitHub Release. Review it on the [Releases](../../releases) page and hit **Publish**.
-
-### Manual fallback
-
-If automation is unavailable, follow the manual flow:
-
+**Recommended flow:**
 ```bash
-git checkout main && git pull origin main
-git checkout -b release/v0.5.1
-# Edit package.json "version": "0.5.1"
-git add package.json
-git commit -m "chore: bump version to 0.5.1"
-git push origin release/v0.5.1
-# Open + merge a PR targeting main
-git checkout main && git pull origin main
-git tag v0.5.1
-git push origin v0.5.1   # triggers build-release.yml
+gh workflow run version-bump.yml -f bump=patch -f release=true
 ```
+Review &amp; merge the resulting PR; the tag + build are then automatic. Finally, publish the draft Release from the [Releases](../../releases) page.
 
-`build-release.yml` enforces that the tag matches `package.json`'s `version`; the automated flow handles this for you.
+**Required GitHub Actions secrets:** `TODESKTOP_ACCESS_TOKEN`, `TODESKTOP_EMAIL` (ToDesktop CLI), `DATADOG_API_KEY` (RUM sourcemaps), `BEN_PAT` (version-bump PR).
 
-### Required secrets
+</details>
 
-`build-release.yml` and `version-bump.yml` rely on these GitHub Actions secrets:
+## Data &amp; Troubleshooting
 
-| Secret | Used by | Purpose |
-|---|---|---|
-| `TODESKTOP_ACCESS_TOKEN` | build-release | Auth for the ToDesktop CLI |
-| `TODESKTOP_EMAIL` | build-release | ToDesktop account email |
-| `DATADOG_API_KEY` | build-release | Upload renderer sourcemaps to Datadog (US5) for RUM symbolication |
-| `BEN_PAT` | version-bump | PAT used to open/edit the version-bump PR (so it triggers CI checks that the default `GITHUB_TOKEN` would skip) |
+<details>
+<summary><b>Data locations</b></summary>
 
-### Bootstrap python in releases
+On Windows/macOS, app data lives under the standard Electron `userData` path. Dev and production use **separate** directories because Electron derives the name from `package.json` `name` (`comfyui-desktop-2`) in dev vs `productName` (`Comfy Desktop`) in packaged builds:
 
-The `bootstrap-v1` GitHub release stores prebuilt `bootstrap-python-{win-x64,mac-arm64,linux-x64}.tar.gz` archives produced by [`build-bootstrap-python.yml`](.github/workflows/build-bootstrap-python.yml). During a ToDesktop build, [`scripts/todesktop-beforeBuild.cjs`](scripts/todesktop-beforeBuild.cjs) runs `fetch-bootstrap-python.mjs` to download the archive matching the build's target platform and extract it into `bootstrap-python/<platform>/` so it's bundled into the installer. To rebuild and publish a new bootstrap release, dispatch the bootstrap workflow and update the `--tag` argument if you change the release name.
+| | Windows | macOS | Linux |
+|---|---|---|---|
+| **Dev** | `%APPDATA%\comfyui-desktop-2` | `~/Library/Application Support/comfyui-desktop-2` | `~/.config/comfyui-desktop-2` |
+| **Production** | `%APPDATA%\Comfy Desktop` | `~/Library/Application Support/Comfy Desktop` | `~/.config/Comfy Desktop` |
 
-## Data Locations
+On Linux the app follows the [XDG Base Directory Specification](https://specifications.freedesktop.org/basedir-spec/latest/) for config, data, cache, and state. The default install directory is `~/ComfyUI-Installs`.
 
-On **Windows** and **macOS**, all app data lives under the standard Electron `userData` path.
+</details>
 
-> **Dev vs. production path difference:** Electron derives the `userData` directory name from the app's name. In development (`pnpm run dev`), it uses the `name` field from `package.json` (`comfyui-desktop-2`), while packaged builds use the `productName` from `electron-builder.yml` (`Comfy Desktop`). This means the two environments use separate data directories:
->
-> | | Windows | macOS | Linux |
-> |---|---|---|---|
-> | **Dev** | `%APPDATA%\comfyui-desktop-2` | `~/Library/Application Support/comfyui-desktop-2` | `~/.config/comfyui-desktop-2` |
-> | **Production** | `%APPDATA%\Comfy Desktop` | `~/Library/Application Support/Comfy Desktop` | `~/.config/Comfy Desktop` |
+<details>
+<summary><b>Reset / clean install</b></summary>
 
-On **Linux**, the app follows the [XDG Base Directory Specification](https://wiki.archlinux.org/title/XDG_Base_Directory):
-
-| Purpose | Linux Path |
-|---------|------------|
-| Config (`settings.json`) | `$XDG_CONFIG_HOME/comfyui-desktop-2` (default `~/.config/comfyui-desktop-2`) |
-| Data (`installations.json`) | `$XDG_DATA_HOME/comfyui-desktop-2` (default `~/.local/share/comfyui-desktop-2`) |
-| Cache (`download-cache/`) | `$XDG_CACHE_HOME/comfyui-desktop-2` (default `~/.cache/comfyui-desktop-2`) |
-| State (`port-locks/`) | `$XDG_STATE_HOME/comfyui-desktop-2` (default `~/.local/state/comfyui-desktop-2`) |
-| Default install dir | `~/ComfyUI-Installs` |
-
-Existing files at the old `~/.config/comfyui-desktop-2` location are automatically migrated on first launch.
-
-### Reset / clean install
-
-If a manual update leaves the app in a broken state (no styling, no i18n, dead dropdowns, etc. — usually caused by a stale Chromium profile from a prior beta version), the [`scripts/reset-*`](scripts/) helpers wipe every known data location for the current build **and** the older beta names (`ComfyUI Launcher`, `comfyui-launcher`, `com.kosinkadink.comfyui-launcher`, `org.comfy.comfyui-launcher`). They prompt before deleting anything and **do not touch** `~/ComfyUI-Installs` (Windows: `%USERPROFILE%\ComfyUI-Installs`).
+If a manual update leaves the app broken (no styling, dead dropdowns — usually a stale Chromium profile), the [`scripts/reset-*`](scripts/) helpers wipe every known data location. They **prompt before deleting** and **do not touch** your `~/ComfyUI-Installs`.
 
 Quit the app first, then:
 
-**macOS:**
 ```sh
-curl -fsSLO https://raw.githubusercontent.com/Comfy-Org/ComfyUI-Desktop-2.0-Beta/main/scripts/reset-mac.sh
-bash reset-mac.sh
+# macOS
+curl -fsSLO https://raw.githubusercontent.com/Comfy-Org/ComfyUI-Desktop-2.0-Beta/main/scripts/reset-mac.sh && bash reset-mac.sh
+# Linux
+curl -fsSLO https://raw.githubusercontent.com/Comfy-Org/ComfyUI-Desktop-2.0-Beta/main/scripts/reset-linux.sh && bash reset-linux.sh
 ```
-
-**Linux:**
-```sh
-curl -fsSLO https://raw.githubusercontent.com/Comfy-Org/ComfyUI-Desktop-2.0-Beta/main/scripts/reset-linux.sh
-bash reset-linux.sh
-```
-
-**Windows (PowerShell):**
 ```powershell
+# Windows (PowerShell)
 iwr -useb https://raw.githubusercontent.com/Comfy-Org/ComfyUI-Desktop-2.0-Beta/main/scripts/reset-windows.ps1 -OutFile reset-windows.ps1
 powershell -ExecutionPolicy Bypass -File .\reset-windows.ps1
 ```
 
-Pass `--yes` (or `-Yes` on Windows) to skip the confirmation prompt. After cleanup, reinstall from the latest release and launch — the app should come up with a clean profile. You may need to re-add existing installations via **"Add existing installation"** since `installations.json` is wiped too.
+Pass `--yes` (or `-Yes` on Windows) to skip the prompt. After cleanup, reinstall from the latest release. You may need to re-add installations via **"Add existing installation"** since `installations.json` is wiped too.
 
-#### Additional macOS leftover paths
+</details>
 
-For a full manual uninstall on macOS, the following additional paths may be left behind by the app and can be removed. The reset helper handles app settings/state, but these are worth checking when doing a true clean install:
+## Contributing
 
-- `~/Library/Application Support/ComfyUI` — Comfy Desktop app data/cache
-- `~/Library/Application Support/Comfy Desktop` — app settings/state
-- `~/Library/Caches/org.comfy.comfyui-desktop-2.ShipIt` — Squirrel auto-updater cache (safe to delete)
-- `~/Library/Logs/ComfyUI` — log files (safe to delete)
+Issues and pull requests are welcome. Before opening a PR, please run `pnpm run typecheck`, `pnpm run lint`, and `pnpm test` locally — see [Development](#development). For coding conventions, see [`AGENTS.md`](AGENTS.md).
+
+## Community
+
+- 💬 **Discord** — [comfy.org/discord](https://www.comfy.org/discord)
+- 🌐 **Website** — [comfy.org](https://www.comfy.org)
+- 🐛 **Issues** — [GitHub Issues](https://github.com/Comfy-Org/ComfyUI-Desktop-2.0-Beta/issues)
+- 🧠 **ComfyUI** — [github.com/comfyanonymous/ComfyUI](https://github.com/comfyanonymous/ComfyUI)
+
+## License
+
+Released under the [MIT License](LICENSE). © Comfy Org.
