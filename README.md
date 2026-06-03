@@ -6,10 +6,12 @@
 
 **Install, run, and manage [ComfyUI](https://github.com/comfyanonymous/ComfyUI) from one app — no dependency hell.**
 
-[![Latest Release](https://img.shields.io/github/v/release/Comfy-Org/Comfy-Desktop?style=for-the-badge&display_name=tag&color=4f46e5)](https://github.com/Comfy-Org/Comfy-Desktop/releases/latest)
-[![CI](https://img.shields.io/github/actions/workflow/status/Comfy-Org/Comfy-Desktop/ci.yml?branch=main&style=for-the-badge&label=CI)](https://github.com/Comfy-Org/Comfy-Desktop/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
-[![Discord](https://img.shields.io/badge/Discord-Join-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://www.comfy.org/discord)
+[![Release](https://img.shields.io/github/v/release/Comfy-Org/Comfy-Desktop?display_name=tag&style=flat&label=release&color=4f46e5)](https://github.com/Comfy-Org/Comfy-Desktop/releases/latest)
+[![CI](https://img.shields.io/github/actions/workflow/status/Comfy-Org/Comfy-Desktop/ci.yml?branch=main&style=flat&label=CI)](https://github.com/Comfy-Org/Comfy-Desktop/actions/workflows/ci.yml)
+[![License](https://img.shields.io/github/license/Comfy-Org/Comfy-Desktop?style=flat&color=blue)](LICENSE)
+[![Stars](https://img.shields.io/github/stars/Comfy-Org/Comfy-Desktop?style=flat&logo=github&color=f5c518)](https://github.com/Comfy-Org/Comfy-Desktop/stargazers)
+[![Discord](https://img.shields.io/badge/Discord-comfy.org-5865F2?style=flat&logo=discord&logoColor=white)](https://www.comfy.org/discord)
+![Platforms](https://img.shields.io/badge/platforms-Windows%20·%20macOS%20·%20Linux-555?style=flat)
 
 [**Download**](#download) · [**Getting Started**](#getting-started) · [**Documentation**](#documentation) · [**Contributing**](#development) · [**Discord**](https://www.comfy.org/discord)
 
@@ -21,24 +23,11 @@ Comfy Desktop is the official desktop application for **ComfyUI**, the node-base
 
 <!-- maintainers: drop a hero screenshot / short demo GIF of the app here -->
 
-## Table of Contents
-
-- [Features](#features)
-- [Download](#download)
-- [Getting Started](#getting-started)
-- [Documentation](#documentation)
-- [Development](#development)
-- [Releasing](#releasing)
-- [Data &amp; Troubleshooting](#data--troubleshooting)
-- [Contributing](#contributing)
-- [Community](#community)
-- [License](#license)
-
 ## Features
 
 - 🧩 **Multiple installs, side by side** — run as many independent ComfyUI setups as you like, each with its own version, models, and custom nodes. Switch between them without conflicts.
 - 📦 **Isolated, GPU-ready environments** — each install ships a relocatable Python with PyTorch and GPU wheels prebuilt. No pip/uv failures, no CUDA roulette at install time.
-- 🔄 **Update source independently** — pull the latest ComfyUI via git without re-downloading the whole environment.
+- 🔄 **One-click updates** — update ComfyUI (and custom nodes) to the latest version in place. No terminal, no git, no re-downloading the multi-gigabyte environment.
 - 📸 **Snapshots & rollback** — back up an install and restore it if an update or a custom node breaks something.
 - 📥 **Bring your existing setup** — adopt and migrate existing ComfyUI installations (portable, git, or a previous desktop install) in place.
 - 🖥️ **Cross-platform** — Windows, macOS, and Linux.
