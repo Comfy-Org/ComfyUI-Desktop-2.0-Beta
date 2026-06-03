@@ -13,7 +13,7 @@
 [![Discord](https://img.shields.io/badge/Discord-comfy.org-5865F2?style=flat&logo=discord&logoColor=white)](https://www.comfy.org/discord)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20·%20macOS%20·%20Linux-555?style=flat)
 
-[**Download**](#download) · [**Getting Started**](#getting-started) · [**Documentation**](#documentation) · [**Contributing**](#development) · [**Discord**](https://www.comfy.org/discord)
+[**Download**](#download) · [**Getting Started**](#getting-started) · [**Contributing**](#development) · [**Discord**](https://www.comfy.org/discord)
 
 </div>
 
@@ -74,17 +74,6 @@ Then launch from your application menu.
 4. **Hit launch** — the app starts ComfyUI and opens it, ready to build.
 
 From there you can add more installs, take snapshots before risky changes, and update ComfyUI or its custom nodes per install.
-
-## Documentation
-
-| Topic | Where |
-|---|---|
-| Architecture &amp; design principles | [`DESIGN_PROCESS.md`](DESIGN_PROCESS.md) |
-| UI style guide | [`DESIGN.md`](DESIGN.md) |
-| Telemetry &amp; privacy | [`docs/telemetry.md`](docs/telemetry.md) |
-| Theming / design tokens | [`docs/theme-colors.md`](docs/theme-colors.md) |
-| ComfyUI-Manager restart handling | [`MANAGER_RESTART.md`](MANAGER_RESTART.md) |
-| Standalone environment definitions | [ComfyUI-Standalone-Environments](https://github.com/Comfy-Org/ComfyUI-Standalone-Environments) |
 
 ## Development
 
@@ -233,6 +222,7 @@ Issues and pull requests are welcome. Before opening a PR, please run `pnpm run 
 - 🌐 **Website** — [comfy.org](https://www.comfy.org)
 - 🐛 **Issues** — [GitHub Issues](https://github.com/Comfy-Org/Comfy-Desktop/issues)
 - 🧠 **ComfyUI** — [github.com/comfyanonymous/ComfyUI](https://github.com/comfyanonymous/ComfyUI)
+- 📦 **Standalone Environments** — [ComfyUI-Standalone-Environments](https://github.com/Comfy-Org/ComfyUI-Standalone-Environments)
 
 ## License
 
