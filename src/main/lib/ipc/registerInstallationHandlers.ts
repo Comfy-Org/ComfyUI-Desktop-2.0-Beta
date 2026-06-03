@@ -410,8 +410,7 @@ export function registerInstallationHandlers(): void {
         }
       }
       if (filtered.name && filtered.name !== inst.name) {
-        const all = await installations.list()
-        if (all.some((i) => i.id !== installationId && i.name === filtered.name)) {
+        if (await installations.hasNameConflict(installationId, filtered.name as string)) {
           return {
             ok: false,
             message: i18n.t('errors.duplicateName', { name: filtered.name as string })

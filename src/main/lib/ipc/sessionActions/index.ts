@@ -1,5 +1,5 @@
 import type { ActionContext, ActionResult } from './types'
-import { handleRemove, handleOpenFolder } from './basic'
+import { handleRemove, handleOpenFolder, handleRename } from './basic'
 import { handleDelete } from './delete'
 import { handleCopy, handleCopyUpdate, handleReleaseUpdate } from './copy'
 import { handleMigrateToStandalone } from './migrate'
@@ -7,7 +7,7 @@ import { handleLaunch } from './launch'
 import { handleDelegateToSource } from './delegate'
 
 export type { ActionContext, ActionResult } from './types'
-export { handleRemove, handleOpenFolder } from './basic'
+export { handleRemove, handleOpenFolder, handleRename } from './basic'
 export { handleDelete } from './delete'
 export { handleCopy, handleCopyUpdate, handleReleaseUpdate } from './copy'
 export { handleMigrateToStandalone } from './migrate'
@@ -19,6 +19,7 @@ export { withAbortableSessionAction } from './withAbortable'
  *  Anything outside this set is delegated to the install's source plugin. */
 const SESSION_ACTION_IDS = [
   'remove',
+  'rename',
   'open-folder',
   'delete',
   'copy',
@@ -46,6 +47,7 @@ function dispatchToSessionHandler(
 ): Promise<ActionResult> {
   switch (actionId) {
     case 'remove': return handleRemove(ctx)
+    case 'rename': return handleRename(ctx)
     case 'open-folder': return handleOpenFolder(ctx)
     case 'delete': return handleDelete(ctx)
     case 'copy': return handleCopy(ctx)

@@ -2,7 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import { app } from 'electron'
 import { fetchJSON } from '../lib/fetch'
-import { deleteAction, untrackAction, launchAction, openFolderAction, migrateToStandaloneAction } from '../lib/actions'
+import { deleteAction, untrackAction, launchAction, openFolderAction, migrateToStandaloneAction, renameAction } from '../lib/actions'
 import { downloadAndExtract } from '../lib/installer'
 import { runLoggedProcess, formatProcessError } from '../lib/logged-process'
 import * as releaseCache from '../lib/release-cache'
@@ -216,6 +216,7 @@ export const portable: SourcePlugin = {
         pinBottom: true,
         actions: [
           launchAction(installed, !installed ? t('errors.installNotReady') : undefined),
+          renameAction(installation.name),
           openFolderAction(installation.installPath),
           migrateToStandaloneAction(installed),
           untrackAction(),

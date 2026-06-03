@@ -6,7 +6,7 @@ import type { ChannelDef } from '../../lib/channel-cards'
 import { formatComfyVersion } from '../../lib/version'
 import type { ComfyVersion } from '../../lib/version'
 import { truncateNotes } from '../../lib/comfyui-releases'
-import { deleteAction, untrackAction, launchAction, openFolderAction } from '../../lib/actions'
+import { deleteAction, untrackAction, launchAction, openFolderAction, renameAction } from '../../lib/actions'
 import { t } from '../../lib/i18n'
 import { buildLaunchSettingsFields, buildSharedPathsField } from '../common/launchSettingsFields'
 import { getVariantLabel, DEFAULT_LAUNCH_ARGS } from './envPaths'
@@ -223,6 +223,7 @@ export function getDetailSections(installation: InstallationRecord): Record<stri
       pinBottom: true,
       actions: [
         launchAction(installed, !installed ? t('errors.installNotReady') : undefined),
+        renameAction(installation.name),
         { id: 'copy', label: t('actions.copyInstallation'), style: 'default', enabled: installed,
           showProgress: true, progressTitle: t('actions.copyingInstallation'), cancellable: true,
           prompt: {
