@@ -467,6 +467,13 @@ async function open(opts: OpenOpts = {}): Promise<void> {
   initialDefaultChoice.value = deriveDefaultChoice()
   expressInstall.value = true
   migrateExisting.value = true
+  // `onContinue` keeps `isContinuing` true past `routePostStart()`
+  // because the chain handlers normally unmount this takeover within
+  // ms — but on the chain-migrate / chain-local cancel-and-return
+  // path, the host re-invokes `open()` on a still-mounted instance
+  // whose Continue spinner is still flagged. Reset here so the
+  // replayed start screen surfaces a fresh, clickable CTA.
+  isContinuing.value = false
   // Reset funnel-completion bookkeeping so a takeover replay measures
   // duration / steps from the replay, not from the original mount.
   mountedAt = Date.now()

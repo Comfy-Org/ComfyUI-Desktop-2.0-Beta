@@ -291,6 +291,32 @@ describe('FirstUseTakeover start step', () => {
     expect(btn.attributes('aria-busy')).toBe('true')
   })
 
+  it('open() resets the Continue spinner so the cancel-and-return path lands on a fresh CTA', async () => {
+    // Reproduces the start → uncheck express → Continue → cancel
+    // mid-chain → open() again loop. `onContinue()` keeps the spinner
+    // flag true past `routePostStart()` (the chain handlers normally
+    // unmount), so on a cancel-and-return the host re-invokes open()
+    // on the still-mounted instance with a stale `isContinuing=true`
+    // — open() must reset it.
+    const wrapper = mountTakeover()
+    await wrapper
+      .find('[data-testid="first-use-consent-tos"] input[type="checkbox"]')
+      .setValue(true)
+    await wrapper.find('[data-testid="first-use-continue"]').trigger('click')
+    // Sanity-check: the Continue button IS in the spinner state right
+    // after click (the chain hasn't unmounted in the isolated test).
+    const btnBusy = wrapper.find('[data-testid="first-use-continue"]')
+    expect(btnBusy.text()).toBe('firstUse.startContinueBusy')
+    expect(btnBusy.attributes('disabled')).toBeDefined()
+
+    await (wrapper.vm as unknown as { open: () => Promise<void> }).open()
+
+    const btnFresh = wrapper.find('[data-testid="first-use-continue"]')
+    expect(btnFresh.text()).toBe('firstUse.startContinue')
+    expect(btnFresh.attributes('disabled')).toBeUndefined()
+    expect(btnFresh.attributes('aria-busy')).toBe('false')
+  })
+
   it('closing the terms modal clears termsDoc (modal unmounts)', async () => {
     const wrapper = mountTakeover()
     await wrapper.find('[data-testid="first-use-eula-link"]').trigger('click')
