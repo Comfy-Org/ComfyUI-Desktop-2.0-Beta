@@ -44,7 +44,7 @@ const outputBase = path.join(projectRoot, 'bootstrap-python')
 
 const PLATFORMS = ['win-x64', 'mac-arm64', 'linux-x64']
 const DEFAULT_TAG = 'bootstrap-v1'
-const REPO = 'Comfy-Org/ComfyUI-Desktop-2.0-Beta'
+const REPO = 'Comfy-Org/Comfy-Desktop'
 
 // Each platform's expected Python binary inside its bootstrap-python dir.
 // Used by verifyPlatform() so a partial / corrupt extract doesn't pass.

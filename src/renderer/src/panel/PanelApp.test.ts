@@ -467,7 +467,7 @@ it('opens the new-install takeover above the chooser body when show-new-install 
     // wizard key after the renderer-side dismiss; the next file-menu
     // pick of the same item hits `setActivePanel`'s same-panel
     // early-return and the modal silently fails to reopen
-    // (Comfy-Org/ComfyUI-Desktop-2.0-Beta#486).
+    // (Comfy-Org/Comfy-Desktop#486).
     window.history.replaceState({}, '', `/?panel=${panel}&firstUseCompleted=true`)
     const wrapper = mountPanel()
     await flushPromises()
