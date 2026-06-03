@@ -48,6 +48,22 @@ const attachedSessions = new WeakSet<Electron.Session>()
 const pendingDownloads = new Map<string, PendingDownload>()
 let mainWindow: BrowserWindow | null = null
 
+/** Original dispatch params per URL, captured at start time so a
+ *  terminal (error) entry can be re-dispatched via `retryDownload`.
+ *  Kept off the broadcast `DownloadProgress` because asset downloads
+ *  carry an `authToken` that must never reach the renderer. Evicted
+ *  alongside `createdAtByUrl` (FIFO cap / dismiss / clear-finished). */
+interface RetryParams {
+  kind: 'model' | 'asset'
+  filename: string
+  window: BrowserWindow
+  senderContents?: Electron.WebContents
+  directory?: string
+  outputDir?: string
+  authToken?: string
+}
+const retryParamsByUrl = new Map<string, RetryParams>()
+
 /**
  * Recent terminal downloads kept in main so a title-bar tray mounted
  * AFTER a download finished can still surface it. Capped at
@@ -90,7 +106,10 @@ function pushRecent(progress: DownloadProgress): void {
   // user's expectation.
   while (recentDownloads.length > RECENT_LIMIT) {
     const evicted = recentDownloads.shift()
-    if (evicted) createdAtByUrl.delete(evicted.url)
+    if (evicted) {
+      createdAtByUrl.delete(evicted.url)
+      retryParamsByUrl.delete(evicted.url)
+    }
   }
 }
 
@@ -318,6 +337,10 @@ export async function startModelDownload(
   const tempDir = getTempDir()
   const tempPath = path.join(tempDir, `${Date.now()}-${filename}.tmp`)
 
+  // Capture before the validation early-returns so even a synchronous
+  // error (bad path / extension) lands a retryable terminal entry.
+  retryParamsByUrl.set(url, { kind: 'model', filename, directory, window: win, senderContents })
+
   const makeProgress = (
     overrides: Partial<DownloadProgress>,
   ): DownloadProgress => ({
@@ -404,6 +427,15 @@ export async function startAssetDownload(
   // but outside the output dir so ComfyUI won't scan it.
   const tempDir = path.join(path.dirname(outputDir), TEMP_DIR_NAME)
   const tempPath = path.join(tempDir, `${Date.now()}-${savedFilename}.tmp`)
+
+  retryParamsByUrl.set(url, {
+    kind: 'asset',
+    filename: savedFilename,
+    outputDir,
+    authToken,
+    window: win,
+    senderContents,
+  })
 
   const makeProgress = (
     overrides: Partial<DownloadProgress>,
@@ -731,6 +763,45 @@ export function cancelModelDownload(url: string): boolean {
   return true
 }
 
+/** Re-dispatch a terminal (error) download from its captured original
+ *  params. No-op if the URL is still in flight or its params have been
+ *  evicted (FIFO cap / dismiss / clear-finished). The old terminal row
+ *  is removed first — both from the recent buffer and every renderer
+ *  store — and its `createdAt` stamp is dropped so the retried download
+ *  gets a fresh top-of-list slot rather than leaving a duplicate. */
+export function retryDownload(url: string): boolean {
+  if (pendingDownloads.has(url)) return false
+  const params = retryParamsByUrl.get(url)
+  if (!params) return false
+
+  const win = !params.window.isDestroyed()
+    ? params.window
+    : mainWindow && !mainWindow.isDestroyed()
+      ? mainWindow
+      : (BrowserWindow.getAllWindows()[0] ?? null)
+  if (!win || win.isDestroyed()) return false
+
+  const sender =
+    params.senderContents && !params.senderContents.isDestroyed()
+      ? params.senderContents
+      : undefined
+
+  const idx = recentDownloads.findIndex((d) => d.url === url)
+  if (idx >= 0) recentDownloads.splice(idx, 1)
+  createdAtByUrl.delete(url)
+  _broadcastToRenderer('model-download-removed', { url })
+  downloadEvents.emit('tray-state-changed')
+
+  if (params.kind === 'asset') {
+    // Best-effort token reuse — if the captured token has expired the
+    // download simply re-enters `error` and stays retryable.
+    void startAssetDownload(win, url, params.filename, params.outputDir!, params.authToken, sender)
+  } else {
+    void startModelDownload(win, url, params.filename, params.directory ?? '', sender)
+  }
+  return true
+}
+
 // ---- Snapshot for seeding Launcher UI ----
 
 export function getActiveDownloads(): DownloadProgress[] {
@@ -766,6 +837,7 @@ export function dismissRecentDownload(url: string): boolean {
   if (idx < 0) return false
   recentDownloads.splice(idx, 1)
   createdAtByUrl.delete(url)
+  retryParamsByUrl.delete(url)
   _broadcastToRenderer('model-download-removed', { url })
   downloadEvents.emit('tray-state-changed')
   return true
@@ -775,7 +847,10 @@ export function dismissRecentDownload(url: string): boolean {
 export function clearFinishedDownloads(): number {
   if (recentDownloads.length === 0) return 0
   const removed = recentDownloads.splice(0, recentDownloads.length)
-  for (const r of removed) createdAtByUrl.delete(r.url)
+  for (const r of removed) {
+    createdAtByUrl.delete(r.url)
+    retryParamsByUrl.delete(r.url)
+  }
   _broadcastToRenderer('model-downloads-cleared-finished', {
     urls: removed.map((r) => r.url),
   })

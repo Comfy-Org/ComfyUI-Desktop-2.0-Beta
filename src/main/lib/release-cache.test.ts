@@ -19,6 +19,17 @@ vi.mock('./git', () => ({
   fetchTags: vi.fn(async () => true),
   fetchCommitSha: vi.fn(async () => true),
   countCommitsAhead: vi.fn(async () => 0),
+  findNearestTag: vi.fn(async () => undefined),
+}))
+
+// Stub `comfyui-releases` so the baseTag-recovery path in
+// `enrichCommitsAhead` doesn't trigger real `lsRemoteLatestTag` work.
+// Only `getLatestStableTag` is invoked from the helper under test;
+// the rest of the surface area is unused here.
+vi.mock('./comfyui-releases', () => ({
+  fetchLatestRelease: vi.fn(),
+  getLatestStableTag: vi.fn(async () => null),
+  truncateNotes: vi.fn((text: string) => text),
 }))
 
 // `enrichCommitsAhead` short-circuits when `${comfyuiDir}/.git` doesn't
@@ -32,6 +43,7 @@ vi.mock('fs', async () => {
 import { isUpdateAvailable, set, enrichCommitsAhead, onEnriched, get } from './release-cache'
 import type { ReleaseCacheEntry } from './release-cache'
 import * as gitMock from './git'
+import * as releasesMock from './comfyui-releases'
 
 describe('isUpdateAvailable', () => {
   it('returns false when lastRollback channel matches and installedTag matches latestTag', () => {
@@ -186,6 +198,8 @@ describe('enrichCommitsAhead', () => {
     vi.mocked(gitMock.fetchTags).mockReset().mockResolvedValue(true)
     vi.mocked(gitMock.fetchCommitSha).mockReset().mockResolvedValue(true)
     vi.mocked(gitMock.countCommitsAhead).mockReset().mockResolvedValue(0)
+    vi.mocked(gitMock.findNearestTag).mockReset().mockResolvedValue(undefined)
+    vi.mocked(releasesMock.getLatestStableTag).mockReset().mockResolvedValue(null)
   })
 
   it('fires onEnriched listeners exactly once when a new commitsAhead is written', async () => {
@@ -306,7 +320,13 @@ describe('enrichCommitsAhead', () => {
     expect(gitMock.fetchTags).not.toHaveBeenCalled()
   })
 
-  it('does not fire listeners when countCommitsAhead returns undefined (failed enrichment)', async () => {
+  it('stamps a settle (and fires listeners) when countCommitsAhead returns undefined (failed enrichment)', async () => {
+    // Used to assert no listener fires, but the renderer relies on
+    // exactly that broadcast to drop the "Computing commits ahead…"
+    // spinner without waiting on the 10s safety timer.  The cache
+    // still has `commitsAhead === undefined` so the picker falls back
+    // to `tag (sha)`; the listener firing is just the "we tried and
+    // gave up" signal.
     const repo = newRepo()
     set(repo, 'latest', {
       commitSha: 'deadbeef00000000',
@@ -322,8 +342,111 @@ describe('enrichCommitsAhead', () => {
       off()
     }
 
-    expect(listener).not.toHaveBeenCalled()
-    expect(get(repo, 'latest')?.commitsAhead).toBeUndefined()
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(listener).toHaveBeenCalledWith(repo)
+    const after = get(repo, 'latest')
+    expect(after?.commitsAhead).toBeUndefined()
+    expect(after?.lastEnrichAttemptAt).toBeTypeOf('number')
+  })
+
+  it('recovers a missing baseTag from getLatestStableTag, persists it, and completes enrichment', async () => {
+    const repo = newRepo()
+    set(repo, 'latest', { commitSha: 'deadbeef00000000' })
+    vi.mocked(releasesMock.getLatestStableTag).mockResolvedValue('v1.2.3')
+    vi.mocked(gitMock.countCommitsAhead).mockResolvedValue(4)
+
+    await enrichCommitsAhead(repo, '/tmp/fake-repo')
+
+    expect(releasesMock.getLatestStableTag).toHaveBeenCalledWith({ refresh: true })
+    // Local-tag fallback shouldn't run if the remote tag refresh worked.
+    expect(gitMock.findNearestTag).not.toHaveBeenCalled()
+    const after = get(repo, 'latest')
+    expect(after?.baseTag).toBe('v1.2.3')
+    expect(after?.commitsAhead).toBe(4)
+    expect(after?.lastEnrichAttemptAt).toBeTypeOf('number')
+    // releaseName should reflect the resolved (tag, commitsAhead) pair
+    // so the picker can render the "+N commits" suffix on next refresh.
+    expect(after?.releaseName).toContain('v1.2.3')
+  })
+
+  it('falls back to findNearestTag when getLatestStableTag still returns null', async () => {
+    const repo = newRepo()
+    set(repo, 'latest', { commitSha: 'deadbeef00000000' })
+    vi.mocked(releasesMock.getLatestStableTag).mockResolvedValue(null)
+    vi.mocked(gitMock.findNearestTag).mockResolvedValue('v1.1.0')
+    vi.mocked(gitMock.countCommitsAhead).mockResolvedValue(2)
+
+    await enrichCommitsAhead(repo, '/tmp/fake-repo')
+
+    expect(gitMock.findNearestTag).toHaveBeenCalledWith('/tmp/fake-repo', 'deadbeef00000000')
+    const after = get(repo, 'latest')
+    expect(after?.baseTag).toBe('v1.1.0')
+    expect(after?.commitsAhead).toBe(2)
+  })
+
+  it('stamps a settle (and fires listeners) when no baseTag can be recovered', async () => {
+    const repo = newRepo()
+    set(repo, 'latest', { commitSha: 'deadbeef00000000' })
+    // Both recovery paths return nothing — the helper must not leave
+    // the renderer stuck on "Computing commits ahead…".
+    vi.mocked(releasesMock.getLatestStableTag).mockResolvedValue(null)
+    vi.mocked(gitMock.findNearestTag).mockResolvedValue(undefined)
+
+    const listener = vi.fn()
+    const off = onEnriched(listener)
+    try {
+      await enrichCommitsAhead(repo, '/tmp/fake-repo')
+    } finally {
+      off()
+    }
+
+    expect(listener).toHaveBeenCalledTimes(1)
+    const after = get(repo, 'latest')
+    expect(after?.baseTag).toBeUndefined()
+    expect(after?.commitsAhead).toBeUndefined()
+    expect(after?.lastEnrichAttemptAt).toBeTypeOf('number')
+    // rev-list was never attempted — there was nothing to count from.
+    expect(gitMock.countCommitsAhead).not.toHaveBeenCalled()
+  })
+
+  it('throttles retries: a recent failed-settle stamp short-circuits before any git work runs', async () => {
+    const repo = newRepo()
+    // Simulate a fresh failed-settle: commitsAhead unresolved but
+    // lastEnrichAttemptAt within the throttle window (5s ago, well
+    // under the 30s cooldown).
+    set(repo, 'latest', {
+      commitSha: 'deadbeef00000000',
+      baseTag: 'v1.0.0',
+      lastEnrichAttemptAt: Date.now() - 5_000,
+    })
+
+    await enrichCommitsAhead(repo, '/tmp/fake-repo')
+
+    // No recovery, no git work — the cooldown beats everything else.
+    expect(releasesMock.getLatestStableTag).not.toHaveBeenCalled()
+    expect(gitMock.findNearestTag).not.toHaveBeenCalled()
+    expect(gitMock.countCommitsAhead).not.toHaveBeenCalled()
+    expect(gitMock.fetchTags).not.toHaveBeenCalled()
+  })
+
+  it('allows retries once the throttle window has elapsed', async () => {
+    const repo = newRepo()
+    // Stamp is older than the 30s throttle, so the helper should run
+    // the full recovery + count chain again.
+    set(repo, 'latest', {
+      commitSha: 'deadbeef00000000',
+      baseTag: 'v1.0.0',
+      lastEnrichAttemptAt: Date.now() - 60_000,
+    })
+    vi.mocked(gitMock.countCommitsAhead).mockResolvedValue(11)
+
+    await enrichCommitsAhead(repo, '/tmp/fake-repo')
+
+    expect(gitMock.countCommitsAhead).toHaveBeenCalled()
+    const after = get(repo, 'latest')
+    expect(after?.commitsAhead).toBe(11)
+    // The fresh success refreshes the stamp.
+    expect(after?.lastEnrichAttemptAt).toBeGreaterThan(Date.now() - 5_000)
   })
 
   it('isolates listener errors — one throwing subscriber does not break others', async () => {

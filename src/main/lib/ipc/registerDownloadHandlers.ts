@@ -7,6 +7,7 @@ import {
   getAllDownloads,
   pauseModelDownload,
   resumeModelDownload,
+  retryDownload,
   startModelDownload,
 } from '../comfyDownloadManager'
 
@@ -37,6 +38,8 @@ export function registerDownloadHandlers(): void {
   )
 
   ipcMain.handle('model-download-clear-finished', () => clearFinishedDownloads())
+
+  ipcMain.handle('model-download-retry', (_event, { url }: { url: string }) => retryDownload(url))
 
   // Seed the renderer-side store with active entries plus the recent
   // terminal buffer so the Settings tab + popup history are non-empty

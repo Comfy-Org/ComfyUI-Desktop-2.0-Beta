@@ -61,8 +61,20 @@ export function buildChannelCards(
         ? cv
         : { commit: info.commitSha, baseTag: info.baseTag, commitsAhead: info.commitsAhead } as ComfyVersion)
       : undefined
+    // Show the "Computing commits ahead…" hint while enrichment is
+    // genuinely in flight.  `enrichCommitsAhead` now recovers a
+    // missing `baseTag` on its own (forced `getLatestStableTag` →
+    // local `findNearestTag` fallback), so we deliberately do NOT
+    // gate on `baseTag` here — the spinner should remain visible
+    // through that recovery window.  Once the helper records a settle
+    // via `lastEnrichAttemptAt` we suppress the hint forever for that
+    // cached entry: a successful follow-up swaps `commitsAhead` in
+    // and the label upgrades silently; a failed settle stays on the
+    // documented `tag (sha)` fallback without re-flashing the spinner
+    // on every picker reopen.
     const enriching = !!info?.commitSha
       && info.commitsAhead === undefined
+      && info.lastEnrichAttemptAt === undefined
       && installHasGit
     return {
       ...def,
