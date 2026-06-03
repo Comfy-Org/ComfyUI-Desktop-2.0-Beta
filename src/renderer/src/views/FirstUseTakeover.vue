@@ -604,6 +604,13 @@ defineExpose({ open })
             @click="pickedChoice = 'local'"
           />
         </div>
+        <!-- Modifier checkboxes (Migrate + Express). Wrapped in a
+             fit-content container so the two labels share the same
+             left edge and read as left-aligned peers — without the
+             wrapper, each label was an `inline-flex` that centered
+             independently, so a longer description text would push
+             one row off-axis from the other. -->
+        <div class="start-modifiers">
         <label
           v-if="hasLegacyDesktop"
           class="brand-checkbox start-migrate-existing"
@@ -653,6 +660,7 @@ defineExpose({ open })
             </span>
           </span>
         </label>
+        </div>
       </div>
       <div class="start-bottom">
         <div class="start-consent-strip">
@@ -924,16 +932,29 @@ defineExpose({ open })
   outline-offset: 2px;
 }
 
+/* Modifier-checkbox container. Both rows (Migrate + Express) live
+ * inside this so they share the same left edge: the wrapper itself is
+ * `width: fit-content` (shrinks to the WIDEST child) and centred in
+ * the start-hero column via `margin-inline: auto`. The labels inside
+ * are then plain block-level rows with no centring of their own, so a
+ * shorter row no longer floats to its own centre — they all start at
+ * the wrapper's left edge. */
+.start-modifiers {
+  display: flex;
+  flex-direction: column;
+  width: fit-content;
+  margin-inline: auto;
+  gap: 8px;
+  margin-top: 4px;
+}
 /* Express Install — intentionally low-weight: left-aligned single
  * line with the standard brand-checkbox box, smaller font + muted
  * text colour so it reads as an opt-out modifier, not a primary
  * decision. */
 .start-express {
   display: inline-flex;
-  align-self: center;
   align-items: flex-start;
   gap: 8px;
-  margin-top: 4px;
   font-size: 13px;
   color: var(--neutral-300);
   opacity: 1;
@@ -989,12 +1010,8 @@ defineExpose({ open })
  * modifiers carrying the same amount of detail. */
 .start-migrate-existing {
   display: inline-flex;
-  align-self: center;
   align-items: flex-start;
   gap: 8px;
-  /* Small bottom margin separates this row from Express so the two
-   * read as discrete peers rather than a stacked pair. */
-  margin-bottom: 4px;
   font-size: 13px;
   color: var(--neutral-300);
   opacity: 1;
