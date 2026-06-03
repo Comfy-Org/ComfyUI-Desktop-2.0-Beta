@@ -18,6 +18,7 @@ interface MockBridgeState {
   panelChangedCallbacks: ((panel: string) => void)[]
   titleChangedCallbacks: ((title: string) => void)[]
   sourceCategoryChangedCallbacks: ((category: string | null) => void)[]
+  zoomChangedCallbacks: ((level: number) => void)[]
   themeChangedCallbacks: ((theme: { bg: string; text: string }) => void)[]
   fullscreenChangedCallbacks: ((fullscreen: boolean) => void)[]
   menuOpenedCallbacks: ((info: { menu: 'menu' }) => void)[]
@@ -41,6 +42,8 @@ interface MockBridgeState {
   downloadsTrayClicks: number
   installPillClicks: { x: number; y: number }[]
   feedbackClicks: number
+  refreshInstanceClicks: number
+  resetZoomClicks: number
   showTooltipCalls: { text: string; leftX: number; rightX: number; bottomY: number }[]
   hideTooltipCalls: number
   readyCalls: number
@@ -51,6 +54,7 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
     panelChangedCallbacks: [],
     titleChangedCallbacks: [],
     sourceCategoryChangedCallbacks: [],
+    zoomChangedCallbacks: [],
     themeChangedCallbacks: [],
     fullscreenChangedCallbacks: [],
     menuOpenedCallbacks: [],
@@ -70,6 +74,8 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
     downloadsTrayClicks: 0,
     installPillClicks: [],
     feedbackClicks: 0,
+    refreshInstanceClicks: 0,
+    resetZoomClicks: 0,
     showTooltipCalls: [],
     hideTooltipCalls: 0,
     readyCalls: 0,
@@ -92,6 +98,10 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
     },
     onSourceCategoryChanged: (cb: (category: string | null) => void) => {
       state.sourceCategoryChangedCallbacks.push(cb)
+      return () => { }
+    },
+    onZoomChanged: (cb: (level: number) => void) => {
+      state.zoomChangedCallbacks.push(cb)
       return () => { }
     },
     onThemeChanged: (cb: (theme: { bg: string; text: string }) => void) => {
@@ -154,6 +164,12 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
     },
     clickFeedback: () => {
       state.feedbackClicks += 1
+    },
+    clickRefreshInstance: () => {
+      state.refreshInstanceClicks += 1
+    },
+    resetZoom: () => {
+      state.resetZoomClicks += 1
     },
     showTooltip: (payload: { text: string; leftX: number; rightX: number; bottomY: number }) => {
       state.showTooltipCalls.push(payload)
