@@ -205,6 +205,15 @@
   DetailPrint ""
   DetailPrint "Step 3 of 3: Finishing up"
   DetailPrint "  Cleaning up temporary files..."
+
+  # Clear the shutdown-block reason electron-builder set at the top of
+  # its install section (installSection.nsh:31). Without this the block
+  # persists through the Finish page, and Windows grays out the title-bar
+  # X — leaving the user unable to dismiss the wizard without clicking
+  # Finish. Best-effort: the block reason auto-clears on installer exit
+  # anyway, but destroying it here also re-enables the X.
+  System::Call 'user32::ShutdownBlockReasonDestroy(p $hwndparent)'
+
   DetailPrint "  ComfyUI Desktop is ready to launch."
 !macroend
 
@@ -246,6 +255,14 @@
   !define MUI_FINISHPAGE_SHOWREADME ""
   !define MUI_FINISHPAGE_SHOWREADME_TEXT "Add a desktop shortcut"
   !define MUI_FINISHPAGE_SHOWREADME_FUNCTION "CreateUserDesktopShortcut"
+
+  # Enable Cancel + the title-bar X on the Finish page. MUI2 default is
+  # to grey them both out once the install completes, which leaves the
+  # user stuck having to click "Finish" — clicking X feels like it
+  # should just close the installer. With this define, Cancel/X close
+  # cleanly without firing the run-after-install + showreadme actions
+  # (so unchecking "Run ComfyUI Desktop" before hitting X is unnecessary).
+  !define MUI_FINISHPAGE_CANCEL_ENABLED
 
   !define MUI_PAGE_CUSTOMFUNCTION_PRE FinishPagePreCheck
   !insertmacro MUI_PAGE_FINISH
