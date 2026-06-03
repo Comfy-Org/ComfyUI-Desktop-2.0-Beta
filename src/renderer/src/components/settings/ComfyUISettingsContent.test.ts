@@ -82,16 +82,25 @@ const useComfyUISettingsState = {
   sections: ref<unknown[]>([{ tab: 'update', fields: [] }, { tab: 'status', fields: [] }, { tab: 'snapshots' }]),
   loading: ref(false),
   error: ref<null>(null),
+  // Default to fresh — most tests don't care about freshness gating
+  // and want the host to render in its normal state. The "switch
+  // staleness" tests override this with `false` to exercise the
+  // `.is-stale` / More-menu gates.
+  sectionsFresh: ref<boolean>(true),
   runningActionIds: ref<Set<string>>(new Set()),
   pendingRestartFieldIds: ref<Set<string>>(new Set()),
   fieldErrorMessages: ref<Record<string, string>>({}),
   diskUsageItem: ref(null),
+  // Stable spies so the stale-watcher tests can assert that the
+  // channel-refresh watcher (#782) doesn't auto-fire actions
+  // against the wrong install's payload.
+  runActionStub: vi.fn(),
 }
 vi.mock('../../composables/useComfyUISettings', () => ({
   useComfyUISettings: () => ({
     ...useComfyUISettingsState,
     updateField: vi.fn(),
-    runAction: vi.fn(),
+    runAction: useComfyUISettingsState.runActionStub,
     // Real composable returns ComputedRef<DetailSection[]>; mirror that
     // so the host's `.value.length` reads work without surfacing the
     // composable's tab-filtering implementation here.
@@ -495,6 +504,124 @@ describe('ComfyUISettingsContent', () => {
       expect(w.find('.settings-v2-relaunch').text()).toBe('Switch')
       await w.find('.settings-v2-relaunch').trigger('click')
       expect(w.emitted('primary-action')).toEqual([[false]])
+    })
+  })
+
+  // Issue #782 — clicking a row in the central pill drawer used to
+  // flash "Loading…" while the new install's `get-detail-sections`
+  // IPC was in flight. The composable no longer blanks `sections` on
+  // switch; this component must (a) keep the body painted, (b) mark
+  // the body root `.is-stale` so a click in the brief window doesn't
+  // run against the previous install's payload, and (c) disable the
+  // footer More menu until the new payload lands.
+  describe('switch staleness (#782)', () => {
+    function setStale(value: boolean): void {
+      // `sectionsFresh = false` mirrors the real composable's state
+      // between an install switch and the new IPC resolving.
+      useComfyUISettingsState.sectionsFresh.value = !value
+    }
+
+    it('does NOT show the "Loading…" placeholder when sections are still painted (fresh OR stale)', async () => {
+      setStale(true)
+      // `loading: true` simulates the in-flight switch window. The
+      // placeholder must NOT appear because the previous payload's
+      // visibleSections.length > 0 — that is the whole point of the
+      // #782 fix.
+      useComfyUISettingsState.loading.value = true
+      const w = await mountContent()
+      expect(w.find('[data-testid="picker-settings-loading"]').exists()).toBe(false)
+      // The settings body root is still rendered so the user keeps
+      // seeing recognizable content during the IPC.
+      expect(w.find('[data-testid="picker-settings-sections"]').exists()).toBe(true)
+      useComfyUISettingsState.loading.value = false
+    })
+
+    it('still shows the "Loading…" placeholder on a true first load (no prior sections)', async () => {
+      // First mount with no payload yet: blank sections + loading.
+      // This is the only case where the placeholder is legitimate.
+      const priorSections = useComfyUISettingsState.sections.value
+      useComfyUISettingsState.sections.value = []
+      useComfyUISettingsState.loading.value = true
+      const w = await mountContent()
+      expect(w.find('[data-testid="picker-settings-loading"]').exists()).toBe(true)
+      useComfyUISettingsState.sections.value = priorSections
+      useComfyUISettingsState.loading.value = false
+    })
+
+    it('marks the body root .is-stale while the new install\'s sections are still in flight', async () => {
+      setStale(true)
+      const w = await mountContent()
+      const root = w.find('[data-testid="picker-settings-sections"]')
+      expect(root.classes()).toContain('is-stale')
+      setStale(false)
+      await nextTick()
+      expect(root.classes()).not.toContain('is-stale')
+    })
+
+    it('disables the footer More menu while sections are stale, re-enables when fresh', async () => {
+      setStale(true)
+      const w = await mountContent()
+      const more = w.find('.settings-v2-more')
+      expect((more.element as HTMLButtonElement).disabled).toBe(true)
+      setStale(false)
+      await nextTick()
+      expect((more.element as HTMLButtonElement).disabled).toBe(false)
+    })
+
+    it('does NOT auto-fire `check-update` against the new install while sections are still stale', async () => {
+      // Regression for an "Action 'check-update' not yet implemented."
+      // alert that appeared when switching from a local install to
+      // Cloud. The channel-cards-refresh watcher used to walk
+      // `sections.value` whenever `sectionsLen > 0`; with #782 keeping
+      // the previous install's sections painted across switches, that
+      // walked the wrong install's payload and fired the action
+      // against Cloud, which has no `check-update` handler.
+      const priorSections = useComfyUISettingsState.sections.value
+      // Seed STALE sections that contain a channel-cards field AND a
+      // `check-update` action — what would still be painted from a
+      // prior local install when the user has just clicked Cloud.
+      useComfyUISettingsState.sections.value = [
+        {
+          tab: 'update',
+          fields: [{ id: 'channel', editType: 'channel-cards', value: 'stable' }],
+          actions: [{ id: 'check-update', label: 'Check for update', data: {} }],
+        },
+      ]
+      setStale(true)
+      useComfyUISettingsState.runActionStub.mockClear()
+
+      await mountContent({ initialTab: 'update' })
+
+      expect(useComfyUISettingsState.runActionStub).not.toHaveBeenCalled()
+
+      useComfyUISettingsState.sections.value = priorSections
+    })
+  })
+
+  // Switching between installs in the central pill drawer should always
+  // give the user a visible motion cue — even when the same tab exists
+  // on both installs (e.g. Status → Status). The inner `<Transition>`
+  // only fires when its child key changes, so we key each pane by the
+  // install id; this test pins that contract by asserting the active
+  // pane's DOM element is replaced on install switch (which is exactly
+  // what makes the `tabTransition` animation fire).
+  describe('install-switch transition cue', () => {
+    it('remounts the inner tab pane when the installation changes (same tab)', async () => {
+      const w = await mountContent({ initialTab: 'status' })
+      const paneBefore = w.find('.settings-v2-tab-pane').element
+      expect(paneBefore).toBeTruthy()
+
+      const other = {
+        ...SAMPLE_INSTALL,
+        id: 'inst-2',
+        name: 'Other Install',
+      } as unknown as Installation
+      await w.setProps({ installation: other })
+      await flushPromises()
+
+      const paneAfter = w.find('.settings-v2-tab-pane').element
+      expect(paneAfter).toBeTruthy()
+      expect(paneAfter).not.toBe(paneBefore)
     })
   })
 
