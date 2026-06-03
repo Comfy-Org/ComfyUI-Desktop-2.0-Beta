@@ -1656,21 +1656,26 @@ function openInstancePickerForHost(
   // Bump the nonce whenever this open carries an autoAction so a repeat
   // trigger re-fires in the cached renderer (see `_pickerAutoActionNonce`).
   const autoActionNonce = autoAction ? (_pickerAutoActionNonce += 1) : _pickerAutoActionNonce
-  const popupEntry = titlePopupsByParent.get(parentEntry.window.id)
+  // Materialise the popup entry up front so the epoch bump persists
+  // even on the very first open (when `openTitlePopup` would otherwise
+  // be the one to create the entry, *after* this function returns).
+  // Without this, cold-open writes the bumped epoch into nothing — the
+  // entry is later created with `pickerSelectionEpoch: 0`, and the
+  // next open's `0 + 1 = 1` matches the renderer's already-applied
+  // epoch `1`, silently no-op'ing the retarget.
+  const popupEntry = ensureTitlePopup(parentEntry.window)
   // Bump the selection epoch BEFORE building the snapshot so the picker
   // view treats this open's `initialSelectedId` as a main-authoritative
   // retarget (vs a stale rebroadcast echoing the renderer's last click).
   // Every code path that intentionally (re)targets the picker selection
   // — title-bar pill, chooser-card "Manage…" deep-link, etc. — funnels
   // through here, so this is the only place that needs to bump.
-  const pickerSelectionEpoch = popupEntry ? popupEntry.pickerSelectionEpoch + 1 : 1
-  if (popupEntry) {
-    popupEntry.pickerSelectedInstallationId = initialSelectedId
-    popupEntry.pickerSelectionEpoch = pickerSelectionEpoch
-    popupEntry.pickerInitialTab = initialTab ?? null
-    popupEntry.pickerAutoAction = autoAction ?? null
-    popupEntry.pickerAutoActionNonce = autoActionNonce
-  }
+  const pickerSelectionEpoch = popupEntry.pickerSelectionEpoch + 1
+  popupEntry.pickerSelectedInstallationId = initialSelectedId
+  popupEntry.pickerSelectionEpoch = pickerSelectionEpoch
+  popupEntry.pickerInitialTab = initialTab ?? null
+  popupEntry.pickerAutoAction = autoAction ?? null
+  popupEntry.pickerAutoActionNonce = autoActionNonce
   const snapshot = buildInstancePickerSnapshot({
     installs,
     hostInstallationId: parentEntry.installationId,
