@@ -27,6 +27,20 @@ export function assertReadable(dirPath: string): void {
   }
 }
 
+/**
+ * Marker file written by `adoptLegacyDesktop()` at the legacy basePath after a
+ * successful adoption. Shared with `desktopAdopt.ts` (re-exported there as
+ * `MARKER_FILE`) so the auto-tracker and the adopter agree on a single name.
+ *
+ * When present, `detectDesktopInstall()` treats the legacy install as
+ * "already migrated" and returns null, which:
+ *   - prevents the startup auto-tracker from re-seeding a stale
+ *     "ComfyUI Legacy Desktop" card next to the adopted standalone, and
+ *   - flips `hasLegacyDesktop` back to false in the first-use detection,
+ *     so the Migrate sub-step disappears for a clean post-adoption launch.
+ */
+export const ADOPT_MARKER_FILE = '.comfyui-desktop-2'
+
 export interface DesktopInstallInfo {
   configDir: string
   basePath: string
@@ -83,6 +97,12 @@ export function detectDesktopInstall(): DesktopInstallInfo | null {
     return null
   }
   assertReadable(basePath)
+
+  // Adoption marker disqualifies this legacy workspace from auto-tracking —
+  // the adopted standalone record already represents it. Suppress before the
+  // models/user content checks so a half-cleaned legacy directory doesn't
+  // resurrect as a desktop card either.
+  if (fs.existsSync(path.join(basePath, ADOPT_MARKER_FILE))) return null
 
   const hasModels = fs.existsSync(path.join(basePath, 'models'))
   const hasUser = fs.existsSync(path.join(basePath, 'user'))

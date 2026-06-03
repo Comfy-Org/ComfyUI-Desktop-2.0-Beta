@@ -2,7 +2,12 @@ import fs from 'fs'
 import path from 'path'
 import { execFile } from 'child_process'
 
-import { detectDesktopInstall, captureDesktopSnapshot, type DesktopInstallInfo } from './desktopDetect'
+import {
+  detectDesktopInstall,
+  captureDesktopSnapshot,
+  ADOPT_MARKER_FILE,
+  type DesktopInstallInfo,
+} from './desktopDetect'
 import { defaultInstallDir, allocateUniqueDir, sanitizeDirName } from './paths'
 import { gitClone, gitCheckoutCommit } from './git'
 import { getComfyUIRemoteUrl } from './github-mirror'
@@ -13,7 +18,7 @@ import type { InstallationRecord } from '../installations'
 import * as settings from '../settings'
 import * as telemetry from './telemetry'
 
-const MARKER_FILE = '.comfyui-desktop-2'
+const MARKER_FILE = ADOPT_MARKER_FILE
 const STAGED_SOURCE_REL = path.join('legacy-staging', 'comfyui')
 const BACKUP_REL = 'legacy-backup'
 const SNAPSHOTS_REL = '.snapshots'
@@ -989,8 +994,9 @@ async function runAdoption(
     // Two markers, two different jobs:
     //   - `<adoptedBaseDir>/<MARKER_FILE>` lets the next adopt attempt
     //     recognise an already-adopted legacy install and short-circuit
-    //     (see `findExistingByMarker`). Also disqualifies the legacy
-    //     workspace from the desktop auto-tracker.
+    //     (see `findExistingAdoption`). Also makes `detectDesktopInstall()`
+    //     skip this workspace, so the startup auto-tracker can't reseed a
+    //     "ComfyUI Legacy Desktop" card alongside the adopted standalone.
     //   - `<installPath>/<MARKER_FILE>` is the safety check used by the
     //     standard delete flow (`sessionActions/delete.ts`) — without it
     //     "Delete" on an adopted install errors out as "not created by
@@ -1003,6 +1009,22 @@ async function runAdoption(
       try { await installations.remove(entry.id) } catch {}
       throw err
     }
+    // Drop the auto-tracked legacy desktop card now that the adopted
+    // standalone record represents the same workspace. Without this the
+    // dashboard shows two cards for the same install path (one with
+    // `launchMode: 'external'` pointing at the no-longer-installed
+    // legacy app). The startup auto-tracker won't reseed it because the
+    // marker we just wrote disqualifies the path from
+    // `detectDesktopInstall()`. Best-effort: a failure here doesn't break
+    // adoption — the next app launch reconciles via the marker check.
+    try {
+      const all = await installations.list()
+      for (const i of all) {
+        if (i.sourceId !== 'desktop') continue
+        if (i.installPath !== info.basePath) continue
+        await installations.remove(i.id)
+      }
+    } catch {}
     return entry
   })
 

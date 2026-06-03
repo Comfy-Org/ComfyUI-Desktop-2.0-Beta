@@ -43,7 +43,13 @@ and marker-based:
   install record exists, so a crash mid-flow never poisons retries.
   If the marker write fails (disk full, permissions, …), the just-added
   installation record is rolled back so the next attempt isn't blocked
-  by a duplicate entry.
+  by a duplicate entry. The marker also makes `detectDesktopInstall()`
+  skip this workspace on subsequent boots, so the startup auto-tracker
+  can't reseed a "ComfyUI Legacy Desktop" card next to the adopted one.
+- Removes any auto-tracked `sourceId === 'desktop'` record whose
+  `installPath` matches the adopted basePath, so the dashboard reflects
+  the swap immediately (best-effort; the marker check above is the
+  belt-and-braces version that catches anything left behind).
 - Re-runs detect the marker and return the existing record without
   re-running the destructive steps. The re-run **does** run a
   best-effort `installAdoptedRequirements` reconcile against the legacy
@@ -283,6 +289,3 @@ Items pending to close the loop:
   in their adopted ComfyUI window.
 - Wire `desktop2.adopt.*` telemetry properties so the migration funnel
   is visible end-to-end in PostHog.
-- Decide whether to remove the auto-tracked legacy desktop install
-  record after a successful adoption (today it stays in the list as a
-  `desktop`-source entry alongside the new `standalone` one).

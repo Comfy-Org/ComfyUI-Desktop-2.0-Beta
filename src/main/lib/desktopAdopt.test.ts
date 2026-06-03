@@ -559,6 +559,43 @@ describe('adoptDesktopInstall', () => {
     } finally { legacy.cleanup() }
   })
 
+  it('removes the auto-tracked legacy desktop card after successful adoption', async () => {
+    const legacy = buildFakeLegacy()
+    try {
+      // Pre-seed the auto-tracked legacy card that the startup auto-tracker
+      // would have inserted on first boot. Adoption must drop it so the
+      // dashboard doesn't show two cards for the same workspace.
+      await installations.add({
+        name: 'ComfyUI Legacy Desktop',
+        sourceId: 'desktop',
+        installPath: legacy.info.basePath,
+        launchMode: 'external',
+        status: 'installed',
+      })
+      // Unrelated desktop-source records at other paths must NOT be touched.
+      const unrelated = await installations.add({
+        name: 'Other Legacy',
+        sourceId: 'desktop',
+        installPath: path.join(legacy.info.basePath, '..', 'elsewhere'),
+        launchMode: 'external',
+        status: 'installed',
+      })
+
+      const tools = buildSilentTools()
+      const record = await adoptDesktopInstall({
+        tools,
+        deps: buildDeps({}, legacy.info),
+      })
+
+      const after = await installations.list()
+      // Adopted standalone present, legacy card at this basePath gone,
+      // unrelated desktop record preserved.
+      expect(after.find((r) => r.id === record.id)).toBeTruthy()
+      expect(after.some((r) => r.sourceId === 'desktop' && r.installPath === legacy.info.basePath)).toBe(false)
+      expect(after.find((r) => r.id === unrelated.id)).toBeTruthy()
+    } finally { legacy.cleanup() }
+  })
+
   it('promotes legacy input-directory / output-directory into per-install fields', async () => {
     const legacy = buildFakeLegacy({
       configFiles: {
