@@ -1508,16 +1508,20 @@ export interface TitlePopupHostBindings {
     installationId: string,
     parentEntryId: number,
   ) => Promise<void> | void
-  /** Picker → Restart on a running install. Implementations confirm
-   *  with the user (parented to the picker's host window), gracefully
-   *  stop the running session, and then re-launch via the same
-   *  focus-or-launch path the picker normally uses. `parentEntryId`
-   *  threads the picker's host through so the confirm dialog is parented
-   *  to the right window and post-stop relaunch routes back through
-   *  the picker's own parent. */
+  /** Picker → Restart on a running install. Gracefully stops the running
+   *  session and re-launches via the same focus-or-launch path the picker
+   *  normally uses. `parentEntryId` threads the picker's host through so
+   *  the post-stop relaunch routes back through the picker's own parent.
+   *
+   *  When `confirmed === true`, the picker renderer already showed an
+   *  in-drawer confirm and the user accepted; implementations skip their
+   *  own system-modal in that case. Otherwise the system-modal confirm
+   *  fires as the safety net (non-renderer-confirmed callers / legacy
+   *  triggers). */
   restartInstallFromPicker: (
     installationId: string,
     parentEntryId: number,
+    opts?: { confirmed?: boolean },
   ) => Promise<void> | void
   /** Resolve the per-install Settings sections + Snapshots payload the
    *  picker's right-pane accordions render. Returns `null` for either
@@ -2504,19 +2508,22 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
 
   // Picker → restart a running install. Same contract as
   // `pick-install` but routed through `restartInstallFromPicker`, which
-  // confirms with the user, stops the running session, then re-runs
-  // the focus-or-launch flow. The popup is dismissed before the
-  // confirm fires so the dialog comes up over the host body, not the
-  // open popup.
+  // stops the running session, then re-runs the focus-or-launch flow.
+  // The popup is dismissed before the action fires so the panel's
+  // ProgressModal lands unobstructed. When the renderer already showed
+  // its own in-drawer confirm (`payload.confirmed`), we forward that
+  // signal so main skips its system-modal — the user already answered
+  // the prompt inside the drawer.
   ipcMain.on(
     'comfy-titlepopup:restart-install',
-    (event, payload: { installationId?: unknown }) => {
+    (event, payload: { installationId?: unknown; confirmed?: unknown }) => {
       const entry = titlePopupsByWebContents.get(event.sender.id)
       if (!entry) return
       const installationId = payload?.installationId
       if (typeof installationId !== 'string' || installationId.length === 0) return
+      const confirmed = payload?.confirmed === true
       hideTitlePopup(entry, { releaseFocusToParent: false })
-      void bindings.restartInstallFromPicker(installationId, entry.parentEntryId)
+      void bindings.restartInstallFromPicker(installationId, entry.parentEntryId, { confirmed })
     },
   )
 
