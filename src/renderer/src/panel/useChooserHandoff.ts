@@ -170,8 +170,17 @@ export function useChooserHandoff(opts: ChooserHandoffOpts): ChooserHandoffApi {
       onMissingLaunchAction()
       return 'missing-action'
     }
-    await prepareChooserHostHandoff(installation.id)
-    await executeChooserAction(installation, launchAction)
+    // Stake the in-place attach claim only after `executeChooserAction`'s
+    // guard chain has committed to running. If the user cancels the
+    // "operation in progress" prompt (e.g. a sibling chooser window
+    // already started this install), staking pre-guard would have
+    // cross-window overwritten the sibling's claim AND left this
+    // window's title bar showing the install's preview chrome — so
+    // when the sibling's launch completed, main would consume *this*
+    // window's stale claim and attach the install to the wrong window.
+    await executeChooserAction(installation, launchAction, {
+      onGuardsPassed: () => prepareChooserHostHandoff(installation.id),
+    })
     return 'launched'
   }
 

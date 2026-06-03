@@ -49,6 +49,7 @@ import {
   _runningSessions,
   _operationAborts,
   _activeOperationStatus,
+  _getLaunchingInstallationIds,
   stopRunning,
   resolveTheme,
   MSG_CANCELLED,
@@ -67,12 +68,15 @@ import {
   markIdentityMigrationCompleted
 } from './lib/deviceId'
 import { initExperiments } from './lib/experiments'
+import { initCloudCapacity } from './lib/cloudCapacity'
+import { initUserTier } from './lib/userTier'
 
 import {
   claimAttachHost,
   comfyWindows,
   computeBodyMode,
   consumeAttachClaim,
+  dropAttachClaimsForWindow,
   findEntryByTitleBarSender,
   getEntryByInstallationId,
   isChooserHost,
@@ -80,7 +84,8 @@ import {
   openOrFocusAnyHostWindow,
   openOrFocusChooserHostWindow,
   raiseAllHostWindows,
-  setHostFactories
+  setHostFactories,
+  shouldConfirmKillForEntry
 } from './host/registry'
 import {
   applyChooserHostThemeToAll,
@@ -945,6 +950,12 @@ ipcMain.handle('release-attach-host-preview', (event) => {
     if (entry.window.isDestroyed()) continue
     if (isInstallHost(entry)) continue
     if (entry.panelView?.webContents !== event.sender) continue
+    // Drop any pending in-place attach claims for this window too —
+    // the renderer is signalling "this op is over, nothing will land
+    // on the claim". Without this a stale claim could be consumed by
+    // a later unrelated `onLaunch` and flip the chooser host into
+    // the wrong install.
+    dropAttachClaimsForWindow(entry.windowKey)
     clearAttachHostPreview(entry)
     return true
   }
@@ -1124,6 +1135,21 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
       }
     })
 
+    // Boot the cloud capacity-protection switch. Separate from
+    // `initExperiments` because this is an OPS kill-switch, not an A/B
+    // experiment — it deliberately bypasses the telemetry consent gate
+    // (a user who declined analytics still benefits from cloud being
+    // throttled when GPUs are saturated). See `cloudCapacity.ts`.
+    void initCloudCapacity({ distinctId: installationId })
+
+    // Hydrate the persisted cloud user-tier cache so the very first
+    // dashboard render knows whether the signed-in user is on a paid
+    // plan — without it, dashboard / IPP would treat returning paid
+    // users as `free` until they open a cloud install once this
+    // session. `userTier.ts` refreshes the cache on every cloud
+    // webContents `dom-ready` (see `attach.ts`).
+    void initUserTier()
+
     const locale = (settings.get('language') as string | undefined) || app.getLocale().split('-')[0]
     i18n.init(locale)
     registerTitleTooltipIpc({
@@ -1170,42 +1196,46 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
       // the IPC boundary, nothing more to do.
       if (parentEntry.installationId === installationId) return
 
-      // Install-backed parent → confirm before swap (the user is
-      // about to lose any unsaved work in the current install's
-      // workflow). Chooser hosts skip the dialog because there's no
-      // active workflow to lose — they're a launcher surface.
+      // Install-backed parent → swap by detaching first, then routing
+      // through the chooser-pick path. Confirm only when the swap will
+      // kill a *local* ComfyUI process (issue #654): chooser hosts have
+      // nothing to detach and cloud/remote hosts have no local process
+      // at risk, so both skip the modal. The detach itself still runs
+      // for cloud parents so the window is free to re-attach.
       if (parentEntry.installationId != null) {
-        let targetName = installationId
-        try {
-          const target = await getInstallation(installationId)
-          if (target?.name) targetName = target.name
-        } catch {
-          // Name lookup is cosmetic — fall through with the id as the label.
-        }
-        const confirmed = await openSystemModalAsync({
-          parent: parentEntry.window,
-          spec: {
-            title: 'Switch instance?',
-            message: `Switch to ${targetName}?`,
-            details: [
-              {
-                label: 'Heads up',
-                items: [
-                  'The current instance will be stopped and replaced in this window.',
-                  'Any unsaved work in the workflow will be lost.'
-                ]
-              }
-            ],
-            confirmLabel: 'Switch',
-            cancelLabel: 'Cancel',
-            confirmStyle: 'primary',
-            theme: parentEntry.lastTheme
+        if (shouldConfirmKillForEntry(parentEntry)) {
+          let targetName = installationId
+          try {
+            const target = await getInstallation(installationId)
+            if (target?.name) targetName = target.name
+          } catch {
+            // Name lookup is cosmetic — fall through with the id as the label.
           }
-        })
-        if (!confirmed) return
-        // Multi-instance validation signal. Fired once per user-confirmed
-        // instance swap from the title-bar picker; other paths (fresh
-        // chooser pick, new-window launch) are NOT swaps.
+          const confirmed = await openSystemModalAsync({
+            parent: parentEntry.window,
+            spec: {
+              title: 'Switch instance?',
+              message: `Switch to ${targetName}?`,
+              details: [
+                {
+                  label: 'Heads up',
+                  items: [
+                    'The current instance will be stopped and replaced in this window.',
+                    'Any unsaved work in the workflow will be lost.'
+                  ]
+                }
+              ],
+              confirmLabel: 'Switch',
+              cancelLabel: 'Cancel',
+              confirmStyle: 'primary',
+              theme: parentEntry.lastTheme
+            }
+          })
+          if (!confirmed) return
+        }
+        // Multi-instance validation signal. Fired once per picker swap
+        // (with or without a confirm); other paths (fresh chooser pick,
+        // new-window launch) are NOT swaps.
         mainTelemetry.emit('desktop2.instance.switched', {
           from_installation_id: parentEntry.installationId,
           to_installation_id: installationId,
@@ -1495,6 +1525,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
         return enriched as unknown as InstancePickerInstall[]
       },
       getRunningInstallationIds: () => Array.from(_runningSessions.keys()),
+      getLaunchingInstallationIds: () => _getLaunchingInstallationIds(),
       // Per-install Settings + Snapshots payload for the picker's
       // right-pane accordions. Both reads route through the same
       // source helpers the unified Settings drawer uses
@@ -1613,27 +1644,34 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
         // shell-level prompts (and Playwright-driveable end to end).
         const parentEntry = comfyWindows.get(parentEntryId)
         if (!parentEntry || parentEntry.window.isDestroyed()) return
-        const confirmed = await openSystemModalAsync({
-          parent: parentEntry.window,
-          spec: {
-            title: 'Restart instance?',
-            message: 'Restart this instance?',
-            details: [
-              {
-                label: 'Heads up',
-                items: [
-                  'Restarting will stop the running session.',
-                  'Any unsaved work in the workflow will be lost.'
-                ]
-              }
-            ],
-            confirmLabel: 'Restart',
-            cancelLabel: 'Cancel',
-            confirmStyle: 'primary',
-            theme: parentEntry.lastTheme
-          }
-        })
-        if (!confirmed) return
+        // Restart is always same-install/same-window — a stale renderer
+        // pick shouldn't be able to restart a different install.
+        if (parentEntry.installationId !== installationId) return
+        // Confirm only when the restart will kill a local process
+        // (issue #654). Cloud/remote restarts skip the modal.
+        if (shouldConfirmKillForEntry(parentEntry)) {
+          const confirmed = await openSystemModalAsync({
+            parent: parentEntry.window,
+            spec: {
+              title: 'Restart instance?',
+              message: 'Restart this instance?',
+              details: [
+                {
+                  label: 'Heads up',
+                  items: [
+                    'Restarting will stop the running session.',
+                    'Any unsaved work in the workflow will be lost.'
+                  ]
+                }
+              ],
+              confirmLabel: 'Restart',
+              cancelLabel: 'Cancel',
+              confirmStyle: 'primary',
+              theme: parentEntry.lastTheme
+            }
+          })
+          if (!confirmed) return
+        }
         // Stop is idempotent — awaiting ensures the process is fully
         // gone before the re-launch so the new session doesn't race a
         // port that's still bound.

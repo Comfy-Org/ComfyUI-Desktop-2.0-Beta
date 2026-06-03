@@ -19,6 +19,7 @@ import {
   getAppVersion,
   _activeOperationStatus,
   _operationAborts,
+  sessionLifecycleEvents,
   type PickerOperationStatus,
 } from '../lib/ipc/shared'
 import {
@@ -33,6 +34,7 @@ import {
   comfyWindows,
   findEntryByTitleBarSender,
   getEntryByInstallationId,
+  hostInstallEvents,
   isChooserHost,
 } from '../host/registry'
 import type { ComfyPanelKey, ComfyWindowEntry } from '../host/registry'
@@ -71,6 +73,13 @@ interface TitlePopupMenuItem {
 }
 
 type TitlePopupKind = 'menu' | 'downloads' | 'instance-picker' | 'global-settings'
+
+/** Kinds that dim the host body with the shared backdrop view. Single source
+ *  of truth — geometry, blur-dismiss opt-out, and backdrop show/hide all key
+ *  off this so a new kind only has to opt in here. */
+function kindUsesBackdrop(kind: TitlePopupKind): boolean {
+  return kind === 'instance-picker' || kind === 'global-settings'
+}
 
 /** Single install row pushed to the instance-picker popup. Mirrors the
  *  renderer-side `Installation` shape returned by the `get-installations`
@@ -117,6 +126,13 @@ export interface InstancePickerSnapshot {
   installs: InstancePickerInstall[]
   activeInstallationId: string | null
   runningInstallationIds: string[]
+  /** Installs mid-launch — `instance-launching` fired, `instance-started`
+   *  has not. Mirrors `_launchingInstallationIds` in main so the picker
+   *  popup can hydrate `sessionStore.launchingInstances` from the
+   *  snapshot (its preload doesn't expose `onInstanceLaunching`).
+   *  Drives the CTA flip from **Start → Restart / Switch** during the
+   *  launching window via `useInstallCta`. */
+  launchingInstallationIds: string[]
   selectedInstallationId: string | null
   selectedSettings: Record<string, unknown>[] | null
   selectedSnapshots: Record<string, unknown> | null
@@ -194,7 +210,15 @@ export interface GlobalSettingsSnapshot {
 interface BuildInstancePickerSnapshotArgs {
   installs: InstancePickerInstall[]
   hostInstallationId: string | null
+  /** Optional fallback for `hostInstallationId` — set by the chooser
+   *  attach-claim path (`applyAttachHostPreview`) so a dashboard that
+   *  has staked a claim against an install reads as "currently owning"
+   *  it for picker purposes (Current pill + per-window CTA) from the
+   *  moment the claim is staked, instead of waiting for the real
+   *  `attachInstall` after `instance-started`. */
+  previewInstallationId?: string | null
   runningInstallationIds: string[]
+  launchingInstallationIds: string[]
   selectedInstallationId?: string | null
   selectedSettings?: Record<string, unknown>[] | null
   selectedSnapshots?: Record<string, unknown> | null
@@ -260,8 +284,14 @@ export function buildInstancePickerSnapshot(
 ): InstancePickerSnapshot {
   return {
     installs: args.installs,
-    activeInstallationId: args.hostInstallationId,
+    // Use the real attached install when available; fall back to the
+    // chooser's preview claim (set by `applyAttachHostPreview` when
+    // the chooser stakes an in-place attach claim ahead of a launch).
+    // Either case represents "this host is the one acting on the
+    // install" from the picker's perspective.
+    activeInstallationId: args.hostInstallationId ?? args.previewInstallationId ?? null,
     runningInstallationIds: args.runningInstallationIds,
+    launchingInstallationIds: args.launchingInstallationIds,
     selectedInstallationId: args.selectedInstallationId ?? null,
     selectedSettings: args.selectedSettings ?? null,
     selectedSnapshots: args.selectedSnapshots ?? null,
@@ -588,11 +618,18 @@ function showPopupBackdrop(parent: BrowserWindow): void {
   entry.visible = true
 }
 
+/** Hide AND detach the backdrop. Detaching (not just `setVisible(false)`)
+ *  stops a lagging hidden view from intercepting body clicks; `showPopupBackdrop`
+ *  re-adds it on every show. */
 function hidePopupBackdrop(parent: BrowserWindow): void {
   const entry = popupBackdropsByParent.get(parent.id)
   if (!entry || !entry.visible) return
-  if (!entry.view.webContents.isDestroyed()) entry.view.setVisible(false)
   entry.visible = false
+  if (entry.view.webContents.isDestroyed()) return
+  entry.view.setVisible(false)
+  if (!parent.isDestroyed()) {
+    try { parent.contentView.removeChildView(entry.view) } catch { /* noop */ }
+  }
 }
 
 const POPUP_WIDTH = 220
@@ -630,91 +667,77 @@ export function buildTitlePopupMenuItems(entry: ComfyWindowEntry): TitlePopupMen
       },
     ]
   }
-  // Issue #497 — file-menu order:
+  // Unified menu order — same item set on dashboard (install-less)
+  // and instance (install-backed) hosts so the user has one mental
+  // model of what the waffle does regardless of where they opened it
+  // (issue #644):
+  //
   //   New Window
   //   ── separator ──
-  //   (install-less only) New Install / Track / Load Snapshot
+  //   New Install
+  //   Add Existing Install
+  //   Load Snapshot
   //   ── separator ──
-  //   Settings (unified — ComfyUI Settings on install-backed hosts,
-  //             Global Settings on install-less; PanelApp picks the
-  //             default tab at mount time)
-  //   Send Feedback
+  //   Desktop Settings
+  //   Send Beta Feedback
+  //   (Reset Zoom — when zoom level != 0)
   //   ── separator ──
-  //   (install-backed only) Return to Dashboard
-  //   Close All Windows
+  //   Close Window
+  //   Quit Desktop
   //
   // Notes:
-  //   - "Close Window" is intentionally absent — the OS-X / native
-  //     close button already covers single-window dismissal; the menu
-  //     only surfaces the cross-window kill switch.
-  //   - Install-creation / import flows (New Install / Track / Load
-  //     Snapshot) live ONLY on the dashboard (install-less host)
-  //     waffle menu. Inside a Comfy Instance window the only escape
-  //     hatch back to the dashboard is "Return to Dashboard" — the
-  //     in-Comfy chrome stays closed-off per the design doc's
-  //     "Comfy Instance is closed-off" rule.
-  //   - "Return to Dashboard" is install-backed-only; install-less
-  //     host windows are already on the chooser body so the entry
-  //     would be a no-op there.
+  //   - "Close Window" appears on every host. On an instance host it
+  //     stops the running ComfyUI and either closes the window or
+  //     detaches it to the dashboard when it's the last one open. On
+  //     the dashboard it just closes that window — matching what the
+  //     native ✕ already does — so the menu and the OS chrome stay
+  //     consistent.
+  //   - New Install / Add Existing Install / Load Snapshot land in
+  //     a takeover *inside* this window when invoked from the
+  //     dashboard, and spawn a *new* chooser window booted straight
+  //     into the wizard when invoked from an instance host — so the
+  //     instance keeps running undisturbed. The host-type branch
+  //     lives in `activateTitlePopupMenuItem` below.
+  //   - "Return to Dashboard" is absent: the picker's Home icon is
+  //     the canonical dashboard escape (opens a fresh chooser window
+  //     instead of detaching, so the running ComfyUI stays alive).
   const items: TitlePopupMenuItem[] = [
     { id: 'new-window', label: 'New Window', labelKey: 'fileMenu.newWindow' },
     { kind: 'separator' },
-  ]
-  if (isChooserHost(entry)) {
-    items.push(
-      { id: 'new-install', label: 'New Install', labelKey: 'fileMenu.newInstall' },
-      {
-        id: 'track',
-        label: 'Add Existing Install',
-        labelKey: 'fileMenu.addExistingInstall',
-      },
-      { id: 'load-snapshot', label: 'Load Snapshot', labelKey: 'fileMenu.loadSnapshot' },
-      { kind: 'separator' },
-      {
-        id: 'settings',
-        label: 'Desktop Settings',
-        labelKey: 'fileMenu.globalSettings',
-      },
-      // Send Feedback (#493). The renderer-side handler resolves the
-      // support URL and emits the `desktop2.feedback.opened`
-      // telemetry action with `source: 'menu'`.
-      { id: 'feedback', label: 'Send Beta Feedback', labelKey: 'fileMenu.sendFeedback' },
-    )
-    // Reset Zoom — discoverable recovery path for users who zoom the
-    // comfyView too far to read. Only on the chooser host (the dummy
-    // comfyView there can still be zoomed via Ctrl/Cmd+scroll); the
-    // install host trims it out per the simplified menu spec.
-    if (!entry.comfyView.webContents.isDestroyed()) {
-      const level = entry.comfyView.webContents.getZoomLevel()
-      if (level !== 0) {
-        const percent = Math.round(Math.pow(1.2, level) * 100)
-        items.push({ id: 'reset-zoom', label: `Reset Zoom (${percent}%)` })
-      }
-    }
-    items.push(
-      { kind: 'separator' },
-      {
-        id: 'close-all-windows',
-        label: 'Quit ComfyUI',
-        labelKey: 'fileMenu.exitAllWindows',
-      },
-    )
-    return items
-  }
-  // Install-host menu: trimmed to the essentials. Desktop Settings,
-  // Return to Dashboard, and Reset Zoom are intentionally absent —
-  // Settings lives in the picker's Startup Args tab, the dashboard
-  // escape is the Home icon in the picker chips row, and Reset Zoom
-  // remains reachable via Ctrl/Cmd + 0. "Quit ComfyUI" stays available
-  // from every window; "Close Window" is instance-only — the dashboard
-  // omits it (there's nothing to close back to).
-  items.push(
+    { id: 'new-install', label: 'New Install', labelKey: 'fileMenu.newInstall' },
+    {
+      id: 'track',
+      label: 'Add Existing Install',
+      labelKey: 'fileMenu.addExistingInstall',
+    },
+    { id: 'load-snapshot', label: 'Load Snapshot', labelKey: 'fileMenu.loadSnapshot' },
+    { kind: 'separator' },
+    {
+      id: 'settings',
+      label: 'Desktop Settings',
+      labelKey: 'fileMenu.globalSettings',
+    },
     { id: 'feedback', label: 'Send Beta Feedback', labelKey: 'fileMenu.sendFeedback' },
+  ]
+  // Reset Zoom — discoverable recovery path for users who zoom the
+  // comfyView too far to read. Contextual: only surfaces when the
+  // current view actually carries a non-zero zoom. Available on
+  // every host (the dashboard's dummy comfyView can be zoomed via
+  // Ctrl/Cmd+scroll, and the instance host's live comfyView even
+  // more so).
+  if (!entry.comfyView.webContents.isDestroyed()) {
+    const level = entry.comfyView.webContents.getZoomLevel()
+    if (level !== 0) {
+      const percent = Math.round(Math.pow(1.2, level) * 100)
+      items.push({ id: 'reset-zoom', label: `Reset Zoom (${percent}%)` })
+    }
+  }
+  items.push(
     { kind: 'separator' },
     { id: 'exit-window', label: 'Close Window', labelKey: 'fileMenu.exitWindow' },
     {
       id: 'close-all-windows',
-      label: 'Quit ComfyUI',
+      label: 'Quit Desktop',
       labelKey: 'fileMenu.exitAllWindows',
     },
   )
@@ -735,6 +758,19 @@ function broadcastDownloadsToTitlePopups(): void {
   }
 }
 
+/**
+ *  Monotonic sequence stamped on every call to
+ *  `broadcastInstancePickerSnapshotToTitlePopups`. The function
+ *  awaits the install list and (per entry) the picker-detail payload;
+ *  back-to-back triggers (`hostInstallEvents.changed` +
+ *  `sessionLifecycleEvents.changed` firing in the same tick around a
+ *  fast launch/stop/restart) can otherwise resolve out of order and
+ *  let an older snapshot overwrite the newer one. Each in-flight
+ *  build re-checks this value after every await and aborts when
+ *  superseded.
+ */
+let pickerSnapshotBroadcastSeq = 0
+
 /** Push an updated instance-picker snapshot to every popup whose
  *  current kind is `'instance-picker'`. Triggered by the
  *  `installationEvents.on('changed')` subscription wired in
@@ -743,6 +779,7 @@ function broadcastDownloadsToTitlePopups(): void {
 async function broadcastInstancePickerSnapshotToTitlePopups(
   bindings: TitlePopupHostBindings,
 ): Promise<void> {
+  const mySeq = ++pickerSnapshotBroadcastSeq
   const hasActivePicker = Array.from(titlePopupsByParent.values()).some(
     (entry) => entry.kind === 'instance-picker'
       && (entry.view.isOpen || entry.view.pendingShowTimer !== null),
@@ -752,15 +789,24 @@ async function broadcastInstancePickerSnapshotToTitlePopups(
   // typically there is only one, but reading the disk-backed list per
   // entry would waste IO on the rare multi-window case.
   const installs = await bindings.getInstancePickerInstalls()
+  if (mySeq !== pickerSnapshotBroadcastSeq) return
   const runningInstallationIds = bindings.getRunningInstallationIds()
+  const launchingInstallationIds = bindings.getLaunchingInstallationIds()
   for (const entry of titlePopupsByParent.values()) {
     if (entry.kind !== 'instance-picker') continue
     if (!entry.view.isOpen && entry.view.pendingShowTimer === null) continue
     if (entry.view.popup.webContents.isDestroyed()) continue
     const parentEntry = comfyWindows.get(entry.parentEntryId)
+    // For picker selection / Current-pill purposes a chooser host
+    // that has staked an attach claim (previewInstallationId set,
+    // installationId still null) reads as "owning" the install — see
+    // `applyAttachHostPreview` + buildInstancePickerSnapshot's
+    // hostInstallationId/previewInstallationId fallback.
+    const effectiveHostInstallationId =
+      parentEntry?.installationId ?? parentEntry?.previewInstallationId ?? null
     const selectedId = resolvePickerSelectedInstallId(
       entry.pickerSelectedInstallationId,
-      parentEntry?.installationId,
+      effectiveHostInstallationId,
       installs,
     )
     if (!entry.pickerSelectedInstallationId && selectedId) {
@@ -772,10 +818,13 @@ async function broadcastInstancePickerSnapshotToTitlePopups(
         snapshots: null,
       }))
       : { settings: null, snapshots: null }
+    if (mySeq !== pickerSnapshotBroadcastSeq) return
     const snapshot = buildInstancePickerSnapshot({
       installs,
       hostInstallationId: parentEntry?.installationId ?? null,
+      previewInstallationId: parentEntry?.previewInstallationId ?? null,
       runningInstallationIds,
+      launchingInstallationIds,
       selectedInstallationId: selectedId,
       selectedSettings: details.settings,
       selectedSnapshots: details.snapshots,
@@ -879,11 +928,6 @@ function ensureTitlePopup(parent: BrowserWindow): TitlePopupEntry {
       titlePopupsByWebContents.delete(view.popupWebContentsId)
     },
     onHide: () => {
-      // Always fires when the popup transitions out of open/pending —
-      // including the blur / will-move / move / popup-blur auto-dismiss
-      // paths. Without this notify, the title-bar renderer's
-      // `isMenuOpen` flag stays stuck true and every subsequent click
-      // on the trigger button is suppressed by the reopen guard.
       if (!entry.titleBarSender.isDestroyed()) {
         entry.titleBarSender.send('comfy-titlebar:menu-closed', { menu: entry.kind })
       }
@@ -892,15 +936,9 @@ function ensureTitlePopup(parent: BrowserWindow): TitlePopupEntry {
       if (entry.kind === 'downloads' && !view.parentWindow.isDestroyed()) {
         downloadsHiddenAtByParent.set(view.parentWindow.id, Date.now())
       }
-      // Hide the popup backdrop on every dismiss path so the dim
-      // never outlives the popup. Cheap no-op for kinds that don't
-      // use the backdrop (menu / downloads).
-      if (
-        (entry.kind === 'instance-picker' || entry.kind === 'global-settings')
-        && !view.parentWindow.isDestroyed()
-      ) {
-        hidePopupBackdrop(view.parentWindow)
-      }
+      /** Unconditional — never gated on `entry.kind`, which may have been
+       *  reassigned by a kind-switch. No-op when the backdrop isn't visible. */
+      if (!view.parentWindow.isDestroyed()) hidePopupBackdrop(view.parentWindow)
     },
   })
   const entry: TitlePopupEntry = {
@@ -997,10 +1035,7 @@ function showTitlePopupNow(entry: TitlePopupEntry): void {
   // Bring the picker backdrop up first so it sits BELOW the popup in
   // the parent's child-view stack — the popup's own re-stack inside
   // `showOnTop` lands on top.
-  if (
-    (entry.kind === 'instance-picker' || entry.kind === 'global-settings')
-    && !entry.view.parentWindow.isDestroyed()
-  ) {
+  if (kindUsesBackdrop(entry.kind) && !entry.view.parentWindow.isDestroyed()) {
     showPopupBackdrop(entry.view.parentWindow)
   }
   // Tell the renderer the popup is about to be shown. Unlike
@@ -1256,19 +1291,23 @@ function openTitlePopup(opts: OpenTitlePopupOpts): void {
   const entry = ensureTitlePopup(opts.parent)
   if (entry.view.popup.webContents.isDestroyed()) return
 
+  // Switching kind on the reused view: close the outgoing popup first so its
+  // `onHide` runs (hides the backdrop, emits `menu-closed` for the OUTGOING
+  // kind) before `entry.kind` is overwritten below.
+  const isOpenOrPending = entry.view.isOpen || entry.view.pendingShowTimer !== null
+  if (isOpenOrPending && opts.kind !== entry.kind) {
+    hideTitlePopup(entry, { releaseFocusToParent: false })
+  }
+
   // Refresh the per-open routing context. `kind` + `parentEntryId` +
   // `titleBarSender` only matter for the *current* open, so we
   // overwrite on every open instead of allocating a new context object.
   entry.parentEntryId = opts.parentEntryId
   entry.kind = opts.kind
   entry.titleBarSender = opts.titleBarSender
-  // Picker + global-settings own their outside-click dismiss via the
-  // backdrop view — skip the blur-driven hide path so the toggle-on-
-  // pill-click is deterministic. File menu + downloads tray have no
-  // backdrop and still rely on blur to close when the user clicks
-  // away.
-  entry.view.suppressBlurDismiss =
-    opts.kind === 'instance-picker' || opts.kind === 'global-settings'
+  // Backdrop kinds own outside-click dismiss via the backdrop view, so skip
+  // the blur-driven hide. Menu / downloads have no backdrop and rely on blur.
+  entry.view.suppressBlurDismiss = kindUsesBackdrop(opts.kind)
 
   // Anchor coords are title-bar-local; the title-bar view sits at
   // content (0,0) so they map directly to parent-window content
@@ -1429,6 +1468,13 @@ export interface TitlePopupHostBindings {
   /** Currently-running installation ids. Drives the picker's "running"
    *  row indicator and the focus-vs-launch decision in `pickInstall`. */
   getRunningInstallationIds: () => string[]
+  /** Installs mid-launch (between `instance-launching` and
+   *  `instance-started` / `instance-launch-failed`). Surfaced in the
+   *  picker snapshot so the popup — whose preload doesn't expose the
+   *  `onInstanceLaunching` IPC channel — can hydrate
+   *  `sessionStore.launchingInstances` and let `useInstallCta` flip the
+   *  CTA from Start to Restart/Switch during the launching window. */
+  getLaunchingInstallationIds: () => string[]
   /** Picker chose an install. The "from a Comfy window pick" contract:
    *  if the install is already running, focus its window; otherwise
    *  open a new Comfy window for it. NEVER swap the active install out
@@ -1572,9 +1618,14 @@ function openInstancePickerForHost(
   if (parentEntry.window.isDestroyed()) return
   const installs: InstancePickerInstall[] = cachedInstallsForPicker.slice()
   const runningInstallationIds = bindings.getRunningInstallationIds()
+  const launchingInstallationIds = bindings.getLaunchingInstallationIds()
+  // A chooser host that already staked a claim (preview) reads as
+  // owning the install for default-selection purposes.
+  const effectiveHostInstallationId =
+    parentEntry.installationId ?? parentEntry.previewInstallationId ?? null
   const initialSelectedId = resolvePickerSelectedInstallId(
     selectedInstallationId,
-    parentEntry.installationId,
+    effectiveHostInstallationId,
     installs,
   )
   // Bump the nonce whenever this open carries an autoAction so a repeat
@@ -1590,7 +1641,9 @@ function openInstancePickerForHost(
   const snapshot = buildInstancePickerSnapshot({
     installs,
     hostInstallationId: parentEntry.installationId,
+    previewInstallationId: parentEntry.previewInstallationId,
     runningInstallationIds,
+    launchingInstallationIds,
     selectedInstallationId: initialSelectedId,
     selectedSettings: null,
     selectedSnapshots: null,
@@ -1619,6 +1672,47 @@ function openInstancePickerForHost(
     await refreshCachedInstallsForPicker()
     await broadcastInstancePickerSnapshotToTitlePopups(bindings)
   })()
+}
+
+/**
+ * Waffle-menu item ids whose action is an install-creation / import
+ * flow (#644). These are the only items that branch on host type at
+ * dispatch time — on the dashboard they take over the current window
+ * in place, on an instance host they spawn a fresh chooser window
+ * booted straight into the wizard so the running ComfyUI stays alive.
+ */
+export type FlowMenuItemId = 'new-install' | 'track' | 'load-snapshot' | 'quick-install'
+
+const FLOW_MENU_ITEM_IDS: ReadonlySet<string> = new Set<FlowMenuItemId>([
+  'new-install',
+  'track',
+  'load-snapshot',
+  'quick-install',
+])
+
+export function isFlowMenuItemId(id: string): id is FlowMenuItemId {
+  return FLOW_MENU_ITEM_IDS.has(id)
+}
+
+/**
+ * Where a flow-menu pick should land. Pure function — call sites
+ * inject the side effects (`setActivePanel` vs `openChooserHostWindow`)
+ * from the result kind so the dispatch policy stays one-decision-one-
+ * test (#644).
+ *
+ *   - dashboard (install-less host) → `set-active-panel` (takeover in
+ *     this window; the chooser body has no instance to disturb).
+ *   - instance host (install-backed) → `open-chooser-host` (spawn a
+ *     fresh window booted into the wizard so the running ComfyUI
+ *     keeps running).
+ */
+export function decideFlowMenuItemTarget(
+  entry: ComfyWindowEntry,
+  id: FlowMenuItemId,
+): { kind: 'set-active-panel' | 'open-chooser-host'; panel: ComfyPanelKey } {
+  return isChooserHost(entry)
+    ? { kind: 'set-active-panel', panel: id }
+    : { kind: 'open-chooser-host', panel: id }
 }
 
 function activateTitlePopupMenuItem(
@@ -1729,14 +1823,15 @@ function activateTitlePopupMenuItem(
       })
     }
   }
-  else if (id === 'new-install' || id === 'track' || id === 'load-snapshot' || id === 'quick-install') {
-    // Install-creation / import flows are chooser-host-only.
-    // `buildTitlePopupMenuItems` already filters them out of the
-    // install-backed file menu; this guard is the belt-and-braces
-    // so a stale popup or an out-of-order IPC can't navigate an
-    // in-Comfy host into one of these panels.
-    if (parentEntry && isChooserHost(parentEntry)) {
-      bindings.setActivePanel(entry.parentEntryId, id)
+  else if (isFlowMenuItemId(id)) {
+    if (parentEntry) {
+      const target = decideFlowMenuItemTarget(parentEntry, id)
+      if (target.kind === 'set-active-panel') {
+        bindings.setActivePanel(entry.parentEntryId, target.panel)
+      } else {
+        bindings.openChooserHostWindow(target.panel)
+        releaseFocusToParent = false
+      }
     }
   }
   // Item click — popup still has focus, so push it back to the parent
@@ -1948,22 +2043,23 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
     hideTitlePopup(entry, { releaseFocusToParent: true })
   })
 
-  // Click on the picker backdrop — dismiss the matching parent's
-  // picker popup. The backdrop is keyed by the parent windowId so we
-  // can route from any backdrop instance back to its popup.
-  //
-  // Guarded against a stray dismiss during the open transition: if the
-  // popup was opened less than `BACKDROP_DISMISS_GUARD_MS` ago, ignore.
-  // Without this, a click that lands on the trigger pill can fire the
-  // backdrop's mousedown after the popup is composited but before the
-  // OS settles focus, causing open → immediate-close → reopen flicker.
+  /** Click on the picker backdrop. Always hides the backdrop itself (safety
+   *  valve so a scrim left over from a kind-switch can never trap the user),
+   *  then dismisses the popup only when the current kind owns the backdrop.
+   *  `BACKDROP_DISMISS_GUARD_MS` ignores the trigger-pill click that can fire
+   *  the backdrop mousedown mid-open and cause open → close → reopen flicker. */
   ipcMain.on('comfy-popup-backdrop:dismiss', (event) => {
     const parentId = popupBackdropsByWebContents.get(event.sender.id)
     if (parentId === undefined) return
     const popup = titlePopupsByParent.get(parentId)
     if (!popup) return
-    if (popup.kind !== 'instance-picker' && popup.kind !== 'global-settings') return
-    if (!popup.view.isOpen) return
+    const parent = popup.view.parentWindow
+    // Safety valve: a backdrop click should never fail to clear the scrim,
+    // even if the current kind no longer owns it (left over from a switch).
+    if (!kindUsesBackdrop(popup.kind) || !popup.view.isOpen) {
+      if (!parent.isDestroyed()) hidePopupBackdrop(parent)
+      return
+    }
     if (Date.now() - popup.openedAt < BACKDROP_DISMISS_GUARD_MS) return
     hideTitlePopup(popup, { releaseFocusToParent: true })
   })
@@ -2612,17 +2708,24 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
   })
 
   // ---- Global-settings popup IPC ----
+  /** Resolve the popup entry for a settings IPC sender, or null if the sender
+   *  isn't a settings-capable popup. Settings fields are reachable from both
+   *  the global-settings popup and the instance-picker (which embeds them). */
+  const settingsEntryFor = (senderId: number): TitlePopupEntry | null => {
+    const entry = titlePopupsByWebContents.get(senderId)
+    if (!entry || (entry.kind !== 'global-settings' && entry.kind !== 'instance-picker')) {
+      return null
+    }
+    return entry
+  }
+
   // Field update (Language / Theme / Cache / Advanced / Shared Dirs).
   // Same side-effects as the legacy `set-setting` handler, plus a
   // `globalSettingsEvents.emit('changed')` for the snapshot loop.
   ipcMain.handle(
     'comfy-titlepopup:global-settings-update-field',
     (event, payload: { fieldId?: unknown; value?: unknown }) => {
-      const popupEntry = titlePopupsByWebContents.get(event.sender.id)
-      if (
-        !popupEntry
-        || (popupEntry.kind !== 'global-settings' && popupEntry.kind !== 'instance-picker')
-      ) {
+      if (!settingsEntryFor(event.sender.id)) {
         return { ok: false, message: 'Global Settings popup not active.' }
       }
       const fieldId = payload?.fieldId
@@ -2642,13 +2745,7 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
   ipcMain.handle(
     'comfy-titlepopup:global-settings-set-models-dirs',
     (event, payload: { dirs?: unknown }) => {
-      const popupEntry = titlePopupsByWebContents.get(event.sender.id)
-      if (
-        !popupEntry
-        || (popupEntry.kind !== 'global-settings' && popupEntry.kind !== 'instance-picker')
-      ) {
-        return { ok: false }
-      }
+      if (!settingsEntryFor(event.sender.id)) return { ok: false }
       const dirs = payload?.dirs
       if (!Array.isArray(dirs) || dirs.some((d) => typeof d !== 'string')) {
         return { ok: false }
@@ -2664,13 +2761,8 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
   ipcMain.handle(
     'comfy-titlepopup:global-settings-browse-folder',
     async (event, payload: { defaultPath?: unknown } | undefined) => {
-      const popupEntry = titlePopupsByWebContents.get(event.sender.id)
-      if (
-        !popupEntry
-        || (popupEntry.kind !== 'global-settings' && popupEntry.kind !== 'instance-picker')
-      ) {
-        return null
-      }
+      const popupEntry = settingsEntryFor(event.sender.id)
+      if (!popupEntry) return null
       const parentEntry = comfyWindows.get(popupEntry.parentEntryId)
       if (!parentEntry || parentEntry.window.isDestroyed()) return null
       const defaultPath = typeof payload?.defaultPath === 'string' && payload.defaultPath.length > 0
@@ -2689,13 +2781,7 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
   ipcMain.on(
     'comfy-titlepopup:global-settings-open-path',
     (event, payload: { path?: unknown }) => {
-      const popupEntry = titlePopupsByWebContents.get(event.sender.id)
-      if (
-        !popupEntry
-        || (popupEntry.kind !== 'global-settings' && popupEntry.kind !== 'instance-picker')
-      ) {
-        return
-      }
+      if (!settingsEntryFor(event.sender.id)) return
       const targetPath = payload?.path
       if (typeof targetPath !== 'string' || targetPath.length === 0) return
       void openPathHelper(targetPath)
@@ -2765,6 +2851,25 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
     void refreshCachedInstallsForPicker()
     void broadcastInstancePickerSnapshotToTitlePopups(bindings)
     void broadcastGlobalSettingsSnapshotToTitlePopups(bindings)
+  })
+  // Host attach/detach (and the chooser's preview-claim apply/clear)
+  // flips `parentEntry.installationId` / `previewInstallationId`,
+  // which the picker snapshot folds into `activeInstallationId`
+  // (drives the "Current" pill on the row and the per-window CTA
+  // decision in `useInstallCta`). Without this listener the picker
+  // would only repaint at `instance-started` (via `markLaunched` →
+  // installation 'changed'), leaving the launching window without a
+  // Current pill for the entire launch.
+  hostInstallEvents.on('changed', () => {
+    void broadcastInstancePickerSnapshotToTitlePopups(bindings)
+  })
+  // Session lifecycle (launching set + running set) drives the
+  // picker's row-side "running" indicator and the Start/Restart/Switch
+  // CTA. The popup's preload doesn't expose `onInstanceLaunching` —
+  // the only path that brings launching state into the popup is the
+  // snapshot itself, so we must rebroadcast on every transition.
+  sessionLifecycleEvents.on('changed', () => {
+    void broadcastInstancePickerSnapshotToTitlePopups(bindings)
   })
   // Settings writes (applySettingSet) emit 'changed' — rebroadcast so
   // the popup sees Language / Theme / Cache / Models / etc. flip live.

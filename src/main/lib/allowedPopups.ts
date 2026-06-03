@@ -1,16 +1,51 @@
+/** Stripe checkout origin. Shared so the checkout prefix in
+ *  {@link POPUP_ALLOWED_PREFIXES} can't drift from {@link isCheckoutUrl}. */
+const CHECKOUT_PREFIX = 'https://checkout.comfy.org/'
+
 /**
  * URLs that are allowed to open in Electron popup windows (e.g. Firebase auth, checkout).
  * These MUST remain present — see allowedPopups.test.ts.
  */
 export const POPUP_ALLOWED_PREFIXES = [
   'https://dreamboothy.firebaseapp.com/',
-  'https://checkout.comfy.org/',
+  CHECKOUT_PREFIX,
   'https://accounts.google.com/',
   'https://github.com/login/oauth/',
 ]
 
 export function shouldOpenInPopup(url: string): boolean {
   return POPUP_ALLOWED_PREFIXES.some((prefix) => url.startsWith(prefix))
+}
+
+/**
+ * Is this the credits-checkout `window.open`? The cloud frontend opens
+ * `https://checkout.comfy.org/...`. We open it as a styled child popup
+ * and auto-close it on the return redirect — see `isCheckoutReturnUrl`.
+ */
+export function isCheckoutUrl(url: string): boolean {
+  return url.startsWith(CHECKOUT_PREFIX)
+}
+
+/**
+ * Auto-close predicate for the checkout popup: true once it leaves
+ * `checkout.comfy.org` and lands back on a first-party comfy.org page
+ * — i.e. the post-payment / cancel return redirect. Without this the
+ * popup lingers showing a second copy of the app after payment.
+ * Deliberately false for the checkout host itself (mid-flow) and for
+ * intermediate Stripe 3DS / bank-ACS hosts (`*.stripe.com`, etc.) so we
+ * never close while the user is still paying. The leading-dot
+ * `.comfy.org` suffix check defeats the `comfy.org.evil.com` spoof.
+ * False on unparseable input.
+ */
+export function isCheckoutReturnUrl(url: string): boolean {
+  let host: string
+  try {
+    host = new URL(url).hostname.toLowerCase()
+  } catch {
+    return false
+  }
+  if (host === 'checkout.comfy.org') return false
+  return host === 'comfy.org' || host.endsWith('.comfy.org')
 }
 
 /**
