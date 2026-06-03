@@ -8,7 +8,7 @@ import { pipFreeze, runUvPip as sharedRunUvPip, installFilteredRequirements, get
 import { installCnrNode, switchCnrVersion, isSafePathComponent } from '../cnr'
 import { killProcTree } from '../process'
 import { formatComfyVersion } from '../version'
-import { getUvPath, getActivePythonPath, getVenvDir } from '../pythonEnv'
+import { getActivePythonPath, getActiveUvPath, getActiveVenvDir } from '../pythonEnv'
 import { findSitePackages } from '../../sources/standalone/envPaths'
 import type { Snapshot, RestoreResult, NodeRestoreResult } from './types'
 import type { ScannedNode } from '../nodes'
@@ -282,7 +282,7 @@ export async function restorePipPackages(
     protectedSkipped: [], failed: [], errors: [],
   }
 
-  const uvPath = getUvPath(installPath)
+  const uvPath = getActiveUvPath(installation)
   const pythonPath = getActivePythonPath(installation)
   if (!pythonPath || !fs.existsSync(uvPath)) {
     throw new Error('Python environment or uv not found')
@@ -355,7 +355,7 @@ export async function restorePipPackages(
 
   // 3. Create targeted backup of packages that will be modified or removed
   sendProgress('restore', { percent: 10, status: 'Creating backup of affected packages…' })
-  let envDir = getVenvDir(installPath)
+  let envDir = getActiveVenvDir(installation)
   let sitePackages = findSitePackages(envDir)
   if (!sitePackages) {
     // Fallback: legacy envs/default/ layout (pre-migration)
@@ -807,7 +807,7 @@ export async function restoreCustomNodes(
 
   // 4. Run post-install scripts for installed/switched nodes
   if (nodesNeedingPostInstall.length > 0 && !signal?.aborted) {
-    const uvPath = getUvPath(installPath)
+    const uvPath = getActiveUvPath(installation)
     const pythonPath = getActivePythonPath(installation)
 
     if (pythonPath && fs.existsSync(uvPath)) {
@@ -826,7 +826,7 @@ export async function restoreCustomNodes(
   {
     const mgrReqPath = path.join(comfyuiDir, 'manager_requirements.txt')
     if (fs.existsSync(mgrReqPath)) {
-      const uvPath = getUvPath(installPath)
+      const uvPath = getActiveUvPath(installation)
       const pythonPath = getActivePythonPath(installation)
 
       if (pythonPath && fs.existsSync(uvPath)) {

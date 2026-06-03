@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 export {
-  getUvPath, getActivePythonPath, getVenvDir, getVenvPythonPath,
+  getUvPath, getActivePythonPath, getActiveUvPath, getVenvDir, getVenvPythonPath,
 } from '../../lib/pythonEnv'
 export const MANIFEST_FILE = 'manifest.json'
 export const DEFAULT_LAUNCH_ARGS = '--enable-manager'

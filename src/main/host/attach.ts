@@ -253,7 +253,7 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
     `})()`
 
   /**
-   * Two cloud-only patches injected on every dom-ready of the comfy view:
+   * Three cloud-only patches injected on every dom-ready of the comfy view:
    *
    *   1. popup-blocked toast suppressor — observes new toast DOM nodes
    *      and removes any that mention `auth/popup-blocked`. That error
@@ -267,6 +267,21 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
    *      script hides documentElement for ~1s on the next load so the
    *      user doesn't see the cloud login page flash before the
    *      Firebase rehydrate redirects to the workspace.
+   *
+   *   3. cloud-onboarding "Download ComfyUI" CTA hider — desktop users
+   *      who hit the cloud onboarding screen see a bottom-right CTA
+   *      ("Want to run ComfyUI locally instead? — Download ComfyUI")
+   *      pointing at comfy.org/download. They already have desktop;
+   *      the link is redundant + confusing. We inject a <style> with
+   *      a :has() rule keyed on the CloudTemplate.vue container's
+   *      Tailwind class chain (CSS-only path — no race vs SPA
+   *      hydration since the rule matches continuously). The
+   *      MutationObserver below also tags any <button> with the
+   *      literal text "Download ComfyUI" via data-comfy-desktop-hide,
+   *      which the same stylesheet hides — that's the text-based
+   *      fallback for when the class chain shifts build-to-build.
+   *      TODO(desktop band-aid): remove once Comfy-Org/ComfyUI_frontend
+   *      PR <link-here> lands (conditional skip when running in desktop).
    */
   const COMFY_CLOUD_PATCHES_JS =
     `(function(){` +
@@ -278,6 +293,14 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
           `setTimeout(function(){de.style.visibility=''},1000);` +
         `}` +
       `}catch(_){}` +
+      `try{` +
+        `if(!document.getElementById('__comfyDesktopHideDownloadCta')){` +
+          `var st=document.createElement('style');` +
+          `st.id='__comfyDesktopHideDownloadCta';` +
+          `st.textContent='[data-comfy-desktop-hide="download-cta"]{display:none !important}';` +
+          `(document.head||document.documentElement).appendChild(st);` +
+        `}` +
+      `}catch(_){}` +
       `function looksBlocked(n){` +
         `if(!n||n.nodeType!==1)return false;` +
         `var t=(n.textContent||'').toLowerCase();` +
@@ -287,21 +310,54 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
         `var root=(n.closest&&n.closest('.p-toast-message,.p-toast-item,[role=alert]'))||n;` +
         `try{root.remove()}catch(_){}` +
       `}` +
-      `new MutationObserver(function(muts){` +
-        `for(var i=0;i<muts.length;i++){` +
-          `var added=muts[i].addedNodes;` +
-          `for(var j=0;j<added.length;j++){` +
-            `var n=added[j];` +
-            `if(looksBlocked(n)){nukeToast(n);continue;}` +
-            `if(n.querySelectorAll){` +
-              `var hits=n.querySelectorAll('*');` +
-              `for(var k=0;k<hits.length;k++){` +
-                `if(looksBlocked(hits[k])){nukeToast(hits[k]);break;}` +
+      `function tagDownloadCta(){` +
+        `var els=document.querySelectorAll('button,a,[role="button"]');` +
+        `for(var i=0;i<els.length;i++){` +
+          `var el=els[i];` +
+          `if(!el)continue;` +
+          `var t=(el.textContent||'').trim().toLowerCase();` +
+          `if(t!=='download comfyui')continue;` +
+          `el.setAttribute('data-comfy-desktop-hide','download-cta');` +
+          `var cur=el.parentElement,tagged=false;` +
+          `while(cur&&cur!==document.body){` +
+            `var ct=(cur.textContent||'').toLowerCase();` +
+            `if(ct.indexOf('want to run')>=0&&ct.indexOf('comfyui')>=0){` +
+              `cur.setAttribute('data-comfy-desktop-hide','download-cta');` +
+              `tagged=true;break;` +
+            `}` +
+            `cur=cur.parentElement;` +
+          `}` +
+          `if(!tagged&&el.parentElement&&el.parentElement.setAttribute){` +
+            `el.parentElement.setAttribute('data-comfy-desktop-hide','download-cta');` +
+          `}` +
+        `}` +
+      `}` +
+      `tagDownloadCta();` +
+      `try{` +
+        `new MutationObserver(function(muts){` +
+          `for(var i=0;i<muts.length;i++){` +
+            `var added=muts[i].addedNodes;` +
+            `for(var j=0;j<added.length;j++){` +
+              `var n=added[j];` +
+              `if(looksBlocked(n)){nukeToast(n);continue;}` +
+              `if(n.querySelectorAll){` +
+                `var hits=n.querySelectorAll('*');` +
+                `for(var k=0;k<hits.length;k++){` +
+                  `if(looksBlocked(hits[k])){nukeToast(hits[k]);break;}` +
+                `}` +
               `}` +
             `}` +
           `}` +
-        `}` +
-      `}).observe(document.documentElement,{childList:true,subtree:true});` +
+          `tagDownloadCta();` +
+        `}).observe(document.documentElement,{childList:true,subtree:true});` +
+      `}catch(_){}` +
+      `try{` +
+        `var __ctaPolls=0;` +
+        `var __ctaPoll=setInterval(function(){` +
+          `tagDownloadCta();` +
+          `__ctaPolls++;if(__ctaPolls>60)clearInterval(__ctaPoll);` +
+        `},500);` +
+      `}catch(_){}` +
     `})()`
 
   const onDomReady = (): void => {

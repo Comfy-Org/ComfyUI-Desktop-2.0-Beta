@@ -11,7 +11,7 @@ import { t } from '../lib/i18n'
 import { fetchLatestRelease, truncateNotes } from '../lib/comfyui-releases'
 import { buildChannelCards, buildChannelLabelMap } from '../lib/channel-cards'
 import type { ChannelDef } from '../lib/channel-cards'
-import { buildLaunchSettingsFields, buildSharedPathsField } from './common/launchSettingsFields'
+import { buildLaunchSettingsFields, buildStorageFields } from './common/launchSettingsFields'
 import type { InstallationRecord } from '../installations'
 import type {
   SourcePlugin,
@@ -209,7 +209,7 @@ export const portable: SourcePlugin = {
       },
       {
         tab: 'storage',
-        fields: [buildSharedPathsField(installation)],
+        fields: buildStorageFields(installation),
       },
       {
         title: 'Actions',

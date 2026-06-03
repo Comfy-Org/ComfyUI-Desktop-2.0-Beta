@@ -2,6 +2,7 @@ import { toRaw } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useModal } from './useModal'
 import { useActionGuard } from './useActionGuard'
+import { useAdoptAction } from './useAdoptAction'
 import { useSessionStore } from '../stores/sessionStore'
 import { augmentMessageWithStopWarning } from '../lib/stopWarning'
 import { findBestVariant } from '../lib/variants'
@@ -46,6 +47,12 @@ export function registerMigrateTakeover(surface: MigrateTakeoverSurface | null):
   registeredTakeover = surface
 }
 
+/** Read access for sibling composables (e.g. {@link useAdoptAction}) that
+ *  drive the same takeover. PanelApp only registers once. */
+export function getRegisteredMigrateTakeover(): MigrateTakeoverSurface | null {
+  return registeredTakeover
+}
+
 /**
  * Composable that encapsulates the full migration confirmation flow:
  * action guard → preview → confirm with variant/device selection → return data.
@@ -61,6 +68,7 @@ export function useMigrateAction(opts?: { surface?: 'modal' | 'takeover' }) {
   const { t } = useI18n()
   const modal = useModal()
   const actionGuard = useActionGuard()
+  const adoptAction = useAdoptAction(opts)
   const sessionStore = useSessionStore()
   const surface: 'modal' | 'takeover' = opts?.surface ?? 'modal'
 
@@ -72,6 +80,16 @@ export function useMigrateAction(opts?: { surface?: 'modal' | 'takeover' }) {
     installation: Installation,
     confirm?: MigrateConfirmOptions,
   ): Promise<MigrateActionResult | null> {
+    // Desktop adoption is a different operation entirely — in-place reuse
+    // of the legacy data folder, Python env, and models; no snapshot to
+    // preview and no variant to pick. Delegate to the dedicated composable
+    // so this function stays a single standalone-migration code path.
+    if (installation.sourceId === 'desktop') {
+      const confirmed = await adoptAction.confirmAdoption(installation, confirm)
+      if (confirmed !== true) return null
+      return { enablePipSync: false }
+    }
+
     // Pre-flight busy check.
     if (!await actionGuard.checkBeforeAction(installation.id, t('migrate.migrateToStandalone'))) {
       return null
@@ -81,26 +99,18 @@ export function useMigrateAction(opts?: { surface?: 'modal' | 'takeover' }) {
     const takeover = useTakeover ? registeredTakeover! : null
     const wasRunning = sessionStore.isRunning(installation.id)
 
-    const isDesktop = installation.sourceId === 'desktop'
-    const migrateItems = isDesktop
-      ? [
-        t('desktop.copyUserData'),
-        t('desktop.copyInput'),
-        t('desktop.copyOutput'),
-        t('desktop.addModels'),
-      ]
-      : [
-        t('migrate.mergeUserData'),
-        t('migrate.mergeInput'),
-        t('migrate.mergeOutput'),
-        t('migrate.addModels'),
-      ]
-
     const dialogTitle = confirm?.title || t('migrate.migrateToStandaloneConfirmTitle')
     const dialogConfirmLabel = confirm?.confirmLabel || t('migrate.migrateToStandaloneConfirm')
     const dialogMessage = wasRunning
       ? augmentMessageWithStopWarning(confirm?.message, t('errors.willStopRunning', { name: installation.name || 'ComfyUI' }))
       : confirm?.message || ''
+
+    const migrateItems = [
+      t('migrate.mergeUserData'),
+      t('migrate.mergeInput'),
+      t('migrate.mergeOutput'),
+      t('migrate.addModels'),
+    ]
 
     // Show the surface (Modal OR brand takeover) with a loading state.
     // Both paths return the same { confirmed, checkboxValues } shape so
@@ -123,11 +133,9 @@ export function useMigrateAction(opts?: { surface?: 'modal' | 'takeover' }) {
     }
 
     // Fetch the preview in the background
-    let previewResult: Awaited<ReturnType<typeof window.api.previewDesktopMigration>>
+    let previewResult: Awaited<ReturnType<typeof window.api.previewLocalMigration>>
     try {
-      previewResult = isDesktop
-        ? await window.api.previewDesktopMigration()
-        : await window.api.previewLocalMigration(installation.id)
+      previewResult = await window.api.previewLocalMigration(installation.id)
     } catch (err) {
       if (takeover) takeover.update({ loading: false })
       else modal.close(false)
@@ -151,9 +159,7 @@ export function useMigrateAction(opts?: { surface?: 'modal' | 'takeover' }) {
         { label: t('migrate.migrationWill'), items: [t('errors.willStopRunning', { name: installation.name || 'ComfyUI' }), ...migrateItems] },
       ]
       : [{ label: t('migrate.migrationWill'), items: migrateItems }]
-    const checkboxesPayload = isDesktop
-      ? []
-      : [{ id: 'enablePipSync', label: t('migrate.enablePipSync'), checked: false }]
+    const checkboxesPayload = [{ id: 'enablePipSync', label: t('migrate.enablePipSync'), checked: false }]
 
     if (takeover) {
       takeover.update({

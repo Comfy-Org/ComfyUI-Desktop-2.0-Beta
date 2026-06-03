@@ -62,7 +62,8 @@
     "more": "更多",
     "diskUsage": "磁盘占用",
     "envVarsCount": "已定义 {n} 项",
-    "emptyInstallLess": "打开一个 ComfyUI 安装以查看其设置。"
+    "emptyInstallLess": "打开一个 ComfyUI 安装以查看其设置。",
+    "useSharedModelsOffWarning": "此安装已关闭共享模型。它只能看到自己文件夹中的模型——在你重新启用之前，共享模型库将被隐藏。"
   },
 
   "running": {
@@ -118,7 +119,10 @@
     "portConflictAuto": "使用下一个可用端口（设置了 --port 时会询问）",
     "download": "下载",
     "extract": "解压",
-    "useSharedPaths": "使用共享目录",
+    "useSharedModels": "使用共享模型",
+    "useSharedInputOutput": "使用共享的输入/输出文件夹",
+    "perInstallInputDir": "输入文件夹",
+    "perInstallOutputDir": "输出文件夹",
     "done": "完成",
     "noItems": "没有可用项目。",
     "advanced": "高级",
@@ -655,6 +659,10 @@
     "snapshots": "已保存的安装时间点状态（版本 + 自定义节点），可随时恢复。",
     "launchMode": "选择 ComfyUI 的运行方式：在独立的应用窗口中运行，或作为仅控制台进程运行。",
     "updateNow": "就地更新此安装。",
-    "copyAndUpdate": "复制此安装并更新副本。原始安装保持不变。"
+    "copyAndUpdate": "复制此安装并更新副本。原始安装保持不变。",
+    "useSharedModels": "启用后，此安装可以看到您全局共享模型文件夹中的所有模型。关闭后将隐藏这些模型——大多数用户应保持启用。",
+    "useSharedInputOutput": "启用后，此安装将从全局共享文件夹读取和写入输入与输出文件。关闭后可在下方将此安装指向自己的文件夹。",
+    "perInstallInputDir": "此安装读取输入文件的文件夹。留空则使用该安装自带的内部输入文件夹。",
+    "perInstallOutputDir": "此安装写入生成的输出文件的文件夹。留空则使用该安装自带的内部输出文件夹。"
   }
 }

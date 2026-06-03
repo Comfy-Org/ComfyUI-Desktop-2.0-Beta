@@ -13,7 +13,7 @@ import { t } from '../../lib/i18n'
 import * as installations from '../../installations'
 import * as settings from '../../settings'
 import * as snapshots from '../../lib/snapshots'
-import { getUvPath, getActivePythonPath, getMasterPythonPath } from './envPaths'
+import { getActivePythonPath, getActiveUvPath, getMasterPythonPath } from './envPaths'
 import { COMFYUI_REPO, getEffectiveChannel } from './updateSections'
 import { runComfyUIUpdate } from './updateOrchestrator'
 import type { InstallationRecord } from '../../installations'
@@ -309,9 +309,23 @@ async function handleUpdateComfyUI(
     return { ok: false, message: t('standalone.updateNoGit') }
   }
 
-  const masterPython = getMasterPythonPath(installPath)
-  if (!fs.existsSync(masterPython)) {
-    return { ok: false, message: 'Master Python not found.' }
+  // Adopted installs don't have a `standalone-env` Python; `runComfyUIUpdate`
+  // routes them through `adoptedPythonPath` (legacy `.venv`, which has
+  // pygit2 installed during adoption). Managed installs still require the
+  // standalone-env Python so we check existence here.
+  if (installation.adopted !== true) {
+    const masterPython = getMasterPythonPath(installPath)
+    if (!fs.existsSync(masterPython)) {
+      return { ok: false, message: 'Master Python not found.' }
+    }
+  } else {
+    const adoptedPython = installation.adoptedPythonPath as string | undefined
+    if (!adoptedPython || !fs.existsSync(adoptedPython)) {
+      return {
+        ok: false,
+        message: 'Adopted Python not found at the recorded path. Re-run "Migrate to Standalone" to reconcile, or use "Copy & Update" to rebuild as a managed standalone.',
+      }
+    }
   }
 
   const targetChannel = (actionData?.channel as string | undefined) ?? (installation.updateChannel as string | undefined) ?? 'stable'
@@ -388,20 +402,23 @@ async function handleMigrateFrom(
     return { ok: false, message: t('migrate.noComfyUIDir') }
   }
 
-  const useShared = (installation.useSharedPaths as boolean | undefined) !== false
+  const useSharedModels = (installation.useSharedModels as boolean | undefined) !== false
+  const useSharedInputOutput = (installation.useSharedInputOutput as boolean | undefined) !== false
+  const perInstallInput = installation.inputDir as string | undefined
+  const perInstallOutput = installation.outputDir as string | undefined
 
   const srcModels = path.join(srcComfyUI, 'models')
-  const dstModels = useShared
+  const dstModels = useSharedModels
     ? ((settings.get('modelsDirs') as string[] | undefined) || settings.defaults.modelsDirs)[0]!
     : path.join(dstComfyUI, 'models')
   const srcInput = path.join(srcComfyUI, 'input')
-  const dstInput = useShared
+  const dstInput = useSharedInputOutput
     ? ((settings.get('inputDir') as string | undefined) || settings.defaults.inputDir)
-    : path.join(dstComfyUI, 'input')
+    : perInstallInput || path.join(dstComfyUI, 'input')
   const srcOutput = path.join(srcComfyUI, 'output')
-  const dstOutput = useShared
+  const dstOutput = useSharedInputOutput
     ? ((settings.get('outputDir') as string | undefined) || settings.defaults.outputDir)
-    : path.join(dstComfyUI, 'output')
+    : perInstallOutput || path.join(dstComfyUI, 'output')
 
   const srcCustomNodes = path.join(srcComfyUI, 'custom_nodes')
   const dstCustomNodes = path.join(dstComfyUI, 'custom_nodes')
@@ -547,7 +564,7 @@ async function handleMigrateFrom(
     if (nodesWithReqs.length === 0) {
       sendProgress('deps', { percent: 100, status: t('migrate.noDeps') })
     } else {
-      const uvPath = getUvPath(installation.installPath)
+      const uvPath = getActiveUvPath(installation)
       const activePython = getActivePythonPath(installation)
 
       if (!fs.existsSync(uvPath) || !activePython) {
@@ -587,7 +604,7 @@ async function handleMigrateFrom(
     const dstComfyUIDir = path.join(installation.installPath, 'ComfyUI')
     const mgrReqPath = path.join(dstComfyUIDir, 'manager_requirements.txt')
     if (fs.existsSync(mgrReqPath)) {
-      const uvPath = getUvPath(installation.installPath)
+      const uvPath = getActiveUvPath(installation)
       const activePython = getActivePythonPath(installation)
 
       if (fs.existsSync(uvPath) && activePython) {

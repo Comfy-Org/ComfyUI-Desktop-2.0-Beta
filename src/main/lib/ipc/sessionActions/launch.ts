@@ -137,11 +137,16 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     }
   }
 
-  // Inject shared paths
-  const useSharedPaths = !launchCmd.skipSharedPaths && (inst.useSharedPaths as boolean | undefined) !== false && !!launchCmd.args
+  // Inject shared models config (--extra-model-paths-config) and/or
+  // input/output directories (--input-directory / --output-directory).
+  // The two flags are independent — an install can have shared models
+  // visible while keeping its workspace local to a specific folder.
+  const argsAvailable = !launchCmd.skipSharedPaths && !!launchCmd.args
+  const useSharedModels = argsAvailable && (inst.useSharedModels as boolean | undefined) !== false
+  const useSharedInputOutput = argsAvailable && (inst.useSharedInputOutput as boolean | undefined) !== false
   let preLaunchExtras: string[] = []
   let sharedModelsDirs: string[] | undefined
-  if (useSharedPaths) {
+  if (useSharedModels) {
     sharedModelsDirs = settings.get('modelsDirs') as string[] | undefined
     const { config } = syncCustomModelFolders(inst.installPath, sharedModelsDirs)
     if (config) {
@@ -150,12 +155,28 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     const installExtras = discoverExtraModelFolders(inst.installPath)
     const baselineSet = new Set([...(config?.extraFolders ?? []), ...installExtras])
     preLaunchExtras = [...baselineSet].sort()
+  }
+  if (useSharedInputOutput) {
     const inputDir = (settings.get('inputDir') as string | undefined) || settings.defaults.inputDir
     const outputDir = (settings.get('outputDir') as string | undefined) || settings.defaults.outputDir
     fs.mkdirSync(inputDir, { recursive: true })
     fs.mkdirSync(outputDir, { recursive: true })
     launchCmd.args!.push('--input-directory', inputDir)
     launchCmd.args!.push('--output-directory', outputDir)
+  } else if (argsAvailable) {
+    // Per-install paths (e.g. adopted-from-legacy installs anchored to
+    // <legacyBasePath>/{input,output}). Omitted entirely when not set so
+    // ComfyUI falls back to its own <installPath>/{input,output} defaults.
+    const perInstallInput = inst.inputDir as string | undefined
+    const perInstallOutput = inst.outputDir as string | undefined
+    if (perInstallInput) {
+      fs.mkdirSync(perInstallInput, { recursive: true })
+      launchCmd.args!.push('--input-directory', perInstallInput)
+    }
+    if (perInstallOutput) {
+      fs.mkdirSync(perInstallOutput, { recursive: true })
+      launchCmd.args!.push('--output-directory', perInstallOutput)
+    }
   }
 
   const sender = event.sender
@@ -490,7 +511,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
 
   // Check if custom nodes created new model folders during startup
   let site1Relaunched = false
-  if (useSharedPaths) {
+  if (useSharedModels) {
     const { newFolders } = syncCustomModelFolders(inst.installPath, sharedModelsDirs, preLaunchExtras)
     if (newFolders.length > 0) {
       sendOutput(`\n--- Restarting: new model folders detected (${newFolders.join(', ')}) ---\n\n`)
@@ -551,7 +572,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
         if (!isModelRelaunch) {
           sendOutput('\n--- ComfyUI restarting ---\n\n')
         }
-        if (useSharedPaths) {
+        if (useSharedModels) {
           const { config } = syncCustomModelFolders(inst.installPath, sharedModelsDirs)
           if (config) {
             for (const f of config.extraFolders) knownExtras.add(f)
@@ -573,7 +594,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
         writePortLock(launchCmd.port!, { pid: proc.pid!, installationName: inst.name })
         attachExitHandler(proc)
         if (_onComfyRestarted) _onComfyRestarted({ installationId, process: proc })
-        if (useSharedPaths) {
+        if (useSharedModels) {
           rebootModelCheckAbort = new AbortController()
           const checkSignal = rebootModelCheckAbort.signal
           waitForPort(launchCmd.port!, '127.0.0.1', { timeoutMs: COMFY_BOOT_TIMEOUT_MS, signal: checkSignal })

@@ -104,6 +104,42 @@ export function useListAction(uiSurface: string, callbacks: ListActionCallbacks)
       }
     }
 
+    // Launch on a not-yet-adopted Legacy Desktop install funnels through
+    // a migrate-then-launch chain instead — adoption is the prerequisite
+    // for ComfyUI to actually run under Desktop 2.0. This path has its own
+    // confirm + showProgress + early return, and skips onGuardsPassed
+    // because the eventual launch is against a freshly-adopted
+    // newInstallationId rather than this inst.id.
+    if (action.id === 'launch' && inst.sourceId === 'desktop' && !inst.adopted) {
+      const confirmed = await modal.confirm({
+        title: t('desktop.migrateBeforeLaunchTitle'),
+        message: t('desktop.migrateBeforeLaunchMessage'),
+        confirmLabel: t('desktop.migrateBeforeLaunchConfirm'),
+        confirmStyle: 'primary',
+      })
+      if (!confirmed) {
+        emitTelemetryAction('desktop2.action.result', { action_id: action.id, result: 'cancelled', ...telemetryContext })
+        return
+      }
+      sessionStore.clearErrorInstance(inst.id)
+      emitTelemetryAction('desktop2.action.invoked', { action_id: action.id, ...telemetryContext })
+      callbacks.showProgress({
+        installationId: inst.id,
+        title: `${t('desktop.migrating')} — ${inst.name}`,
+        apiCall: async () => {
+          const migrateResult = await window.api.runAction(inst.id, 'migrate-to-standalone')
+          if (!migrateResult.ok || !migrateResult.newInstallationId) return migrateResult
+          // Hand off to the freshly-adopted install in the same overlay
+          // so the user sees one continuous "migrate → launch" flow.
+          return window.api.runAction(migrateResult.newInstallationId, 'launch')
+        },
+        cancellable: true,
+        triggersInstanceStart: true,
+        opKind: 'launch',
+      })
+      return
+    }
+
     // All cancel-paths have committed to running. Side effects that
     // must NOT survive a cancel (chooser in-place attach claim +
     // title-bar preview) belong in this hook.

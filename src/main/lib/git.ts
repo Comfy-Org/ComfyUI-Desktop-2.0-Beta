@@ -155,10 +155,16 @@ export function probePygit2(
 }
 
 /**
- * Best-effort macOS repair for a Python env directory: remove quarantine
- * flag and adhoc-sign Mach-O binaries.  Used for both the bundled
- * bootstrap-python (whose codesignature gets invalidated when the .app is
+ * Best-effort macOS repair for an env directory: remove quarantine flag and
+ * adhoc-sign every Mach-O binary in the tree.  Used for both the bundled
+ * bootstrap-python (whose codesignatures get invalidated when the .app is
  * extracted from a zip) and standalone-env (copied/migrated installs).
+ *
+ * The walk in codesignBinaries() signs anything that looks like Mach-O, so
+ * this single call covers every bundled binary in the env — currently the
+ * Python interpreter + pygit2 .so files + the bundled `uv` binary at the
+ * env root / under `bin/`.  Adding more bundled binaries to bootstrap-python
+ * does not require changes here.
  *
  * No-op on non-Darwin platforms or when already attempted for this dir
  * in the current session.

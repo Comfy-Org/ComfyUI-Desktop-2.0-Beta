@@ -1,4 +1,6 @@
-import { describe, expect, it, vi } from 'vitest'
+import fs from 'fs'
+import path from 'path'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('electron', () => ({
   app: { getPath: () => '' },
@@ -18,6 +20,7 @@ import { fetchJSON } from '../../lib/fetch'
 import { getLatestStableTag } from '../../lib/comfyui-releases'
 import { PLATFORM_PREFIX } from './envPaths'
 import type { FieldOption } from '../../types/sources'
+import type { InstallationRecord } from '../../installations'
 
 const mockedFetchJSON = vi.mocked(fetchJSON)
 const mockedGetLatestStableTag = vi.mocked(getLatestStableTag)
@@ -174,6 +177,107 @@ describe('standalone.getFieldOptions release', () => {
     const options = await standalone.getFieldOptions!('release', {}, { includeLatestStable: true })
     const latestEntry = options.find((o) => o.value === 'latest')!
     expect(latestEntry.description).toBeUndefined()
+  })
+})
+
+// --- getLaunchCommand: adopted Legacy Desktop installs ---
+
+describe('standalone.getLaunchCommand for adopted Legacy Desktop installs', () => {
+  const installPath = path.join('C:', 'fake', 'installs', 'adopted')
+  const adoptedBaseDir = path.join('C:', 'Users', 'me', 'Documents', 'ComfyUI')
+  const adoptedPythonPath = path.join(adoptedBaseDir, '.venv', 'Scripts', 'python.exe')
+
+  // Pretend every path the source checks is on disk — we're only exercising
+  // arg construction, not file resolution.
+  beforeEach(() => {
+    vi.spyOn(fs, 'existsSync').mockReturnValue(true)
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  function makeAdoptedRecord(overrides: Partial<InstallationRecord> = {}): InstallationRecord {
+    return {
+      id: 'inst-1',
+      name: 'Adopted from Legacy Desktop',
+      createdAt: new Date().toISOString(),
+      sourceId: 'standalone',
+      installPath,
+      adopted: true,
+      adoptedBaseDir,
+      adoptedPythonPath,
+      // Adopted records ship with shared models on (legacy `models/` is
+      // registered in the global modelsDirs list) and shared input/output
+      // off — the workspace is pinned to legacy basePath via the
+      // per-install inputDir/outputDir fields, which launch.ts handles.
+      useSharedModels: true,
+      useSharedInputOutput: false,
+      inputDir: path.join(adoptedBaseDir, 'input'),
+      outputDir: path.join(adoptedBaseDir, 'output'),
+      launchArgs: '--listen 127.0.0.1 --port 8188',
+      ...overrides,
+    } as InstallationRecord
+  }
+
+  it('uses adoptedPythonPath for the cmd instead of standalone-env python', () => {
+    const cmd = standalone.getLaunchCommand!(makeAdoptedRecord())
+    expect(cmd).not.toBeNull()
+    expect(cmd!.cmd).toBe(adoptedPythonPath)
+  })
+
+  it('runs ComfyUI/main.py from installPath (not from adoptedBaseDir)', () => {
+    const cmd = standalone.getLaunchCommand!(makeAdoptedRecord())!
+    expect(cmd.cwd).toBe(installPath)
+    expect(cmd.args![0]).toBe('-s')
+    expect(cmd.args![1]).toBe(path.join('ComfyUI', 'main.py'))
+  })
+
+  it('injects only --base-directory / --user-directory rooted at adoptedBaseDir', () => {
+    // --input-directory / --output-directory are NOT injected here anymore;
+    // they're first-class per-install fields handled by launch.ts'
+    // shared-input-output branch.
+    const cmd = standalone.getLaunchCommand!(makeAdoptedRecord())!
+    const args = cmd.args!
+    const idx = (flag: string) => args.indexOf(flag)
+    expect(args[idx('--base-directory') + 1]).toBe(adoptedBaseDir)
+    expect(args[idx('--user-directory') + 1]).toBe(path.join(adoptedBaseDir, 'user'))
+    expect(args.includes('--input-directory')).toBe(false)
+    expect(args.includes('--output-directory')).toBe(false)
+  })
+
+  it('places adopt CLI args before user launchArgs so user values win on conflict', () => {
+    const cmd = standalone.getLaunchCommand!(makeAdoptedRecord({
+      launchArgs: '--listen 0.0.0.0 --port 9000 --base-directory /custom/override',
+    }))!
+    const args = cmd.args!
+    // Two --base-directory occurrences; user override comes after the adopt-injected one
+    const positions = args
+      .map((value, index) => value === '--base-directory' ? index : -1)
+      .filter((index) => index >= 0)
+    expect(positions.length).toBe(2)
+    expect(positions[0]!).toBeLessThan(positions[1]!)
+    expect(args[positions[1]! + 1]).toBe('/custom/override')
+  })
+
+  it('extracts the port from user launchArgs', () => {
+    const cmd = standalone.getLaunchCommand!(makeAdoptedRecord())!
+    expect(cmd.port).toBe(8188)
+  })
+
+  it('returns null when adoptedPythonPath is missing', () => {
+    const cmd = standalone.getLaunchCommand!(makeAdoptedRecord({ adoptedPythonPath: undefined }))
+    expect(cmd).toBeNull()
+  })
+
+  it('does not inject adopt args when adopted flag is absent', () => {
+    const record = makeAdoptedRecord({ adopted: undefined })
+    const cmd = standalone.getLaunchCommand!(record)
+    // adoptedPythonPath is ignored for non-adopted; getActivePythonPath would
+    // return a standalone-env path which our existsSync mock also accepts.
+    expect(cmd).not.toBeNull()
+    expect(cmd!.args!.includes('--base-directory')).toBe(false)
+    expect(cmd!.args!.includes('--user-directory')).toBe(false)
   })
 })
 

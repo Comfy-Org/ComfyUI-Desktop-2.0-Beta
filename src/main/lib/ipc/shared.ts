@@ -30,7 +30,6 @@ import {
 } from '../process'
 import { detectGPU, validateHardware, checkNvidiaDriver } from '../gpu'
 import { detectDesktopInstall, stageDesktopSnapshot } from '../desktopDetect'
-import { performDesktopMigration } from '../desktopMigration'
 import { performLocalMigration, stageLocalSnapshot } from '../localMigration'
 import { getDiskSpace, getDirectorySize, validateInstallPath } from '../disk'
 import { syncOemSeed } from '../oem'
@@ -71,7 +70,7 @@ export {
   COMFY_BOOT_TIMEOUT_MS,
   detectGPU, validateHardware, checkNvidiaDriver,
   detectDesktopInstall, stageDesktopSnapshot,
-  performDesktopMigration, performLocalMigration, stageLocalSnapshot,
+  performLocalMigration, stageLocalSnapshot,
   getDiskSpace, getDirectorySize, validateInstallPath,
   syncOemSeed, formatTime, getActiveDownloads,
   syncCustomModelFolders, discoverExtraModelFolders,
@@ -386,18 +385,28 @@ export async function performCopy(
 
     const source = sourceMap[inst.sourceId]
     if (source?.fixupCopy) {
-      await source.fixupCopy(inst.installPath, destPath)
+      await source.fixupCopy(inst, destPath, sendProgress, signal)
     }
+
+    const adopted = inst.adopted === true && typeof inst.adoptedBaseDir === 'string'
 
     const {
       id: _id, name: _name, installPath: _path, createdAt: _created, seen: _seen, status: _status,
       copiedFrom: _copiedFrom, copiedAt: _copiedAt, copiedFromName: _copiedFromName, copyReason: _copyReason,
       ...inherited
     } = inst
-    const finalName = await uniqueName(name)
-    const entry = await installations.add({
+
+    // Adopted copies are self-contained after `fixupCopy` deep-copied the
+    // legacy venv + workspace data into the new install. Re-home all
+    // adopted-* fields to point at the new install instead of the original
+    // legacy workspace so adopted-aware code (launch, snapshot restore,
+    // dep installs) keeps working from the copy. The metadata-only
+    // "where did this come from" fields (legacy version, GPU, source mode,
+    // migration tag) describe the original adoption event and are dropped
+    // since they no longer apply to a derived copy.
+    let recordData: Record<string, unknown> = {
       ...inherited,
-      name: finalName,
+      name: '',  // overwritten below
       installPath: destPath,
       status: 'installed',
       seen: false,
@@ -406,7 +415,40 @@ export async function performCopy(
       copiedFromName: inst.name,
       copiedAt: new Date().toISOString(),
       copyReason,
-    })
+    }
+
+    if (adopted) {
+      const newComfyUI = path.join(destPath, 'ComfyUI')
+      const newAdoptedPython = path.join(
+        newComfyUI, '.venv',
+        process.platform === 'win32' ? 'Scripts' : 'bin',
+        process.platform === 'win32' ? 'python.exe' : 'python3',
+      )
+      const {
+        adoptedFromLegacyVersion: _afv, adoptedFromGpu: _afg,
+        adoptedSelectedDevice: _asd, adoptedComfyTagAtMigration: _act,
+        adoptedSourceMode: _asm,
+        inputDir: _idn, outputDir: _odn,
+        ...adoptInherited
+      } = recordData as Record<string, unknown>
+      recordData = {
+        ...adoptInherited,
+        adopted: true,
+        adoptedAt: new Date().toISOString(),
+        adoptedBaseDir: newComfyUI,
+        adoptedPythonPath: newAdoptedPython,
+        // Workspace data was deep-copied into the new install — point
+        // per-install I/O at the copies so launches don't keep writing
+        // to the legacy workspace.
+        useSharedInputOutput: false,
+        inputDir: path.join(newComfyUI, 'input'),
+        outputDir: path.join(newComfyUI, 'output'),
+      }
+    }
+
+    const finalName = await uniqueName(name)
+    recordData.name = finalName
+    const entry = await installations.add(recordData)
 
     try { fs.writeFileSync(path.join(destPath, MARKER_FILE), entry.id) } catch {}
 

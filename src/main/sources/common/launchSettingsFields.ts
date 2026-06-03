@@ -9,17 +9,56 @@ export interface LaunchSettingsOptions {
   extraFields?: Record<string, unknown>[]
 }
 
-/** Per-install `useSharedPaths` toggle. Rendered in the picker's
- *  Storage tab next to the global model-directory UI. Emitted by
- *  sources that participate in shared-model storage (desktop /
- *  portable); git-source installs omit this section entirely. */
-export function buildSharedPathsField(installation: InstallationRecord): Record<string, unknown> {
-  return {
-    id: 'useSharedPaths', label: t('common.useSharedPaths'),
-    value: (installation.useSharedPaths as boolean | undefined) !== false,
-    editable: true, editType: 'boolean', tooltip: t('tooltips.useSharedPaths'),
-    requiresRestart: true,
-  }
+/**
+ * Per-install storage toggles + per-install input/output path fields,
+ * rendered in the picker's Storage tab next to the global model-directory
+ * UI. Emitted by sources that participate in shared storage (desktop /
+ * portable); git-source installs omit these entirely.
+ *
+ * Two independent toggles:
+ *  - `useSharedModels` — gates `--extra-model-paths-config` injection.
+ *    Defaults to `true`. Off is intentionally rare (the renderer surfaces
+ *    an inline warning) because most users want their model library
+ *    visible to every install.
+ *  - `useSharedInputOutput` — gates `--input-directory` /
+ *    `--output-directory` injection from the global shared dirs. When
+ *    off, the per-install `inputDir` / `outputDir` fields below are used
+ *    instead, defaulting to ComfyUI's own `<installPath>/{input,output}`
+ *    when also unset.
+ */
+export function buildStorageFields(installation: InstallationRecord): Record<string, unknown>[] {
+  const useSharedModels = (installation.useSharedModels as boolean | undefined) !== false
+  const useSharedInputOutput = (installation.useSharedInputOutput as boolean | undefined) !== false
+  return [
+    {
+      id: 'useSharedModels', label: t('common.useSharedModels'),
+      value: useSharedModels,
+      editable: true, editType: 'boolean', tooltip: t('tooltips.useSharedModels'),
+      requiresRestart: true,
+    },
+    {
+      id: 'useSharedInputOutput', label: t('common.useSharedInputOutput'),
+      value: useSharedInputOutput,
+      editable: true, editType: 'boolean', tooltip: t('tooltips.useSharedInputOutput'),
+      requiresRestart: true,
+    },
+    // Per-install input/output paths — only meaningful when
+    // `useSharedInputOutput === false`. StoragePane.vue filters them
+    // out of the rendered field list while the toggle is on, so they
+    // don't clutter the common case.
+    {
+      id: 'inputDir', label: t('common.perInstallInputDir'),
+      value: (installation.inputDir as string | undefined) ?? '',
+      editable: true, editType: 'path', tooltip: t('tooltips.perInstallInputDir'),
+      requiresRestart: true,
+    },
+    {
+      id: 'outputDir', label: t('common.perInstallOutputDir'),
+      value: (installation.outputDir as string | undefined) ?? '',
+      editable: true, editType: 'path', tooltip: t('tooltips.perInstallOutputDir'),
+      requiresRestart: true,
+    },
+  ]
 }
 
 export function buildLaunchSettingsFields(

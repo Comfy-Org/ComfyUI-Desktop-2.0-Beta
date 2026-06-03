@@ -7,7 +7,7 @@ files:
   - '!src/*'
   - '!electron.vite.config.{js,ts,mjs,cjs}'
   - '!eslint.config.ts'
-  - '!{.eslintcache,.prettierrc.json,README.md,DESIGN_PROCESS.md,MANAGER_RESTART.md,REFERENCE_COMFY_DESKTOP.md}'
+  - '!{.eslintcache,.prettierrc.json,README.md,AGENTS.md}'
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
   - '!{.env,.env.*,.npmrc}'
   - '!docs/*'
@@ -23,7 +23,7 @@ afterPack: ./scripts/afterPack.mjs
 publish:
   provider: github
   owner: Comfy-Org
-  repo: ComfyUI-Desktop-2.0-Beta
+  repo: Comfy-Desktop
 artifactName: ComfyUI-Desktop-2.0-${version}-${os}-${arch}.${ext}
 win:
   target: nsis

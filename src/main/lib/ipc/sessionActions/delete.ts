@@ -9,9 +9,58 @@ import {
 import type { ActionContext, ActionResult } from './types'
 import { withAbortableSessionAction } from './withAbortable'
 
+/**
+ * Wipe the launcher-owned parts of an adopted install at
+ * `adoptedBaseDir`, leaving the user's data alone:
+ *
+ *   delete  `<adoptedBaseDir>/.venv` — opaque interpreter state
+ *   delete  `<adoptedBaseDir>/<MARKER_FILE>` — re-adopt sentinel
+ *   keep    `models/`, `user/`, `input/`, `output/`, `custom_nodes/`
+ *   keep    everything else (user-added files, configs, …)
+ *
+ * The wrapper at `installPath` is deleted by the standard
+ * `deleteDir(installPath)` call in `handleDelete`; this function only
+ * handles the legacy-side cleanup, which `deleteDir` cannot reach.
+ *
+ * Best-effort: a missing or locked legacy venv must not block the primary
+ * wrapper deletion — the install record is already on its way out and a
+ * half-cleaned legacy dir is recoverable manually.
+ */
+async function cleanupAdoptedLegacyDir(
+  adoptedBaseDir: string,
+  sendProgress: (phase: string, detail: Record<string, unknown>) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (!fs.existsSync(adoptedBaseDir)) return
+  const venvDir = path.join(adoptedBaseDir, '.venv')
+  if (fs.existsSync(venvDir)) {
+    try {
+      sendProgress('delete', { percent: 0, status: 'Removing legacy venv…' })
+      await deleteDir(venvDir, (p) => {
+        sendProgress('delete', { percent: p.percent, status: formatDeleteStatus(p, 'Removing legacy venv…') })
+      }, { signal })
+    } catch (err) {
+      console.warn('Failed to remove legacy venv at', venvDir, err)
+    }
+  }
+  const adoptMarker = path.join(adoptedBaseDir, MARKER_FILE)
+  if (fs.existsSync(adoptMarker)) {
+    try { await fs.promises.unlink(adoptMarker) } catch {}
+  }
+}
+
 export async function handleDelete(ctx: ActionContext): Promise<ActionResult> {
   const { event, installationId, inst } = ctx
+  const adopted = inst.adopted === true
+  const adoptedBaseDir = adopted ? (inst.adoptedBaseDir as string | undefined) : undefined
   if (!fs.existsSync(inst.installPath)) {
+    // Wrapper is already gone but the legacy venv may still be on disk
+    // (e.g. user deleted the wrapper manually). Best-effort cleanup before
+    // we drop the record so re-adopt later starts clean.
+    if (adopted && adoptedBaseDir) {
+      const noopProgress = (): void => {}
+      await cleanupAdoptedLegacyDir(adoptedBaseDir, noopProgress)
+    }
     await installations.remove(installationId)
     return { ok: true, navigate: 'list' }
   }
@@ -33,6 +82,9 @@ export async function handleDelete(ctx: ActionContext): Promise<ActionResult> {
       await deleteDir(inst.installPath, (p) => {
         sendProgress('delete', { percent: p.percent, status: formatDeleteStatus(p) })
       }, { signal })
+      if (adopted && adoptedBaseDir) {
+        await cleanupAdoptedLegacyDir(adoptedBaseDir, sendProgress, signal)
+      }
     } catch (err) {
       // Restore the safety marker so a retry still passes the marker check;
       // mark the install as partially deleted so the dashboard surfaces it.

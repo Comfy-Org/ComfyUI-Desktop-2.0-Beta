@@ -150,10 +150,11 @@ describe('handleReleaseUpdate (release-update success path)', () => {
     fs.mkdirSync(srcRoot, { recursive: true })
     seedSource(srcRoot)
 
-    // The new install defaults to `useSharedPaths: true` (buildInstallation
-    // doesn't set it), so migrate-from routes models/input/output to the
-    // shared dirs returned by `settings.get`. Wire those to per-test tmp dirs
-    // so the assertions can read them back deterministically.
+    // The new install defaults to `useSharedModels: true` /
+    // `useSharedInputOutput: true` (buildInstallation doesn't set them),
+    // so migrate-from routes models/input/output to the shared dirs
+    // returned by `settings.get`. Wire those to per-test tmp dirs so the
+    // assertions can read them back deterministically.
     sharedModelsDir = path.join(tmpRoot, 'shared-models')
     sharedInputDir = path.join(tmpRoot, 'shared-input')
     sharedOutputDir = path.join(tmpRoot, 'shared-output')
@@ -243,8 +244,8 @@ describe('handleReleaseUpdate (release-update success path)', () => {
     expect(fs.readFileSync(path.join(dstComfyUI, 'custom_nodes', NODE_NAME, NODE_FILE), 'utf-8'))
       .toBe(NODE_FILE_BODY)
 
-    // Models / input / output route through useSharedPaths to the
-    // settings-provided dirs.
+    // Models route through useSharedModels and input/output route
+    // through useSharedInputOutput to the settings-provided dirs.
     expect(fs.readFileSync(path.join(sharedModelsDir, 'checkpoints', MODEL_FILE), 'utf-8'))
       .toBe(MODEL_BODY)
     expect(fs.readFileSync(path.join(sharedInputDir, INPUT_FILE), 'utf-8')).toBe(INPUT_BODY)

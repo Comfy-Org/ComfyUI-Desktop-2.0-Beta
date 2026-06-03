@@ -8,7 +8,7 @@ import type { ComfyVersion } from '../../lib/version'
 import { truncateNotes } from '../../lib/comfyui-releases'
 import { deleteAction, untrackAction, launchAction, openFolderAction, renameAction } from '../../lib/actions'
 import { t } from '../../lib/i18n'
-import { buildLaunchSettingsFields, buildSharedPathsField } from '../common/launchSettingsFields'
+import { buildLaunchSettingsFields, buildStorageFields } from '../common/launchSettingsFields'
 import { getVariantLabel, DEFAULT_LAUNCH_ARGS } from './envPaths'
 import type { InstallationRecord } from '../../installations'
 import type { StatusTag } from '../../types/sources'
@@ -216,7 +216,7 @@ export function getDetailSections(installation: InstallationRecord): Record<stri
     },
     {
       tab: 'storage',
-      fields: [buildSharedPathsField(installation)],
+      fields: buildStorageFields(installation),
     },
     {
       title: 'Actions',

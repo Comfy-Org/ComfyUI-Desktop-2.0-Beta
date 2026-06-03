@@ -1,10 +1,11 @@
 import fs from 'fs'
 import path from 'path'
 import { fetchJSON } from '../../lib/fetch'
-import { parseArgs, extractPort } from '../../lib/util'
+import { parseArgs, extractPort, formatTime } from '../../lib/util'
 import { t } from '../../lib/i18n'
 import { launchAction } from '../../lib/actions'
 import { getLatestStableTag } from '../../lib/comfyui-releases'
+import { copyDirWithProgress } from '../../lib/copy'
 import {
   PLATFORM_PREFIX, DEFAULT_LAUNCH_ARGS,
   getVariantLabel, stripPlatform, getActivePythonPath,
@@ -116,6 +117,10 @@ export const standalone: SourcePlugin = {
   },
 
   getLaunchCommand(installation: InstallationRecord): LaunchCommand | null {
+    // `getActivePythonPath` is adopted-aware: returns `adoptedPythonPath`
+    // for legacy-desktop adoptions and the managed `ComfyUI/.venv` python
+    // otherwise.
+    const adopted = installation.adopted === true
     const pythonPath = getActivePythonPath(installation)
     if (!pythonPath || !fs.existsSync(pythonPath)) return null
     const mainPy = path.join(installation.installPath, 'ComfyUI', 'main.py')
@@ -123,12 +128,24 @@ export const standalone: SourcePlugin = {
     const userArgs = ((installation.launchArgs as string | undefined) ?? DEFAULT_LAUNCH_ARGS).trim()
     const parsed = userArgs.length > 0 ? parseArgs(userArgs) : []
     const port = extractPort(parsed)
+    // Adopted installs keep their data (models, user, input, output,
+    // custom_nodes) at the legacy basePath. `--base-directory` and
+    // `--user-directory` are structural plumbing the user shouldn't need
+    // to touch, so pin them here. Input/output are first-class per-install
+    // fields (`installation.inputDir` / `outputDir`) handled by launch.ts'
+    // shared-input-output branch — adopted records ship with both set to
+    // `<legacyBasePath>/{input,output}` so the end result is the same.
+    const adoptedBaseDir = adopted ? (installation.adoptedBaseDir as string | undefined) : undefined
+    const adoptArgs = adoptedBaseDir ? [
+      '--base-directory', adoptedBaseDir,
+      '--user-directory', path.join(adoptedBaseDir, 'user'),
+    ] : []
     // Desktop-managed feature flags (e.g. show_signin_button) are injected in
     // handleLaunch after we discover the running ComfyUI's feature-flag registry,
     // so we only set keys the install actually knows about.
     return {
       cmd: pythonPath,
-      args: ['-s', path.join('ComfyUI', 'main.py'), ...parsed],
+      args: ['-s', path.join('ComfyUI', 'main.py'), ...adoptArgs, ...parsed],
       cwd: installation.installPath,
       port,
     }
@@ -146,16 +163,74 @@ export const standalone: SourcePlugin = {
   probeInstallation,
   handleAction,
 
-  async fixupCopy(srcPath: string, destPath: string): Promise<void> {
+  async fixupCopy(
+    inst: InstallationRecord,
+    destPath: string,
+    sendProgress: (phase: string, detail: Record<string, unknown>) => void,
+    signal?: AbortSignal,
+  ): Promise<void> {
     await writeComfyEnvironment(path.join(destPath, 'ComfyUI'))
+
+    const adopted = inst.adopted === true
+    const adoptedBaseDir = adopted ? (inst.adoptedBaseDir as string | undefined) : undefined
+
+    // For an adopted install, the wrapper at `installPath` only contains
+    // the freshly cloned ComfyUI source — the venv and user data live
+    // under `adoptedBaseDir`. We need to pull those over too so the copy
+    // is a self-contained install that can run independently of the
+    // original Legacy Desktop workspace.
+    //
+    // Models are deliberately NOT copied — they remain shared via the
+    // global `modelsDirs` setting (inherited from the source record),
+    // matching the source's `useSharedModels: true`. This keeps the
+    // copy cheap and avoids duplicating multi-GB checkpoint files.
+    if (adopted && adoptedBaseDir && fs.existsSync(adoptedBaseDir)) {
+      // Order matters only for cancellation responsiveness — the venv is
+      // by far the largest, so put it first to surface progress quickly.
+      const carryOver = ['.venv', 'user', 'custom_nodes', 'input', 'output']
+      const destComfyUI = path.join(destPath, 'ComfyUI')
+      for (const entry of carryOver) {
+        if (signal?.aborted) return
+        const src = path.join(adoptedBaseDir, entry)
+        if (!fs.existsSync(src)) continue
+        const dst = path.join(destComfyUI, entry)
+        // Skip if the wrapper copy already placed an entry there (the
+        // upstream ComfyUI clone has empty `input/`, `output/`,
+        // `custom_nodes/` checked in). Remove the empty placeholder
+        // first so the merge isn't ambiguous.
+        if (fs.existsSync(dst)) {
+          try { await fs.promises.rm(dst, { recursive: true, force: true }) } catch {}
+        }
+        sendProgress('copy', { percent: 0, status: `Copying legacy ${entry}…` })
+        await copyDirWithProgress(src, dst, (copied, total, elapsedSecs, etaSecs) => {
+          const percent = total > 0 ? Math.round((copied / total) * 100) : 0
+          const elapsed = formatTime(elapsedSecs)
+          const eta = etaSecs >= 0 ? formatTime(etaSecs) : '—'
+          sendProgress('copy', {
+            percent,
+            status: `Copying legacy ${entry}  ${copied} / ${total}  ·  ${elapsed} elapsed  ·  ${eta} remaining`,
+          })
+        }, { signal })
+      }
+    }
 
     const venvPath = getVenvDir(destPath)
     if (!fs.existsSync(venvPath)) return
 
+    // Path-rewrite source for the venv metadata:
+    //   - managed: pyvenv.cfg references `<installPath>/ComfyUI/.venv/...`
+    //     → rewrite `<installPath>` → `<destPath>`.
+    //   - adopted: pyvenv.cfg references `<adoptedBaseDir>/.venv/...`
+    //     → rewrite `<adoptedBaseDir>` → `<destPath>/ComfyUI`, since the
+    //     venv now lives one directory deeper than it did in the legacy
+    //     workspace.
+    const srcRewriteFrom = adopted && adoptedBaseDir ? adoptedBaseDir : inst.installPath
+    const srcRewriteTo = adopted && adoptedBaseDir ? path.join(destPath, 'ComfyUI') : destPath
+
     const cfgPath = path.join(venvPath, 'pyvenv.cfg')
     if (fs.existsSync(cfgPath)) {
       let content = await fs.promises.readFile(cfgPath, 'utf-8')
-      content = content.replaceAll(srcPath, destPath)
+      content = content.replaceAll(srcRewriteFrom, srcRewriteTo)
       await fs.promises.writeFile(cfgPath, content, 'utf-8')
     }
 
@@ -168,8 +243,8 @@ export const standalone: SourcePlugin = {
           const filePath = path.join(binDir, entry.name)
           try {
             let content = await fs.promises.readFile(filePath, 'utf-8')
-            if (content.startsWith('#!') && content.includes(srcPath)) {
-              content = content.replaceAll(srcPath, destPath)
+            if (content.startsWith('#!') && content.includes(srcRewriteFrom)) {
+              content = content.replaceAll(srcRewriteFrom, srcRewriteTo)
               await fs.promises.writeFile(filePath, content, 'utf-8')
             }
           } catch {}

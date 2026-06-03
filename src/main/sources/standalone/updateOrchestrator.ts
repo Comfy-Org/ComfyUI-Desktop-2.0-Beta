@@ -12,7 +12,7 @@ import { getBundledScriptPath } from '../../lib/bundledScript'
 import * as settings from '../../settings'
 import * as snapshots from '../../lib/snapshots'
 import { repairMacBinaries } from './macRepair'
-import { getUvPath, getActivePythonPath, getMasterPythonPath } from './envPaths'
+import { getActivePythonPath, getActiveUvPath, getMasterPythonPath } from './envPaths'
 import type { InstallationRecord } from '../../installations'
 
 interface ScriptResult {
@@ -158,7 +158,14 @@ export async function runComfyUIUpdate(opts: UpdateOrchestrationOptions): Promis
   let { installation } = opts
   const sendOutput = opts.sendOutput
   const comfyuiDir = path.join(installPath, 'ComfyUI')
-  const masterPython = getMasterPythonPath(installPath)
+  // Adopted installs don't have a standalone-env Python — they run the
+  // updater against the legacy `.venv` Python instead, which has pygit2
+  // installed during adoption (see `installAdoptedRequirements`).
+  // `update_comfyui.py` only imports `pygit2` + stdlib, so any Python
+  // with pygit2 importable works.
+  const updaterPython = installation.adopted === true
+    ? (installation.adoptedPythonPath as string)
+    : getMasterPythonPath(installPath)
   const channelArgs = channel === 'stable' ? ['--stable'] : []
 
   // Read pre-update requirements
@@ -183,7 +190,7 @@ export async function runComfyUIUpdate(opts: UpdateOrchestrationOptions): Promis
   }
 
   // Run the update script (with macOS SIGKILL retry)
-  let result = await spawnUpdateScript(masterPython, comfyuiDir, channelArgs, sendOutput, signal)
+  let result = await spawnUpdateScript(updaterPython, comfyuiDir, channelArgs, sendOutput, signal)
 
   if (result.exitCode !== 0 && result.exitSignal === 'SIGKILL' && process.platform === 'darwin') {
     if (sendOutput) {
@@ -191,11 +198,16 @@ export async function runComfyUIUpdate(opts: UpdateOrchestrationOptions): Promis
     } else {
       console.warn('macOS killed update process — attempting binary repair and retry')
     }
-    await repairMacBinaries(installPath, sendProgress, sendOutput)
+    // `repairMacBinaries` no-ops the standalone-env half for adopted
+    // installs (path absent) and uses `getActiveVenvDir(installation)` to
+    // pick the right runtime venv — `<installPath>/ComfyUI/.venv` for
+    // managed, `<adoptedBaseDir>/.venv` for adopted. So a Gatekeeper
+    // SIGKILL on either type recovers via the same call.
+    await repairMacBinaries(installPath, sendProgress, sendOutput, installation)
     if (sendOutput) {
       sendOutput('Repair complete — retrying update…\n\n')
     }
-    result = await spawnUpdateScript(masterPython, comfyuiDir, channelArgs, sendOutput, signal)
+    result = await spawnUpdateScript(updaterPython, comfyuiDir, channelArgs, sendOutput, signal)
   }
 
   // Check for cancellation before inspecting exit code — aborted processes
@@ -209,9 +221,9 @@ export async function runComfyUIUpdate(opts: UpdateOrchestrationOptions): Promis
       if (detail) {
         message = `${t('standalone.updateFailed', { code: result.exitCode })}\n\n${detail}`
       } else if (result.exitSignal) {
-        message = `${t('standalone.updateFailed', { code: result.exitCode })}\n\nProcess was killed by signal ${result.exitSignal}.\npython: ${masterPython}\nscript: ${getBundledScriptPath('update_comfyui.py')}`
+        message = `${t('standalone.updateFailed', { code: result.exitCode })}\n\nProcess was killed by signal ${result.exitSignal}.\npython: ${updaterPython}\nscript: ${getBundledScriptPath('update_comfyui.py')}`
       } else {
-        message = `${t('standalone.updateFailed', { code: result.exitCode })}\n\nProcess produced no output.\npython: ${masterPython}\nscript: ${getBundledScriptPath('update_comfyui.py')}`
+        message = `${t('standalone.updateFailed', { code: result.exitCode })}\n\nProcess produced no output.\npython: ${updaterPython}\nscript: ${getBundledScriptPath('update_comfyui.py')}`
       }
       return { ok: false, message, installation }
     }
@@ -226,7 +238,7 @@ export async function runComfyUIUpdate(opts: UpdateOrchestrationOptions): Promis
   try { postReqs = await fs.promises.readFile(reqPath, 'utf-8') } catch {}
 
   if (preReqs !== postReqs && postReqs.length > 0) {
-    const uvPath = getUvPath(installPath)
+    const uvPath = getActiveUvPath(installation)
     const activeEnvPython = getActivePythonPath(installation)
 
     if (fs.existsSync(uvPath) && activeEnvPython) {
@@ -289,7 +301,7 @@ export async function runComfyUIUpdate(opts: UpdateOrchestrationOptions): Promis
   try { postMgrReqs = await fs.promises.readFile(mgrReqPath, 'utf-8') } catch {}
 
   if (preMgrReqs !== postMgrReqs && postMgrReqs.length > 0) {
-    const uvPath = getUvPath(installPath)
+    const uvPath = getActiveUvPath(installation)
     const activeEnvPython = getActivePythonPath(installation)
 
     if (fs.existsSync(uvPath) && activeEnvPython) {

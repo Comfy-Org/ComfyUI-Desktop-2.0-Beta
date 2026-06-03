@@ -151,7 +151,7 @@ export function buildSettingsSections(): SettingsSection[] {
         readonly: true
       }
     ],
-    actions: [{ label: 'GitHub', url: 'https://github.com/Comfy-Org/ComfyUI-Desktop-2.0-Beta' }]
+    actions: [{ label: 'GitHub', url: 'https://github.com/Comfy-Org/Comfy-Desktop' }]
   }
   return [...appSections, ...sourceSections, aboutSection]
 }

@@ -33,7 +33,54 @@ export interface InstallationRecord {
    *  category (e.g. 'local' / 'cloud' / 'desktop'). Always written together
    *  with `lastLaunchedAt` via `markLaunched()` so the two stay consistent. */
   lastLaunchedAtByCategory?: Record<string, number>
+  /** When true (default), launch injects `--extra-model-paths-config`
+   *  derived from the global `modelsDirs` setting so this install sees the
+   *  user's shared model library. When false, only this install's
+   *  `<installPath>/models` is visible. Off is intentionally rare. */
+  useSharedModels?: boolean
+  /** When true (default), launch injects `--input-directory` /
+   *  `--output-directory` from the global `inputDir` / `outputDir`
+   *  settings. When false, launch uses the per-install `inputDir` /
+   *  `outputDir` below if set, otherwise ComfyUI's own
+   *  `<installPath>/{input,output}` defaults. */
+  useSharedInputOutput?: boolean
+  /** Per-install input directory, used only when
+   *  `useSharedInputOutput === false`. Adopted-from-legacy installs
+   *  pre-fill this with `<legacyBasePath>/input`. */
+  inputDir?: string
+  /** Per-install output directory, used only when
+   *  `useSharedInputOutput === false`. */
+  outputDir?: string
   [key: string]: unknown
+}
+
+/**
+ * One-shot in-memory migration from the legacy `useSharedPaths` boolean
+ * to the new `useSharedModels` / `useSharedInputOutput` pair.
+ *
+ * - `useSharedModels` is always set to `true` regardless of the legacy
+ *   value. Users who set `useSharedPaths: false` almost certainly did so
+ *   to isolate their workspace (input/output), not to lose visibility of
+ *   their global model library. Defaulting models-shared back to on is
+ *   the safer intent-preserving choice and matches the new default for
+ *   fresh installs.
+ * - `useSharedInputOutput` copies whatever the legacy boolean was.
+ * - The legacy `useSharedPaths` key is stripped from the returned record
+ *   so downstream code can't accidentally read both.
+ *
+ * Applied on every `load()` so callers always see the new shape; legacy
+ * fields on disk get cleaned the next time the record is written via
+ * `update()` / `add()`.
+ */
+function migrateRecord(record: InstallationRecord): InstallationRecord {
+  if (!('useSharedPaths' in record)) return record
+  const legacy = record.useSharedPaths as boolean | undefined
+  const { useSharedPaths: _drop, ...rest } = record
+  return {
+    ...rest,
+    useSharedModels: true,
+    useSharedInputOutput: typeof legacy === 'boolean' ? legacy : true,
+  } as InstallationRecord
 }
 
 const dataPath = path.join(dataDir(), "installations.json")
@@ -78,7 +125,9 @@ async function load(): Promise<InstallationRecord[]> {
   if (raw) {
     try {
       const parsed: unknown = JSON.parse(raw)
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed as InstallationRecord[]
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return (parsed as InstallationRecord[]).map(migrateRecord)
+      }
     } catch {}
   }
   return []

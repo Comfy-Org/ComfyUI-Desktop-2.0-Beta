@@ -8,7 +8,7 @@
  * can be created through it.
  *
  * Once the v1 user-base has fully migrated to standalone, this file can
- * be removed along with `desktopDetect.ts` and `desktopMigration.ts`.
+ * be removed along with `desktopDetect.ts` and `desktopAdopt.ts`.
  */
 import fs from 'fs'
 import path from 'path'
@@ -42,7 +42,13 @@ export const desktop: SourcePlugin = {
   buildInstallation(): Record<string, unknown> {
     return {
       launchMode: 'external',
-      useSharedPaths: false,
+      // Legacy v1 desktop runs out-of-process via the legacy .exe; v2's
+      // shared model/input/output injection bypass (`skipSharedPaths` on
+      // the launch command below) is the real opt-out, but persisting
+      // both flags as `false` keeps the record's intent obvious if the
+      // user ever inspects the JSON.
+      useSharedModels: false,
+      useSharedInputOutput: false,
     }
   },
 
@@ -149,7 +155,8 @@ export const desktop: SourcePlugin = {
 
     return {
       launchMode: 'external',
-      useSharedPaths: false,
+      useSharedModels: false,
+      useSharedInputOutput: false,
       desktopExePath: findDesktopExecutable() || undefined,
     }
   },
