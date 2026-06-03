@@ -253,7 +253,7 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
     `})()`
 
   /**
-   * Two cloud-only patches injected on every dom-ready of the comfy view:
+   * Three cloud-only patches injected on every dom-ready of the comfy view:
    *
    *   1. popup-blocked toast suppressor — observes new toast DOM nodes
    *      and removes any that mention `auth/popup-blocked`. That error
@@ -267,6 +267,21 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
    *      script hides documentElement for ~1s on the next load so the
    *      user doesn't see the cloud login page flash before the
    *      Firebase rehydrate redirects to the workspace.
+   *
+   *   3. cloud-onboarding "Download ComfyUI" CTA hider — desktop users
+   *      who hit the cloud onboarding screen see a bottom-right CTA
+   *      ("Want to run ComfyUI locally instead? — Download ComfyUI")
+   *      pointing at comfy.org/download. They already have desktop;
+   *      the link is redundant + confusing. We inject a <style> with
+   *      a :has() rule keyed on the CloudTemplate.vue container's
+   *      Tailwind class chain (CSS-only path — no race vs SPA
+   *      hydration since the rule matches continuously). The
+   *      MutationObserver below also tags any <button> with the
+   *      literal text "Download ComfyUI" via data-comfy-desktop-hide,
+   *      which the same stylesheet hides — that's the text-based
+   *      fallback for when the class chain shifts build-to-build.
+   *      TODO(desktop band-aid): remove once Comfy-Org/ComfyUI_frontend
+   *      PR <link-here> lands (conditional skip when running in desktop).
    */
   const COMFY_CLOUD_PATCHES_JS =
     `(function(){` +
@@ -278,6 +293,17 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
           `setTimeout(function(){de.style.visibility=''},1000);` +
         `}` +
       `}catch(_){}` +
+      `try{` +
+        `if(!document.getElementById('__comfyDesktopHideDownloadCta')){` +
+          `var st=document.createElement('style');` +
+          `st.id='__comfyDesktopHideDownloadCta';` +
+          `st.textContent=` +
+            `'div.absolute.inset-0.flex.flex-col.justify-end.px-14.pb-\\\\[64px\\\\]'+` +
+            `':has(> .flex > .flex.items-center.gap-3){display:none !important}'+` +
+            `'[data-comfy-desktop-hide="download-cta"]{display:none !important}';` +
+          `(document.head||document.documentElement).appendChild(st);` +
+        `}` +
+      `}catch(_){}` +
       `function looksBlocked(n){` +
         `if(!n||n.nodeType!==1)return false;` +
         `var t=(n.textContent||'').toLowerCase();` +
@@ -287,6 +313,17 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
         `var root=(n.closest&&n.closest('.p-toast-message,.p-toast-item,[role=alert]'))||n;` +
         `try{root.remove()}catch(_){}` +
       `}` +
+      `function tagDownloadCta(n){` +
+        `if(!n||n.nodeType!==1)return;` +
+        `var btns=(n.tagName==='BUTTON')?[n]:(n.querySelectorAll?n.querySelectorAll('button'):[]);` +
+        `for(var i=0;i<btns.length;i++){` +
+          `var b=btns[i];` +
+          `if(!b||(b.textContent||'').trim()!=='Download ComfyUI')continue;` +
+          `var host=(b.closest&&b.closest('div.absolute.inset-0.flex.flex-col.justify-end'))||b.parentElement;` +
+          `if(host&&host.setAttribute)host.setAttribute('data-comfy-desktop-hide','download-cta');` +
+        `}` +
+      `}` +
+      `tagDownloadCta(document.body);` +
       `new MutationObserver(function(muts){` +
         `for(var i=0;i<muts.length;i++){` +
           `var added=muts[i].addedNodes;` +
@@ -299,6 +336,7 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
                 `if(looksBlocked(hits[k])){nukeToast(hits[k]);break;}` +
               `}` +
             `}` +
+            `tagDownloadCta(n);` +
           `}` +
         `}` +
       `}).observe(document.documentElement,{childList:true,subtree:true});` +
