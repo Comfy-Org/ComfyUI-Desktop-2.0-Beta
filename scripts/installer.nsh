@@ -41,22 +41,23 @@
   LangString reinstallUpgrade 1033 "Setup will update your existing installation."
   !pragma warning enable 6030
 
-  ; Tracks whether the wizard is currently on the Finish page. Set in
-  ; FinishPagePreCheck, never reset. Used by OnFinishCancelHandler to
-  ; decide whether to Quit cleanly (Finish page) or let MUI2's default
-  ; abort flow continue (every earlier page — abort-confirm prompt).
-  Var IsOnFinishPage
-
   ; Hooked into MUI2's .onUserAbort via MUI_CUSTOMFUNCTION_ABORT (defined
   ; at the top of this file). MUI2 emits `Call "OnFinishCancelHandler"`
   ; inside its generated .onUserAbort, so the function is referenced
-  ; despite NSIS's static analysis not seeing the wiring — no
-  ; warning 6010 / -WX failure.
+  ; despite NSIS's static analysis not seeing the wiring directly.
+  ;
+  ; electron-builder doesn't define MUI_ABORTWARNING, so MUI2's
+  ; .onUserAbort has no built-in abort-confirm prompt — without our
+  ; handler doing something explicit, the Cancel button silently no-ops
+  ; (which was the user-reported bug). We Quit unconditionally: any
+  ; page reaching this handler means the user clicked Cancel / X
+  ; intending to leave, so close the installer cleanly with ErrorLevel
+  ; 0. (Tradeoff: cancelling mid-install also exits without a
+  ; "Are you sure?" prompt. That matches default-NSIS behavior when
+  ; the script doesn't opt into MUI_ABORTWARNING.)
   Function OnFinishCancelHandler
-    ${If} $IsOnFinishPage == "1"
-      SetErrorLevel 0
-      Quit
-    ${EndIf}
+    SetErrorLevel 0
+    Quit
   FunctionEnd
 
   ; Reveal the install-details list view during install. electron-builder's
@@ -318,11 +319,5 @@
       ${StdUtils.ExecShellAsUser} $0 "$launchLink" "open" "--updated"
       Abort
     ${endif}
-
-    ; Tell OnFinishCancelHandler (hooked into MUI2's .onUserAbort) that
-    ; we're on the Finish page so Cancel / X close the wizard cleanly
-    ; instead of triggering the standard abort-confirm prompt that's
-    ; meant for in-flight installs.
-    StrCpy $IsOnFinishPage "1"
   FunctionEnd
 !macroend
