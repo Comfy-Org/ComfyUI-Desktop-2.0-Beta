@@ -948,7 +948,7 @@ describe('TitleBarApp', () => {
     const btn = wrapper.find('.title-feedback-button')
     expect(btn.exists()).toBe(true)
     expect(btn.attributes('aria-label')).toBe('Feedback')
-    expect(btn.text()).toContain('Feedback')
+    expect(btn.text()).toBe('')
     await btn.trigger('click')
     expect(bridgeState.feedbackClicks).toBe(1)
     wrapper.unmount()

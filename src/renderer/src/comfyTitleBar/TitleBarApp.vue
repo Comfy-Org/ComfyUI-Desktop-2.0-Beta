@@ -10,7 +10,7 @@ import {
   MessageSquarePlus,
   RefreshCw,
   RotateCw,
-  Search
+  ZoomIn
 } from 'lucide-vue-next'
 import { useTitleBarTooltip } from './useTitleBarTooltip'
 import { useTitleBarMenus } from './useTitleBarMenus'
@@ -227,9 +227,7 @@ void firstUseMode
 
 const zoomLevel = ref(0)
 const zoomPercent = computed(() => Math.round(Math.pow(1.2, zoomLevel.value) * 100))
-const showZoomReset = computed(
-  () => zoomLevel.value !== 0 && !isInstallLess.value && !isFirstUseLockdown.value
-)
+const showZoomReset = computed(() => !isInstallLess.value && !isFirstUseLockdown.value)
 
 /**
  * Title-bar chrome lockdown. True whenever the bar should collapse to
@@ -604,6 +602,18 @@ onUnmounted(() => {
       >
         <MenuIcon :size="18" />
       </button>
+      <!-- Browser-style refresh for remote/cloud instances, right of the
+           hamburger. Re-navigates the comfyView via the same reload path
+           as F5/Ctrl+R. -->
+      <button
+        v-if="showRefreshButton"
+        type="button"
+        class="title-menu-button title-menu-button--icon title-refresh-button"
+        v-bind="tooltipAttrs(t('titleBar.refreshInstanceTooltip'))"
+        @click="handleRefreshInstance"
+      >
+        <RotateCw :size="16" />
+      </button>
     </div>
 
     <!-- Center: install pill + install-update pill. The downloads tray
@@ -621,19 +631,6 @@ onUnmounted(() => {
            `loading-lockdown` keeps the pill interactive so the user
            can open the picker (switch / open another install) while
            an op runs in the background. -->
-      <!-- Browser-style refresh for remote/cloud instances, on the left
-           of the identity pill (reload sits before the address in a
-           browser). Re-navigates the comfyView via the same reload path
-           as F5/Ctrl+R. -->
-      <button
-        v-if="showRefreshButton"
-        type="button"
-        class="title-menu-button title-menu-button--icon title-refresh-button"
-        v-bind="tooltipAttrs(t('titleBar.refreshInstanceTooltip'))"
-        @click="handleRefreshInstance"
-      >
-        <RotateCw :size="16" />
-      </button>
       <!-- Interactive on every mode except first-use lockdown. The
            bootstrap UX is the only flow that needs to keep the user
            inside one window; long-running ops mount the ProgressModal
@@ -706,18 +703,6 @@ onUnmounted(() => {
         </div>
         <div class="title-install-slot title-install-slot--trailing"></div>
       </div>
-      <Transition name="title-zoom-fade">
-        <button
-          v-if="showZoomReset"
-          type="button"
-          class="title-zoom-reset"
-          v-bind="tooltipAttrs(t('titleBar.resetZoomTooltip'))"
-          @click="handleResetZoom"
-        >
-          <Search :size="13" class="title-zoom-reset-icon" />
-          <span class="title-zoom-reset-percent">{{ zoomPercent }}%</span>
-        </button>
-      </Transition>
     </div>
 
     <div ref="titleTrailing" class="title-trailing">
@@ -746,15 +731,27 @@ onUnmounted(() => {
         <RefreshCw v-else-if="appUpdateState.kind === 'ready'" :size="14" />
         <span class="title-update-pill-label">{{ appUpdatePillLabel ?? 'Desktop Update' }}</span>
       </button>
+      <!-- Zoom-level pill. Always visible on an instance (reads "100%" at
+           the default); click resets the comfyView to 100%. -->
+      <button
+        v-if="showZoomReset"
+        type="button"
+        class="title-zoom-reset"
+        :class="{ 'is-zoomed': zoomLevel !== 0 }"
+        v-bind="tooltipAttrs(t('titleBar.resetZoomTooltip'))"
+        @click="handleResetZoom"
+      >
+        <ZoomIn :size="14" class="title-zoom-reset-icon" />
+        <span class="title-zoom-reset-percent">{{ zoomPercent }}%</span>
+      </button>
       <button
         v-if="!isFirstUseLockdown"
         type="button"
-        class="title-menu-button title-feedback-button"
+        class="title-menu-button title-menu-button--icon title-feedback-button"
         v-bind="tooltipAttrs(t('titleBar.feedbackTooltip'), t('titleBar.feedback'))"
         @click="handleFeedback"
       >
         <MessageSquarePlus :size="16" />
-        <span class="title-feedback-label">{{ t('titleBar.feedback') }}</span>
       </button>
       <!-- Downloads tray. Click opens the title-bar dropdown popup in
            `'downloads'` mode anchored under the button. Distinct
@@ -1020,54 +1017,52 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 2px 8px;
+  padding: 3px 8px;
   border-radius: 999px;
   border: 1px solid transparent;
-  background: rgba(255, 255, 255, 0.08);
+  background: transparent;
   color: var(--titlebar-icon);
   font: inherit;
   font-size: 11px;
   line-height: 14px;
   font-variant-numeric: tabular-nums;
   cursor: pointer;
-  opacity: 0.85;
+  opacity: 0.7;
   transition:
     background-color 0.12s,
     border-color 0.12s,
     opacity 0.12s;
 }
 .title-zoom-reset-icon {
-  opacity: 0.75;
+  opacity: 0.85;
 }
 .title-zoom-reset-percent {
   letter-spacing: 0.01em;
 }
 .title-bar.is-hover-active .title-zoom-reset:hover {
   opacity: 1;
-  background: rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.08);
   border-color: rgba(255, 255, 255, 0.18);
 }
-.title-bar.is-light .title-zoom-reset {
-  background: rgba(0, 0, 0, 0.06);
-}
 .title-bar.is-light.is-hover-active .title-zoom-reset:hover {
-  background: rgba(0, 0, 0, 0.1);
+  background: rgba(0, 0, 0, 0.06);
   border-color: rgba(0, 0, 0, 0.18);
+}
+/* Off the default zoom: surface a quiet accent so the user notices the
+   view is zoomed and that the pill is the way back to 100%. */
+.title-zoom-reset.is-zoomed {
+  opacity: 1;
+  background: color-mix(in srgb, var(--comfy-yellow) 12%, transparent);
+  border-color: color-mix(in srgb, var(--comfy-yellow) 45%, transparent);
+  color: var(--comfy-yellow);
+}
+.title-bar.is-hover-active .title-zoom-reset.is-zoomed:hover {
+  background: color-mix(in srgb, var(--comfy-yellow) 20%, transparent);
+  border-color: var(--comfy-yellow);
 }
 .title-zoom-reset:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
-}
-.title-zoom-fade-enter-active,
-.title-zoom-fade-leave-active {
-  transition:
-    opacity 0.16s ease,
-    transform 0.16s ease;
-}
-.title-zoom-fade-enter-from,
-.title-zoom-fade-leave-to {
-  opacity: 0;
-  transform: scale(0.9);
 }
 
 .title-install-caret {
@@ -1349,14 +1344,6 @@ onUnmounted(() => {
 
    Tooltips on every pill carry the full label, so icon-only states
    stay accessible without extra markup. */
-
-.title-bar.is-collapsed-feedback .title-feedback-label {
-  display: none;
-}
-.title-bar.is-collapsed-feedback .title-feedback-button {
-  padding: 4px 6px;
-  gap: 0;
-}
 
 /* When the update label collapses the pill drops to a 24×24 circle
    (matching the Settings + other icon-only chrome) instead of staying
