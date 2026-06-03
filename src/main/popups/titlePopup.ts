@@ -134,6 +134,16 @@ export interface InstancePickerSnapshot {
    *  launching window via `useInstallCta`. */
   launchingInstallationIds: string[]
   selectedInstallationId: string | null
+  /** Bumped on every main-initiated retarget of the picker selection
+   *  (open / "Manage" from a chooser card / `open-instance-picker-for-
+   *  install` deep-link). NOT bumped when the renderer pushes its own
+   *  user-click selection via `set-picker-selected-install`. The
+   *  renderer keys its "apply snapshot selection over my local pick"
+   *  guard on this epoch so a stale snapshot whose
+   *  `selectedInstallationId` echoes an older value can't snap the
+   *  user back to a previously-selected row after they've moved on
+   *  (issue #788). */
+  pickerSelectionEpoch: number
   selectedSettings: Record<string, unknown>[] | null
   selectedSnapshots: Record<string, unknown> | null
   /** Tab the settings UI opens on ('config' | 'status' | 'update' |
@@ -220,6 +230,7 @@ interface BuildInstancePickerSnapshotArgs {
   runningInstallationIds: string[]
   launchingInstallationIds: string[]
   selectedInstallationId?: string | null
+  pickerSelectionEpoch?: number
   selectedSettings?: Record<string, unknown>[] | null
   selectedSnapshots?: Record<string, unknown> | null
   initialTab?: string | null
@@ -293,6 +304,7 @@ export function buildInstancePickerSnapshot(
     runningInstallationIds: args.runningInstallationIds,
     launchingInstallationIds: args.launchingInstallationIds,
     selectedInstallationId: args.selectedInstallationId ?? null,
+    pickerSelectionEpoch: args.pickerSelectionEpoch ?? 0,
     selectedSettings: args.selectedSettings ?? null,
     selectedSnapshots: args.selectedSnapshots ?? null,
     initialTab: args.initialTab ?? null,
@@ -400,6 +412,13 @@ interface TitlePopupEntry {
    *  scope `selectedSettings` + `selectedSnapshots` in subsequent
    *  snapshot pushes. Defaults to the host's active install on open. */
   pickerSelectedInstallationId: string | null
+  /** Monotonic counter bumped only on main-initiated picker selection
+   *  retargets (`openInstancePickerForHost`). Mirrored into the
+   *  snapshot as `pickerSelectionEpoch`; the renderer treats a snapshot
+   *  selection as authoritative only when this advances, so a stale
+   *  rebroadcast carrying an older `selectedInstallationId` can't snap
+   *  the user back after a fast click (issue #788). */
+  pickerSelectionEpoch: number
   /** Tab id the settings UI opens on. Forwarded into the snapshot for
    *  the picker view to consume on first render. */
   pickerInitialTab: string | null
@@ -826,6 +845,11 @@ async function broadcastInstancePickerSnapshotToTitlePopups(
       runningInstallationIds,
       launchingInstallationIds,
       selectedInstallationId: selectedId,
+      // Forward the current epoch verbatim — broadcasts NEVER bump it.
+      // Only `openInstancePickerForHost` does, so a live data refresh
+      // (installs changed, op progress tick, etc.) can't masquerade as a
+      // main-authoritative selection retarget in the renderer.
+      pickerSelectionEpoch: entry.pickerSelectionEpoch,
       selectedSettings: details.settings,
       selectedSnapshots: details.snapshots,
       initialTab: entry.pickerInitialTab,
@@ -950,6 +974,7 @@ function ensureTitlePopup(parent: BrowserWindow): TitlePopupEntry {
     lastConfigJson: null,
     lastSyncedConfigJson: null,
     pickerSelectedInstallationId: null,
+    pickerSelectionEpoch: 0,
     pickerInitialTab: null,
     pickerAutoAction: null,
     pickerAutoActionNonce: 0,
@@ -1632,8 +1657,16 @@ function openInstancePickerForHost(
   // trigger re-fires in the cached renderer (see `_pickerAutoActionNonce`).
   const autoActionNonce = autoAction ? (_pickerAutoActionNonce += 1) : _pickerAutoActionNonce
   const popupEntry = titlePopupsByParent.get(parentEntry.window.id)
+  // Bump the selection epoch BEFORE building the snapshot so the picker
+  // view treats this open's `initialSelectedId` as a main-authoritative
+  // retarget (vs a stale rebroadcast echoing the renderer's last click).
+  // Every code path that intentionally (re)targets the picker selection
+  // — title-bar pill, chooser-card "Manage…" deep-link, etc. — funnels
+  // through here, so this is the only place that needs to bump.
+  const pickerSelectionEpoch = popupEntry ? popupEntry.pickerSelectionEpoch + 1 : 1
   if (popupEntry) {
     popupEntry.pickerSelectedInstallationId = initialSelectedId
+    popupEntry.pickerSelectionEpoch = pickerSelectionEpoch
     popupEntry.pickerInitialTab = initialTab ?? null
     popupEntry.pickerAutoAction = autoAction ?? null
     popupEntry.pickerAutoActionNonce = autoActionNonce
@@ -1645,6 +1678,7 @@ function openInstancePickerForHost(
     runningInstallationIds,
     launchingInstallationIds,
     selectedInstallationId: initialSelectedId,
+    pickerSelectionEpoch,
     selectedSettings: null,
     selectedSnapshots: null,
     initialTab: initialTab ?? null,

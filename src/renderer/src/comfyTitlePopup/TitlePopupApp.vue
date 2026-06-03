@@ -96,6 +96,11 @@ interface PickerSnapshot {
    *  mean "no selection / no install path / source failure" — the
    *  picker renders the empty state in that case. */
   selectedInstallationId: string | null
+  /** Bumped only when main intentionally retargets the picker
+   *  selection (open / Manage…). Gates the picker view's "apply
+   *  snapshot selection over my local pick" behaviour so stale
+   *  rebroadcasts can't snap-back after a fast click (issue #788). */
+  pickerSelectionEpoch?: number
   selectedSettings: DetailSection[] | null
   selectedSnapshots: SnapshotListData | null
   storage: PickerStorageSlice
@@ -196,6 +201,7 @@ const pickerSnapshot = ref<PickerSnapshot>({
   runningInstallationIds: [],
   launchingInstallationIds: [],
   selectedInstallationId: null,
+  pickerSelectionEpoch: 0,
   selectedSettings: null,
   selectedSnapshots: null,
   storage: { sharedDirectoriesFields: [], modelsDirs: [], modelsSystemDefault: '' }
