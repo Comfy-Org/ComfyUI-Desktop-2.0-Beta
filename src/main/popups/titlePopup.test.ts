@@ -461,5 +461,33 @@ describe('buildInstancePickerSnapshot', () => {
     })
     expect(snap.launchingInstallationIds).toEqual(['a', 'b'])
   })
+
+  // Issue #788: the picker view treats `selectedInstallationId` as
+  // authoritative only when `pickerSelectionEpoch` advances. Live-data
+  // rebroadcasts must forward whatever the entry's current epoch is
+  // (default 0 if never seeded by an open); only `openInstancePickerForHost`
+  // is allowed to bump it.
+  it('defaults pickerSelectionEpoch to 0 when not provided', () => {
+    const snap = buildInstancePickerSnapshot({
+      installs: [],
+      hostInstallationId: null,
+      runningInstallationIds: [],
+      launchingInstallationIds: [],
+      storage: EMPTY_STORAGE,
+    })
+    expect(snap.pickerSelectionEpoch).toBe(0)
+  })
+
+  it('preserves pickerSelectionEpoch verbatim when provided', () => {
+    const snap = buildInstancePickerSnapshot({
+      installs: [],
+      hostInstallationId: null,
+      runningInstallationIds: [],
+      launchingInstallationIds: [],
+      pickerSelectionEpoch: 7,
+      storage: EMPTY_STORAGE,
+    })
+    expect(snap.pickerSelectionEpoch).toBe(7)
+  })
 })
 

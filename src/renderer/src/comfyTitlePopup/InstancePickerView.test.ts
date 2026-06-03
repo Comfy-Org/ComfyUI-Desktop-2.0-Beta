@@ -54,6 +54,7 @@ interface MockSnapshot {
    *  the launching state explicitly set this. */
   launchingInstallationIds?: string[]
   selectedInstallationId?: string | null
+  pickerSelectionEpoch?: number
   selectedSettings?: unknown[] | null
   selectedSnapshots?: unknown | null
 }
@@ -561,6 +562,105 @@ describe('comfyTitlePopup/InstancePickerView', () => {
       })
       await flushPromises()
       expect(sessionStore.isLaunching('a')).toBe(true)
+    })
+
+    // Regression for #788: clicking through rows fast must not snap
+    // back to a previously-selected row when a stale snapshot (carrying
+    // an older `selectedInstallationId`) lands after the local click.
+    // The fix gates snapshot-driven selection updates on a strictly-
+    // increasing `pickerSelectionEpoch` — only `openInstancePickerForHost`
+    // bumps it. Plain live-data rebroadcasts share the same epoch as
+    // the open, so they cannot retarget the picker.
+    describe('selection epoch gating (#788)', () => {
+      it('ignores a stale same-epoch snapshot that would override a local pick', async () => {
+        const wrapper = await mountPicker({
+          installs: [
+            makeInstall({ id: 'a', name: 'Alpha' }),
+            makeInstall({ id: 'b', name: 'Bravo' }),
+          ],
+          activeInstallationId: 'a',
+          runningInstallationIds: [],
+          // First (open) snapshot at epoch 1: main seeded selection = 'a'.
+          pickerSelectionEpoch: 1,
+        })
+
+        // User clicks Bravo locally.
+        const bravoRow = wrapper.findAll('.picker-row').find((c) => c.text().includes('Bravo'))
+        await bravoRow!.trigger('click')
+        await flushPromises()
+        expect(bridge.selectedInstallSets.at(-1)).toBe('b')
+        const echoCountAfterClick = bridge.selectedInstallSets.length
+
+        // A late live-data snapshot lands carrying the old selection
+        // ('a') and the SAME epoch — represents either an in-flight
+        // broadcast that started before the user's click, or any other
+        // event-driven rebroadcast (installationEvents / session /
+        // download). The view must keep Bravo selected and must NOT
+        // re-echo 'a' back to main (which would otherwise make the
+        // snap-back persistent by overwriting main's pickerSelectedInstallationId).
+        await wrapper.setProps({
+          snapshot: {
+            installs: [
+              makeInstall({ id: 'a', name: 'Alpha' }),
+              makeInstall({ id: 'b', name: 'Bravo' }),
+            ],
+            activeInstallationId: 'a',
+            runningInstallationIds: [],
+            launchingInstallationIds: [],
+            selectedInstallationId: 'a',
+            pickerSelectionEpoch: 1,
+            selectedSettings: null,
+            selectedSnapshots: emptySnapshotListPayload,
+          },
+        })
+        await flushPromises()
+
+        const stillBravo = wrapper.findAll('.picker-row').find((c) => c.text().includes('Bravo'))
+        expect(stillBravo!.classes()).toContain('is-active')
+        expect(bridge.selectedInstallSets.length).toBe(echoCountAfterClick)
+        expect(bridge.selectedInstallSets.at(-1)).toBe('b')
+      })
+
+      it('retargets selection when the epoch advances (main reopened picker)', async () => {
+        const wrapper = await mountPicker({
+          installs: [
+            makeInstall({ id: 'a', name: 'Alpha' }),
+            makeInstall({ id: 'b', name: 'Bravo' }),
+            makeInstall({ id: 'c', name: 'Charlie' }),
+          ],
+          activeInstallationId: 'a',
+          runningInstallationIds: [],
+          pickerSelectionEpoch: 1,
+        })
+
+        // User clicks Bravo locally.
+        const bravoRow = wrapper.findAll('.picker-row').find((c) => c.text().includes('Bravo'))
+        await bravoRow!.trigger('click')
+        await flushPromises()
+
+        // Main retargets to Charlie via a fresh open (e.g. chooser-card
+        // "Manage…" deep-link). Epoch advances → renderer honours.
+        await wrapper.setProps({
+          snapshot: {
+            installs: [
+              makeInstall({ id: 'a', name: 'Alpha' }),
+              makeInstall({ id: 'b', name: 'Bravo' }),
+              makeInstall({ id: 'c', name: 'Charlie' }),
+            ],
+            activeInstallationId: 'a',
+            runningInstallationIds: [],
+            launchingInstallationIds: [],
+            selectedInstallationId: 'c',
+            pickerSelectionEpoch: 2,
+            selectedSettings: null,
+            selectedSnapshots: emptySnapshotListPayload,
+          },
+        })
+        await flushPromises()
+
+        const charlie = wrapper.findAll('.picker-row').find((c) => c.text().includes('Charlie'))
+        expect(charlie!.classes()).toContain('is-active')
+      })
     })
 
     it('clears a launching id when it drops out of the snapshot', async () => {
