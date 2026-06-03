@@ -42,7 +42,7 @@ mac:
   target:
     - dmg
     - zip
-  icon: assets/Comfy_Logo_x1024.png
+  icon: assets/Comfy_Logo_mac_x1024.png
   category: public.app-category.developer-tools
   extraResources:
     - from: bootstrap-python/mac-arm64

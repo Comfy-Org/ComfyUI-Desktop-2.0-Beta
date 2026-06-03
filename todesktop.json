@@ -34,7 +34,7 @@
     "nsisInclude": "./scripts/installer.nsh"
   },
   "mac": {
-    "icon": "./assets/Comfy_Logo_x1024.png",
+    "icon": "./assets/Comfy_Logo_mac_x1024.png",
     "category": "public.app-category.graphics-design"
   },
   "linux": {
