@@ -10,7 +10,7 @@ import { formatNodeVersion } from '../lib/snapshots'
 
 const { t } = useI18n()
 
-const { state, close } = useModal()
+const { state, close, dismiss } = useModal()
 
 /** Whether the current confirm modal is the Migrate-to-Standalone flow.
  *  `snapshotPreview` is only set by `useMigrateAction`, so its presence
@@ -143,11 +143,7 @@ function handleOverlayMouseDown(event: MouseEvent): void {
 
 function handleOverlayClick(event: MouseEvent): void {
   if (mouseDownOnOverlay.value && event.target === overlayRef.value) {
-    if (state.type === 'alert') {
-      close(undefined)
-    } else {
-      close(state.type === 'confirm' ? false : null)
-    }
+    dismiss()
   }
   mouseDownOnOverlay.value = false
 }
@@ -183,11 +179,7 @@ function handleKeydown(event: KeyboardEvent): void {
   // Skip here to avoid double-resolving the promise.
   if (usesBaseAlert.value) return
   if (event.key === 'Escape') {
-    if (state.type === 'alert') {
-      close(undefined)
-    } else {
-      close(state.type === 'confirm' ? false : null)
-    }
+    dismiss()
   }
 }
 
