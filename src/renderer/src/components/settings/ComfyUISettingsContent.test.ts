@@ -91,12 +91,16 @@ const useComfyUISettingsState = {
   pendingRestartFieldIds: ref<Set<string>>(new Set()),
   fieldErrorMessages: ref<Record<string, string>>({}),
   diskUsageItem: ref(null),
+  // Stable spies so the stale-watcher tests can assert that the
+  // channel-refresh watcher (#782) doesn't auto-fire actions
+  // against the wrong install's payload.
+  runActionStub: vi.fn(),
 }
 vi.mock('../../composables/useComfyUISettings', () => ({
   useComfyUISettings: () => ({
     ...useComfyUISettingsState,
     updateField: vi.fn(),
-    runAction: vi.fn(),
+    runAction: useComfyUISettingsState.runActionStub,
     // Real composable returns ComputedRef<DetailSection[]>; mirror that
     // so the host's `.value.length` reads work without surfacing the
     // composable's tab-filtering implementation here.
@@ -562,6 +566,35 @@ describe('ComfyUISettingsContent', () => {
       setStale(false)
       await nextTick()
       expect((more.element as HTMLButtonElement).disabled).toBe(false)
+    })
+
+    it('does NOT auto-fire `check-update` against the new install while sections are still stale', async () => {
+      // Regression for an "Action 'check-update' not yet implemented."
+      // alert that appeared when switching from a local install to
+      // Cloud. The channel-cards-refresh watcher used to walk
+      // `sections.value` whenever `sectionsLen > 0`; with #782 keeping
+      // the previous install's sections painted across switches, that
+      // walked the wrong install's payload and fired the action
+      // against Cloud, which has no `check-update` handler.
+      const priorSections = useComfyUISettingsState.sections.value
+      // Seed STALE sections that contain a channel-cards field AND a
+      // `check-update` action — what would still be painted from a
+      // prior local install when the user has just clicked Cloud.
+      useComfyUISettingsState.sections.value = [
+        {
+          tab: 'update',
+          fields: [{ id: 'channel', editType: 'channel-cards', value: 'stable' }],
+          actions: [{ id: 'check-update', label: 'Check for update', data: {} }],
+        },
+      ]
+      setStale(true)
+      useComfyUISettingsState.runActionStub.mockClear()
+
+      await mountContent({ initialTab: 'update' })
+
+      expect(useComfyUISettingsState.runActionStub).not.toHaveBeenCalled()
+
+      useComfyUISettingsState.sections.value = priorSections
     })
   })
 

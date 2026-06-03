@@ -193,11 +193,15 @@ watch(
   [
     () => autoActionKey.value,
     () => props.installation?.id ?? null,
-    () => loading.value,
-    () => sections.value.length
+    () => sectionsFresh.value
   ],
-  async ([key, installId, isLoading, sectionsLen]) => {
-    if (!installId || !key || isLoading || sectionsLen === 0) return
+  async ([key, installId, isFresh]) => {
+    // `isFresh` guards against acting on a previous install's
+    // stale payload — sections are no longer blanked on switch
+    // (#782), so we must wait until the new install's sections
+    // have actually landed before resolving an autoAction id
+    // against them.
+    if (!installId || !key || !isFresh) return
     if (consumedAutoActionKey.value === key) return
     const autoAction = props.autoAction
     if (!autoAction) return
@@ -248,9 +252,15 @@ watch(
 // than 6 fetches/minute/channel.
 const refreshedChannelKeys = new Set<string>()
 watch(
-  [() => activeTab.value, () => props.installation?.id ?? null, () => sections.value.length],
-  ([tab, installId, sectionsLen]) => {
-    if (tab !== 'update' || !installId || sectionsLen === 0) return
+  [() => activeTab.value, () => props.installation?.id ?? null, () => sectionsFresh.value],
+  ([tab, installId, isFresh]) => {
+    // `isFresh` is critical: sections are no longer blanked on
+    // install switch (#782), so without this guard the watcher would
+    // walk the previous install's stale sections, find a
+    // `check-update` action, and fire it against the NEW install —
+    // which on Cloud / remote URL installs returns
+    // `Action "check-update" not yet implemented.` (alert modal).
+    if (tab !== 'update' || !installId || !isFresh) return
 
     const channelField = sections.value
       .flatMap((s) => s.fields ?? [])
