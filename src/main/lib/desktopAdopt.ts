@@ -7,7 +7,7 @@ import { defaultInstallDir, allocateUniqueDir, sanitizeDirName } from './paths'
 import { gitClone, gitCheckoutCommit } from './git'
 import { getComfyUIRemoteUrl } from './github-mirror'
 import { getLatestStableTag } from './comfyui-releases'
-import { installFilteredRequirements } from './pip'
+import { installFilteredRequirements, runUvPip, getPipIndexArgs } from './pip'
 import * as installations from '../installations'
 import type { InstallationRecord } from '../installations'
 import * as settings from '../settings'
@@ -438,6 +438,8 @@ interface RequirementsInstallReport {
   uvAvailable: boolean
   coreExitCode: number | null
   managerExitCode: number | null
+  /** `uv pip install pygit2` exit code, or null when skipped (no uv). */
+  pygit2ExitCode: number | null
 }
 
 /**
@@ -448,6 +450,19 @@ interface RequirementsInstallReport {
  * user can re-sync from the Manager UI later. PyTorch packages are
  * filtered out via `installFilteredRequirements` so we never clobber the
  * legacy CUDA build.
+ *
+ * Also installs `pygit2` so:
+ *   - ComfyUI-Manager v4 picks the pygit2 backend (gated by
+ *     `CM_USE_PYGIT2=1`, which `buildLaunchEnv` already sets for every
+ *     `sourceId === 'standalone'` install — adopted included). Without
+ *     pygit2 Manager falls back to GitPython, which requires `git` on
+ *     PATH — Legacy Desktop never required system git, so adopted users
+ *     often don't have it.
+ *   - The launcher-bundled `update_comfyui.py` can run against the
+ *     adopted Python (it imports pygit2 unconditionally), which is what
+ *     unblocks in-place ComfyUI source updates for adopted installs.
+ *     Without pygit2 in the legacy venv, the only way to update was
+ *     Copy & Update (rebuild as a fully managed standalone).
  */
 async function installAdoptedRequirements(
   destSource: string,
@@ -462,7 +477,7 @@ async function installAdoptedRequirements(
       `Warning: legacy venv uv not found at ${uvPath} — skipping ComfyUI requirements install. ` +
       `You may need to manually run \`pip install -r requirements.txt\` later if launches fail.\n`,
     )
-    return { uvAvailable: false, coreExitCode: null, managerExitCode: null }
+    return { uvAvailable: false, coreExitCode: null, managerExitCode: null, pygit2ExitCode: null }
   }
 
   const mirrors = settings.getMirrorConfig()
@@ -470,6 +485,7 @@ async function installAdoptedRequirements(
     uvAvailable: true,
     coreExitCode: null,
     managerExitCode: null,
+    pygit2ExitCode: null,
   }
 
   const coreReqs = path.join(destSource, 'requirements.txt')
@@ -500,6 +516,28 @@ async function installAdoptedRequirements(
     if (code !== 0) {
       tools.sendOutput(`Warning: manager requirements install exited with code ${code}.\n`)
     }
+  }
+
+  // pygit2 is a separate uv invocation rather than a synthetic entry in a
+  // requirements file so we surface its exit code distinctly in telemetry
+  // (Manager + in-place updates both depend on it; we want to spot a
+  // population of adoptions where this specific install fails). Idempotent
+  // on reconcile.
+  tools.sendOutput('Installing pygit2 into legacy venv (enables Manager + in-place updates)…\n')
+  const pygit2Code = await runUvPip(
+    uvPath,
+    ['pip', 'install', 'pygit2', '--python', pythonPath, ...getPipIndexArgs(mirrors.pypiMirror, mirrors.useChineseMirrors)],
+    installPath,
+    tools.sendOutput,
+    tools.signal,
+  )
+  report.pygit2ExitCode = pygit2Code
+  if (pygit2Code !== 0) {
+    tools.sendOutput(
+      `Warning: pygit2 install exited with code ${pygit2Code}. Manager will fall back ` +
+      `to GitPython (requires system git) and in-place ComfyUI updates will be unavailable ` +
+      `until pygit2 is installed manually or via "Copy & Update".\n`,
+    )
   }
 
   return report
@@ -853,7 +891,7 @@ async function runAdoption(
       return await installAdoptedRequirements(destSource, installPath, pythonPath, info.basePath, tools)
     } catch (err) {
       sendOutput(`Warning: requirements install threw: ${(err as Error).message}\n`)
-      return { uvAvailable: false, coreExitCode: null, managerExitCode: null }
+      return { uvAvailable: false, coreExitCode: null, managerExitCode: null, pygit2ExitCode: null }
     }
   })
 
@@ -965,6 +1003,7 @@ async function runAdoption(
     requirements_uv_available: reqReport.uvAvailable,
     requirements_core_exit: reqReport.coreExitCode,
     requirements_manager_exit: reqReport.managerExitCode,
+    requirements_pygit2_exit: reqReport.pygit2ExitCode,
     gpu: detectedGpu,
     selected_device: selectedDevice,
   })

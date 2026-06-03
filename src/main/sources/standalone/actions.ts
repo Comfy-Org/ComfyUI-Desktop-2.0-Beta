@@ -309,21 +309,23 @@ async function handleUpdateComfyUI(
     return { ok: false, message: t('standalone.updateNoGit') }
   }
 
-  // Adopted installs reuse the legacy uv-managed `.venv` and don't ship
-  // with a `standalone-env` Python. The update script also needs `pygit2`
-  // (bundled with standalone-env but not in the legacy venv), so this
-  // flow can't run in-place. Recommend Copy & Update, which converts
-  // the install to a fully managed standalone.
-  if (installation.adopted === true) {
-    return {
-      ok: false,
-      message: 'In-place ComfyUI update is not available for installs adopted from Legacy Desktop. Use "Copy & Update" to convert this install to a managed standalone first.',
+  // Adopted installs don't have a `standalone-env` Python; `runComfyUIUpdate`
+  // routes them through `adoptedPythonPath` (legacy `.venv`, which has
+  // pygit2 installed during adoption). Managed installs still require the
+  // standalone-env Python so we check existence here.
+  if (installation.adopted !== true) {
+    const masterPython = getMasterPythonPath(installPath)
+    if (!fs.existsSync(masterPython)) {
+      return { ok: false, message: 'Master Python not found.' }
     }
-  }
-
-  const masterPython = getMasterPythonPath(installPath)
-  if (!fs.existsSync(masterPython)) {
-    return { ok: false, message: 'Master Python not found.' }
+  } else {
+    const adoptedPython = installation.adoptedPythonPath as string | undefined
+    if (!adoptedPython || !fs.existsSync(adoptedPython)) {
+      return {
+        ok: false,
+        message: 'Adopted Python not found at the recorded path. Re-run "Migrate to Standalone" to reconcile, or use "Copy & Update" to rebuild as a managed standalone.',
+      }
+    }
   }
 
   const targetChannel = (actionData?.channel as string | undefined) ?? (installation.updateChannel as string | undefined) ?? 'stable'

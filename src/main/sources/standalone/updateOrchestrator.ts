@@ -158,7 +158,14 @@ export async function runComfyUIUpdate(opts: UpdateOrchestrationOptions): Promis
   let { installation } = opts
   const sendOutput = opts.sendOutput
   const comfyuiDir = path.join(installPath, 'ComfyUI')
-  const masterPython = getMasterPythonPath(installPath)
+  // Adopted installs don't have a standalone-env Python — they run the
+  // updater against the legacy `.venv` Python instead, which has pygit2
+  // installed during adoption (see `installAdoptedRequirements`).
+  // `update_comfyui.py` only imports `pygit2` + stdlib, so any Python
+  // with pygit2 importable works.
+  const updaterPython = installation.adopted === true
+    ? (installation.adoptedPythonPath as string)
+    : getMasterPythonPath(installPath)
   const channelArgs = channel === 'stable' ? ['--stable'] : []
 
   // Read pre-update requirements
@@ -183,7 +190,7 @@ export async function runComfyUIUpdate(opts: UpdateOrchestrationOptions): Promis
   }
 
   // Run the update script (with macOS SIGKILL retry)
-  let result = await spawnUpdateScript(masterPython, comfyuiDir, channelArgs, sendOutput, signal)
+  let result = await spawnUpdateScript(updaterPython, comfyuiDir, channelArgs, sendOutput, signal)
 
   if (result.exitCode !== 0 && result.exitSignal === 'SIGKILL' && process.platform === 'darwin') {
     if (sendOutput) {
@@ -191,11 +198,16 @@ export async function runComfyUIUpdate(opts: UpdateOrchestrationOptions): Promis
     } else {
       console.warn('macOS killed update process — attempting binary repair and retry')
     }
-    await repairMacBinaries(installPath, sendProgress, sendOutput)
+    // Quarantine repair only applies to the standalone-env Python bundle —
+    // adopted installs run against the legacy venv which the user already
+    // launched directly, so its binaries are already trusted by Gatekeeper.
+    if (installation.adopted !== true) {
+      await repairMacBinaries(installPath, sendProgress, sendOutput)
+    }
     if (sendOutput) {
       sendOutput('Repair complete — retrying update…\n\n')
     }
-    result = await spawnUpdateScript(masterPython, comfyuiDir, channelArgs, sendOutput, signal)
+    result = await spawnUpdateScript(updaterPython, comfyuiDir, channelArgs, sendOutput, signal)
   }
 
   // Check for cancellation before inspecting exit code — aborted processes
@@ -209,9 +221,9 @@ export async function runComfyUIUpdate(opts: UpdateOrchestrationOptions): Promis
       if (detail) {
         message = `${t('standalone.updateFailed', { code: result.exitCode })}\n\n${detail}`
       } else if (result.exitSignal) {
-        message = `${t('standalone.updateFailed', { code: result.exitCode })}\n\nProcess was killed by signal ${result.exitSignal}.\npython: ${masterPython}\nscript: ${getBundledScriptPath('update_comfyui.py')}`
+        message = `${t('standalone.updateFailed', { code: result.exitCode })}\n\nProcess was killed by signal ${result.exitSignal}.\npython: ${updaterPython}\nscript: ${getBundledScriptPath('update_comfyui.py')}`
       } else {
-        message = `${t('standalone.updateFailed', { code: result.exitCode })}\n\nProcess produced no output.\npython: ${masterPython}\nscript: ${getBundledScriptPath('update_comfyui.py')}`
+        message = `${t('standalone.updateFailed', { code: result.exitCode })}\n\nProcess produced no output.\npython: ${updaterPython}\nscript: ${getBundledScriptPath('update_comfyui.py')}`
       }
       return { ok: false, message, installation }
     }

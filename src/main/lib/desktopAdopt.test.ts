@@ -57,9 +57,10 @@ vi.mock('./git', async () => {
   }
 })
 
-// Stub the pip helper so adoption tests don't need a real uv binary on disk.
-const { installFilteredRequirementsMock } = vi.hoisted(() => ({
+// Stub the pip helpers so adoption tests don't need a real uv binary on disk.
+const { installFilteredRequirementsMock, runUvPipMock } = vi.hoisted(() => ({
   installFilteredRequirementsMock: vi.fn<(...args: unknown[]) => Promise<number>>(),
+  runUvPipMock: vi.fn<(...args: unknown[]) => Promise<number>>(),
 }))
 
 vi.mock('./pip', async (importOriginal) => {
@@ -67,6 +68,7 @@ vi.mock('./pip', async (importOriginal) => {
   return {
     ...actual,
     installFilteredRequirements: installFilteredRequirementsMock,
+    runUvPip: runUvPipMock,
   }
 })
 
@@ -232,6 +234,7 @@ beforeEach(() => {
   for (const key of Object.keys(settingsMock.__store)) delete settingsMock.__store[key]
   vi.clearAllMocks()
   installFilteredRequirementsMock.mockResolvedValue(0)
+  runUvPipMock.mockResolvedValue(0)
   // Adoption's one-shot ComfyUI update path is exercised in dedicated
   // tests; the default for unrelated tests is "no tag available", which
   // makes the update step a no-op without polluting the source tree.
@@ -824,6 +827,68 @@ describe('adoptDesktopInstall', () => {
         deps: buildDeps({}, legacy.info),
       })
       expect(installFilteredRequirementsMock).not.toHaveBeenCalled()
+      // pygit2 install requires uv too — it's skipped together.
+      expect(runUvPipMock).not.toHaveBeenCalled()
+    } finally { legacy.cleanup() }
+  })
+
+  it('installs pygit2 into the legacy venv during adoption so Manager + in-place updates work', async () => {
+    const legacy = buildFakeLegacy({ configFiles: { 'comfy.settings.json': '{}' } })
+    try {
+      const uvPath = getLegacyVenvUvPath(legacy.basePath)
+      fs.mkdirSync(path.dirname(uvPath), { recursive: true })
+      fs.writeFileSync(uvPath, '')
+      const cloneFn = vi.fn(async (_url: string, dest: string) => {
+        fs.mkdirSync(dest, { recursive: true })
+        fs.writeFileSync(path.join(dest, 'main.py'), '# clone')
+        // No requirements files so installFilteredRequirements isn't invoked
+        // and we can isolate the pygit2 call.
+        return { ok: true as const }
+      })
+      const tools = buildSilentTools()
+      await adoptDesktopInstall({
+        tools,
+        deps: buildDeps({ cloneSourceFromGit: cloneFn }, legacy.info),
+      })
+      // Exactly one runUvPip call, targeting pygit2 against the legacy uv
+      // and the adopted python.
+      expect(runUvPipMock).toHaveBeenCalledTimes(1)
+      const [calledUv, calledArgs] = runUvPipMock.mock.calls[0]!
+      expect(calledUv).toBe(uvPath)
+      expect(Array.isArray(calledArgs)).toBe(true)
+      const args = calledArgs as string[]
+      expect(args.slice(0, 3)).toEqual(['pip', 'install', 'pygit2'])
+      expect(args).toContain('--python')
+      // pygit2 result reported in telemetry succeeded payload.
+      expect(telemetry.capture).toHaveBeenCalledWith(
+        'desktop2.adopt.succeeded',
+        expect.objectContaining({ requirements_pygit2_exit: 0 }),
+      )
+    } finally { legacy.cleanup() }
+  })
+
+  it('records pygit2 install failure in telemetry without aborting adoption', async () => {
+    const legacy = buildFakeLegacy({ configFiles: { 'comfy.settings.json': '{}' } })
+    try {
+      const uvPath = getLegacyVenvUvPath(legacy.basePath)
+      fs.mkdirSync(path.dirname(uvPath), { recursive: true })
+      fs.writeFileSync(uvPath, '')
+      runUvPipMock.mockResolvedValueOnce(99)
+      const cloneFn = vi.fn(async (_url: string, dest: string) => {
+        fs.mkdirSync(dest, { recursive: true })
+        fs.writeFileSync(path.join(dest, 'main.py'), '# clone')
+        return { ok: true as const }
+      })
+      const tools = buildSilentTools()
+      const record = await adoptDesktopInstall({
+        tools,
+        deps: buildDeps({ cloneSourceFromGit: cloneFn }, legacy.info),
+      })
+      expect(record.adopted).toBe(true)
+      expect(telemetry.capture).toHaveBeenCalledWith(
+        'desktop2.adopt.succeeded',
+        expect.objectContaining({ requirements_pygit2_exit: 99 }),
+      )
     } finally { legacy.cleanup() }
   })
 

@@ -190,7 +190,7 @@ no duplicate args.
 | Event | Properties |
 |---|---|
 | `desktop2.adopt.started` | (none) |
-| `desktop2.adopt.succeeded` | `installation_id`, `legacy_version`, `adopted_source_mode`, `has_venv`, `has_extra_models_yaml`, `models_dir_count`, `carried_keys[]`, `carry_skipped_keys[]`, `adopted_path_override_input`, `adopted_path_override_output`, `adopted_comfy_tag_at_migration`, `requirements_uv_available`, `requirements_core_exit`, `requirements_manager_exit`, `gpu`, `selected_device` |
+| `desktop2.adopt.succeeded` | `installation_id`, `legacy_version`, `adopted_source_mode`, `has_venv`, `has_extra_models_yaml`, `models_dir_count`, `carried_keys[]`, `carry_skipped_keys[]`, `adopted_path_override_input`, `adopted_path_override_output`, `adopted_comfy_tag_at_migration`, `requirements_uv_available`, `requirements_core_exit`, `requirements_manager_exit`, `requirements_pygit2_exit`, `gpu`, `selected_device` |
 | `desktop2.adopt.failed` | `error_bucket`, `error_message` (first 500 chars) |
 | `desktop2.adopt.*` step events | `desktop2.adopt.backup`, `tcc`, `validate_venv`, `snapshot`, `source`, `comfy_update`, `requirements`, `requirements_reconcile`, `carry_settings`, `register` — all wrapped in `telemetry.trackedStep` |
 
@@ -242,11 +242,17 @@ working off the copy. The "where did this come from" fields
 they describe the original migration event, not the derived copy.
 `adoptedAt` is reset to the copy time.
 
-**In-place ComfyUI update is gated off for adopted installs.** The
-update script needs `pygit2` (bundled with `standalone-env` but not
-the legacy venv) and a `standalone-env` python. `update-comfyui`
-short-circuits with a message recommending Copy & Update, which goes
-through the deep-copy path above.
+**In-place ComfyUI updates work for adopted installs.** The updater
+script (`update_comfyui.py`) only needs Python + `pygit2`, both of
+which the adopted install has after `installAdoptedRequirements`
+pip-installs `pygit2` into the legacy venv. `runComfyUIUpdate` branches
+on `installation.adopted` to spawn against `adoptedPythonPath` instead
+of `getMasterPythonPath()`. `CM_USE_PYGIT2=1` is already injected by
+`buildLaunchEnv` for every `sourceId === 'standalone'` install, so
+Manager v4 picks the pygit2 backend transparently without needing
+system `git` on PATH (Legacy Desktop never required it). When the
+pygit2 install fails during adoption, in-place update returns the
+underlying `ImportError` and Copy & Update remains the fallback.
 
 ## What this design intentionally does NOT do
 
@@ -262,9 +268,6 @@ through the deep-copy path above.
 - No auto-update of ComfyUI after adoption. The one-shot checkout
   during adoption is **distinct** from the per-install opt-in update
   policy that applies from then on.
-- No in-place ComfyUI update for adopted installs — the user is
-  routed through Copy & Update, which yields a self-contained,
-  fully feature-equivalent install.
 
 ## Open scope (not yet on this branch)
 
