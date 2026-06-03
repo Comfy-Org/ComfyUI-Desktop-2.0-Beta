@@ -149,7 +149,7 @@ The `-s` flag prevents system site-packages from interfering. The standalone Pyt
 
 #### Resolved Decisions
 
-- **Hosting:** GitHub Releases on the ComfyUI-Desktop-2.0-Beta repo (2GB per asset limit; archives should fit)
+- **Hosting:** GitHub Releases on the Comfy-Desktop repo (2GB per asset limit; archives should fit)
 - **Archive format:** `.7z` on Windows (best compression for executables via LZMA2), `.tar.gz` on Linux/macOS
 - **Python-build-standalone variant:** `install_only` (smaller, includes pip via ensurepip, no build tools)
 - **Git requirement:** `pygit2` is included in the environment; the launcher can use it for cloning without requiring system git
