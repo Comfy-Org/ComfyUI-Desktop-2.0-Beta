@@ -23,7 +23,7 @@ interface MockBridgeState {
   fullscreenChangedCallbacks: ((fullscreen: boolean) => void)[]
   menuOpenedCallbacks: ((info: { menu: 'menu' }) => void)[]
   menuClosedCallbacks: ((info: { menu: 'menu' }) => void)[]
-  firstUseModeChangedCallbacks: ((mode: 'none' | 'consent-lockdown' | 'post-consent') => void)[]
+  firstUseModeChangedCallbacks: ((mode: 'none' | 'consent-lockdown' | 'post-consent' | 'loading-lockdown') => void)[]
   previewModeChangedCallbacks: ((preview: boolean) => void)[]
   installationIdChangedCallbacks: ((installationId: string | null) => void)[]
   appUpdateStateCallbacks: ((state: {
@@ -46,6 +46,16 @@ interface MockBridgeState {
   resetZoomClicks: number
   showTooltipCalls: { text: string; leftX: number; rightX: number; bottomY: number }[]
   hideTooltipCalls: number
+  showCoachmarkCalls: {
+    title: string
+    body: string
+    dismissLabel: string
+    leftX: number
+    rightX: number
+    bottomY: number
+  }[]
+  hideCoachmarkCalls: number
+  coachmarkDismissedCallbacks: (() => void)[]
   readyCalls: number
 }
 
@@ -78,6 +88,9 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
     resetZoomClicks: 0,
     showTooltipCalls: [],
     hideTooltipCalls: 0,
+    showCoachmarkCalls: [],
+    hideCoachmarkCalls: 0,
+    coachmarkDismissedCallbacks: [],
     readyCalls: 0,
   }
   const installationId = opts.installationId === undefined ? 'test-id' : opts.installationId
@@ -120,7 +133,7 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
       state.menuClosedCallbacks.push(cb)
       return () => { }
     },
-    onFirstUseModeChanged: (cb: (mode: 'none' | 'consent-lockdown' | 'post-consent') => void) => {
+    onFirstUseModeChanged: (cb: (mode: 'none' | 'consent-lockdown' | 'post-consent' | 'loading-lockdown') => void) => {
       state.firstUseModeChangedCallbacks.push(cb)
       return () => { }
     },
@@ -176,6 +189,23 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
     },
     hideTooltip: () => {
       state.hideTooltipCalls += 1
+    },
+    showCoachmark: (payload: {
+      title: string
+      body: string
+      dismissLabel: string
+      leftX: number
+      rightX: number
+      bottomY: number
+    }) => {
+      state.showCoachmarkCalls.push(payload)
+    },
+    hideCoachmark: () => {
+      state.hideCoachmarkCalls += 1
+    },
+    onCoachmarkDismissed: (cb: () => void) => {
+      state.coachmarkDismissedCallbacks.push(cb)
+      return () => {}
     },
     ready: () => {
       state.readyCalls += 1
@@ -1253,6 +1283,105 @@ describe('TitleBarApp', () => {
       const titleBar = wrapper.find('.title-bar').element as HTMLElement
       expect(titleBar.style.getPropertyValue('--title-trailing-width')).toBe('0px')
       expect(wrapper.find('.title-install-pill').exists()).toBe(true)
+      wrapper.unmount()
+    })
+  })
+
+  describe('first-instance pill coachmark', () => {
+    let getSetting: ReturnType<typeof vi.fn>
+    let setSetting: ReturnType<typeof vi.fn>
+
+    beforeEach(() => {
+      getSetting = vi.fn().mockResolvedValue(undefined)
+      setSetting = vi.fn().mockResolvedValue(undefined)
+      ;(window as unknown as { api: unknown }).api = { getSetting, setSetting }
+      // Run the deferred rAF synchronously so the coachmark trigger
+      // resolves within a flushPromises() tick.
+      vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => {
+        cb(0)
+        return 0
+      })
+    })
+
+    afterEach(() => {
+      vi.restoreAllMocks()
+      delete (window as unknown as { api?: unknown }).api
+    })
+
+    it('shows the coachmark when a window attaches to an instance AFTER mount', async () => {
+      // The original bug: the trigger ran once at mount when the window
+      // was still install-less, so it never fired after attach. The
+      // reactive watcher must re-attempt when isInstallLess flips false.
+      bridgeState = installMockBridge({ installationId: null })
+      vi.resetModules()
+      const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+      const wrapper = mount(TitleBarApp, { attachTo: document.body })
+      await flushPromises()
+      // Install-less at mount → no coachmark yet.
+      expect(bridgeState.showCoachmarkCalls.length).toBe(0)
+
+      // Main pushes an installation id — the window is now install-backed.
+      bridgeState.installationIdChangedCallbacks.forEach((cb) => cb('inst-1'))
+      await flushPromises()
+
+      expect(bridgeState.showCoachmarkCalls.length).toBe(1)
+      const payload = bridgeState.showCoachmarkCalls[0]
+      expect(payload.title).toBe('Switch & manage instances')
+      wrapper.unmount()
+    })
+
+    it('does not show the coachmark on an install-less (dashboard) window', async () => {
+      bridgeState = installMockBridge({ installationId: null })
+      vi.resetModules()
+      const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+      const wrapper = mount(TitleBarApp, { attachTo: document.body })
+      await flushPromises()
+      expect(bridgeState.showCoachmarkCalls.length).toBe(0)
+      wrapper.unmount()
+    })
+
+    it('does not show the coachmark when already seen', async () => {
+      getSetting.mockImplementation((key: string) =>
+        key === 'hasSeenCentralPillHint' ? Promise.resolve(true) : Promise.resolve(undefined),
+      )
+      bridgeState = installMockBridge({ installationId: 'inst-1' })
+      vi.resetModules()
+      const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+      const wrapper = mount(TitleBarApp, { attachTo: document.body })
+      await flushPromises()
+      expect(bridgeState.showCoachmarkCalls.length).toBe(0)
+      wrapper.unmount()
+    })
+
+    it('waits for loading-lockdown to clear (ComfyUI screen visible) before showing', async () => {
+      // An install-backed window with a progress / connect takeover up
+      // (loading-lockdown) must NOT show the coachmark over the brand
+      // loader — it should fire only once the lockdown clears to 'none'.
+      bridgeState = installMockBridge({ installationId: 'inst-1' })
+      vi.resetModules()
+      const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+      const wrapper = mount(TitleBarApp, { attachTo: document.body })
+      bridgeState.firstUseModeChangedCallbacks.forEach((cb) => cb('loading-lockdown'))
+      await flushPromises()
+      expect(bridgeState.showCoachmarkCalls.length).toBe(0)
+
+      // Loader finished → ComfyUI is visible.
+      bridgeState.firstUseModeChangedCallbacks.forEach((cb) => cb('none'))
+      await flushPromises()
+      expect(bridgeState.showCoachmarkCalls.length).toBe(1)
+      wrapper.unmount()
+    })
+
+    it('lifts the pill to the brand-open state while the coachmark is showing', async () => {
+      bridgeState = installMockBridge({ installationId: 'inst-1' })
+      vi.resetModules()
+      const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+      const wrapper = mount(TitleBarApp, { attachTo: document.body })
+      await flushPromises()
+      expect(bridgeState.showCoachmarkCalls.length).toBe(1)
+      // The pill carries the coachmark-highlight modifier (same yellow lift
+      // as is-open) so it reads as the thing the card points at.
+      expect(wrapper.find('.title-install-pill.is-coachmark').exists()).toBe(true)
       wrapper.unmount()
     })
   })

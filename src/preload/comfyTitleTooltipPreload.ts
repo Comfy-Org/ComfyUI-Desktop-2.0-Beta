@@ -17,8 +17,16 @@ import type { IpcRendererEvent } from 'electron'
  * `setBounds` and flips it visible after the renderer acks paint.
  */
 export interface TitleTooltipConfig {
-  text: string
-  theme: { bg: string; text: string; border: string }
+  /** Absent / `'tooltip'` for the hover bubble; `'coachmark'` for the
+   *  sticky onboarding card (extra title / body / dismiss fields). */
+  variant?: 'tooltip' | 'coachmark'
+  /** Hover-bubble body (tooltip variant). */
+  text?: string
+  /** Coachmark fields (coachmark variant). */
+  title?: string
+  body?: string
+  dismissLabel?: string
+  theme: { bg: string; text: string; border: string; accent?: string }
   /** Round-trip token. Echoed verbatim by the renderer in
    *  `notifyRendered` so main can discard render-acks that don't
    *  match the most recently sent config (e.g. a fast pointer move
@@ -41,17 +49,27 @@ export interface ComfyTitleTooltipBridge {
   notifyRendered(payload: { width: number; height: number; configToken: string }): void
   /** Subscribe to config pushes (one fires per show). */
   onConfig(cb: (config: TitleTooltipConfig) => void): () => void
+  /** Coachmark dismiss button → main hides the popup and tells the
+   *  title-bar renderer to flip the once-ever flag. No-op for the
+   *  tooltip variant (which has no interactive controls). */
+  dismissCoachmark(): void
 }
 
 function isTooltipConfig(value: unknown): value is TitleTooltipConfig {
   if (!value || typeof value !== 'object') return false
   const v = value as Partial<TitleTooltipConfig>
-  if (typeof v.text !== 'string') return false
   if (typeof v.configToken !== 'string') return false
   if (!v.theme || typeof v.theme !== 'object') return false
   if (typeof v.theme.bg !== 'string') return false
   if (typeof v.theme.text !== 'string') return false
   if (typeof v.theme.border !== 'string') return false
+  // Coachmark needs title/body; tooltip needs text. Accept either so a
+  // single channel serves both variants.
+  if (v.variant === 'coachmark') {
+    if (typeof v.title !== 'string' && typeof v.body !== 'string') return false
+  } else if (typeof v.text !== 'string') {
+    return false
+  }
   return true
 }
 
@@ -68,6 +86,9 @@ const bridge: ComfyTitleTooltipBridge = {
     }
     ipcRenderer.on('comfy-titletooltip:set-config', handler)
     return () => ipcRenderer.removeListener('comfy-titletooltip:set-config', handler)
+  },
+  dismissCoachmark: () => {
+    ipcRenderer.send('comfy-titlecoachmark:dismiss')
   },
 }
 

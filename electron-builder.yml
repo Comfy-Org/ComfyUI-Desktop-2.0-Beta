@@ -54,6 +54,25 @@ mac:
       to: bootstrap-python
       filter:
         - '**/*'
+dmg:
+  title: ComfyUI Desktop 2.0
+  # background + background@2x live under resources/ (directories.buildResources).
+  background: dmg/background.png
+  iconSize: 84
+  iconTextSize: 11
+  window:
+    width: 540
+    height: 400
+  # x/y are icon centers in the 540x400 content area, aligned to the
+  # arrow and title drawn into background.png.
+  contents:
+    - x: 135
+      y: 195
+      type: file
+    - x: 405
+      y: 195
+      type: link
+      path: /Applications
 linux:
   target:
     - AppImage
