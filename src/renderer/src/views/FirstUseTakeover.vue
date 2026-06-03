@@ -52,6 +52,7 @@ import TermsModal from '../components/TermsModal.vue'
 import Tooltip from '../components/ui/Tooltip.vue'
 import BrandTakeoverLayout from '../components/BrandTakeoverLayout.vue'
 import { emitTelemetryAction } from '../lib/telemetry'
+import { useCloudCapacity } from '../composables/useCloudCapacity'
 
 type Step = 'start' | 'mirrors' | 'localBranch'
 
@@ -94,6 +95,43 @@ const locale = ref('en')
  *  Cloud is the brand-anchor card (glow + beam target) so it ships
  *  pre-selected — users can flip to Local before pressing Continue. */
 const pickedChoice = ref<'cloud' | 'local'>('cloud')
+
+// Capacity-protection switch for Cloud (PostHog flag
+// `desktop-cloud-capacity`). At first-use, we follow the flag
+// verbatim — `disabled` greys the cloud card and pre-selects local,
+// `degraded` shows a heads-up modal on Continue. The only relaxation
+// anywhere in the gate is "known paid user", and that requires a
+// signed-in session — which we don't have here. So first-use cannot
+// soften, by design.
+const cloudCapacity = useCloudCapacity()
+const capacityReady = ref(false)
+/** What the picker rendered as default before the user could interact —
+ *  used to split `fork_chosen` conversion by signal-vs-defaulting: a
+ *  user keeping the default cloud pick is different from a user
+ *  actively flipping local→cloud. Reseeded on every `open()` from the
+ *  resolved capacity status. */
+const initialDefaultChoice = ref<'cloud' | 'local'>('cloud')
+function deriveDefaultChoice(): 'cloud' | 'local' {
+  return cloudCapacity.isDisabled() ? 'local' : 'cloud'
+}
+onMounted(async () => {
+  await cloudCapacity.whenReady()
+  if (cloudCapacity.isDisabled()) {
+    pickedChoice.value = 'local'
+  }
+  initialDefaultChoice.value = deriveDefaultChoice()
+  capacityReady.value = true
+})
+watch(cloudCapacity.status, (status) => {
+  if (status === 'disabled' && pickedChoice.value === 'cloud') {
+    pickedChoice.value = 'local'
+  }
+})
+const cloudDescriptionKey = computed(() => {
+  if (cloudCapacity.isDisabled()) return 'cloud.capacityDisabledHint'
+  if (cloudCapacity.isDegraded()) return 'cloud.capacityDegradedHint'
+  return 'firstUse.cloudDesc'
+})
 /** Express-install opt-out modifier on the start screen. Pre-ticked.
  *  Functional wiring (skipping optional setup steps) lands separately;
  *  for now the value is captured for telemetry only. */
@@ -220,7 +258,19 @@ async function onContinue(): Promise<void> {
   emitTelemetryAction('desktop2.first_use.fork_chosen', {
     choice: pickedChoice.value,
     has_legacy_desktop: hasLegacyDesktop.value,
-    express_install: expressInstall.value
+    express_install: expressInstall.value,
+    // Capacity-protection context. `capacity_status` is the resolved
+    // boot-time `desktop-cloud-capacity` flag value at the moment of
+    // commit; `was_default` is true when the user kept whatever card
+    // was pre-selected for them, false when they actively flipped.
+    // `user_tier` is whatever was hydrated from the persisted cache
+    // at boot — `unknown` for users who've never opened cloud on this
+    // device, `free` / `paid` for returning users. Lets the funnel
+    // split conversion by (a) signal-vs-defaulting and (b) the gate
+    // tier the user would have hit on dashboard / IPP.
+    capacity_status: cloudCapacity.status.value,
+    was_default: pickedChoice.value === initialDefaultChoice.value,
+    user_tier: cloudCapacity.tier.value
   })
 
   if (isChinese.value) {
@@ -229,20 +279,45 @@ async function onContinue(): Promise<void> {
     return
   }
 
-  routePostStart()
+  void routePostStart()
 }
 
 /** Post-start routing — shared by `onContinue` (non-China path) and
  *  `chooseMirrors` (China path, after mirrors prompt). Honours
  *  `skipPick` for returning users by short-circuiting to `complete-skip`
  *  regardless of which card was selected. */
-function routePostStart(): void {
+async function routePostStart(): Promise<void> {
   if (skipPick.value) {
     emitCompleted('skipped')
     emit('complete-skip')
     return
   }
   if (pickedChoice.value === 'cloud') {
+    // Cloud capacity gate. `normal` resolves instantly; `degraded`
+    // shows a confirm modal (user can back out); `disabled` resolves
+    // false. There's an inherent race: the user can hit Continue with
+    // `cloud` still picked before the boot-fetch reactive auto-flip
+    // runs (PostHog network ~ a few hundred ms). When that happens,
+    // un-stick `isContinuing` so the spinner clears, and flip the
+    // pick to Local so a second Continue click just proceeds (the
+    // Cloud card is already visually greyed). User sees: spinner
+    // disappears, Local is now selected, hit Continue → moves on.
+    if (!(await cloudCapacity.confirmEntry())) {
+      // Separate event from `fork_chosen` because the user picked cloud
+      // but never actually entered it — counting them as a cloud
+      // converter would inflate the dashboard. `disabled` means the
+      // kill-switch was hard-off (composable returned false directly);
+      // `degraded_declined` means the user saw the heavy-load modal
+      // and backed out.
+      emitTelemetryAction('desktop2.first_use.cloud_blocked', {
+        reason: cloudCapacity.isDisabled() ? 'disabled' : 'degraded_declined',
+        capacity_status: cloudCapacity.status.value,
+        user_tier: cloudCapacity.tier.value
+      })
+      isContinuing.value = false
+      if (cloudCapacity.isDisabled()) pickedChoice.value = 'local'
+      return
+    }
     emitCompleted('cloud')
     emit('complete-cloud')
   } else if (hasLegacyDesktop.value && !expressInstall.value) {
@@ -267,7 +342,7 @@ async function chooseMirrors(useMirrors: boolean): Promise<void> {
     window.api.setSetting('chineseMirrorsPrompted', true)
   ])
   emitTelemetryAction('desktop2.first_use.mirrors_chosen', { use_mirrors: useMirrors })
-  routePostStart()
+  void routePostStart()
 }
 
 function openWhyCloud(): void {
@@ -355,7 +430,12 @@ async function open(opts: OpenOpts = {}): Promise<void> {
   whyCloudOpen.value = false
   termsDoc.value = null
   acceptedTos.value = false
-  pickedChoice.value = 'cloud'
+  // Re-derive default pick from current capacity. On first mount the
+  // `onMounted` `whenReady` await handles this; on takeover replay
+  // (capacity already resolved) we apply it inline so a `disabled`
+  // flag isn't clobbered by the reset.
+  pickedChoice.value = deriveDefaultChoice()
+  initialDefaultChoice.value = deriveDefaultChoice()
   expressInstall.value = true
   // Reset funnel-completion bookkeeping so a takeover replay measures
   // duration / steps from the replay, not from the original mount.
@@ -459,14 +539,16 @@ defineExpose({ open })
         >
           <ChoiceCard
             class="start-card-cloud"
+            :class="{ 'start-card-cloud--capacity-disabled': cloudCapacity.isDisabled() }"
             selectable
             :selected="pickedChoice === 'cloud'"
+            :aria-disabled="cloudCapacity.isDisabled() ? true : undefined"
             glow
             :label="$t('cloud.label')"
-            :tagline="$t('firstUse.cloudTagline')"
-            :description="$t('firstUse.cloudDesc')"
+            :tagline="cloudCapacity.isDisabled() ? $t('cloud.capacityDisabled') : (cloudCapacity.isDegraded() ? $t('cloud.capacityDegraded') : $t('firstUse.cloudTagline'))"
+            :description="$t(cloudDescriptionKey)"
             data-testid="first-use-pick-cloud"
-            @click="pickedChoice = 'cloud'"
+            @click="cloudCapacity.isDisabled() ? null : (pickedChoice = 'cloud')"
           >
             <template #label-trailing>
               <Tooltip :text="$t('firstUse.whyTryCloud')">
@@ -756,6 +838,15 @@ defineExpose({ open })
  * Cloud card the same way the original pick step did. */
 .start-card-cloud {
   anchor-name: --brand-beam-target;
+}
+/* Capacity-protection visual when cloud is currently disabled by the
+ * `desktop-cloud-capacity` flag: grey the card and block pointer
+ * interaction. The proceed handler also refuses to advance with cloud
+ * picked, so this is defense-in-depth + a clear signal to the user. */
+.start-card-cloud--capacity-disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 .start-cloud-info {
   display: inline-flex;

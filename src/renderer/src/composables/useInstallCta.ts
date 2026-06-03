@@ -9,12 +9,21 @@ import type { Installation } from '../types/ipc'
  * An install can be running in at most one window at a time
  * (`getEntryByInstallationId` on the main side enforces this), so the
  * answer to "what should the primary CTA do?" decomposes into three
- * cases driven by the global `sessionStore.isRunning(id)` flag and the
- * host window's own `activeInstallationId`:
+ * cases driven by the install's session state and the host window's
+ * own `activeInstallationId`:
  *
- *   - not running anywhere       → **Start**, launch via `pickInstall`
- *   - running in this window     → **Restart**, stop + relaunch in place
- *   - running in another window  → **Switch**, focus the existing window
+ *   - no session anywhere        → **Start**, launch via `pickInstall`
+ *   - session in this window     → **Restart**, stop + relaunch in place
+ *   - session in another window  → **Switch**, focus the existing window
+ *
+ * "Session" covers both `isLaunching` (mid-startup, no port yet) and
+ * `isRunning` (live). Treating the launching state as a session keeps
+ * the CTA honest from the moment the user clicks Start: the window
+ * the launch was attached to flips straight from **Start** to
+ * **Restart** instead of lingering on **Start** until
+ * `instance-started` fires, and other windows correctly see **Switch**
+ * during the startup window instead of offering to start a parallel
+ * launch that the main-side single-attach guard would just reject.
  *
  * Centralizing the decision here so the picker row indicators and the
  * settings footer CTA can't drift apart (issue #755 — the original
@@ -23,15 +32,18 @@ import type { Installation } from '../types/ipc'
  * `ComfyUISettingsContent`).
  */
 export interface InstallCta {
-  /** True when the install is running in the host window that owns
-   *  this composable. Only here does "Restart" make sense. */
+  /** True when the install has a session (launching or running) in the
+   *  host window that owns this composable. Only here does "Restart"
+   *  make sense. */
   runningInThisWindow: ComputedRef<boolean>
-  /** True when the install is running in some *other* host window —
-   *  the right action is to focus that window, not restart. */
+  /** True when the install has a session (launching or running) in
+   *  some *other* host window — the right action is to focus that
+   *  window, not restart. */
   runningElsewhere: ComputedRef<boolean>
-  /** True when the install has a running session anywhere. Use this
-   *  for genuinely global gates (delete / snapshot-restore) that
-   *  shouldn't fire while the install is in use anywhere. */
+  /** True when the install has a session (launching or running)
+   *  anywhere. Use this for genuinely global gates (delete /
+   *  snapshot-restore) that shouldn't fire while the install is in
+   *  use anywhere. */
   runningAnywhere: ComputedRef<boolean>
   /** Localized primary-action label: `Start` / `Restart` / `Switch`.
    *  Components can override (e.g. settings shows "Restart to apply
@@ -50,9 +62,17 @@ export function useInstallCta(
   const { t } = useI18n()
   const sessionStore = useSessionStore()
 
+  // `isLaunching || isRunning` — covers the full attached-session
+  // window. The launching state lasts from `instance-launching` (port
+  // not yet bound) until `instance-started` (live), and the main-side
+  // attach happens BEFORE `instance-launching` fires (see launch.ts +
+  // `attachInstall`), so by the time `runningAnywhere` flips true the
+  // target window's `activeInstallationId` already matches and the
+  // "in this window?" comparison is honest.
   const runningAnywhere = computed(() => {
     const inst = installation.value
-    return inst ? sessionStore.isRunning(inst.id) : false
+    if (!inst) return false
+    return sessionStore.isRunning(inst.id) || sessionStore.isLaunching(inst.id)
   })
 
   const runningInThisWindow = computed(() => {

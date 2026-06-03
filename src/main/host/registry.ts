@@ -1,6 +1,23 @@
+import { EventEmitter } from 'events'
 import type { BrowserWindow, WebContents, WebContentsView } from 'electron'
 import { _runningSessions } from '../lib/ipc/shared'
 import type { FirstUseMode } from '../../shared/firstUseMode'
+
+/**
+ * Internal main-process bus for host-window install attachment changes.
+ *
+ *  Events:
+ *  - `'changed'`(): the `installationId → windowKey` secondary index
+ *    mutated — a host attached, detached, or re-attached an install.
+ *    Distinct from `installationEvents.changed` (which fires on
+ *    install-record mutations: add/remove/rename/markLaunched).
+ *    Surfaces like the instance picker, whose snapshot embeds
+ *    `parentEntry.installationId` as `activeInstallationId`, listen to
+ *    this so the "Current" pill flips on as soon as a launch attaches
+ *    its install — not at `instance-started` time, which is when
+ *    `markLaunched` would have fired the install-record change.
+ */
+export const hostInstallEvents = new EventEmitter()
 
 /**
  * Title-bar pill key — one of the three user-visible navigation tabs.
@@ -315,19 +332,24 @@ export function getEntryByInstallationId(installationId: string): ComfyWindowEnt
 /**
  * Set the install-id → window-key secondary index entry. Use from
  * `attachInstall` after it pivots the entry's `installationId`.
+ * Emits `hostInstallEvents.changed` so picker snapshots repaint with
+ * the new `activeInstallationId` without waiting on `instance-started`.
  */
 export function indexInstallationId(installationId: string, windowKey: number): void {
   installationIdToWindowKey.set(installationId, windowKey)
+  hostInstallEvents.emit('changed')
 }
 
 /**
  * Drop a stale `installationId` from the secondary index without
  * touching the primary `comfyWindows` map. Use after destructive
  * lifecycle events (uninstall, file removed) where the entry may or
- * may not still be live.
+ * may not still be live. Emits `hostInstallEvents.changed` (the index
+ * shrunk) so picker snapshots clear the stale `activeInstallationId`.
  */
 export function dropInstallationIndex(installationId: string): void {
-  installationIdToWindowKey.delete(installationId)
+  const had = installationIdToWindowKey.delete(installationId)
+  if (had) hostInstallEvents.emit('changed')
 }
 
 /**
@@ -339,6 +361,7 @@ export function registerHostEntry(entry: ComfyWindowEntry): void {
   comfyWindows.set(entry.windowKey, entry)
   if (entry.installationId !== null) {
     installationIdToWindowKey.set(entry.installationId, entry.windowKey)
+    hostInstallEvents.emit('changed')
   }
 }
 
@@ -353,6 +376,7 @@ export function unregisterHostEntry(entry: ComfyWindowEntry): void {
     const indexed = installationIdToWindowKey.get(entry.installationId)
     if (indexed === entry.windowKey) {
       installationIdToWindowKey.delete(entry.installationId)
+      hostInstallEvents.emit('changed')
     }
   }
 }
