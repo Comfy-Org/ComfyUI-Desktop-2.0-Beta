@@ -47,18 +47,6 @@ Comfy Desktop is the official desktop application for **ComfyUI**, the node-base
 > **New to ComfyUI?** Just download, install, and open the app — it walks you through creating your first setup. No terminal required.
 
 <details>
-<summary><b>Direct downloads (specific platform / architecture)</b></summary>
-
-| Platform | Direct link |
-|---|---|
-| Windows x64 | [`/windows/nsis/x64`](https://dl.todesktop.com/241130tqe9q3y/windows/nsis/x64) |
-| Windows ARM64 | [`/windows/nsis/arm64`](https://dl.todesktop.com/241130tqe9q3y/windows/nsis/arm64) |
-| macOS (Apple Silicon) | [`/mac/dmg/arm64`](https://dl.todesktop.com/241130tqe9q3y/mac/dmg/arm64) |
-| Linux (`.AppImage` / `.deb`) | [latest release](https://github.com/Comfy-Org/Comfy-Desktop/releases/latest) |
-
-</details>
-
-<details>
 <summary><b>Install instructions per platform</b></summary>
 
 **Windows** — run the NSIS installer (`.exe`) and launch from the Start Menu or desktop shortcut.
@@ -219,16 +207,16 @@ If a manual update leaves the app broken (no styling, dead dropdowns — usually
 
 Quit the app first, then:
 
+```powershell
+# Windows (PowerShell)
+iwr -useb https://raw.githubusercontent.com/Comfy-Org/Comfy-Desktop/main/scripts/reset-windows.ps1 -OutFile reset-windows.ps1
+powershell -ExecutionPolicy Bypass -File .\reset-windows.ps1
+```
 ```sh
 # macOS
 curl -fsSLO https://raw.githubusercontent.com/Comfy-Org/Comfy-Desktop/main/scripts/reset-mac.sh && bash reset-mac.sh
 # Linux
 curl -fsSLO https://raw.githubusercontent.com/Comfy-Org/Comfy-Desktop/main/scripts/reset-linux.sh && bash reset-linux.sh
-```
-```powershell
-# Windows (PowerShell)
-iwr -useb https://raw.githubusercontent.com/Comfy-Org/Comfy-Desktop/main/scripts/reset-windows.ps1 -OutFile reset-windows.ps1
-powershell -ExecutionPolicy Bypass -File .\reset-windows.ps1
 ```
 
 Pass `--yes` (or `-Yes` on Windows) to skip the prompt. After cleanup, reinstall from the latest release. You may need to re-add installations via **"Add existing installation"** since `installations.json` is wiped too.
