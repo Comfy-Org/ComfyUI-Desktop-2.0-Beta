@@ -29,16 +29,23 @@
   !pragma warning enable 6030
 
   ; Tracks whether the wizard is currently sitting on the Finish page so
-  ; .onUserAbort can quit cleanly there instead of falling through to the
-  ; default "Are you sure you want to abort?" prompt (which is wrong on a
-  ; finished install). Set in FinishPagePreCheck, never reset.
+  ; the user-abort callback can quit cleanly there instead of falling
+  ; through to the default "Are you sure you want to abort?" prompt
+  ; (which is wrong on a finished install). Set in FinishPagePreCheck,
+  ; never reset.
   Var IsOnFinishPage
 
-  ; .onUserAbort fires on Cancel button or title-bar X. On every page
-  ; before Finish, fall through (no Abort/Quit) so NSIS shows its
-  ; standard abort-confirm dialog. On Finish, the install is done — Quit
-  ; the installer cleanly without any prompt.
-  Function .onUserAbort
+  ; Cancel button / title-bar X handler.
+  ;
+  ; MUI2 already declares `Function .onUserAbort` (in MUI2.nsh), so we
+  ; cannot redeclare it — instead we hook MUI2's own onUserAbort via
+  ; `MUI_CUSTOMFUNCTION_ABORT`, which adds our function as an extra step
+  ; MUI2 calls during its abort flow. On the Finish page we Quit before
+  ; MUI2's default abort confirm fires; on every earlier page we fall
+  ; through and the standard confirm prompt is shown.
+  !define MUI_CUSTOMFUNCTION_ABORT "OnFinishCancelHandler"
+
+  Function OnFinishCancelHandler
     ${If} $IsOnFinishPage == "1"
       SetErrorLevel 0
       Quit
