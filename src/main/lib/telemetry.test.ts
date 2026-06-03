@@ -335,15 +335,28 @@ describe('telemetry consent state (3-state)', () => {
     expect(events).toEqual(['desktop2.first_use.consent_decision'])
   })
 
-  it('denied suppresses every event including the consent_decision one', async () => {
+  it('denied suppresses everything EXCEPT the consent_decision allow-list entry', async () => {
+    // Regression for the 2026-06-03 finding: 232 accepts and 0 declines in
+    // 30 days, traced to the renderer's "Continue" handler awaiting the
+    // setting write (which flips state to 'denied') BEFORE emitting the
+    // decline event. If denied short-circuits without consulting the
+    // allow-list, every decline is dropped by its own decision and we
+    // lose 100% of decline signal.
     telemetry.setConsentState('denied')
     telemetry.identify('test-distinct-id')
     captured.length = 0
 
     telemetry.capture('desktop2.execution.started', {})
-    telemetry.capture('desktop2.first_use.consent_decision', { accepted: false })
+    telemetry.capture('desktop2.first_use.consent_decision', {
+      decision: 'decline',
+      telemetry_enabled: false
+    })
 
-    expect(captured).toHaveLength(0)
+    expect(captured.map((c) => c.event)).toEqual(['desktop2.first_use.consent_decision'])
+    expect(captured[0]?.properties).toMatchObject({
+      decision: 'decline',
+      telemetry_enabled: false
+    })
   })
 
   it('defers session.started + identify person properties until consent flips to granted', async () => {

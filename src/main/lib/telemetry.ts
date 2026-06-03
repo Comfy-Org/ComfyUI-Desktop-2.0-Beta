@@ -239,15 +239,28 @@ function deriveAppChannel(appVersion: string): string {
  * Three-state consent.
  *
  * - `'granted'` — user opted in. Everything ships.
- * - `'denied'` — user opted out. Nothing ships.
+ * - `'denied'` — user opted out. Nothing ships, EXCEPT the
+ *   `PRE_CONSENT_ALLOWED_EVENTS` set — see the next paragraph for why.
  * - `'undecided'` — user has not chosen yet (fresh install OR a Desktop-1
- * migrator whose `telemetryEnabled` setting was never set).
- * Only events in `PRE_CONSENT_ALLOWED_EVENTS` ship; everything
- * else is suppressed until the user makes a choice. Mirrors
- * the renderer's pre-consent gate in `rendererBootstrap.ts`.
+ *   migrator whose `telemetryEnabled` setting was never set).
+ *   Only events in `PRE_CONSENT_ALLOWED_EVENTS` ship; everything
+ *   else is suppressed until the user makes a choice. Mirrors
+ *   the renderer's pre-consent gate in `rendererBootstrap.ts`.
+ *
+ * **Why `PRE_CONSENT_ALLOWED_EVENTS` survive `'denied'`**: the consent
+ * decision event itself races the state flip. The renderer's "Continue"
+ * handler in `FirstUseTakeover.vue` awaits the telemetryEnabled setting
+ * write (which propagates to `setConsentState('denied')` here) and only
+ * then calls `emitTelemetryAction('first_use.consent_decision', { decision: 'decline' })`.
+ * If `isAllowedToFire` short-circuited on `'denied'` without consulting the
+ * allow-list, every decline would be dropped — meaning we'd have 100%
+ * accept-rate signal and zero ability to measure decline. The allow-list
+ * is intentionally the FIRST check so the decision event survives the
+ * exact state it triggers.
  *
  * Default at module load is `'undecided'`: if `setConsentState` is never
- * called (test paths, mis-wired boot), we fail closed.
+ * called (test paths, mis-wired boot), we fail closed for everything that
+ * isn't in the allow-list.
  */
 export type ConsentState = 'granted' | 'denied' | 'undecided'
 
@@ -258,9 +271,13 @@ const PRE_CONSENT_ALLOWED_EVENTS: ReadonlySet<string> = new Set([
 ])
 
 function isAllowedToFire(event: string): boolean {
+  // Allow-list takes precedence over every state, including 'denied'.
+  // See the ConsentState docstring above for the full reasoning — short
+  // version: the consent decision event races the 'denied' state flip
+  // and would otherwise be dropped by its own decision.
+  if (PRE_CONSENT_ALLOWED_EVENTS.has(event)) return true
   if (consentState === 'granted') return true
-  if (consentState === 'denied') return false
-  return PRE_CONSENT_ALLOWED_EVENTS.has(event)
+  return false
 }
 
 /**
