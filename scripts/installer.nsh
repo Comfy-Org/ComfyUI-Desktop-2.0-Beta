@@ -28,6 +28,15 @@
   LangString reinstallUpgrade 1033 "Setup will update your existing installation."
   !pragma warning enable 6030
 
+  ; Reveal the install-details list view during install. electron-builder's
+  ; common.nsh (included at installer.nsi line 8) defaults to
+  ; `ShowInstDetails nevershow`, which hides the standard NSIS Show-Details
+  ; button entirely — every DetailPrint line we emit was getting written to
+  ; an invisible log. `show` always-displays the list so users watch each
+  ; step stream in in real time. Set in customHeader (line 46) so it lands
+  ; AFTER common.nsh and overrides the prior value.
+  ShowInstDetails show
+
   ; Pre-install Section that runs the Visual C++ Redistributable BEFORE
   ; electron-builder's main "install" section. The default electron-builder
   ; section order is: files → start-menu shortcut → desktop shortcut →
@@ -213,14 +222,6 @@
   !define MUI_FINISHPAGE_SHOWREADME ""
   !define MUI_FINISHPAGE_SHOWREADME_TEXT "Add a desktop shortcut"
   !define MUI_FINISHPAGE_SHOWREADME_FUNCTION "CreateUserDesktopShortcut"
-
-  # Keep the install (details) page visible after the install completes
-  # instead of auto-advancing to the Finish page. Pairs with
-  # `SetDetailsPrint both` in installVcRedist — the user can hit the
-  # standard NSIS "Show Details" toggle on the install page and review
-  # every step (redist phase, file extraction, shortcut creation, etc.)
-  # before clicking Next to reach the Finish page.
-  !define MUI_FINISHPAGE_NOAUTOCLOSE
 
   !define MUI_PAGE_CUSTOMFUNCTION_PRE FinishPagePreCheck
   !insertmacro MUI_PAGE_FINISH
