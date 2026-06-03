@@ -459,6 +459,40 @@ def cmd_clone(url, dest):
         sys.exit(1)
 
 
+def _try_resolve_ref(repo, ref):
+    """Non-exiting version of resolve_ref.
+
+    Returns the resolved Oid on success, or None if the ref can't be
+    resolved locally (e.g. SHA missing from the object store, tag/branch
+    not present).  Used by helpers that need to probe for local
+    availability without triggering resolve_ref's `sys.exit(1)` (which
+    raises SystemExit and is NOT caught by `except Exception`).
+    """
+    if ref == "HEAD":
+        try:
+            return repo.head.target
+        except Exception:
+            return None
+
+    for full in (
+        "refs/tags/%s" % ref,
+        "refs/heads/%s" % ref,
+        "refs/remotes/origin/%s" % ref,
+        ref,
+    ):
+        try:
+            r = repo.lookup_reference(full)
+            return r.peel(pygit2.Commit).id
+        except (KeyError, ValueError):
+            continue
+
+    try:
+        obj = repo.revparse_single(ref)
+        return obj.peel(pygit2.Commit).id
+    except (KeyError, ValueError):
+        return None
+
+
 def _ensure_commit_local(repo, commit):
     """Make a best effort to ensure `commit` is in the local object store.
 
@@ -468,13 +502,16 @@ def _ensure_commit_local(repo, commit):
     to react.  Mirrors the strict pattern in cmd_fetch_commit so callers
     fail honestly when the fetch chain doesn't actually deliver the
     requested object.
+
+    `commit` may be a full SHA, a SHA prefix, a tag, or a branch name —
+    `_try_resolve_ref` handles all of them.  The explicit-SHA fetch step
+    is a best effort; if `commit` isn't SHA-shaped, libgit2 will simply
+    reject that refspec and we fall through to the unshallow / plain
+    fetch.
     """
-    # Fast path: commit already present locally.
-    try:
-        repo[commit]
+    # Fast path: ref already resolvable locally.
+    if _try_resolve_ref(repo, commit) is not None:
         return True, None
-    except (KeyError, ValueError):
-        pass
 
     origin = get_origin(repo)
     last_error = None
@@ -497,31 +534,21 @@ def _ensure_commit_local(repo, commit):
             except Exception as e3:
                 last_error = e3
 
-    try:
-        repo[commit]
+    if _try_resolve_ref(repo, commit) is not None:
         return True, None
-    except (KeyError, ValueError):
-        return False, last_error
+    return False, last_error
 
 
 def _try_checkout_existing(repo, commit, strategy):
-    """Attempt to resolve + checkout `commit`.
+    """Attempt to resolve + checkout `commit` from the local object store.
 
-    Returns the oid string on success, None if the commit can't be
-    resolved (e.g. missing from the object store) so the caller can
-    fall back to fetching.  Re-raises unexpected exceptions.
-
-    Note: resolve_ref() itself calls sys.exit(1) when a ref can't be
-    resolved.  That's SystemExit, which derives from BaseException and
-    is NOT caught by `except Exception` — so callers MUST check the
-    object's presence via `repo[commit]` before invoking this helper,
-    or catch SystemExit explicitly.
+    Returns the oid string on success, None if the ref can't be resolved
+    locally so the caller can fall back to fetching.  Re-raises
+    unexpected exceptions.
     """
-    try:
-        repo[commit]
-    except (KeyError, ValueError):
+    oid = _try_resolve_ref(repo, commit)
+    if oid is None:
         return None
-    oid = resolve_ref(repo, commit)
     commit_obj = repo.get(oid)
     repo.checkout_tree(commit_obj, strategy=strategy)
     repo.set_head(oid)
@@ -617,9 +644,7 @@ def cmd_fetch_and_checkout(repo_path, commit):
 
     # Verify the requested commit actually arrived; if not, ask for it
     # explicitly via the same strict-fetch path cmd_fetch_commit uses.
-    try:
-        repo[commit]
-    except (KeyError, ValueError):
+    if _try_resolve_ref(repo, commit) is None:
         print("Requested commit not in fetched history; retrying with explicit SHA...", file=sys.stderr)
         ok, last_error = _ensure_commit_local(repo, commit)
         if not ok:
