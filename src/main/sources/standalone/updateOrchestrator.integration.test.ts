@@ -54,6 +54,10 @@ vi.mock('../../lib/snapshots', () => ({
 vi.mock('./envPaths', () => ({
   getMasterPythonPath: () => SENTINEL_PYTHON,
   getUvPath: (p: string) => path.join(p, SENTINEL_UV_NAME),
+  // getActiveUvPath for managed installs resolves to the same uv as
+  // getUvPath(installPath); mirror that with the sentinel so the existing
+  // SENTINEL_UV_NAME interceptor in the spawn mock still matches.
+  getActiveUvPath: (inst: { installPath: string }) => path.join(inst.installPath, SENTINEL_UV_NAME),
   getActivePythonPath: () => SENTINEL_ACTIVE_PY,
   getVenvDir: (p: string) => path.join(p, 'ComfyUI', '.venv'),
   getVenvPythonPath: (p: string) => path.join(p, 'ComfyUI', '.venv', 'Scripts', 'python.exe'),
