@@ -1631,17 +1631,11 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
         }
       },
       pickInstallFromPicker,
-      restartInstallFromPicker: async (installationId, parentEntryId) => {
+      restartInstallFromPicker: async (installationId, parentEntryId, opts) => {
         // Restart: same install, same window. The session is stopped
         // and a fresh launch is triggered; `onLaunch`'s existing-
         // window short-circuit reloads the comfyView URL in place
         // without re-creating the BrowserWindow or the entry.
-        //
-        // Confirm via the shell-level system-modal overlay parented to
-        // the host so the prompt visually belongs to the window that
-        // initiated the restart. Same primitive `confirmAndCloseAllHostWindows`
-        // uses, so the launcher's confirm surface is consistent across
-        // shell-level prompts (and Playwright-driveable end to end).
         const parentEntry = comfyWindows.get(parentEntryId)
         if (!parentEntry || parentEntry.window.isDestroyed()) return
         // Restart is always same-install/same-window — a stale renderer
@@ -1649,7 +1643,13 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
         if (parentEntry.installationId !== installationId) return
         // Confirm only when the restart will kill a local process
         // (issue #654). Cloud/remote restarts skip the modal.
-        if (shouldConfirmKillForEntry(parentEntry)) {
+        //
+        // The picker renderer shows its own in-drawer confirm before
+        // sending the IPC and forwards `opts.confirmed: true` when the
+        // user accepted; in that case we skip the shell-level system-
+        // modal so the user isn't prompted twice. Kept as a safety net
+        // for any caller that fires the IPC without first confirming.
+        if (opts?.confirmed !== true && shouldConfirmKillForEntry(parentEntry)) {
           const confirmed = await openSystemModalAsync({
             parent: parentEntry.window,
             spec: {

@@ -2,9 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { AlertTriangle, Info } from 'lucide-vue-next'
-import { useModal } from '../../composables/useModal'
-import GlobalSettingsMicroSection from '../../comfyTitlePopup/globalSettings/GlobalSettingsMicroSection.vue'
-import ModelsDirList from '../../comfyTitlePopup/globalSettings/ModelsDirList.vue'
+import GlobalStorageSections from '../../comfyTitlePopup/globalSettings/GlobalStorageSections.vue'
 import SettingsSectionList from './SettingsSectionList.vue'
 import type { DetailField, DetailSection, Installation } from '../../types/ipc'
 
@@ -12,12 +10,12 @@ import type { DetailField, DetailSection, Installation } from '../../types/ipc'
  * Storage tab pane for the instance-picker settings.
  *
  * Composes:
- *  - Global shared-models UI (model directories + shared-directory
- *    fields) — driven by the same `globalSettingsSnapshot` the popup
- *    already streams, and mutated through the popup's existing
- *    `__comfyTitlePopup.globalSettings*` bridge methods. This mirrors
- *    the old Global Settings popup view exactly — only the render
- *    surface changed.
+ *  - Global shared-models UI via `GlobalStorageSections` — the same
+ *    component the Global Settings popup's Storage tab renders, so
+ *    the two surfaces can't drift. Driven by the
+ *    `globalSettingsSnapshot` the popup already streams and mutated
+ *    through the popup's `__comfyTitlePopup.globalSettings*` bridge
+ *    methods.
  *  - Per-install `useSharedPaths` toggle, sourced from `props.sections`
  *    (main emits `{ tab: 'storage', fields: [useSharedPaths] }` for
  *    desktop / portable installs; git installs omit it).
@@ -42,16 +40,6 @@ export interface StorageSnapshot {
   modelsSystemDefault: string
 }
 
-interface GlobalSettingsBridge {
-  globalSettingsUpdateField(
-    fieldId: string,
-    value: unknown
-  ): Promise<{ ok: boolean; message?: string }>
-  globalSettingsBrowseFolder(defaultPath?: string): Promise<string | null>
-  globalSettingsOpenPath(path: string): void
-  globalSettingsSetModelsDirs(dirs: string[]): Promise<{ ok: boolean }>
-}
-
 interface Props {
   installation: Installation | null
   /** Global snapshot fields the popup streams via
@@ -73,10 +61,6 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
-const modal = useModal()
-
-const bridge = (window as unknown as { __comfyTitlePopup?: GlobalSettingsBridge })
-  .__comfyTitlePopup
 
 /** Tracks whether the user has touched ANY global field in this tab
  *  session. Global writes go through `globalSettingsSetModelsDirs` /
@@ -102,10 +86,6 @@ const showRestartWarning = computed(() => {
  *  doesn't count `:is` template references as imports. */
 const noteIcon = computed(() => (showRestartWarning.value ? AlertTriangle : Info))
 
-const sharedDirsSections = computed<DetailSection[]>(() => [
-  { fields: props.snapshot.sharedDirectoriesFields as unknown as DetailField[] },
-])
-
 /** Per-install `useSharedPaths` toggle value (defaults to on when the
  *  field is absent). When off, this install uses only its own local
  *  paths, so the shared Models / Directories config below is irrelevant
@@ -116,52 +96,6 @@ const useSharedPathsEnabled = computed<boolean>(() => {
     .find((f) => f.id === 'useSharedPaths')
   return field ? field.value !== false : true
 })
-
-async function handleAddModelsDir(): Promise<void> {
-  const picked = await bridge?.globalSettingsBrowseFolder()
-  if (!picked) return
-  globalTouched.value = true
-  const dirs = props.snapshot.modelsDirs.map((d) => d.path)
-  dirs.push(picked)
-  await bridge?.globalSettingsSetModelsDirs(dirs)
-}
-
-async function handleRemoveModelsDir(index: number): Promise<void> {
-  const dir = props.snapshot.modelsDirs[index]
-  if (!dir) return
-  const ok = await modal.confirm({
-    title: t('models.removeDirTitle', 'Remove shared models directory?'),
-    message: t(
-      'models.removeDirConfirm',
-      "This won't delete any files. You can re-add the directory later from this list."
-    ),
-    confirmLabel: t('models.removeDir', 'Remove'),
-    confirmStyle: 'danger',
-  })
-  if (!ok) return
-  globalTouched.value = true
-  const dirs = props.snapshot.modelsDirs.map((d) => d.path)
-  dirs.splice(index, 1)
-  await bridge?.globalSettingsSetModelsDirs(dirs)
-}
-
-async function handleMakePrimary(index: number): Promise<void> {
-  globalTouched.value = true
-  const dirs = props.snapshot.modelsDirs.map((d) => d.path)
-  const moved = dirs.splice(index, 1)[0]
-  if (typeof moved !== 'string') return
-  dirs.unshift(moved)
-  await bridge?.globalSettingsSetModelsDirs(dirs)
-}
-
-function handleOpenModelsDir(path: string): void {
-  bridge?.globalSettingsOpenPath(path)
-}
-
-async function handleUpdateSharedDirField(field: DetailField, value: unknown): Promise<void> {
-  globalTouched.value = true
-  await bridge?.globalSettingsUpdateField(field.id, value)
-}
 
 function handleUpdatePerInstallField(field: DetailField, value: unknown): void {
   emit('update-field', field, value)
@@ -215,31 +149,15 @@ function handleUpdatePerInstallField(field: DetailField, value: unknown): void {
     <!-- Shared Models + Shared Directories only apply when this install
          opts into shared storage. Hide them when the toggle is off so
          the user isn't configuring paths this install won't use. -->
-    <template v-if="useSharedPathsEnabled">
-      <GlobalSettingsMicroSection
-        :title="t('settings.models', 'Shared Models')"
-        :tooltip="t('tooltips.sharedModels')"
-      >
-        <ModelsDirList
-          :dirs="snapshot.modelsDirs"
-          @open="handleOpenModelsDir"
-          @remove="handleRemoveModelsDir"
-          @make-primary="handleMakePrimary"
-          @add="handleAddModelsDir"
-        />
-      </GlobalSettingsMicroSection>
-
-      <GlobalSettingsMicroSection :title="t('settings.sharedDirectories', 'Shared Directories')">
-        <SettingsSectionList
-          :sections="sharedDirsSections"
-          :installation-id="installation?.id"
-          :running-action-ids="runningActionIds"
-          :pending-restart-field-ids="pendingRestartFieldIds"
-          :field-error-messages="fieldErrorMessages"
-          @update-field="handleUpdateSharedDirField"
-        />
-      </GlobalSettingsMicroSection>
-    </template>
+    <GlobalStorageSections
+      v-if="useSharedPathsEnabled"
+      :snapshot="snapshot"
+      :installation-id="installation?.id"
+      :pending-restart-field-ids="pendingRestartFieldIds"
+      :field-error-messages="fieldErrorMessages"
+      :running-action-ids="runningActionIds"
+      @touched="globalTouched = true"
+    />
   </div>
 </template>
 

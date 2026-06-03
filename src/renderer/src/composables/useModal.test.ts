@@ -182,4 +182,49 @@ describe('useModal', () => {
       expect(() => modal.close(null)).not.toThrow()
     })
   })
+
+  describe('dismiss', () => {
+    it('resolves confirm as false', async () => {
+      const promise = modal.confirm({ title: 'T', message: 'M' })
+      modal.dismiss()
+      await expect(promise).resolves.toBe(false)
+      expect(modal.state.visible).toBe(false)
+    })
+
+    it('resolves prompt as null', async () => {
+      const promise = modal.prompt({ title: 'T', message: 'M' })
+      modal.dismiss()
+      await expect(promise).resolves.toBeNull()
+    })
+
+    it('resolves select as null', async () => {
+      const promise = modal.select({
+        title: 'T',
+        items: [{ value: 'a', label: 'A' }],
+      })
+      modal.dismiss()
+      await expect(promise).resolves.toBeNull()
+    })
+
+    it('resolves alert as undefined', async () => {
+      const promise = modal.alert({ title: 'T', message: 'M' })
+      modal.dismiss()
+      await expect(promise).resolves.toBeUndefined()
+    })
+
+    it('resolves confirmWithOptions as null', async () => {
+      const promise = modal.confirmWithOptions({
+        title: 'T',
+        message: 'M',
+        options: [{ id: 'opt1', label: 'Option 1' }],
+      })
+      modal.dismiss()
+      await expect(promise).resolves.toBeNull()
+    })
+
+    it('is a no-op when no modal is open', () => {
+      expect(() => modal.dismiss()).not.toThrow()
+      expect(modal.state.visible).toBe(false)
+    })
+  })
 })

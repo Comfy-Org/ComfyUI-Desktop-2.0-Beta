@@ -1038,13 +1038,13 @@ function hideTitlePopup(
     && !entry.view.popup.webContents.isDestroyed()
     && !entry.view.parentWindow.isDestroyed()
   ) {
-    // Embedded WebContentsView: `BrowserWindow.focus()` raises the host
-    // window but doesn't deterministically land keyboard focus in any
-    // child view. Push focus into the title bar (the button that
-    // opened the popup) so subsequent keystrokes go somewhere
-    // sensible. Falls back to a plain window focus if the title-bar
-    // sender is no longer alive.
-    if (!entry.titleBarSender.isDestroyed()) {
+    /** comfyView first: it carries the `before-input-event` zoom
+     *  listener (attach.ts), so focusing elsewhere silently breaks
+     *  Ctrl/Cmd +/-/0. Title bar, then window, are fallbacks. */
+    const comfyContents = comfyWindows.get(entry.parentEntryId)?.comfyView.webContents
+    if (comfyContents && !comfyContents.isDestroyed()) {
+      comfyContents.focus()
+    } else if (!entry.titleBarSender.isDestroyed()) {
       entry.titleBarSender.focus()
     } else {
       entry.view.parentWindow.focus()
@@ -1321,6 +1321,17 @@ function openTitlePopup(opts: OpenTitlePopupOpts): void {
   // kind) before `entry.kind` is overwritten below.
   const isOpenOrPending = entry.view.isOpen || entry.view.pendingShowTimer !== null
   if (isOpenOrPending && opts.kind !== entry.kind) {
+    // When the outgoing kind is the instance-picker, tell the popup
+    // renderer to cancel any open `useModal` / `useDialogs` entry
+    // first. The picker's `useComfyUISettings.runAction` chain can
+    // park a confirm/prompt waiting on user input; hiding the WCV
+    // alone doesn't resolve that Promise, so the next time the picker
+    // opens (or re-renders) the modal would silently resurface.
+    // Treat the kind-switch click as the same dismiss the modal's own
+    // backdrop fires (issue #770).
+    if (entry.kind === 'instance-picker' && !entry.view.popup.webContents.isDestroyed()) {
+      entry.view.popup.webContents.send('comfy-titlepopup:dismiss-modals')
+    }
     hideTitlePopup(entry, { releaseFocusToParent: false })
   }
 
@@ -1420,8 +1431,16 @@ function openTitlePopup(opts: OpenTitlePopupOpts): void {
     config = { kind: 'downloads', theme: opts.theme }
   } else if (opts.kind === 'instance-picker') {
     config = { kind: 'instance-picker', snapshot: opts.snapshot, theme: opts.theme }
+    // Seed the broadcast-dedupe cache with the snapshot we're about to
+    // ship as the initial config. Without this, a subsequent live
+    // broadcast that happens to equal a *previous* session's last
+    // broadcast (but differs from the snapshot the renderer is currently
+    // displaying) would be silently skipped by the dedupe check in
+    // `broadcastInstancePickerUpdate` / `broadcastGlobalSettingsUpdate`.
+    entry.lastPickerBroadcastJson = JSON.stringify(opts.snapshot)
   } else {
     config = { kind: 'global-settings', snapshot: opts.snapshot, theme: opts.theme }
+    entry.lastGlobalSettingsBroadcastJson = JSON.stringify(opts.snapshot)
   }
   const configJson = JSON.stringify(config)
 
@@ -1514,16 +1533,20 @@ export interface TitlePopupHostBindings {
     installationId: string,
     parentEntryId: number,
   ) => Promise<void> | void
-  /** Picker → Restart on a running install. Implementations confirm
-   *  with the user (parented to the picker's host window), gracefully
-   *  stop the running session, and then re-launch via the same
-   *  focus-or-launch path the picker normally uses. `parentEntryId`
-   *  threads the picker's host through so the confirm dialog is parented
-   *  to the right window and post-stop relaunch routes back through
-   *  the picker's own parent. */
+  /** Picker → Restart on a running install. Gracefully stops the running
+   *  session and re-launches via the same focus-or-launch path the picker
+   *  normally uses. `parentEntryId` threads the picker's host through so
+   *  the post-stop relaunch routes back through the picker's own parent.
+   *
+   *  When `confirmed === true`, the picker renderer already showed an
+   *  in-drawer confirm and the user accepted; implementations skip their
+   *  own system-modal in that case. Otherwise the system-modal confirm
+   *  fires as the safety net (non-renderer-confirmed callers / legacy
+   *  triggers). */
   restartInstallFromPicker: (
     installationId: string,
     parentEntryId: number,
+    opts?: { confirmed?: boolean },
   ) => Promise<void> | void
   /** Resolve the per-install Settings sections + Snapshots payload the
    *  picker's right-pane accordions render. Returns `null` for either
@@ -1703,6 +1726,19 @@ function openInstancePickerForHost(
     titleBarSender,
   })
 
+  // The snapshot above already carries `autoAction`/`autoActionNonce`
+  // baked in (a fresh object built by `buildInstancePickerSnapshot`),
+  // so clearing them on the entry now is safe — that snapshot reaches
+  // the renderer unchanged. Subsequent `broadcastInstancePickerSnapshotToTitlePopups`
+  // rebuilds reread these fields and would otherwise keep re-sending
+  // the same one-shot autoAction forever, re-firing the confirm modal
+  // any time the picker's renderer-side `consumedAutoActionKey` is
+  // lost (renderer reload, prop transition cycles).
+  const ensuredEntry = titlePopupsByParent.get(parentEntry.window.id)
+  if (ensuredEntry) {
+    ensuredEntry.pickerAutoAction = null
+  }
+
   // Kick the data refresh asynchronously. When it lands,
   // `broadcastInstancePickerSnapshotToTitlePopups` pushes the updated
   // snapshot to the open picker — same channel that handles live
@@ -1808,10 +1844,9 @@ function activateTitlePopupMenuItem(
       : null
     void bindings.confirmAndCloseAllHostWindows(parentWindow)
   } else if (id === 'settings') {
-    // Open the new Global Settings popup (centred card, picker chrome)
-    // instead of routing to the legacy SettingsModal panel. The host's
-    // active installation (null on chooser hosts) drives the install-
-    // scoped Update Channel + Copy & Update controls.
+    // Open the Global Settings popup. The host's active installation
+    // (null on chooser hosts) drives the install-scoped Update Channel
+    // + Copy & Update controls.
     if (parentEntry && !parentEntry.window.isDestroyed()) {
       releaseFocusToParent = false
       openGlobalSettingsForHost(
@@ -1912,10 +1947,8 @@ const SETTINGS_TYPE_TO_DETAIL_EDIT_TYPE: Record<string, string | undefined> = {
 }
 
 /** Map a main-side `SettingsField` into the loose-typed `DetailField`
- *  shape the renderer's `SettingsSectionList` expects. Keeps the
- *  popup view pure-display by doing the field-shape translation here
- *  rather than in `useGlobalSettings.ts` (which only ran in the panel
- *  renderer). */
+ *  shape the renderer's `SettingsSectionList` expects. Done main-side
+ *  so the popup view stays pure-display. */
 function toDetailField(
   f: ReturnType<typeof buildSettingsSections>[number]['fields'][number],
 ): Record<string, unknown> {
@@ -1928,6 +1961,7 @@ function toDetailField(
     editType,
     options: f.options?.map((o) => ({ value: o.value, label: o.label })),
     tooltip: f.tooltip,
+    description: f.description,
     placeholder: f.placeholder,
     min: f.min,
     max: f.max,
@@ -2513,19 +2547,22 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
 
   // Picker → restart a running install. Same contract as
   // `pick-install` but routed through `restartInstallFromPicker`, which
-  // confirms with the user, stops the running session, then re-runs
-  // the focus-or-launch flow. The popup is dismissed before the
-  // confirm fires so the dialog comes up over the host body, not the
-  // open popup.
+  // stops the running session, then re-runs the focus-or-launch flow.
+  // The popup is dismissed before the action fires so the panel's
+  // ProgressModal lands unobstructed. When the renderer already showed
+  // its own in-drawer confirm (`payload.confirmed`), we forward that
+  // signal so main skips its system-modal — the user already answered
+  // the prompt inside the drawer.
   ipcMain.on(
     'comfy-titlepopup:restart-install',
-    (event, payload: { installationId?: unknown }) => {
+    (event, payload: { installationId?: unknown; confirmed?: unknown }) => {
       const entry = titlePopupsByWebContents.get(event.sender.id)
       if (!entry) return
       const installationId = payload?.installationId
       if (typeof installationId !== 'string' || installationId.length === 0) return
+      const confirmed = payload?.confirmed === true
       hideTitlePopup(entry, { releaseFocusToParent: false })
-      void bindings.restartInstallFromPicker(installationId, entry.parentEntryId)
+      void bindings.restartInstallFromPicker(installationId, entry.parentEntryId, { confirmed })
     },
   )
 
@@ -2722,8 +2759,7 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
 
   // Panel renderer → open the Global Settings popup for the sender's
   // host window. Used by the panel-side file-menu "Settings" item and
-  // the `comfy://open-settings?tab=global` deep link, both of which
-  // previously opened the legacy SettingsModal overlay.
+  // the `comfy://open-settings?tab=global` deep link.
   ipcMain.on('comfy-titlepopup:open-global-settings', (event) => {
     recordIpcInvocation('comfy-titlepopup:open-global-settings')
     const win = BrowserWindow.fromWebContents(event.sender)
