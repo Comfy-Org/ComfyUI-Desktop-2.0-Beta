@@ -409,6 +409,46 @@ describe('enrichCommitsAhead', () => {
     expect(gitMock.countCommitsAhead).not.toHaveBeenCalled()
   })
 
+  it('throttles retries: a recent failed-settle stamp short-circuits before any git work runs', async () => {
+    const repo = newRepo()
+    // Simulate a fresh failed-settle: commitsAhead unresolved but
+    // lastEnrichAttemptAt within the throttle window (5s ago, well
+    // under the 30s cooldown).
+    set(repo, 'latest', {
+      commitSha: 'deadbeef00000000',
+      baseTag: 'v1.0.0',
+      lastEnrichAttemptAt: Date.now() - 5_000,
+    })
+
+    await enrichCommitsAhead(repo, '/tmp/fake-repo')
+
+    // No recovery, no git work — the cooldown beats everything else.
+    expect(releasesMock.getLatestStableTag).not.toHaveBeenCalled()
+    expect(gitMock.findNearestTag).not.toHaveBeenCalled()
+    expect(gitMock.countCommitsAhead).not.toHaveBeenCalled()
+    expect(gitMock.fetchTags).not.toHaveBeenCalled()
+  })
+
+  it('allows retries once the throttle window has elapsed', async () => {
+    const repo = newRepo()
+    // Stamp is older than the 30s throttle, so the helper should run
+    // the full recovery + count chain again.
+    set(repo, 'latest', {
+      commitSha: 'deadbeef00000000',
+      baseTag: 'v1.0.0',
+      lastEnrichAttemptAt: Date.now() - 60_000,
+    })
+    vi.mocked(gitMock.countCommitsAhead).mockResolvedValue(11)
+
+    await enrichCommitsAhead(repo, '/tmp/fake-repo')
+
+    expect(gitMock.countCommitsAhead).toHaveBeenCalled()
+    const after = get(repo, 'latest')
+    expect(after?.commitsAhead).toBe(11)
+    // The fresh success refreshes the stamp.
+    expect(after?.lastEnrichAttemptAt).toBeGreaterThan(Date.now() - 5_000)
+  })
+
   it('isolates listener errors — one throwing subscriber does not break others', async () => {
     const repo = newRepo()
     set(repo, 'latest', {

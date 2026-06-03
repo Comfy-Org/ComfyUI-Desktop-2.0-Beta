@@ -259,6 +259,17 @@ export async function checkForUpdate(
  */
 const _enrichInflight = new Map<string, Promise<void>>()
 
+/** Minimum interval between *failed* enrichment retries for the same
+ *  cache entry.  The inflight dedupe already coalesces concurrent
+ *  callers, but each picker reopen and each auto-check tick fires a
+ *  fresh `enrichCommitsAhead` call after the previous one has settled.
+ *  Without this throttle a structurally broken entry (no recoverable
+ *  `baseTag`, persistent rev-list failure) would re-run the full
+ *  recovery + fetch chain on every reopen for no gain.  30s is short
+ *  enough to recover quickly when the user comes back online, long
+ *  enough that rapid picker toggling doesn't spam git. */
+const ENRICH_RETRY_THROTTLE_MS = 30_000
+
 /** Listeners notified when `enrichCommitsAhead` actually writes a new
  *  `commitsAhead` value into the cache (not on no-op short-circuits). The
  *  IPC layer wires a broadcast here so renderers can refresh affected
@@ -290,6 +301,14 @@ export async function enrichCommitsAhead(repo: string, comfyuiDir: string): Prom
     const entry = get(repo, 'latest')
     if (!entry?.commitSha || entry.commitsAhead !== undefined) return
     if (!fs.existsSync(path.join(comfyuiDir, '.git'))) return
+    // Retry throttle: a recent failed attempt (`lastEnrichAttemptAt`
+    // set but `commitsAhead` still undefined) means the recovery /
+    // count chain just ran and produced nothing.  Don't re-run it on
+    // every picker reopen — the underlying state is unlikely to change
+    // in the next few seconds, and we already broadcast a settle so
+    // the renderer dropped its spinner.
+    if (entry.lastEnrichAttemptAt !== undefined
+      && Date.now() - entry.lastEnrichAttemptAt < ENRICH_RETRY_THROTTLE_MS) return
 
     // Recover a missing baseTag before bailing.  When
     // `fetchLatestRelease('latest')` runs while `getLatestStableTag`

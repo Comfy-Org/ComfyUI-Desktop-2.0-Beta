@@ -137,16 +137,18 @@ describe('buildChannelCards — enriching flag', () => {
     expect(latest.data?.enriching).toBe(true)
   })
 
-  it('does NOT set enriching when baseTag is missing — enrichCommitsAhead short-circuits synchronously in that state', () => {
-    // Regression for issue #783: a partial fetchLatestRelease leaves
-    // commitSha set but baseTag undefined.  enrichCommitsAhead used to
-    // (and still will, when no recovery is possible) bail without
-    // writing.  Claiming enriching=true in that case is the lie that
-    // produced the stuck "Computing commits ahead…" spinner.
+  it('still sets enriching=true while baseTag is missing — the helper recovers it in the background', () => {
+    // The original bug (issue #783) showed the spinner forever because
+    // enrichCommitsAhead bailed silently on a missing baseTag and never
+    // broadcast a settle.  The helper now recovers baseTag itself (via
+    // forced `getLatestStableTag` then a local `findNearestTag`
+    // fallback), so the spinner should remain visible through that
+    // window.  The settle stamp + broadcast — not this guard — is what
+    // clears it.
     latestInfo({ baseTag: undefined })
     const cards = buildChannelCards(REPO, DEFS, baseInstall())
     const latest = cards.find((c) => c.value === 'latest')!
-    expect(latest.data?.enriching).toBeUndefined()
+    expect(latest.data?.enriching).toBe(true)
   })
 
   it('does NOT set enriching once lastEnrichAttemptAt has been stamped', () => {
