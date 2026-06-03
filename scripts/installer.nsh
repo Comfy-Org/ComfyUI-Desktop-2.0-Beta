@@ -56,6 +56,13 @@
   ; "Are you sure?" prompt. That matches default-NSIS behavior when
   ; the script doesn't opt into MUI_ABORTWARNING.)
   Function OnFinishCancelHandler
+    ; DIAGNOSTIC TRIPWIRE — confirms whether MUI2 actually routes Cancel
+    ; / X clicks to our handler. If you see "TRIPWIRE A" when clicking
+    ; either, the handler is being reached and the problem is Quit not
+    ; closing the wizard. If you don't see it, .onUserAbort isn't
+    ; routing to us at all (i.e. nsDialogs is eating the click before it
+    ; gets to NSIS's abort handler). REMOVE AFTER DEBUGGING.
+    MessageBox MB_OK|MB_ICONINFORMATION "TRIPWIRE A: OnFinishCancelHandler reached — about to Quit"
     SetErrorLevel 0
     Quit
   FunctionEnd
