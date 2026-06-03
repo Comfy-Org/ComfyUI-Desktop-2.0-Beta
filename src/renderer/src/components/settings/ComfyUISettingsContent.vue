@@ -149,6 +149,7 @@ const {
   notice,
   sectionsFresh,
   updateField,
+  renameInstallation,
   pendingRestartFieldIds,
   fieldErrorMessages,
   runAction,
@@ -813,6 +814,7 @@ defineExpose({
                 :installation="installation"
                 :sections="statusSections"
                 :disk-usage="diskUsageItem"
+                :on-rename="renameInstallation"
               />
             </div>
             <div

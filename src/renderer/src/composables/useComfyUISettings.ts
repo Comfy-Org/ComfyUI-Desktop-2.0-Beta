@@ -10,6 +10,7 @@ import { progressOpKindForActionId, destroysInstanceForActionId } from '../lib/p
 import {
   REQUIRES_STOPPED,
   type ActionDef,
+  type ActionResult,
   type DetailField,
   type DetailSection,
   type DiskSpaceInfo,
@@ -123,6 +124,11 @@ export interface UseComfyUISettingsApi {
    *  inline pill surfaces the message. Auto-clears after a short
    *  timer or on the next edit of the same field. */
   fieldErrorMessages: ComputedRef<Map<string, string>>
+
+  /** Commit a new display name for the selected install (inline hero
+   *  edit). Resolves `true` when committed, `false` on no-op / rejection
+   *  (duplicate name → alert). */
+  renameInstallation: (newName: string) => Promise<boolean>
 
   /** Run an action coming off a `DetailSection.actions[]` entry. */
   runAction: (action: ActionDef) => Promise<void>
@@ -522,6 +528,30 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     }
   }
 
+  /** Commit a new display name for the selected install. Shared by the
+   *  About-tab inline hero edit; the footer "More → Rename" path runs
+   *  through `runAction` instead, but both reconcile via
+   *  `update-installation` → `'changed'` → store refetch. The IPC handler
+   *  owns the duplicate-name guard — a rejection surfaces here as an alert
+   *  and the `installation` prop stays put.
+   *
+   *  Resolves `true` when the name was committed, `false` on a no-op
+   *  (empty / unchanged) or a rejection (duplicate). The hero uses this to
+   *  revert its optimistic text only when the write didn't land. */
+  async function renameInstallation(newName: string): Promise<boolean> {
+    const inst = toValue(opts.installation)
+    if (!inst) return false
+    const name = newName.trim()
+    if (!name || name === inst.name) return false
+    const result: ActionResult | void = await window.api.updateInstallation(inst.id, { name })
+    if (result?.ok === false) {
+      await dialogs.alert({ title: inst.name, message: result.message ?? '' })
+      return false
+    }
+    await reload()
+    return true
+  }
+
   async function runAction(action: ActionDef): Promise<void> {
     const inst = toValue(opts.installation)
     if (!inst) return
@@ -859,6 +889,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     reload,
     refreshSection,
     updateField,
+    renameInstallation,
     pendingRestartFieldIds,
     fieldErrorMessages,
     runAction,

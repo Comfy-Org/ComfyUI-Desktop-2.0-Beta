@@ -51,6 +51,11 @@ export const en = {
     storageRestartNote:
       'Restart the application (or close and reopen) for these changes to take effect.'
   },
+  /** About-tab hero (StatusFactPanel.vue). The inline-editable name's
+   *  aria-label lives here so the popup-scoped catalog resolves it. */
+  statusFactPanel: {
+    editName: 'Edit installation name'
+  },
   models: {
     addDir: 'Add directory',
     removeDir: 'Remove',
