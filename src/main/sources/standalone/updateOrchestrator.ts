@@ -198,12 +198,12 @@ export async function runComfyUIUpdate(opts: UpdateOrchestrationOptions): Promis
     } else {
       console.warn('macOS killed update process — attempting binary repair and retry')
     }
-    // Quarantine repair only applies to the standalone-env Python bundle —
-    // adopted installs run against the legacy venv which the user already
-    // launched directly, so its binaries are already trusted by Gatekeeper.
-    if (installation.adopted !== true) {
-      await repairMacBinaries(installPath, sendProgress, sendOutput)
-    }
+    // `repairMacBinaries` no-ops the standalone-env half for adopted
+    // installs (path absent) and uses `getActiveVenvDir(installation)` to
+    // pick the right runtime venv — `<installPath>/ComfyUI/.venv` for
+    // managed, `<adoptedBaseDir>/.venv` for adopted. So a Gatekeeper
+    // SIGKILL on either type recovers via the same call.
+    await repairMacBinaries(installPath, sendProgress, sendOutput, installation)
     if (sendOutput) {
       sendOutput('Repair complete — retrying update…\n\n')
     }
