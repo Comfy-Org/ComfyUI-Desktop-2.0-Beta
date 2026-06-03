@@ -63,12 +63,17 @@ onBeforeUnmount(() => {
 })
 
 function open(): void {
+  // Bump so any probe still in flight from a previous session is
+  // discarded by `probe()`'s generation check and can't populate the
+  // freshly-reset state.
+  probeGeneration++
   trackPath.value = ''
   trackName.value = ''
   probeResults.value = []
   selectedProbe.value = null
   venvOverride.value = null
   suggestedName.value = ''
+  probing.value = false
   isOpen.value = true
   void window.api
     .getUniqueName('ComfyUI')
