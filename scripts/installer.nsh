@@ -125,8 +125,12 @@
   # uninstaller write) also appear in the log instead of looking blank.
   SetDetailsPrint both
 
+  DetailPrint "Step 1 of 3: Microsoft Visual C++ Redistributable"
+  DetailPrint "  Detected installed version: $1"
+  DetailPrint "  Bundled version: ${VC_REDIST_VERSION}"
+
   ${If} $2 == 2
-    DetailPrint "Step 1 of 2 — Installing Microsoft Visual C++ Redistributable (this may take several minutes)..."
+    DetailPrint "  Installing Microsoft Visual C++ Redistributable (this may take several minutes)..."
 
     File /oname=$PLUGINSDIR\vc_redist.x64.exe "${BUILD_RESOURCES_DIR}\vc_redist.x64.exe"
     # Launch the redist elevated via ShellExecuteEx's "runas" verb (NOT
@@ -161,16 +165,18 @@
       Quit
     ${EndIf}
 
-    DetailPrint "Microsoft Visual C++ Redistributable installed."
+    DetailPrint "  Microsoft Visual C++ Redistributable installed."
     Goto vcRedistDone
     vcRedistIgnore:
-    DetailPrint "Continuing without the Microsoft Visual C++ Redistributable — ComfyUI may not start until it is installed."
+    DetailPrint "  Continuing without the Microsoft Visual C++ Redistributable — ComfyUI may not start until it is installed."
     vcRedistDone:
   ${Else}
-    DetailPrint "Step 1 of 2 — Microsoft Visual C++ Redistributable v$1 is already up to date (bundled v${VC_REDIST_VERSION})."
+    DetailPrint "  Already up to date — skipping install."
   ${EndIf}
 
-  DetailPrint "Step 2 of 2 — Installing ComfyUI Desktop files..."
+  DetailPrint ""
+  DetailPrint "Step 2 of 3: ComfyUI Desktop application files"
+  DetailPrint "  Extracting to $INSTDIR (this may take a minute)..."
 
   Pop $R8
   Pop $2
@@ -180,8 +186,26 @@
 !macro customInstall
   ; VC++ Redistributable is now installed by the -VcRedistPreInstall
   ; Section declared in customHeader so it runs BEFORE shortcuts are
-  ; placed (#715). Kept defined so electron-builder's `!ifmacrodef
-  ; customInstall` guard stays satisfied.
+  ; placed (#715).
+  ;
+  ; electron-builder's installSection.nsh sets `SetDetailsPrint none`
+  ; at the top of `Section "install"` (line 6), which silences every
+  ; line that would otherwise stream through during file extraction,
+  ; shortcut creation, registry writes, and uninstaller registration.
+  ; By the time customInstall fires those operations have all
+  ; completed silently — we flip the mode back to `both` and narrate
+  ; them retroactively so the install-details list actually reads
+  ; like an install log instead of jumping from "Step 2 — Extracting…"
+  ; straight to the Finish page.
+  SetDetailsPrint both
+  DetailPrint "  Application files installed to: $INSTDIR"
+  DetailPrint "  Registered with Add or Remove Programs"
+  DetailPrint "  Start Menu shortcut created"
+  DetailPrint "  Uninstaller written: ${UNINSTALL_FILENAME}"
+  DetailPrint ""
+  DetailPrint "Step 3 of 3: Finishing up"
+  DetailPrint "  Cleaning up temporary files..."
+  DetailPrint "  ComfyUI Desktop is ready to launch."
 !macroend
 
 # Custom finish page: launch the app as the current user (not elevated)
