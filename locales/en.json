@@ -869,6 +869,8 @@
     "copyUpdatedAs": "Copy & Updated as",
     "releaseUpdatedAs": "Release Updated as",
     "copyDeleted": "deleted",
+    "copyEventLabel": "Copied to {destination}",
+    "copyEventLabelIncoming": "Copied from {source}",
     "viewInstall": "View",
     "restorePreviewTitle": "Restore Preview — changes that will be applied:",
     "restoreNoChanges": "No changes needed — environment already matches this snapshot.",
