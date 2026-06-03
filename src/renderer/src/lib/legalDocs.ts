@@ -53,7 +53,7 @@ export const EULA: LegalDoc = {
     {
       kind: 'ul',
       items: [
-        '**"Desktop App"** — the Comfy Desktop application, including all binaries, installers, signed packages, scripts, configuration, and bundled assets we distribute under the name "Comfy Desktop," "ComfyUI Desktop," "Comfy Desktop 2," or any successor naming.',
+        '**"Desktop App"** — the Comfy Desktop application, including all binaries, installers, signed packages, scripts, configuration, and bundled assets we distribute under the name "Comfy Desktop," "ComfyUI Desktop," "ComfyUI Desktop 2.0," "Comfy Desktop 2," or any successor naming.',
         '**"Comfy Org," "we," "us," "our"** — the publisher of the Desktop App.',
         '**"You"** — the individual or entity installing or using the Desktop App.',
         '**"Source Code"** — the open-source source code published at github.com/Comfy-Org/ComfyUI-Desktop-2.0-Beta.',
@@ -370,7 +370,7 @@ export const PRIVACY_POLICY: LegalDoc = {
     {
       kind: 'ul',
       items: [
-        'App version and platform (e.g. "Desktop 2.0.1, macOS 14.4 ARM")',
+        'App version and platform (e.g. "Comfy Desktop 1.0.0, macOS 14.4 ARM")',
         'A local device ID generated locally. Before you sign in to Comfy Cloud, this ID is not tied to your name, email, or any hardware identifier we can reverse. Once you sign in, the device ID is linked to your Comfy account.',
         'Feature events ("install completed," "workflow opened," "settings panel opened") with non-identifying metadata',
         'Approximate timing of those events'
@@ -609,7 +609,7 @@ export const THIRD_PARTY_NOTICES: LegalDoc = {
     { kind: 'h2', text: 'Components Desktop installs but does NOT bundle' },
     {
       kind: 'p',
-      text: 'Desktop 2.0 is a **shell** that installs and manages ComfyUI environments. The following components are downloaded and set up on your machine at runtime (per your action). They are **not part of the Desktop 2.0 binary** and are governed by their own licenses, which apply directly between you and the respective authors:'
+      text: 'Comfy Desktop is a **shell** that installs and manages ComfyUI environments. The following components are downloaded and set up on your machine at runtime (per your action). They are **not part of the Comfy Desktop binary** and are governed by their own licenses, which apply directly between you and the respective authors:'
     },
     {
       kind: 'ul',

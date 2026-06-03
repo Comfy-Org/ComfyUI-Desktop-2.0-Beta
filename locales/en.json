@@ -7,7 +7,7 @@
     "telemetryNotice": "Anonymous telemetry is collected to improve Comfy Desktop.",
     "telemetrySettings": "Manage in Settings",
     "migrateBannerTitle": "Migrate to Standalone",
-    "migrateBannerDesc": "Your Legacy Desktop installation was detected. Migrate to a Standalone install for better performance, easier updates, and full Desktop 2.0 management.",
+    "migrateBannerDesc": "Your Legacy Desktop installation was detected. Migrate to a Standalone install for better performance, easier updates, and full Comfy Desktop management.",
     "migrateBannerAction": "Migrate Now",
     "migrateBannerSkip": "New Install Without Migrating",
     "confirmStopLocal": {
@@ -368,7 +368,7 @@
     "onAppClose": "When app is closed",
     "closeTray": "Minimize to tray (keep instances running)",
     "closeQuit": "Stop all instances and quit",
-    "closeQuitTitle": "Quit Desktop 2.0",
+    "closeQuitTitle": "Quit Comfy Desktop",
     "closeQuitMessage": "The following are still active. Quitting will stop all of them.",
     "closeQuitConfirm": "Quit",
     "closeQuitSessions": "Running",
@@ -524,7 +524,7 @@
   },
 
   "tray": {
-    "showApp": "Show Desktop 2.0",
+    "showApp": "Show Comfy Desktop",
     "quit": "Quit"
   },
 

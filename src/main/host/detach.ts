@@ -256,7 +256,7 @@ export async function confirmAndCloseAllHostWindows(
     return
   }
   // One clean line per open instance — the title-bar pill name, not the
-  // verbose OS window title ("… — *Unsaved Workflow — Desktop 2.0 v…").
+  // verbose OS window title ("… — *Unsaved Workflow — Comfy Desktop v…").
   const titles = instanceWindows.map((e) => e.titleBarText || 'Untitled instance')
   const details: SystemModalDetailGroup[] = [
     { label: 'Open instances', items: titles },
