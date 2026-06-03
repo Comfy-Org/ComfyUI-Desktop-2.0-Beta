@@ -503,9 +503,7 @@
     "localLabel": "Local",
     "localTagline": "Full control. Your hardware.",
     "localDesc": "Best for **power users** who want to manage versions, custom nodes, and offline workflows.",
-    "migrateLabel": "Migrate",
-    "migrateTagline": "Already a Comfy user?",
-    "migrateDesc": "Bring over **workflows, models, and settings** from your existing Comfy Desktop install.",
+    "migrateExistingLine": "Migrate existing install",
     "whyTryCloud": "Why try Cloud?",
     "whyCloud": {
       "title": "Why try Cloud?",

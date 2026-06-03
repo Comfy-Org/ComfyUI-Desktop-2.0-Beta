@@ -91,12 +91,10 @@ const emit = defineEmits<{
 const step = ref<Step>('start')
 const telemetryEnabled = ref(true)
 const locale = ref('en')
-/** Cloud / Local / Migrate selection picked on the merged start screen.
+/** Cloud-vs-Local selection picked on the merged start screen.
  *  Cloud is the brand-anchor card (glow + beam target) so it ships
- *  pre-selected — users can flip to Local or Migrate before pressing
- *  Continue. The Migrate option only renders when `hasLegacyDesktop`
- *  is true (an auto-tracked legacy install is on disk). */
-const pickedChoice = ref<'cloud' | 'local' | 'migrate'>('cloud')
+ *  pre-selected — users can flip to Local before pressing Continue. */
+const pickedChoice = ref<'cloud' | 'local'>('cloud')
 
 // Capacity-protection switch for Cloud (PostHog flag
 // `desktop-cloud-capacity`). At first-use, we follow the flag
@@ -138,6 +136,16 @@ const cloudDescriptionKey = computed(() => {
  *  Functional wiring (skipping optional setup steps) lands separately;
  *  for now the value is captured for telemetry only. */
 const expressInstall = ref(true)
+/** Nested sub-modifier under Express Install, only meaningful when an
+ *  auto-tracked legacy install was detected on the machine. When
+ *  checked, the Express path skips the fresh Standalone install and
+ *  routes to chain-migrate instead — the existing install gets
+ *  brought over rather than left behind. Pre-ticked so returning
+ *  Desktop users land on the migration path by default. */
+const migrateExisting = ref(true)
+const showMigrateExisting = computed(
+  () => pickedChoice.value === 'local' && expressInstall.value && hasLegacyDesktop.value
+)
 /** Detected GPU vendor — populated by `window.api.detectGPU()` on
  *  `open()`. Surfaces as an inline confirmation line under the Express
  *  checkbox so users on the wrong hardware can untick Express before
@@ -322,23 +330,19 @@ async function routePostStart(): Promise<void> {
     }
     emitCompleted('cloud')
     emit('complete-cloud')
-  } else if (pickedChoice.value === 'migrate') {
-    // Migrate option only renders when hasLegacyDesktop is true, so we
-    // can route straight to chain-migrate without the localBranch
-    // sub-step. (localBranch is still kept for the InstallWizardModal
-    // → Back path: handleNewInstallBackToLocalBranch reopens this
-    // takeover with initialStep: 'localBranch' so the user lands on
-    // the migrate-vs-fresh fork from there.)
+  } else if (hasLegacyDesktop.value && expressInstall.value && migrateExisting.value) {
+    // Local + Express + the nested "Migrate existing install" sub-
+    // checkbox: route directly to chain-migrate. The sub-checkbox is
+    // only visible when Express is on AND a legacy install was
+    // detected, so its `true` value is an explicit opt-in to bring
+    // the existing install over instead of installing fresh.
     emitTelemetryAction('desktop2.first_use.local_branch_chosen', { choice: 'migrate' })
     emitCompleted('local-migrate')
     emit('chain-migrate')
   } else if (hasLegacyDesktop.value && !expressInstall.value) {
-    // Local picked with a legacy install present + Express unchecked:
-    // historically the only way to reach the migrate-vs-fresh fork.
-    // The Migrate card above now hoists that choice up to the start
-    // screen, so this branch is rarely hit — it stays as a safety net
-    // for the keyboard-only path where the user kept Local selected
-    // without considering Migrate.
+    // Express takes precedence: when checked, skip the migrate-vs-fresh
+    // sub-step and head straight to the express Standalone install. Only
+    // surface the localBranch fork when Express is unticked.
     step.value = 'localBranch'
     isContinuing.value = false
   } else {
@@ -394,9 +398,7 @@ function chooseMigrate(): void {
 function onStartCardsKeydown(e: KeyboardEvent): void {
   const target = e.target as HTMLElement | null
   if (!target?.closest('[role="radio"]')) return
-  const order: readonly ('cloud' | 'local' | 'migrate')[] = hasLegacyDesktop.value
-    ? ['cloud', 'local', 'migrate']
-    : ['cloud', 'local']
+  const order = ['cloud', 'local'] as const
   const currentIndex = order.indexOf(pickedChoice.value)
   if (currentIndex < 0) return
   let next: number
@@ -456,6 +458,7 @@ async function open(opts: OpenOpts = {}): Promise<void> {
   pickedChoice.value = deriveDefaultChoice()
   initialDefaultChoice.value = deriveDefaultChoice()
   expressInstall.value = true
+  migrateExisting.value = true
   // Reset funnel-completion bookkeeping so a takeover replay measures
   // duration / steps from the replay, not from the original mount.
   mountedAt = Date.now()
@@ -592,16 +595,6 @@ defineExpose({ open })
             data-testid="first-use-pick-local"
             @click="pickedChoice = 'local'"
           />
-          <ChoiceCard
-            v-if="hasLegacyDesktop"
-            selectable
-            :selected="pickedChoice === 'migrate'"
-            :label="$t('firstUse.migrateLabel')"
-            :tagline="$t('firstUse.migrateTagline')"
-            :description="$t('firstUse.migrateDesc')"
-            data-testid="first-use-pick-migrate"
-            @click="pickedChoice = 'migrate'"
-          />
         </div>
         <label
           class="brand-checkbox start-express"
@@ -629,6 +622,22 @@ defineExpose({ open })
               </template>
               <template v-else>&nbsp;</template>
             </span>
+          </span>
+        </label>
+        <label
+          v-if="hasLegacyDesktop"
+          class="brand-checkbox start-migrate-existing"
+          :class="{ 'start-migrate-existing--hidden': !showMigrateExisting }"
+          :aria-hidden="!showMigrateExisting"
+          data-testid="first-use-migrate-existing"
+        >
+          <input
+            v-model="migrateExisting"
+            type="checkbox"
+            :tabindex="showMigrateExisting ? 0 : -1"
+          />
+          <span class="start-migrate-existing__label">
+            {{ $t('firstUse.migrateExistingLine') }}
           </span>
         </label>
       </div>
@@ -954,6 +963,44 @@ defineExpose({ open })
 }
 @media (prefers-reduced-motion: reduce) {
   .start-express {
+    transition: none;
+  }
+}
+
+/* Sub-checkbox nested under Express Install. Indented and a notch
+ * smaller than its parent so the visual hierarchy reads as
+ * "Express → migrate is a sub-option of express", not as two peer
+ * checkboxes competing for the same column. Same hide-with-class
+ * pattern as `.start-express--hidden` so the row stays in the DOM
+ * (no layout jump when toggled). */
+.start-migrate-existing {
+  display: inline-flex;
+  align-self: center;
+  align-items: flex-start;
+  gap: 8px;
+  /* Visual indent under the Express checkbox: 16px (input width) + 8px
+   * (gap) = 24px lines this checkbox up with the start of the Express
+   * *label text* rather than with the parent input itself. */
+  margin-left: 24px;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--neutral-400);
+  opacity: 1;
+  transform: translateY(0);
+  transition:
+    opacity 180ms ease-out,
+    transform 180ms ease-out;
+}
+.start-migrate-existing--hidden {
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
+}
+.start-migrate-existing__label {
+  line-height: 1.4;
+}
+@media (prefers-reduced-motion: reduce) {
+  .start-migrate-existing {
     transition: none;
   }
 }
