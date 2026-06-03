@@ -21,7 +21,9 @@
 
 Comfy Desktop is the official desktop application for **ComfyUI**, the node-based engine for generative AI. It installs ComfyUI into a self-contained, GPU-ready environment, lets you run **multiple independent setups side by side**, and keeps them updated — so you spend your time building workflows instead of fighting Python, CUDA, and pip.
 
-<!-- maintainers: drop a hero screenshot / short demo GIF of the app here -->
+<div align="center">
+  <img src="assets/hero.png" alt="Comfy Desktop — run multiple ComfyUI installs side by side from one app" width="820" />
+</div>
 
 ## Features
 
@@ -45,6 +47,8 @@ Comfy Desktop is the official desktop application for **ComfyUI**, the node-base
 </div>
 
 > **New to ComfyUI?** Just download, install, and open the app — it walks you through creating your first setup. No terminal required.
+
+**Requirements:** Windows, macOS (Apple Silicon), or Linux. A dedicated GPU (NVIDIA / AMD) or Apple Silicon is recommended for good performance, but not required.
 
 <details>
 <summary><b>Install instructions per platform</b></summary>
