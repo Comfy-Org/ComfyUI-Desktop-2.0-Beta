@@ -1,4 +1,4 @@
-import { untrackAction } from '../../lib/actions'
+import { untrackAction, renameAction } from '../../lib/actions'
 import { parseUrl } from '../../lib/util'
 import { t } from '../../lib/i18n'
 import * as settings from '../../settings'
@@ -86,6 +86,7 @@ export function createUrlSource(config: UrlSourceConfig): SourcePlugin {
       const actions: Record<string, unknown>[] = [
         { id: 'launch', label: t('actions.connect'), style: 'primary', enabled: installation.status === 'installed',
           showProgress: true, progressTitle: t('actions.connecting'), cancellable: true },
+        renameAction(installation.name),
       ]
       if (includeUntrack) {
         actions.push(untrackAction())

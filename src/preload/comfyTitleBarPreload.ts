@@ -75,6 +75,10 @@ export interface ComfyTitleBarBridge {
    *  resolved — the renderer suppresses the icon entirely in that
    *  case. */
   onSourceCategoryChanged(cb: (category: string | null) => void): () => void
+  /** Subscribe to comfyView zoom-level pushes from main. Level 0 = 100%;
+   *  the title bar surfaces the contextual "NNN%" reset pill for any
+   *  non-zero level. */
+  onZoomChanged(cb: (level: number) => void): () => void
   /** Subscribe to theme updates (background + symbol color). */
   onThemeChanged(cb: (theme: { bg: string; text: string }) => void): () => void
   /** Subscribe to macOS fullscreen state — drives traffic-light padding. */
@@ -178,6 +182,13 @@ export interface ComfyTitleBarBridge {
    *  the `desktop2.feedback.opened` telemetry action and opens the
    *  support URL via `openExternal`. */
   clickFeedback(): void
+  /** Click handler for the title-bar cloud-instance refresh button.
+   *  Main resolves the host entry from the sender and re-navigates its
+   *  comfyView via the same reload path as F5/Ctrl+R. */
+  clickRefreshInstance(): void
+  /** Reset the host comfyView's zoom to 100% (the title-bar zoom pill).
+   *  Mirrors Ctrl/Cmd+0 and the hamburger-menu Reset Zoom item. */
+  resetZoom(): void
   /** Issue #514 — show the title-bar hover tooltip popup. Routed
    *  through main, which positions a cached `WebContentsView` popup
    *  attached to the host window so the bubble escapes the title-bar
@@ -200,6 +211,25 @@ export interface ComfyTitleBarBridge {
   /** Issue #514 — hide the title-bar hover tooltip popup. Sent on
    *  pointer leave, focus loss, menu open, or panel switch. */
   hideTooltip(): void
+  /** First-instance onboarding coachmark (issue #701) — show the sticky
+   *  card pointing at the centre pill. Reuses the clip-escaping tooltip
+   *  popup pipeline (`variant: 'coachmark'`). `leftX`/`rightX` bracket
+   *  the pill's edges, `bottomY` is its bottom edge — title-bar-local
+   *  px (the title-bar view sits at window (0,0)). */
+  showCoachmark(payload: {
+    title: string
+    body: string
+    dismissLabel: string
+    leftX: number
+    rightX: number
+    bottomY: number
+  }): void
+  /** Hide the onboarding coachmark popup. */
+  hideCoachmark(): void
+  /** Subscribe to the coachmark's own dismiss button. Main forwards this
+   *  after the popup's ✕ / "Got it" is clicked so the renderer flips the
+   *  once-ever `hasSeenCentralPillHint` flag via `window.api`. */
+  onCoachmarkDismissed(cb: () => void): () => void
   /** Tell main this title bar is mounted; main responds with the initial state. */
   ready(): void
 }
@@ -258,6 +288,13 @@ const bridge: ComfyTitleBarBridge = {
     }
     ipcRenderer.on('comfy-titlebar:source-category-changed', handler)
     return () => ipcRenderer.removeListener('comfy-titlebar:source-category-changed', handler)
+  },
+  onZoomChanged: (cb) => {
+    const handler = (_event: IpcRendererEvent, level: unknown): void => {
+      cb(typeof level === 'number' ? level : 0)
+    }
+    ipcRenderer.on('comfy-titlebar:zoom-changed', handler)
+    return () => ipcRenderer.removeListener('comfy-titlebar:zoom-changed', handler)
   },
   onThemeChanged: (cb) => {
     const handler = (_event: IpcRendererEvent, data: unknown): void => {
@@ -365,11 +402,28 @@ const bridge: ComfyTitleBarBridge = {
   clickFeedback: () => {
     ipcRenderer.send('comfy-window:click-feedback')
   },
+  clickRefreshInstance: () => {
+    ipcRenderer.send('comfy-window:click-refresh-instance')
+  },
+  resetZoom: () => {
+    ipcRenderer.send('comfy-window:reset-zoom')
+  },
   showTooltip: (payload) => {
     ipcRenderer.send('comfy-window:show-titlebar-tooltip', payload)
   },
   hideTooltip: () => {
     ipcRenderer.send('comfy-window:hide-titlebar-tooltip')
+  },
+  showCoachmark: (payload) => {
+    ipcRenderer.send('comfy-window:show-titlebar-coachmark', payload)
+  },
+  hideCoachmark: () => {
+    ipcRenderer.send('comfy-window:hide-titlebar-coachmark')
+  },
+  onCoachmarkDismissed: (cb) => {
+    const handler = (): void => cb()
+    ipcRenderer.on('comfy-titlebar:coachmark-dismissed', handler)
+    return () => ipcRenderer.removeListener('comfy-titlebar:coachmark-dismissed', handler)
   },
   ready: () => {
     ipcRenderer.send('comfy-window:title-bar-ready')

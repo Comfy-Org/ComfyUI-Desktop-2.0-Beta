@@ -1193,6 +1193,10 @@ export interface ElectronApi {
   /** Bulk-dismiss every terminal entry from main's recent buffer.
    *  Returns the number of entries removed. */
   clearFinishedModelDownloads(): Promise<number>
+  /** Re-dispatch a terminal (error) download from main's captured
+   *  original params. Returns false if it's still in flight or the
+   *  params were evicted from the recent buffer. */
+  retryModelDownload(url: string): Promise<boolean>
   showDownloadInFolder(savePath: string): Promise<void>
 
   // Event listeners (return unsubscribe functions)

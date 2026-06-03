@@ -749,6 +749,12 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
         'comfy-titlebar:preview-mode-changed',
         entry.previewInstallationId !== null,
       )
+      if (!entry.comfyView.webContents.isDestroyed()) {
+        titleBarView.webContents.send(
+          'comfy-titlebar:zoom-changed',
+          entry.comfyView.webContents.getZoomLevel(),
+        )
+      }
     }
     // Both modes get the app-update pill and the downloads tray.
     // The install-update pill is install-backed only — chooser hosts

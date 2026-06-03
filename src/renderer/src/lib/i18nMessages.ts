@@ -51,6 +51,11 @@ export const en = {
     storageRestartNote:
       'Restart the application (or close and reopen) for these changes to take effect.'
   },
+  /** About-tab hero (StatusFactPanel.vue). The inline-editable name's
+   *  aria-label lives here so the popup-scoped catalog resolves it. */
+  statusFactPanel: {
+    editName: 'Edit installation name'
+  },
   models: {
     addDir: 'Add directory',
     removeDir: 'Remove',
@@ -96,13 +101,25 @@ export const en = {
      *  The unseen indicator clears as soon as the popup is opened. */
     downloadsCompleteUnseen:
       'no recent downloads | {n} download finished — click to review | {n} downloads finished — click to review',
+    /** Tooltip when one or more downloads have failed since the user
+     *  last opened the tray. Takes precedence over the "finished" copy. */
+    downloadsFailedUnseen:
+      'no downloads failed | {n} download failed — click to review | {n} downloads failed — click to review',
     desktopUpdateAvailable: 'Desktop Update',
     desktopUpdateDownloading: 'Downloading update…',
     desktopUpdateReady: 'Desktop Update Ready',
     desktopUpdateWithVersion: '{label} (v{version})',
     installUpdateAvailable: 'ComfyUI Update',
     installUpdateVersion: 'ComfyUI {version}',
-    installUpdateShort: 'Update'
+    installUpdateShort: 'Update',
+    refreshInstanceTooltip: 'Refresh',
+    resetZoomTooltip: 'Reset zoom to 100%',
+    /** First-instance onboarding coachmark pointing at the centre pill —
+     *  teaches that the pill is the instance picker (switch / manage /
+     *  back to the dashboard for a new local install). Shown once ever. */
+    pillHintTitle: 'Switch & manage instances',
+    pillHintBody: 'Click here to switch instances, start a new local install, or return to the dashboard.',
+    pillHintDismiss: 'Got it'
   },
   fileMenu: {
     newWindow: 'New Window',
@@ -126,6 +143,7 @@ export const en = {
     pause: 'Pause',
     resume: 'Resume',
     cancel: 'Cancel',
+    retry: 'Retry',
     showInFolder: 'Show in Finder',
     remove: 'Remove from list',
     viewAllInSettings: 'View All Downloads',
@@ -142,7 +160,8 @@ export const en = {
     filterActive: 'Active',
     filterCompleted: 'Completed',
     filterErrored: 'Failed',
-    filterAriaLabel: 'Status filter'
+    filterAriaLabel: 'Status filter',
+    retry: 'Retry'
   },
   settingsModal: {
     title: 'Settings',

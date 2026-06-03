@@ -15,8 +15,16 @@ import { nextTick, onMounted, onUnmounted, ref, useTemplateRef, watch } from 'vu
  */
 
 interface TooltipConfig {
-  text: string
-  theme: { bg: string; text: string; border: string }
+  /** Absent (or `'tooltip'`) for the plain hover bubble; `'coachmark'`
+   *  for the sticky onboarding card with a beak + accent + dismiss. */
+  variant?: 'tooltip' | 'coachmark'
+  /** Hover-bubble body (tooltip variant). */
+  text?: string
+  /** Coachmark title + body + dismiss label (coachmark variant). */
+  title?: string
+  body?: string
+  dismissLabel?: string
+  theme: { bg: string; text: string; border: string; accent?: string }
   configToken: string
 }
 
@@ -24,14 +32,27 @@ interface Bridge {
   ready(): void
   notifyRendered(payload: { width: number; height: number; configToken: string }): void
   onConfig(cb: (config: TooltipConfig) => void): () => void
+  /** Coachmark dismiss button — tells main to hide + persist the
+   *  once-ever flag. No-op for the tooltip variant. */
+  dismissCoachmark?(): void
 }
 
 const bridge = (window as unknown as { __comfyTitleTooltip?: Bridge }).__comfyTitleTooltip
 
+const variant = ref<'tooltip' | 'coachmark'>('tooltip')
 const text = ref<string>('')
-const themeBg = ref<string>('#262729')
-const themeText = ref<string>('#dddddd')
-const themeBorder = ref<string>('#494a50')
+const cmTitle = ref<string>('')
+const cmBody = ref<string>('')
+const cmDismissLabel = ref<string>('Got it')
+const themeBg = ref<string>('#211927')
+const themeText = ref<string>('#ffffff')
+const themeBorder = ref<string>('#38303d')
+const themeAccent = ref<string>('#e3ff3c')
+/** Whitish, semi-transparent hairline for the coachmark card + beak.
+ *  Brighter than the neutral tooltip border (`themeBorder`) so the card
+ *  reads as a distinct floating surface separated from the ComfyUI
+ *  content behind it, not a flush extension of the dark chrome. */
+const coachmarkBorder = 'rgba(255, 255, 255, 0.22)'
 /** Token from the most recently applied config — echoed back to main
  *  in every render-ack so main can discard stale acks. */
 let currentConfigToken = ''
@@ -79,10 +100,15 @@ async function measureAndAck(): Promise<void> {
 onMounted(() => {
   unsubConfig = bridge?.onConfig((cfg) => {
     currentConfigToken = cfg.configToken
-    text.value = cfg.text
+    variant.value = cfg.variant === 'coachmark' ? 'coachmark' : 'tooltip'
+    text.value = cfg.text ?? ''
+    cmTitle.value = cfg.title ?? ''
+    cmBody.value = cfg.body ?? ''
+    cmDismissLabel.value = cfg.dismissLabel ?? cmDismissLabel.value
     themeBg.value = cfg.theme.bg
     themeText.value = cfg.theme.text
     themeBorder.value = cfg.theme.border
+    if (cfg.theme.accent) themeAccent.value = cfg.theme.accent
     // Ack after Vue has flushed the DOM update *and* the browser has
     // painted with the actual web font. Main keeps the popup view
     // hidden until this ack arrives so the user never sees the
@@ -107,7 +133,11 @@ onMounted(() => {
 // measureAndAck). Keeping the watch here makes the renderer robust to
 // hot-module reload during dev and to future code that might mutate
 // `text` without going through `onConfig`.
-watch(text, () => { void measureAndAck() })
+watch([text, cmTitle, cmBody], () => { void measureAndAck() })
+
+function onDismiss(): void {
+  bridge?.dismissCoachmark?.()
+}
 
 onUnmounted(() => {
   unsubConfig?.()
@@ -115,7 +145,33 @@ onUnmounted(() => {
 </script>
 
 <template>
+  <!-- Coachmark variant: sticky onboarding card with an upward beak,
+       brand-accent title, body copy, and a dismiss button. -->
+  <div
+    v-if="variant === 'coachmark'"
+    ref="bubble"
+    class="coachmark"
+    role="dialog"
+    aria-modal="false"
+    :aria-label="cmTitle"
+    :style="{
+      background: themeBg,
+      color: themeText,
+      borderColor: coachmarkBorder,
+    }"
+  >
+    <span class="coachmark-beak" :style="{ background: themeBg, borderColor: coachmarkBorder }" />
+    <div class="coachmark-body">
+      <div class="coachmark-title" :style="{ color: themeAccent }">{{ cmTitle }}</div>
+      <p class="coachmark-text">{{ cmBody }}</p>
+      <button type="button" class="coachmark-dismiss" :style="{ color: themeAccent }" @click="onDismiss">
+        {{ cmDismissLabel }}
+      </button>
+    </div>
+  </div>
+  <!-- Hover-tooltip variant: the plain content-sized bubble. -->
   <span
+    v-else
     ref="bubble"
     class="bubble"
     :style="{
@@ -168,5 +224,71 @@ onUnmounted(() => {
   pointer-events: none;
   user-select: none;
   box-sizing: border-box;
+}
+
+/* Coachmark card — sticky onboarding hint. Wider than the tooltip,
+   interactive (dismiss button), with an upward beak that visually ties
+   it to the pill above. The view bounds are sized from this element's
+   measured rect (render-ack), so it shrink-wraps its content. */
+.coachmark {
+  position: relative;
+  display: block;
+  width: max-content;
+  max-width: 280px;
+  margin-top: 7px; /* room for the beak above the card */
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid;
+  /* Whitish hairline (set inline) + a soft inner highlight + a drop
+     shadow, so the card floats clearly above the ComfyUI content behind
+     it rather than blending into the dark canvas. */
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.04),
+    0 8px 24px rgba(0, 0, 0, 0.5);
+  font: 13px/1.45 var(--font-sans, 'Inter', system-ui, sans-serif);
+  user-select: none;
+  box-sizing: border-box;
+}
+
+/* Upward-pointing beak centered on the card's top edge. A rotated square
+   sharing the card's bg + border so only the top two edges show. */
+.coachmark-beak {
+  position: absolute;
+  top: -6px;
+  left: 50%;
+  width: 12px;
+  height: 12px;
+  transform: translateX(-50%) rotate(45deg);
+  border-top: 1px solid;
+  border-left: 1px solid;
+  border-top-left-radius: 3px;
+}
+
+.coachmark-title {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.coachmark-text {
+  margin: 4px 0 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  opacity: 0.88;
+}
+
+.coachmark-dismiss {
+  appearance: none;
+  background: transparent;
+  border: none;
+  padding: 2px 0;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.coachmark-dismiss:hover {
+  text-decoration: underline;
 }
 </style>

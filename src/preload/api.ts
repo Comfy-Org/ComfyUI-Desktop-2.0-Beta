@@ -202,6 +202,7 @@ export function buildElectronApi(): ElectronApi {
     cancelModelDownload: (url) => ipcRenderer.invoke('model-download-cancel', { url }),
     dismissModelDownload: (url) => ipcRenderer.invoke('model-download-dismiss', { url }),
     clearFinishedModelDownloads: () => ipcRenderer.invoke('model-download-clear-finished'),
+    retryModelDownload: (url) => ipcRenderer.invoke('model-download-retry', { url }),
     showDownloadInFolder: (savePath) => ipcRenderer.invoke('show-download-in-folder', { savePath }),
 
     // Updates

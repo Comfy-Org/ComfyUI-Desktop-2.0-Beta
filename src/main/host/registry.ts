@@ -479,6 +479,17 @@ export function findEntryByTitleBarSender(wc: WebContents): { id: number; entry:
   return null
 }
 
+/** Resolve a host BrowserWindow back to its registry entry. Used to map
+ *  a popup's parent window to the title-bar webContents (e.g. the
+ *  coachmark dismiss button routing its acknowledgement back to the
+ *  title-bar renderer). */
+export function findEntryByHostWindow(window: BrowserWindow): ComfyWindowEntry | null {
+  for (const entry of comfyWindows.values()) {
+    if (entry.window === window) return entry
+  }
+  return null
+}
+
 /** Find the first live host entry matching `pred`, preferring
  *  non-minimised over minimised. Within each visibility bucket, returns
  *  insertion order. Returns `null` when nothing matches. */

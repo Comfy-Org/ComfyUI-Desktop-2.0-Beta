@@ -3,7 +3,7 @@ import path from 'path'
 import { execFile } from 'child_process'
 import { fetchJSON } from '../lib/fetch'
 import { runLoggedProcess, formatProcessError } from '../lib/logged-process'
-import { untrackAction, launchAction, openFolderAction, migrateToStandaloneAction } from '../lib/actions'
+import { untrackAction, launchAction, openFolderAction, migrateToStandaloneAction, renameAction } from '../lib/actions'
 import { resolveGitDir, readGitHead, readGitRemoteUrl } from '../lib/git'
 import { parseArgs, extractPort } from '../lib/util'
 import { t } from '../lib/i18n'
@@ -197,6 +197,7 @@ export const gitSource: SourcePlugin = {
         pinBottom: true,
         actions: [
           launchAction(canLaunch, !canLaunch ? (!hasVenv ? t('git.noVenv') : !hasMain ? t('git.noMainPy') : t('errors.installNotReady')) : undefined),
+          renameAction(installation.name),
           openFolderAction(installation.installPath),
           { id: 'git-pull', label: t('git.gitPull'), style: 'default', enabled: installed,
             showProgress: true, progressTitle: t('git.gitPulling') },

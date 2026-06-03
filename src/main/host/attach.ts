@@ -27,6 +27,15 @@ export interface AttachFactories {
    *  retry timer. The relaunch flow uses this to interrupt a pending
    *  retry that would otherwise navigate away from the splash page. */
   comfyFailRetryTimerCancels: Map<string, () => void>
+  /** Per-install comfyView reload (browser-style page reload). Registered
+   *  on attach, cleared on detach. Lets the title-bar refresh button reuse
+   *  the same reload path as F5/Ctrl+R without lifting the closure. */
+  comfyReloads: Map<string, () => void>
+  /** Per-install comfyView zoom reset (→ 100%). Registered on attach,
+   *  cleared on detach. Lets the title-bar zoom pill reset the live
+   *  comfyContents and emit the matching `desktop2.zoom.reset` telemetry
+   *  without lifting the closure. */
+  comfyZoomResets: Map<string, () => void>
   /** Per-install relaunch state. Keys present in this map gate every
    *  attach-side reload path so a relaunch-in-progress install can't
    *  be auto-retried out from under the splash. */
@@ -359,6 +368,7 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
       if (input.key === '0') {
         const previousLevel = comfyContents.getZoomLevel()
         comfyContents.setZoomLevel(0)
+        pushZoom()
         // Only emit when this was a real reset (skip no-op presses at 1x)
         // so the event count tracks actual recovery actions, not key-spam.
         if (previousLevel !== 0) {
@@ -374,9 +384,17 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
       }
       const step = input.key === '-' ? -0.5 : 0.5
       comfyContents.setZoomLevel(comfyContents.getZoomLevel() + step)
+      pushZoom()
     }
   }
   comfyContents.on('before-input-event', onBeforeInputEvent)
+
+  const pushZoom = (): void => {
+    if (titleBarView.webContents.isDestroyed() || comfyContents.isDestroyed()) return
+    titleBarView.webContents.send('comfy-titlebar:zoom-changed', comfyContents.getZoomLevel())
+  }
+  const onZoomChanged = (): void => pushZoom()
+  comfyContents.on('zoom-changed', onZoomChanged)
 
   // Failure retry — backoff on did-fail-load that isn't aborted /
   // mid-relaunch. Per-install timer cancel registered into the
@@ -387,6 +405,21 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
     if (failRetryTimer) { clearTimeout(failRetryTimer); failRetryTimer = null }
   }
   fx.comfyFailRetryTimerCancels.set(installationId, cancelFailRetry)
+  fx.comfyReloads.set(installationId, reloadComfy)
+  fx.comfyZoomResets.set(installationId, () => {
+    if (comfyContents.isDestroyed()) return
+    const previousLevel = comfyContents.getZoomLevel()
+    if (previousLevel === 0) return
+    comfyContents.setZoomLevel(0)
+    pushZoom()
+    mainTelemetry.emit('desktop2.zoom.reset', {
+      source: 'titlebar',
+      parent_entry_id: entry.windowKey,
+      installation_id: entry.installationId,
+      previous_zoom_level: previousLevel,
+      previous_zoom_percent: Math.round(Math.pow(1.2, previousLevel) * 100),
+    })
+  })
   const onDidFailLoad = (
     _e: Electron.Event,
     code: number,
@@ -454,6 +487,7 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
       comfyContents.off('did-fail-load', onDidFailLoad)
       comfyContents.off('render-process-gone', onRenderProcessGone)
       comfyContents.off('before-input-event', onBeforeInputEvent)
+      comfyContents.off('zoom-changed', onZoomChanged)
     }
     const id = entry.installationId
     if (id !== null) {
@@ -482,6 +516,8 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
       }
       ipc.stopRunning(id)
       fx.comfyFailRetryTimerCancels.delete(id)
+      fx.comfyReloads.delete(id)
+      fx.comfyZoomResets.delete(id)
       fx.relaunchStates.delete(id)
       dropInstallationIndex(id)
       entry.installationId = null
