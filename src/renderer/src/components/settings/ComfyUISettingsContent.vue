@@ -413,6 +413,7 @@ function isTabLabelHidden(key: ComfyUISettingsTab): boolean {
 }
 
 function handleTabKeydown(event: KeyboardEvent, index: number): void {
+  if (opInflight.value) return
   if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return
   event.preventDefault()
   const delta = event.key === 'ArrowRight' ? 1 : -1
@@ -467,6 +468,9 @@ function closeSubPage(): void {
 const tabTransition = ref<'subpage-push' | 'subpage-pop'>('subpage-push')
 
 function selectTab(key: ComfyUISettingsTab): void {
+  // Locked while an op is in flight — only the active tab (hosting the
+  // loader) stays interactable. Guards stray programmatic switches.
+  if (opInflight.value && key !== activeTab.value) return
   if (subPage.value !== null) subPageTransition.value = 'subpage-pop'
   if (key !== activeTab.value) {
     const list = tabs.value
@@ -689,8 +693,12 @@ defineExpose({
           role="tab"
           :aria-selected="activeTab === tab.key"
           :tabindex="activeTab === tab.key ? 0 : -1"
+          :disabled="opInflight && activeTab !== tab.key"
           class="settings-v2-tab"
-          :class="{ 'is-active': activeTab === tab.key }"
+          :class="{
+            'is-active': activeTab === tab.key,
+            'is-locked': opInflight && activeTab !== tab.key,
+          }"
           @click="selectTab(tab.key)"
           @keydown="handleTabKeydown($event, i)"
         >
@@ -1021,6 +1029,18 @@ defineExpose({
   opacity: 1;
   color: var(--neutral-100);
   background: var(--neutral-800);
+}
+
+/* Locked while an instance op is in flight — only the active tab stays
+   live, every other tab greys out and stops responding to pointer. */
+.settings-v2-tab.is-locked {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.settings-v2-tab.is-locked:hover {
+  opacity: 0.4;
+  background: transparent;
 }
 
 .settings-v2-tab-icon-wrap {
