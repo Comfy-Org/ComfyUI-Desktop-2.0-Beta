@@ -56,7 +56,7 @@ export const EULA: LegalDoc = {
         '**"Desktop App"** — the Comfy Desktop application, including all binaries, installers, signed packages, scripts, configuration, and bundled assets we distribute under the name "Comfy Desktop," "ComfyUI Desktop," "ComfyUI Desktop 2.0," "Comfy Desktop 2," or any successor naming.',
         '**"Comfy Org," "we," "us," "our"** — the publisher of the Desktop App.',
         '**"You"** — the individual or entity installing or using the Desktop App.',
-        '**"Source Code"** — the open-source source code published at github.com/Comfy-Org/ComfyUI-Desktop-2.0-Beta.',
+        '**"Source Code"** — the open-source source code published at github.com/Comfy-Org/Comfy-Desktop.',
         '**"Your Content"** — workflows, prompts, models, generated outputs, configurations, or other data you create, import, or store using the Desktop App.'
       ]
     },

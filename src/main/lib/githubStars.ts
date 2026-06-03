@@ -31,7 +31,7 @@ export async function getGithubStarCount(repo: string): Promise<number | null> {
     const res = await fetch(`https://api.github.com/repos/${repo}`, {
       headers: {
         Accept: 'application/vnd.github+json',
-        'User-Agent': 'ComfyUI-Desktop-2.0-Beta',
+        'User-Agent': 'Comfy-Desktop',
       },
       signal: controller.signal,
     })

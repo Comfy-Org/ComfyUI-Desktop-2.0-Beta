@@ -47,7 +47,7 @@ const PLATFORMS = ['win-x64', 'mac-arm64', 'linux-x64']
 // this together with the tag published from build-bootstrap-python.mjs so
 // fresh fetches pull the archives that contain uv.
 const DEFAULT_TAG = 'bootstrap-v2'
-const REPO = 'Comfy-Org/ComfyUI-Desktop-2.0-Beta'
+const REPO = 'Comfy-Org/Comfy-Desktop'
 
 // Each platform's expected Python binary inside its bootstrap-python dir.
 // Used by verifyPlatform() so a partial / corrupt extract doesn't pass.

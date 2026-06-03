@@ -23,7 +23,7 @@ afterPack: ./scripts/afterPack.mjs
 publish:
   provider: github
   owner: Comfy-Org
-  repo: ComfyUI-Desktop-2.0-Beta
+  repo: Comfy-Desktop
 artifactName: ComfyUI-Desktop-2.0-${version}-${os}-${arch}.${ext}
 win:
   target: nsis

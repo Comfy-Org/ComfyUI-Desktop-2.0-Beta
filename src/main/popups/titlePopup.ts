@@ -1924,7 +1924,7 @@ function activateTitlePopupMenuItem(
  */
 
 const GLOBAL_SETTINGS_GITHUB_URL =
-  'https://github.com/Comfy-Org/ComfyUI-Desktop-2.0-Beta'
+  'https://github.com/Comfy-Org/Comfy-Desktop'
 
 /** Last seen `app-update:download-progress` payload, cached so a fresh
  *  popup open (or a snapshot rebroadcast that doesn't carry progress
