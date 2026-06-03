@@ -371,6 +371,7 @@ describe('buildInstancePickerSnapshot', () => {
       installs,
       hostInstallationId: null,
       runningInstallationIds: [],
+      launchingInstallationIds: [],
       storage: EMPTY_STORAGE,
     })
     expect(snap.installs).toEqual(installs)
@@ -381,6 +382,7 @@ describe('buildInstancePickerSnapshot', () => {
       installs: [makeInstall({ id: 'a' })],
       hostInstallationId: 'a',
       runningInstallationIds: [],
+      launchingInstallationIds: [],
       storage: EMPTY_STORAGE,
     })
     expect(snap.activeInstallationId).toBe('a')
@@ -391,6 +393,7 @@ describe('buildInstancePickerSnapshot', () => {
       installs: [],
       hostInstallationId: null,
       runningInstallationIds: [],
+      launchingInstallationIds: [],
       storage: EMPTY_STORAGE,
     })
     expect(snap.activeInstallationId).toBeNull()
@@ -401,6 +404,7 @@ describe('buildInstancePickerSnapshot', () => {
       installs: [],
       hostInstallationId: null,
       runningInstallationIds: ['b', 'a', 'c'],
+      launchingInstallationIds: [],
       storage: EMPTY_STORAGE,
     })
     expect(snap.runningInstallationIds).toEqual(['b', 'a', 'c'])
@@ -411,9 +415,51 @@ describe('buildInstancePickerSnapshot', () => {
       installs: [makeInstall({ id: 'a' })],
       hostInstallationId: null,
       runningInstallationIds: [],
+      launchingInstallationIds: [],
       storage: EMPTY_STORAGE,
     })
     expect(snap.runningInstallationIds).toEqual([])
+  })
+
+  it('falls back to previewInstallationId when no real attach yet', () => {
+    // Chooser host that staked an attach claim before the launch
+    // completed: `applyAttachHostPreview` sets previewInstallationId
+    // while installationId is still null. Picker should still treat
+    // this host as "owning" the install.
+    const snap = buildInstancePickerSnapshot({
+      installs: [makeInstall({ id: 'a' })],
+      hostInstallationId: null,
+      previewInstallationId: 'a',
+      runningInstallationIds: [],
+      launchingInstallationIds: ['a'],
+      storage: EMPTY_STORAGE,
+    })
+    expect(snap.activeInstallationId).toBe('a')
+  })
+
+  it('prefers the real hostInstallationId over previewInstallationId', () => {
+    // Once `attachInstall` runs, the real installationId takes over;
+    // a stale preview should never override it.
+    const snap = buildInstancePickerSnapshot({
+      installs: [makeInstall({ id: 'a' }), makeInstall({ id: 'b' })],
+      hostInstallationId: 'a',
+      previewInstallationId: 'b',
+      runningInstallationIds: ['a'],
+      launchingInstallationIds: [],
+      storage: EMPTY_STORAGE,
+    })
+    expect(snap.activeInstallationId).toBe('a')
+  })
+
+  it('surfaces launchingInstallationIds verbatim for popup hydration', () => {
+    const snap = buildInstancePickerSnapshot({
+      installs: [makeInstall({ id: 'a' })],
+      hostInstallationId: null,
+      runningInstallationIds: [],
+      launchingInstallationIds: ['a', 'b'],
+      storage: EMPTY_STORAGE,
+    })
+    expect(snap.launchingInstallationIds).toEqual(['a', 'b'])
   })
 })
 

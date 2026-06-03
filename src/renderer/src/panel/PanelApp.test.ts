@@ -20,13 +20,6 @@ vi.mock('../composables/useModal', () => ({
 }))
 
 // Stub the heavy children so we can assert which sub-panel is rendered.
-vi.mock('../views/SettingsView.vue', () => ({
-  default: {
-    name: 'SettingsView',
-    template: '<div data-testid="settings-view" />',
-    methods: { loadSettings: vi.fn() },
-  },
-}))
 vi.mock('../views/DetailModal.vue', () => ({
   default: {
     name: 'DetailModal',
@@ -63,13 +56,6 @@ vi.mock('./ComfyLifecycleView.vue', () => ({
     props: ['installation', 'installationId'],
     template:
       '<div data-testid="comfy-lifecycle" :data-installation-id="installationId" />',
-  },
-}))
-vi.mock('../views/DirectoriesView.vue', () => ({
-  default: {
-    name: 'DirectoriesView',
-    template: '<div data-testid="directories-view" />',
-    methods: { loadAll: vi.fn(), loadModels: vi.fn(), loadMedia: vi.fn() },
   },
 }))
 vi.mock('../views/ChooserView.vue', () => ({
@@ -383,8 +369,6 @@ describe('PanelApp', () => {
     const wrapper = mountPanel()
     await flushPromises()
     expect(wrapper.find('[data-testid="comfy-lifecycle"]').exists()).toBe(true)
-    // Page modals (settings / directories) only mount when explicitly opened.
-    expect(wrapper.find('[data-testid="settings-view"]').exists()).toBe(false)
   })
 
 it('ignores unknown panel keys from onPanelSwitch', async () => {
@@ -395,7 +379,6 @@ it('ignores unknown panel keys from onPanelSwitch', async () => {
     mockState.panelSwitchCallbacks.forEach((cb) => cb({ panel: 'not-a-real-panel' }))
     await flushPromises()
     expect(wrapper.find('[data-testid="comfy-lifecycle"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="settings-view"]').exists()).toBe(false)
   })
 
   it('refetches the installation when onInstallationsChanged fires', async () => {
