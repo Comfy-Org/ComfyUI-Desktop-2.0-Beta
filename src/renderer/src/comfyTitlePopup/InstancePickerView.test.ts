@@ -60,7 +60,9 @@ interface MockSnapshot {
 
 interface BridgeState {
   picks: string[]
-  restarts: string[]
+  /** Each entry: `[installationId, opts]` — captures the second arg so
+   *  tests can assert the renderer-confirmed flag reaches the bridge. */
+  restarts: { id: string; opts?: { confirmed?: boolean } }[]
   newInstallCount: number
   selectedInstallSets: (string | null)[]
   updateFieldCalls: { installationId: string; fieldId: string; value: unknown }[]
@@ -80,8 +82,8 @@ function installMockBridge(): BridgeState {
     pickInstall: (id: string) => {
       state.picks.push(id)
     },
-    restartInstall: (id: string) => {
-      state.restarts.push(id)
+    restartInstall: (id: string, opts?: { confirmed?: boolean }) => {
+      state.restarts.push({ id, opts })
     },
     openNewInstall: () => {
       state.newInstallCount += 1
@@ -429,12 +431,13 @@ describe('comfyTitlePopup/InstancePickerView', () => {
       expect(bridge.restarts).toEqual([])
     })
 
-    it('dispatches restartInstall when the selected install is running', async () => {
+    it('shows the in-drawer confirm and dispatches restartInstall(confirmed) on accept', async () => {
       const { default: ComfyUISettingsContent } = await import(
         '../components/settings/ComfyUISettingsContent.vue'
       )
+      const { useDialogs } = await import('../composables/useDialogs')
       const wrapper = await mountPicker({
-        installs: [makeInstall({ id: 'a', name: 'Alpha' })],
+        installs: [makeInstall({ id: 'a', name: 'Alpha', sourceCategory: 'local' })],
         activeInstallationId: 'a',
         runningInstallationIds: ['a'],
       })
@@ -442,8 +445,58 @@ describe('comfyTitlePopup/InstancePickerView', () => {
       expect(settings.exists()).toBe(true)
       settings.vm.$emit('primary-action', true)
       await flushPromises()
-      expect(bridge.restarts).toEqual(['a'])
+      // Renderer parks on the confirm; bridge hasn't fired yet.
+      const dialogs = useDialogs()
+      expect(dialogs.state.open).toBe(true)
+      expect(dialogs.state.kind).toBe('confirm')
+      expect(dialogs.state.confirm.title).toBe('Restart instance?')
+      expect(bridge.restarts).toEqual([])
+      // Accept the confirm — bridge fires with `confirmed: true` so
+      // main knows to skip its own system-modal.
+      dialogs.confirmPrimary()
+      await flushPromises()
+      expect(bridge.restarts).toEqual([{ id: 'a', opts: { confirmed: true } }])
       expect(bridge.picks).toEqual([])
+    })
+
+    it('does not dispatch restartInstall when the in-drawer confirm is cancelled', async () => {
+      const { default: ComfyUISettingsContent } = await import(
+        '../components/settings/ComfyUISettingsContent.vue'
+      )
+      const { useDialogs } = await import('../composables/useDialogs')
+      const wrapper = await mountPicker({
+        installs: [makeInstall({ id: 'a', name: 'Alpha', sourceCategory: 'local' })],
+        activeInstallationId: 'a',
+        runningInstallationIds: ['a'],
+      })
+      const settings = wrapper.findComponent(ComfyUISettingsContent)
+      settings.vm.$emit('primary-action', true)
+      await flushPromises()
+      const dialogs = useDialogs()
+      expect(dialogs.state.open).toBe(true)
+      dialogs.cancel()
+      await flushPromises()
+      expect(bridge.restarts).toEqual([])
+    })
+
+    it('skips the in-drawer confirm for non-local installs (no local process to kill)', async () => {
+      const { default: ComfyUISettingsContent } = await import(
+        '../components/settings/ComfyUISettingsContent.vue'
+      )
+      const { useDialogs } = await import('../composables/useDialogs')
+      const wrapper = await mountPicker({
+        installs: [makeInstall({ id: 'r', name: 'Remote', sourceCategory: 'remote' })],
+        activeInstallationId: 'r',
+        runningInstallationIds: ['r'],
+      })
+      const settings = wrapper.findComponent(ComfyUISettingsContent)
+      settings.vm.$emit('primary-action', true)
+      await flushPromises()
+      // No confirm parked — restart fires straight through, still with
+      // `confirmed: true` so main keeps a single code path.
+      const dialogs = useDialogs()
+      expect(dialogs.state.open).toBe(false)
+      expect(bridge.restarts).toEqual([{ id: 'r', opts: { confirmed: true } }])
     })
 
     // Issue #749 — Cloud + local both open. The footer CTA for an install

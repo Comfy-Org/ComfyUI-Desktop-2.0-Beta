@@ -19,20 +19,43 @@ import * as mainTelemetry from '../../lib/telemetry'
  * GitHub popup) converge on the resolved Firebase `user` record, so this
  * is the single hook that covers every sign-in.
  *
- * Only the email DOMAIN is sent (never the raw address) — enough to
- * power internal cohort filters (e.g. the comfy.org A/B targeting)
- * without shipping PII. `bindUserId` is consent-gated downstream, so a
- * user who declined telemetry binds nothing. Wrapped so a telemetry
- * failure can never break the auth flow.
+ * Person properties shipped:
+ *   - `email` — raw address. Industry-standard for product analytics
+ *     and the only practical way to support "what did <person> do"
+ *     lookups for support / debugging without a two-system round-trip
+ *     through Firebase Admin. PostHog's `$email` field also lights up
+ *     the person card with an avatar + email so persons-view search
+ *     by email works as expected.
+ *   - `email_domain` — cohort filter (e.g. comfy.org A/B targeting).
+ *     Kept alongside the raw email so existing filters / experiments
+ *     don't have to derive it at query time.
+ *   - `signed_in_via: 'desktop_2'` — every event from this person from
+ *     here on inherits this, so cloud-side events (when the user later
+ *     interacts with the embedded cloud workspace) are attributable to
+ *     a desktop-originated sign-in. Covers the case where the OAuth
+ *     flow itself runs in the system browser (no cloud.comfy.org
+ *     pageview during auth, so utm_source alone can't carry it).
+ *   - `signed_in_at_ms` — epoch-ms of the most recent sign-in. Useful
+ *     for "users who signed in within the last N days" cohorts.
+ *
+ * `bindUserId` is consent-gated downstream — a user who declined
+ * telemetry binds nothing. Wrapped so a telemetry failure can never
+ * break the auth flow.
  */
 function bindSignedInUser(user: Record<string, unknown>): void {
   try {
     const uid = typeof user.uid === 'string' && user.uid.length > 0 ? user.uid : null
     if (!uid) return
-    const email = typeof user.email === 'string' ? user.email : null
+    const email = typeof user.email === 'string' && user.email.length > 0 ? user.email : null
     const at = email ? email.lastIndexOf('@') : -1
     const emailDomain = at >= 0 ? email!.slice(at + 1).toLowerCase() : null
-    mainTelemetry.bindUserId(uid, emailDomain ? { email_domain: emailDomain } : {})
+    const properties: Record<string, string | number> = {
+      signed_in_via: 'desktop_2',
+      signed_in_at_ms: Date.now()
+    }
+    if (email) properties.email = email
+    if (emailDomain) properties.email_domain = emailDomain
+    mainTelemetry.bindUserId(uid, properties)
   } catch {
     // telemetry must never break the auth flow
   }
