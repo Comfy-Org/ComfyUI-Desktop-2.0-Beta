@@ -39,6 +39,10 @@ interface MockBridgeState {
    *  the shell can bump openSeq and re-key its view to reset transient
    *  per-open state. */
   willShowCallbacks: ((info: { kind: string }) => void)[]
+  /** Dismiss-modals push callbacks. Fires when main wants the popup
+   *  renderer to cancel any open useModal / useDialogs entry — e.g.
+   *  another title-bar dropdown is preempting the picker (#770). */
+  dismissModalsCallbacks: (() => void)[]
   activateCalls: string[]
   closeCalls: number
   readyCalls: number
@@ -56,6 +60,7 @@ function installMockBridge(): MockBridgeState {
     downloadsCallbacks: [],
     instancePickerSnapshotCallbacks: [],
     willShowCallbacks: [],
+    dismissModalsCallbacks: [],
     activateCalls: [],
     closeCalls: 0,
     readyCalls: 0,
@@ -94,6 +99,10 @@ function installMockBridge(): MockBridgeState {
     },
     onWillShow: (cb: (info: { kind: string }) => void) => {
       state.willShowCallbacks.push(cb)
+      return () => {}
+    },
+    onDismissModals: (cb: () => void) => {
+      state.dismissModalsCallbacks.push(cb)
       return () => {}
     },
     downloadsAction: (action: unknown) => {
@@ -333,5 +342,24 @@ describe('TitlePopupApp', () => {
     wrapper.unmount()
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
     expect(bridgeState.closeCalls).toBe(0)
+  })
+
+  // Issue #770 — the picker's modal layer must not survive a kind-switch
+  // hide. Main fires `dismiss-modals` right before hiding the picker so
+  // a half-open confirm doesn't get stranded in the reused popup view.
+  it('cancels any open useModal entry when main fires dismiss-modals', async () => {
+    const { useModal } = await import('../composables/useModal')
+    const { default: TitlePopupApp } = await import('./TitlePopupApp.vue')
+    mount(TitlePopupApp, { attachTo: document.body })
+    await flushPromises()
+    // App always subscribes; assert the wiring then fire the callback
+    // and confirm an open `useModal.confirm` resolves to `false`.
+    expect(bridgeState.dismissModalsCallbacks.length).toBeGreaterThan(0)
+    const modal = useModal()
+    const pending = modal.confirm({ title: 'Update ComfyUI', message: 'Confirm?' })
+    expect(modal.state.visible).toBe(true)
+    bridgeState.dismissModalsCallbacks.forEach((cb) => cb())
+    await expect(pending).resolves.toBe(false)
+    expect(modal.state.visible).toBe(false)
   })
 })

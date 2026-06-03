@@ -58,7 +58,13 @@ export const DATADOG_MIRRORED_EVENT_NAMES: ReadonlySet<string> = new Set([
   // because the call site is misbehaving (loop, missing dedup, etc.)
   // and the SDK had to step in. One emit per process per event-name.
   'desktop2.telemetry.rate_limited',
-  'desktop2.telemetry.session_cap_hit'
+  'desktop2.telemetry.session_cap_hit',
+  // pygit2 reliability — spike here means a release broke the bundled
+  // Python env for a population of users (signing / quarantine /
+  // bootstrap-python copy drift). probe_failed = single-user state;
+  // circuit_broken = stop-the-bleeding guard tripped.
+  'desktop2.pygit2.probe_failed',
+  'desktop2.pygit2.circuit_broken'
 ])
 
 export function isDatadogMirroredEvent(eventName: string): boolean {

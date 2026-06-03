@@ -54,10 +54,9 @@ interface Props {
   asModal?: boolean
   /** When true, render bare (no ModalShell wrapper, no close button)
    *  for mounting inside a parent modal that owns the chrome — e.g.
-   *  the unified SettingsModal's "ComfyUI Settings" tab body. The
-   *  contenteditable install name renders as the first row of the
-   *  bare panel; everything else (tabs, scroll body, action bar)
-   *  follows unchanged. */
+   *  ManageInstallModal. The contenteditable install name renders as
+   *  the first row of the bare panel; everything else (tabs, scroll
+   *  body, action bar) follows unchanged. */
   embedded?: boolean
 }
 
@@ -642,11 +641,10 @@ function navigateToInstallation(installationId: string): void {
     </div>
   </ModalShell>
 
-  <!-- Embedded mount: bare panel body for the unified SettingsModal's
-       "ComfyUI Settings" tab. No ModalShell, no close button — the
-       parent owns the chrome. Editable install name sits at the top
-       of the body; tabs / scroll / action-bar follow as in the
-       wrapped mount. -->
+  <!-- Embedded mount: bare panel body for ManageInstallModal. No
+       ModalShell, no close button — the parent owns the chrome.
+       Editable install name sits at the top of the body; tabs /
+       scroll / action-bar follow as in the wrapped mount. -->
   <div v-else-if="installation" class="detail-embedded">
     <div class="detail-embedded-title">
       <div
