@@ -21,7 +21,9 @@ const _locks = new Map<string, Promise<void>>()
 
 async function withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
   while (_locks.has(key)) {
-    try { await _locks.get(key) } catch {}
+    try {
+      await _locks.get(key)
+    } catch {}
   }
   let resolve!: () => void
   const lock = new Promise<void>((r) => (resolve = r))
@@ -55,11 +57,13 @@ function resolveSnapshotPath(installPath: string, filename: string): string | nu
 
 function readManifest(installPath: string): { comfyui_ref: string; version: string; id: string } {
   try {
-    const data = JSON.parse(fs.readFileSync(path.join(installPath, MANIFEST_FILE), 'utf8')) as Record<string, string>
+    const data = JSON.parse(
+      fs.readFileSync(path.join(installPath, MANIFEST_FILE), 'utf8')
+    ) as Record<string, string>
     return {
       comfyui_ref: data.comfyui_ref || 'unknown',
       version: data.version || '',
-      id: data.id || '',
+      id: data.id || ''
     }
   } catch {
     return { comfyui_ref: 'unknown', version: '', id: '' }
@@ -73,7 +77,10 @@ export function formatTimestamp(date: Date): string {
 
 // --- Core functions ---
 
-export async function captureState(installPath: string, installation: InstallationRecord): Promise<Omit<Snapshot, 'createdAt' | 'trigger' | 'label' | 'version'>> {
+export async function captureState(
+  installPath: string,
+  installation: InstallationRecord
+): Promise<Omit<Snapshot, 'createdAt' | 'trigger' | 'label' | 'version'>> {
   const comfyuiDir = path.join(installPath, 'ComfyUI')
   const manifest = readManifest(installPath)
   const commit = readGitHead(comfyuiDir)
@@ -102,16 +109,19 @@ export async function captureState(installPath: string, installation: Installati
       releaseTag: manifest.version,
       variant: manifest.id,
       baseTag: commitMatches ? cv?.baseTag : undefined,
-      commitsAhead: commitMatches ? cv?.commitsAhead : undefined,
+      commitsAhead: commitMatches ? cv?.commitsAhead : undefined
     },
     customNodes,
     pipPackages,
     pythonVersion: (installation.pythonVersion as string | undefined) || undefined,
-    updateChannel: (installation.updateChannel as string | undefined) || 'stable',
+    updateChannel: (installation.updateChannel as string | undefined) || 'stable'
   }
 }
 
-export function statesMatch(a: Snapshot, b: Omit<Snapshot, 'createdAt' | 'trigger' | 'label' | 'version'>): boolean {
+export function statesMatch(
+  a: Snapshot,
+  b: Omit<Snapshot, 'createdAt' | 'trigger' | 'label' | 'version'>
+): boolean {
   // ComfyUI version/commit
   if (a.comfyui.ref !== b.comfyui.ref || a.comfyui.commit !== b.comfyui.commit) return false
 
@@ -121,7 +131,13 @@ export function statesMatch(a: Snapshot, b: Omit<Snapshot, 'createdAt' | 'trigge
   for (const bn of b.customNodes) {
     const an = aNodes.get(nodeKey(bn))
     if (!an) return false
-    if (an.type !== bn.type || an.version !== bn.version || an.commit !== bn.commit || an.enabled !== bn.enabled) return false
+    if (
+      an.type !== bn.type ||
+      an.version !== bn.version ||
+      an.commit !== bn.commit ||
+      an.enabled !== bn.enabled
+    )
+      return false
   }
 
   // Pip packages
@@ -137,7 +153,10 @@ export function statesMatch(a: Snapshot, b: Omit<Snapshot, 'createdAt' | 'trigge
 
 async function writeSnapshot(
   installPath: string,
-  data: Omit<Snapshot, 'createdAt' | 'version'> & { trigger: Snapshot['trigger']; label: string | null }
+  data: Omit<Snapshot, 'createdAt' | 'version'> & {
+    trigger: Snapshot['trigger']
+    label: string | null
+  }
 ): Promise<string> {
   const now = new Date()
   const snapshot: Snapshot = {
@@ -149,7 +168,7 @@ async function writeSnapshot(
     customNodes: data.customNodes,
     pipPackages: data.pipPackages,
     pythonVersion: data.pythonVersion,
-    updateChannel: data.updateChannel,
+    updateChannel: data.updateChannel
   }
 
   const dir = snapshotsDir(installPath)
@@ -188,8 +207,6 @@ export async function listSnapshots(installPath: string): Promise<SnapshotEntry[
   }
 }
 
-
-
 export async function loadSnapshot(installPath: string, filename: string): Promise<Snapshot> {
   const filePath = resolveSnapshotPath(installPath, filename)
   if (!filePath) throw new Error(`Invalid snapshot filename: ${filename}`)
@@ -214,7 +231,10 @@ export async function getSnapshotCount(installPath: string): Promise<number> {
  * and ComfyUI version, only pip packages differ). If so, delete it — the new
  * snapshot supersedes it with the fully-installed state.
  */
-async function deduplicateRestartSnapshot(installPath: string, justSavedFilename: string): Promise<string | undefined> {
+async function deduplicateRestartSnapshot(
+  installPath: string,
+  justSavedFilename: string
+): Promise<string | undefined> {
   const entries = await listSnapshots(installPath)
 
   const savedIdx = entries.findIndex((e) => e.filename === justSavedFilename)
@@ -227,8 +247,11 @@ async function deduplicateRestartSnapshot(installPath: string, justSavedFilename
   if (prev.snapshot.trigger !== 'restart' || prev.snapshot.label) return undefined
 
   // ComfyUI version must match
-  if (prev.snapshot.comfyui.ref !== saved.snapshot.comfyui.ref ||
-      prev.snapshot.comfyui.commit !== saved.snapshot.comfyui.commit) return undefined
+  if (
+    prev.snapshot.comfyui.ref !== saved.snapshot.comfyui.ref ||
+    prev.snapshot.comfyui.commit !== saved.snapshot.comfyui.commit
+  )
+    return undefined
 
   // Custom nodes must match exactly (same set, same versions)
   if (prev.snapshot.customNodes.length !== saved.snapshot.customNodes.length) return undefined
@@ -236,7 +259,13 @@ async function deduplicateRestartSnapshot(installPath: string, justSavedFilename
   for (const node of saved.snapshot.customNodes) {
     const pn = prevNodes.get(nodeKey(node))
     if (!pn) return undefined
-    if (pn.type !== node.type || pn.version !== node.version || pn.commit !== node.commit || pn.enabled !== node.enabled) return undefined
+    if (
+      pn.type !== node.type ||
+      pn.version !== node.version ||
+      pn.commit !== node.commit ||
+      pn.enabled !== node.enabled
+    )
+      return undefined
   }
 
   // Previous snapshot is an intermediate restart — remove it
@@ -268,13 +297,20 @@ function emitSnapshotCreated(opts: {
    */
   deduplicatedPrevious: boolean
 }): void {
+  // Skip the boot-trigger emit — it fires on every restart for every
+  // user (537 events / 235 users in 30d), and the signal duplicates
+  // session.started. The other triggers (manual / pre-update / post-
+  // update / restart / post-restore) carry real product intent and
+  // stay on. `manual` in particular is what we use to measure actual
+  // user-initiated snapshotting.
+  if (opts.trigger === 'boot') return
   telemetry.emit('desktop2.snapshot.created', {
     installation_id: opts.installation.id,
     trigger: opts.trigger,
     custom_nodes_count: opts.customNodesCount,
     pip_packages_count: opts.pipPackagesCount,
     has_label: opts.hasLabel,
-    deduplicated_previous: opts.deduplicatedPrevious,
+    deduplicated_previous: opts.deduplicatedPrevious
   })
 }
 
@@ -314,7 +350,7 @@ export async function captureSnapshotIfChanged(
       customNodesCount: current.customNodes.length,
       pipPackagesCount: Object.keys(current.pipPackages).length,
       hasLabel: false,
-      deduplicatedPrevious: deduplicated !== undefined,
+      deduplicatedPrevious: deduplicated !== undefined
     })
 
     // Prune old auto snapshots
@@ -339,13 +375,16 @@ export async function saveSnapshot(
       customNodesCount: current.customNodes.length,
       pipPackagesCount: Object.keys(current.pipPackages).length,
       hasLabel: !!(label && label.length > 0),
-      deduplicatedPrevious: false,
+      deduplicatedPrevious: false
     })
     return filename
   })
 }
 
-export async function deduplicatePreUpdateSnapshot(installPath: string, preUpdateFilename: string): Promise<boolean> {
+export async function deduplicatePreUpdateSnapshot(
+  installPath: string,
+  preUpdateFilename: string
+): Promise<boolean> {
   const entries = await listSnapshots(installPath)
   const idx = entries.findIndex((e) => e.filename === preUpdateFilename)
   if (idx < 0 || idx >= entries.length - 1) return false
@@ -363,7 +402,9 @@ export async function deduplicatePreUpdateSnapshot(installPath: string, preUpdat
 
 export async function pruneAutoSnapshots(installPath: string, keep: number): Promise<number> {
   const entries = await listSnapshots(installPath)
-  const autoSnapshots = entries.filter((e) => (e.snapshot.trigger === 'boot' || e.snapshot.trigger === 'restart') && !e.snapshot.label)
+  const autoSnapshots = entries.filter(
+    (e) => (e.snapshot.trigger === 'boot' || e.snapshot.trigger === 'restart') && !e.snapshot.label
+  )
   if (autoSnapshots.length <= keep) return 0
 
   const toDelete = autoSnapshots.slice(keep)
