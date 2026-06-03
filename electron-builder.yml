@@ -55,7 +55,7 @@ mac:
       filter:
         - '**/*'
 dmg:
-  title: ComfyUI Desktop 2.0
+  title: Comfy Desktop
   # background + background@2x live under resources/ (directories.buildResources).
   background: dmg/background.png
   iconSize: 84
