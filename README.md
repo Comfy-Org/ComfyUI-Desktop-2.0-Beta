@@ -47,14 +47,27 @@ Comfy Desktop is the official desktop application for **ComfyUI**, the node-base
 
 ## Download
 
-| Platform | Download |
-|---|---|
-| **Windows** (x64) | [![Windows x64](https://img.shields.io/badge/Download-Windows%20x64-0078D6?style=flat-square&logo=windows&logoColor=white)](https://dl.todesktop.com/241130tqe9q3y/windows/nsis/x64) |
-| **Windows** (ARM64) | [![Windows ARM64](https://img.shields.io/badge/Download-Windows%20ARM64-0078D6?style=flat-square&logo=windows&logoColor=white)](https://dl.todesktop.com/241130tqe9q3y/windows/nsis/arm64) |
-| **macOS** (Apple Silicon) | [![macOS Apple Silicon](https://img.shields.io/badge/Download-macOS%20Apple%20Silicon-000000?style=flat-square&logo=apple&logoColor=white)](https://dl.todesktop.com/241130tqe9q3y/mac/dmg/arm64) |
-| **Linux** | `.AppImage` &amp; `.deb` — see the [latest release](https://github.com/Comfy-Org/Comfy-Desktop/releases/latest) |
+<div align="center">
+
+[![Download Comfy Desktop](https://img.shields.io/badge/⬇%20Download%20Comfy%20Desktop-Windows%20·%20macOS%20·%20Linux-4f46e5?style=for-the-badge)](https://dl.todesktop.com/241130tqe9q3y)
+
+**[dl.todesktop.com/241130tqe9q3y](https://dl.todesktop.com/241130tqe9q3y)** — one link, auto-detects your platform.
+
+</div>
 
 > **New to ComfyUI?** Just download, install, and open the app — it walks you through creating your first setup. No terminal required.
+
+<details>
+<summary><b>Direct downloads (specific platform / architecture)</b></summary>
+
+| Platform | Direct link |
+|---|---|
+| Windows x64 | [`/windows/nsis/x64`](https://dl.todesktop.com/241130tqe9q3y/windows/nsis/x64) |
+| Windows ARM64 | [`/windows/nsis/arm64`](https://dl.todesktop.com/241130tqe9q3y/windows/nsis/arm64) |
+| macOS (Apple Silicon) | [`/mac/dmg/arm64`](https://dl.todesktop.com/241130tqe9q3y/mac/dmg/arm64) |
+| Linux (`.AppImage` / `.deb`) | [latest release](https://github.com/Comfy-Org/Comfy-Desktop/releases/latest) |
+
+</details>
 
 <details>
 <summary><b>Install instructions per platform</b></summary>
