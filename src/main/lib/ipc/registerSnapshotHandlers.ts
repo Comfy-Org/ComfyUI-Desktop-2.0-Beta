@@ -34,6 +34,7 @@ import {
   allocateUniqueDir
 } from './shared'
 import type { LatestTagOverride, SnapshotExportEnvelope, FieldOption, Snapshot } from './shared'
+import type { CopyEvent } from '../../../types/ipc'
 import * as telemetry from '../telemetry'
 
 async function _findReferenceRepo(): Promise<{
@@ -124,7 +125,7 @@ export function registerSnapshotHandlers(): void {
     const data = await getSnapshotListData(inst.installPath)
 
     const allInstalls = await installations.list()
-    const copyEvents = allInstalls
+    const copyEvents: CopyEvent[] = allInstalls
       .filter(
         (i) =>
           (i.copiedFrom as string | undefined) === installationId &&
@@ -135,8 +136,28 @@ export function registerSnapshotHandlers(): void {
         installationName: i.name,
         copiedAt: i.copiedAt as string,
         copyReason: (i.copyReason as 'copy' | 'copy-update' | 'release-update') || 'copy',
-        exists: true
+        exists: true,
+        direction: 'out'
       }))
+
+    // Surface the inbound copy on the destination's rail too — `copiedFromName`
+    // is captured at copy time so it survives source rename / deletion. Falls
+    // back to the source's current name when missing (older copies that
+    // predate `copiedFromName`), then to the raw id as a last resort.
+    const copiedFrom = inst.copiedFrom as string | undefined
+    const copiedAt = inst.copiedAt as string | undefined
+    if (copiedFrom && copiedAt) {
+      const source = allInstalls.find((i) => i.id === copiedFrom)
+      const snapshottedName = inst.copiedFromName as string | undefined
+      copyEvents.push({
+        installationId: copiedFrom,
+        installationName: snapshottedName || source?.name || copiedFrom,
+        copiedAt,
+        copyReason: (inst.copyReason as 'copy' | 'copy-update' | 'release-update') || 'copy',
+        exists: Boolean(source),
+        direction: 'in'
+      })
+    }
 
     return {
       ...data,
