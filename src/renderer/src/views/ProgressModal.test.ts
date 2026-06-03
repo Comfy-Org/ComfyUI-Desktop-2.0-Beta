@@ -43,7 +43,7 @@ const messages = {
       confirmStopLocal: {
         title: 'Return to Dashboard?',
         message: 'This will stop the current ComfyUI.',
-        confirmLabel: 'Stop & Return',
+        confirmLabel: 'Return to Dashboard',
       },
     },
     progress: {
@@ -347,7 +347,7 @@ describe('ProgressModal — brand branch state transitions', () => {
       error: null,
       result: {
         ok: false,
-        message: 'Port 8188 is already in use by ComfyUI Desktop',
+        message: 'Port 8188 is already in use by Comfy Desktop',
         portConflict,
       } as ActionResult,
     })

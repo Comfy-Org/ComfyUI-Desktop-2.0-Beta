@@ -30,7 +30,7 @@ beforeEach(() => {
   homePath = path.join(tmpRoot, 'home')
   userDataPath = path.join(tmpRoot, 'user-data')
   programDataPath = path.join(tmpRoot, 'program-data')
-  oemRoot = path.join(programDataPath, 'ComfyUI Desktop 2.0', 'OEM')
+  oemRoot = path.join(programDataPath, 'Comfy Desktop', 'OEM')
 
   fs.mkdirSync(homePath, { recursive: true })
   fs.mkdirSync(userDataPath, { recursive: true })

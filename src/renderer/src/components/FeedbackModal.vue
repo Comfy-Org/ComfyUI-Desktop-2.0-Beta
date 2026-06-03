@@ -5,7 +5,7 @@ import BaseModal from './ui/BaseModal.vue'
 import { emitTelemetryAction } from '../lib/telemetry'
 
 /**
- * Send Beta Feedback modal — wraps the typeform in an in-app iframe so
+ * Send Feedback modal — wraps the typeform in an in-app iframe so
  * the user never leaves the desktop window. The iframe origin is
  * whitelisted in `panel.html`'s `frame-src` CSP directive.
  *
@@ -91,7 +91,7 @@ onBeforeUnmount(() => {
   <BaseModal
     :open="open"
     size="xl"
-    :aria-label="t('feedback.modalLabel', 'Send Beta Feedback')"
+    :aria-label="t('feedback.modalLabel', 'Send Feedback')"
     content-class="feedback-modal-panel"
     @close="onClose"
   >
@@ -103,7 +103,7 @@ onBeforeUnmount(() => {
         v-if="open && url"
         class="feedback-modal-frame"
         :src="url"
-        :title="t('feedback.modalLabel', 'Send Beta Feedback')"
+        :title="t('feedback.modalLabel', 'Send Feedback')"
         loading="eager"
         allow="camera; microphone; autoplay; encrypted-media; fullscreen"
         @load="onFrameLoad"

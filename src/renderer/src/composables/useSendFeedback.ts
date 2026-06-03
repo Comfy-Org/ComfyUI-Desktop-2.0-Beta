@@ -12,7 +12,7 @@ interface UseSendFeedbackApi {
 }
 
 /**
- * Title-bar Send Feedback button + file-menu "Send Beta Feedback" entry
+ * Title-bar Send Feedback button + file-menu "Send Feedback" entry
  * both forward through main to `onOpenFeedback`. Fires the
  * `desktop2.feedback.opened` telemetry action with the originating
  * affordance and opens the in-app feedback modal (iframe-embedded

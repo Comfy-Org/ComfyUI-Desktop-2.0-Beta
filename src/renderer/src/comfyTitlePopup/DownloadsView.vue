@@ -8,6 +8,7 @@ import {
   PauseCircle,
   // TODO(brand-cleanup): PlayCircle was the Resume action icon — redesign skips it; restore if Pause/Resume comes back.
   // PlayCircle,
+  RotateCcw,
   X
 } from 'lucide-vue-next'
 import { fileLabel, statusKindClass, statusLine } from '../lib/downloadFormatters'
@@ -64,6 +65,7 @@ type DownloadAction =
   | { action: 'cancel'; url: string }
   | { action: 'show-in-folder'; url: string; savePath: string }
   | { action: 'dismiss'; url: string }
+  | { action: 'retry'; url: string }
   | { action: 'clear-finished' }
 
 type PopupSettingsTab = 'comfy' | 'directories' | 'downloads' | 'global'
@@ -114,6 +116,9 @@ function showInFolder(url: string, savePath: string): void {
 function dismiss(url: string): void {
   bridge?.downloadsAction({ action: 'dismiss', url })
 }
+function retry(url: string): void {
+  bridge?.downloadsAction({ action: 'retry', url })
+}
 function viewAllDownloads(): void {
   // Opens the brand-redesigned `DownloadsModal` on the host's panel
   // view instead of deep-linking to the Settings → Downloads tab.
@@ -162,7 +167,7 @@ function subtitle(d: DownloadEntry): string {
  *  location, matching the design's removal of the explicit
  *  "Show in folder" button. Other statuses are not clickable. */
 function handleRowClick(d: DownloadEntry, event: MouseEvent): void {
-  if ((event.target as HTMLElement).closest('.downloads-item-close')) return
+  if ((event.target as HTMLElement).closest('.downloads-item-close, .downloads-item-retry')) return
   if (d.status === 'completed' && d.savePath) showInFolder(d.url, d.savePath)
 }
 
@@ -245,6 +250,16 @@ function progressStyle(d: DownloadEntry): Record<string, string> | undefined {
           @click.stop="resume(d.url)"
         ><PlayCircle :size="14" /></button>
         -->
+        <button
+          v-if="d.status === 'error' || d.status === 'cancelled'"
+          type="button"
+          class="downloads-item-retry"
+          :title="t('downloadsPopup.retry')"
+          :aria-label="t('downloadsPopup.retry')"
+          @click.stop="retry(d.url)"
+        >
+          <RotateCcw :size="16" />
+        </button>
         <button
           type="button"
           class="downloads-item-close"
@@ -409,7 +424,8 @@ function progressStyle(d: DownloadEntry): Record<string, string> | undefined {
   white-space: nowrap;
 }
 
-.downloads-item-close {
+.downloads-item-close,
+.downloads-item-retry {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
@@ -427,11 +443,13 @@ function progressStyle(d: DownloadEntry): Record<string, string> | undefined {
     background-color 120ms ease,
     color 120ms ease;
 }
-.downloads-item-close:hover {
+.downloads-item-close:hover,
+.downloads-item-retry:hover {
   background: color-mix(in srgb, var(--neutral-500) 35%, transparent);
   color: var(--downloads-text);
 }
-.downloads-item-close:focus-visible {
+.downloads-item-close:focus-visible,
+.downloads-item-retry:focus-visible {
   outline: 2px solid var(--neutral-50);
   outline-offset: 1px;
 }

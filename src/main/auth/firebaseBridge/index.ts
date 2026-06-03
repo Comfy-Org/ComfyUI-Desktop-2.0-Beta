@@ -67,7 +67,7 @@ export interface HandleFirebasePopupOpts {
   /**
    * Optional handle to the BrowserWindow that owns `comfyContents`.
    * When provided, we restore + focus it after the bridge completes so
-   * the user returns to ComfyUI Desktop instead of staying parked on
+   * the user returns to Comfy Desktop instead of staying parked on
    * the now-finished browser tab.
    */
   parentWindow?: BrowserWindow

@@ -9,7 +9,7 @@
 > A full rewrite ships after the in-flight telemetry rework lands in
 > production. Until then: trust the code, not this doc.
 
-ComfyUI Desktop 2 emits telemetry through **two providers** that share a
+Comfy Desktop emits telemetry through **two providers** that share a
 single event bus:
 
 - **Datadog RUM** (renderer-only) — reliability, errors, performance,

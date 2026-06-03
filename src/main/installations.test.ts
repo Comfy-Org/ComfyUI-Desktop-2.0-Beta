@@ -495,3 +495,44 @@ describe('installations.getRecentByCategory', () => {
     expect((await installations.getRecentByCategory('local', resolveCategory))!.id).toBe(a.id)
   })
 })
+
+describe('installations.hasNameConflict', () => {
+  it('is false when no other install shares the name', async () => {
+    const installations = await loadInstallations()
+    const a = await installations.add({
+      name: 'Alpha',
+      installPath: path.join(tmpRoot, 'a'),
+      sourceId: 'standalone',
+      status: 'installed',
+    })
+    expect(await installations.hasNameConflict(a.id, 'Beta')).toBe(false)
+  })
+
+  it('is true when another install already uses the name', async () => {
+    const installations = await loadInstallations()
+    await installations.add({
+      name: 'Taken',
+      installPath: path.join(tmpRoot, 'a'),
+      sourceId: 'standalone',
+      status: 'installed',
+    })
+    const b = await installations.add({
+      name: 'Free',
+      installPath: path.join(tmpRoot, 'b'),
+      sourceId: 'standalone',
+      status: 'installed',
+    })
+    expect(await installations.hasNameConflict(b.id, 'Taken')).toBe(true)
+  })
+
+  it('ignores the install being renamed (renaming to its own name is not a conflict)', async () => {
+    const installations = await loadInstallations()
+    const a = await installations.add({
+      name: 'Self',
+      installPath: path.join(tmpRoot, 'a'),
+      sourceId: 'standalone',
+      status: 'installed',
+    })
+    expect(await installations.hasNameConflict(a.id, 'Self')).toBe(false)
+  })
+})

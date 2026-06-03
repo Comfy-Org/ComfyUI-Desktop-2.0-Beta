@@ -1,4 +1,4 @@
-# ComfyUI Desktop 2.0
+# Comfy Desktop
 
 [![Latest Release](https://img.shields.io/github/v/release/Comfy-Org/ComfyUI-Desktop-2.0-Beta?style=for-the-badge&display_name=tag)](https://github.com/Comfy-Org/ComfyUI-Desktop-2.0-Beta/releases/latest)
 [![CI](https://img.shields.io/github/actions/workflow/status/Comfy-Org/ComfyUI-Desktop-2.0-Beta/ci.yml?branch=main&style=for-the-badge&label=CI)](https://github.com/Comfy-Org/ComfyUI-Desktop-2.0-Beta/actions/workflows/ci.yml)
@@ -29,7 +29,7 @@ Run the NSIS installer (`.exe`) and launch from the Start Menu or desktop shortc
 
 ### macOS
 
-Open the `.dmg`, drag ComfyUI Desktop 2.0 to Applications, and launch from there.
+Open the `.dmg`, drag Comfy Desktop to Applications, and launch from there.
 
 ### Linux
 
@@ -256,12 +256,12 @@ The `bootstrap-v1` GitHub release stores prebuilt `bootstrap-python-{win-x64,mac
 
 On **Windows** and **macOS**, all app data lives under the standard Electron `userData` path.
 
-> **Dev vs. production path difference:** Electron derives the `userData` directory name from the app's name. In development (`pnpm run dev`), it uses the `name` field from `package.json` (`comfyui-desktop-2`), while packaged builds use the `productName` from `electron-builder.yml` (`ComfyUI Desktop 2.0`). This means the two environments use separate data directories:
+> **Dev vs. production path difference:** Electron derives the `userData` directory name from the app's name. In development (`pnpm run dev`), it uses the `name` field from `package.json` (`comfyui-desktop-2`), while packaged builds use the `productName` from `electron-builder.yml` (`Comfy Desktop`). This means the two environments use separate data directories:
 >
 > | | Windows | macOS | Linux |
 > |---|---|---|---|
 > | **Dev** | `%APPDATA%\comfyui-desktop-2` | `~/Library/Application Support/comfyui-desktop-2` | `~/.config/comfyui-desktop-2` |
-> | **Production** | `%APPDATA%\ComfyUI Desktop 2.0` | `~/Library/Application Support/ComfyUI Desktop 2.0` | `~/.config/ComfyUI Desktop 2.0` |
+> | **Production** | `%APPDATA%\Comfy Desktop` | `~/Library/Application Support/Comfy Desktop` | `~/.config/Comfy Desktop` |
 
 On **Linux**, the app follows the [XDG Base Directory Specification](https://wiki.archlinux.org/title/XDG_Base_Directory):
 
@@ -305,7 +305,7 @@ Pass `--yes` (or `-Yes` on Windows) to skip the confirmation prompt. After clean
 
 For a full manual uninstall on macOS, the following additional paths may be left behind by the app and can be removed. The reset helper handles app settings/state, but these are worth checking when doing a true clean install:
 
-- `~/Library/Application Support/ComfyUI` — ComfyUI Desktop app data/cache
-- `~/Library/Application Support/ComfyUI Desktop 2.0` — app settings/state
+- `~/Library/Application Support/ComfyUI` — Comfy Desktop app data/cache
+- `~/Library/Application Support/Comfy Desktop` — app settings/state
 - `~/Library/Caches/org.comfy.comfyui-desktop-2.ShipIt` — Squirrel auto-updater cache (safe to delete)
 - `~/Library/Logs/ComfyUI` — log files (safe to delete)

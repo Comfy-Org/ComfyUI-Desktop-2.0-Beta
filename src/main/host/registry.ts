@@ -176,7 +176,7 @@ export interface ComfyWindowEntry {
   /**
    * Current title-bar pill label. Install-backed windows mirror the
    * install name (and re-push on rename); install-less hosts hold
-   * `'Desktop 2.0 Beta'`. Stored on the entry so the unified
+   * `'Comfy Desktop'`. Stored on the entry so the unified
    * `title-bar-ready` handshake in `createHostWindow()` can
    * synthesize the initial push without a per-mode callback
    * closure, and so `attachInstall()` / `detachInstall()` can swap
@@ -475,6 +475,17 @@ export function computeBodyMode(entry: ComfyWindowEntry): BodyMode {
 export function findEntryByTitleBarSender(wc: WebContents): { id: number; entry: ComfyWindowEntry } | null {
   for (const [id, entry] of comfyWindows) {
     if (entry.titleBarView.webContents === wc) return { id, entry }
+  }
+  return null
+}
+
+/** Resolve a host BrowserWindow back to its registry entry. Used to map
+ *  a popup's parent window to the title-bar webContents (e.g. the
+ *  coachmark dismiss button routing its acknowledgement back to the
+ *  title-bar renderer). */
+export function findEntryByHostWindow(window: BrowserWindow): ComfyWindowEntry | null {
+  for (const entry of comfyWindows.values()) {
+    if (entry.window === window) return entry
   }
   return null
 }

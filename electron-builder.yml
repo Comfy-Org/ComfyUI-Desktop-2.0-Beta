@@ -1,5 +1,5 @@
 appId: org.comfy.comfyui-desktop-2
-productName: ComfyUI Desktop 2.0
+productName: Comfy Desktop
 directories:
   buildResources: resources
 files:
@@ -37,18 +37,42 @@ nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
+  # Disable the built-in unconditional desktop-shortcut creation. The
+  # installer surfaces an "Add a desktop shortcut" checkbox on the
+  # Finish page (default checked) instead — same default outcome, but
+  # the user can opt out. See scripts/installer.nsh → customFinishPage.
+  createDesktopShortcut: false
   include: scripts/installer.nsh
 mac:
   target:
     - dmg
     - zip
-  icon: assets/Comfy_Logo_x1024.png
+  icon: assets/Comfy_Logo_mac_x1024.png
   category: public.app-category.developer-tools
   extraResources:
     - from: bootstrap-python/mac-arm64
       to: bootstrap-python
       filter:
         - '**/*'
+dmg:
+  title: ComfyUI Desktop 2.0
+  # background + background@2x live under resources/ (directories.buildResources).
+  background: dmg/background.png
+  iconSize: 84
+  iconTextSize: 11
+  window:
+    width: 540
+    height: 400
+  # x/y are icon centers in the 540x400 content area, aligned to the
+  # arrow and title drawn into background.png.
+  contents:
+    - x: 135
+      y: 195
+      type: file
+    - x: 405
+      y: 195
+      type: link
+      path: /Applications
 linux:
   target:
     - AppImage

@@ -1,6 +1,6 @@
 // Pull in the same Inter font + design tokens as the launcher / panel /
 // title-bar / title-popup renderers so the system-modal surface is
-// visually consistent with the rest of Desktop 2.0.
+// visually consistent with the rest of Comfy Desktop.
 import '../assets/main.css'
 import { loadProprietaryFonts } from '../assets/proprietaryFonts'
 

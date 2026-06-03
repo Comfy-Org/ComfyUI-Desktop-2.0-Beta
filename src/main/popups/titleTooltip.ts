@@ -1,6 +1,5 @@
 import { ipcMain } from 'electron'
 import type { BrowserWindow, WebContents } from 'electron'
-import { resolveTheme } from '../lib/ipc/shared'
 import { TITLEBAR_HEIGHT } from '../lib/titleBarOverlay'
 import { EmbeddedPopupView } from './embeddedPopupView'
 
@@ -83,14 +82,14 @@ export function getTitleTooltipForParent(parentId: number): TitleTooltipPopupEnt
   return titleTooltipPopupsByParent.get(parentId)
 }
 
-/** Resolve the dark/light tooltip palette. Mirrors the panel-side
- *  `.info-tooltip-bubble` style (var(--surface) / var(--border) /
- *  var(--text)) so the title-bar tooltip looks identical to the
- *  in-renderer tooltips users already see. */
+/** Resolve the tooltip palette. Hardcoded mirror of the `--tooltip-*`
+ *  primitive tokens (`main.css`) — `--tooltip-bg` / `--tooltip-fg` /
+ *  `--tooltip-border` — so the title-bar tooltip looks identical to the
+ *  in-renderer `Tooltip` / `InfoTooltip` bubbles. The renderer tokens
+ *  carry the same value in both themes until light brand parity ships,
+ *  so this is theme-agnostic to match. */
 function resolveTooltipTheme(): { bg: string; text: string; border: string } {
-  return resolveTheme() === 'dark'
-    ? { bg: '#262729', text: '#dddddd', border: '#494a50' }
-    : { bg: '#ffffff', text: '#1f1f1f', border: '#d0d0d0' }
+  return { bg: '#211927', text: '#ffffff', border: '#38303d' }
 }
 
 /** Create (or reuse) a title-tooltip popup view for *parent*. */

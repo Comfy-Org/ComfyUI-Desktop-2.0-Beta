@@ -86,7 +86,7 @@ const statusSentence = computed(() => {
         'Update available'
       )
     default:
-      return t('appUpdate.panelIdleTitle', 'ComfyUI Desktop is up to date')
+      return t('appUpdate.panelIdleTitle', 'Comfy Desktop is up to date')
   }
 })
 

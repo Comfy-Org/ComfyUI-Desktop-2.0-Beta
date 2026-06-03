@@ -1,6 +1,6 @@
 // Pull in the same Inter font + design tokens (--surface, --border,
 // --text-muted, etc.) as the launcher and panel renderers so the title bar
-// is visually consistent with the rest of Desktop 2.0 instead of falling
+// is visually consistent with the rest of Comfy Desktop instead of falling
 // back to system fonts and ad-hoc hex values.
 import '../assets/main.css'
 import { loadProprietaryFonts } from '../assets/proprietaryFonts'

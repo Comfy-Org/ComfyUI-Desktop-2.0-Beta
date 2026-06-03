@@ -1,7 +1,7 @@
 abi <abi/4.0>,
 include <tunables/global>
 
-profile "comfyui-desktop-2" "/opt/ComfyUI Desktop 2.0/comfyui-desktop-2" flags=(unconfined) {
+profile "comfyui-desktop-2" "/opt/Comfy Desktop/comfyui-desktop-2" flags=(unconfined) {
   userns,
 
   # Site-specific additions and overrides. See local/README for details.

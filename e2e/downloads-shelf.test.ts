@@ -174,6 +174,108 @@ test('per-status row close button maps to the right action @windows @macos @linu
   expect(summary['ca.safetensors']?.close).toContain('remove')
 })
 
+test('retry affordance shows on error + cancelled rows only @windows @macos @linux', async () => {
+  await seedDownloads(ctx.app, {
+    active: [makeEntry({ url: 'u-dl', filename: 'dl.safetensors', status: 'downloading', progress: 0.5 })],
+    recent: [
+      makeEntry({ url: 'u-co', filename: 'co.safetensors', status: 'completed', progress: 1, savePath: '/tmp/co.safetensors' }),
+      makeEntry({ url: 'u-er', filename: 'er.safetensors', status: 'error', progress: 0, error: 'boom' }),
+      makeEntry({ url: 'u-ca', filename: 'ca.safetensors', status: 'cancelled', progress: 0 }),
+    ],
+  })
+  await openDownloadsTray(ctx.titleBar)
+  await waitForPopupVisible(ctx.app)
+  await waitForStableBounds(ctx.app)
+
+  // The retry button (↺) is rendered for `error` AND `cancelled` rows —
+  // both can be re-dispatched from main's captured params. Completed
+  // (nothing to retry) and in-flight rows must not offer it.
+  const summary = await popup.evaluate<Record<string, { retry: boolean }>>(`(() => {
+    const out = {}
+    for (const li of document.querySelectorAll('.downloads-item')) {
+      const name = (li.querySelector('.downloads-item-name')?.textContent || '').trim()
+      out[name] = { retry: !!li.querySelector('.downloads-item-retry') }
+    }
+    return out
+  })()`)
+
+  expect(summary['er.safetensors']?.retry).toBe(true)
+  expect(summary['ca.safetensors']?.retry).toBe(true)
+  expect(summary['co.safetensors']?.retry).toBe(false)
+  expect(summary['dl.safetensors']?.retry).toBe(false)
+})
+
+// ---------------------------------------------------------------------------
+// Title-bar badge — a failed download surfaces a distinct red error
+// badge that takes precedence over the green "completed, unseen" badge,
+// so a failure never reads as success on the tray icon.
+// ---------------------------------------------------------------------------
+
+test('unseen failure shows the red error badge, not the green one @windows @macos @linux', async () => {
+  // Keep the popup CLOSED — the badge is the "unseen" indicator and
+  // clears the moment the tray is opened (acknowledgeRecent).
+  await seedDownloads(ctx.app, {
+    active: [],
+    recent: [makeEntry({ url: 'u-er', filename: 'er.safetensors', status: 'error', progress: 0, error: 'boom' })],
+  })
+
+  await expect.poll(() => ctx.titleBar.count('.title-downloads-badge.is-error'), {
+    timeout: 5_000,
+    intervals: [100, 200, 400],
+  }).toBe(1)
+  // The green "completed" badge must NOT be showing for a pure failure.
+  expect(await ctx.titleBar.count('.title-downloads-badge.is-unseen')).toBe(0)
+})
+
+test('a completed-only download shows the green badge (error badge gated) @windows @macos @linux', async () => {
+  await seedDownloads(ctx.app, {
+    active: [],
+    recent: [makeEntry({ url: 'u-co', filename: 'co.safetensors', status: 'completed', progress: 1, savePath: '/tmp/co.safetensors' })],
+  })
+
+  await expect.poll(() => ctx.titleBar.count('.title-downloads-badge.is-unseen'), {
+    timeout: 5_000,
+    intervals: [100, 200, 400],
+  }).toBe(1)
+  expect(await ctx.titleBar.count('.title-downloads-badge.is-error')).toBe(0)
+})
+
+test('a mid-batch failure shows the red dot while the active count badge persists @windows @macos @linux', async () => {
+  // Two still downloading + one already failed: the badge keeps
+  // reporting the ACTIVE count (blue, no `is-error` recolour), but the
+  // failure is surfaced immediately via the red dot + the tray's
+  // `has-error` tint — rather than waiting for the queue to drain.
+  //
+  // The dot is the *unseen* indicator, so the popup must stay CLOSED
+  // (opening it calls `acknowledgeRecent`, zeroing `unseenErrorCount`).
+  // `beforeEach` closes it, but assert it here too so a prior test that
+  // left it open can't mask the dot.
+  await closeTitlePopupIfOpen(ctx.app)
+  await new Promise((r) => setTimeout(r, TITLE_REOPEN_SUPPRESSION_MS))
+  // A never-before-acknowledged URL so a prior test's `acknowledgeRecent`
+  // can't leave it in the `seenUrls` set.
+  await seedDownloads(ctx.app, {
+    active: [
+      makeEntry({ url: 'u-midbatch-dl1', filename: 'dl1.safetensors', status: 'downloading', progress: 0.5 }),
+      makeEntry({ url: 'u-midbatch-dl2', filename: 'dl2.safetensors', status: 'downloading', progress: 0.2 }),
+    ],
+    recent: [makeEntry({ url: 'u-midbatch-er', filename: 'er.safetensors', status: 'error', progress: 0, error: 'boom' })],
+  })
+
+  // Red dot appears (the mid-batch failure marker).
+  await expect.poll(() => ctx.titleBar.count('.title-downloads-error-dot'), {
+    timeout: 5_000,
+    intervals: [100, 200, 400],
+  }).toBe(1)
+  // The tray button carries the danger tint.
+  expect(await ctx.titleBar.count('.title-downloads-tray.has-error')).toBe(1)
+  // The count badge is still the plain (active-count) variant — NOT
+  // recoloured to the error badge, and showing the active total "2".
+  expect(await ctx.titleBar.count('.title-downloads-badge.is-error')).toBe(0)
+  const badgeText = (await ctx.titleBar.allText('.title-downloads-badge'))[0]?.trim()
+  expect(badgeText).toBe('2')
+})
+
 // ---------------------------------------------------------------------------
 // Live repaint — the open popup must redraw when the tray-state-changed
 // broadcast fires (this is what `comfy-titlepopup:downloads-changed`

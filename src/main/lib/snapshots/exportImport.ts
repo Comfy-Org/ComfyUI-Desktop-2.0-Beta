@@ -58,7 +58,7 @@ function isValidSnapshot(s: unknown): s is Snapshot {
 export function validateExportEnvelope(data: unknown): SnapshotExportEnvelope {
   if (!data || typeof data !== 'object') throw new Error('Invalid file: not a JSON object')
   const obj = data as Record<string, unknown>
-  if (obj.type !== 'comfyui-desktop-2-snapshot') throw new Error('Invalid file: not a ComfyUI Desktop 2.0 snapshot export')
+  if (obj.type !== 'comfyui-desktop-2-snapshot') throw new Error('Invalid file: not a Comfy Desktop snapshot export')
   if (obj.version !== 1) throw new Error(`Unsupported snapshot version: ${obj.version}`)
   if (!Array.isArray(obj.snapshots) || obj.snapshots.length === 0) throw new Error('File contains no snapshots')
   for (let i = 0; i < obj.snapshots.length; i++) {

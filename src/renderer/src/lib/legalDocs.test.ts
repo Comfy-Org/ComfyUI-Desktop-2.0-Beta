@@ -24,7 +24,7 @@ describe('LEGAL_DOCS', () => {
     const doc = LEGAL_DOCS[id]
     expect(doc).toBeDefined()
     expect(doc.effectiveDate).toMatch(/^\d{4}-\d{2}-\d{2}$/)
-    expect(doc.appliesTo).toContain('ComfyUI Desktop')
+    expect(doc.appliesTo).toContain('Comfy Desktop')
     expect(doc.blocks.length).toBeGreaterThan(0)
   })
 

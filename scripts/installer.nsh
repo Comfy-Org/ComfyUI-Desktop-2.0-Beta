@@ -27,6 +27,34 @@
   LangString perMachineInstall 1033 "$(^Name) is installed for all users.$\r$\n"
   LangString reinstallUpgrade 1033 "Setup will update your existing installation."
   !pragma warning enable 6030
+
+  ; Reveal the install-details list view during install. electron-builder's
+  ; common.nsh (included at installer.nsi line 8) defaults to
+  ; `ShowInstDetails nevershow`, which hides the standard NSIS Show-Details
+  ; button entirely — every DetailPrint line we emit was getting written to
+  ; an invisible log. `show` always-displays the list so users watch each
+  ; step stream in in real time. Set in customHeader (line 46) so it lands
+  ; AFTER common.nsh and overrides the prior value.
+  ShowInstDetails show
+
+  ; Pre-install Section that runs the Visual C++ Redistributable BEFORE
+  ; electron-builder's main "install" section. The default electron-builder
+  ; section order is: files → start-menu shortcut → desktop shortcut →
+  ; customInstall (where the redist *used* to run). That ordering let the
+  ; user click the freshly-created desktop / Start-menu shortcut and open
+  ; the app while VC++ was still installing (#715). Moving the redist into
+  ; a hidden Section declared in customHeader places it BEFORE
+  ; `Section "install"` (installer.nsi line ~94), so the redist completes
+  ; before any shortcut is placed.
+  ;
+  ; The leading "-" makes the section unselectable / hidden; it has no
+  ; component-page entry and always runs. Skipped on update — main install
+  ; already-installed check elsewhere; mirrors the prior gate.
+  Section "-VcRedistPreInstall"
+    ${IfNot} ${isUpdated}
+      !insertmacro installVcRedist
+    ${EndIf}
+  SectionEnd
 !macroend
 
 ; Optional installer command-line overrides:
@@ -86,14 +114,23 @@
     ${VersionCompare} "$1" "${VC_REDIST_VERSION}" $2
   ${EndIf}
 
+  # SetDetailsPrint mode for all DetailPrint lines in this macro:
+  #   both     = status-bar text AND a line in the Show-Details log
+  #
+  # electron-builder defaults to `none` (no log lines, no status bar)
+  # for interactive installs. We flip to `both` so the user sees what's
+  # happening AND can review every step via the "Show Details" button on
+  # the install page. We leave it on `both` at the end so subsequent
+  # electron-builder operations (file extract, shortcuts, registry,
+  # uninstaller write) also appear in the log instead of looking blank.
+  SetDetailsPrint both
+
+  DetailPrint "Step 1 of 3: Microsoft Visual C++ Redistributable"
+  DetailPrint "  Detected installed version: $1"
+  DetailPrint "  Bundled version: ${VC_REDIST_VERSION}"
+
   ${If} $2 == 2
-    # electron-builder calls SetDetailsPrint none for interactive installs,
-    # which silences DetailPrint output. Switch to textonly so users see what
-    # is happening in the installer's status bar while the redist runs; this
-    # message stays on screen for the full duration of the VC++ install.
-    SetDetailsPrint textonly
-    DetailPrint "Installing Microsoft Visual C++ Redistributable (this may take several minutes)..."
-    SetDetailsPrint none
+    DetailPrint "  Installing Microsoft Visual C++ Redistributable (this may take several minutes)..."
 
     File /oname=$PLUGINSDIR\vc_redist.x64.exe "${BUILD_RESOURCES_DIR}\vc_redist.x64.exe"
     # Launch the redist elevated via ShellExecuteEx's "runas" verb (NOT
@@ -116,31 +153,30 @@
     BringToFront
 
     ${If} $R8 == "ERR"
-      SetDetailsPrint textonly
-      DetailPrint "Microsoft Visual C++ Redistributable was not installed."
-      SetDetailsPrint none
+      DetailPrint "Microsoft Visual C++ Redistributable was not installed (permission prompt declined)."
       BringToFront
       # Abort / Retry / Ignore is the only built-in MessageBox set with an
       # "Abort" button (Windows has no 2-button Retry|Abort).
       #   Retry  -> loop back to vcRedistAttempt (re-show the UAC prompt)
       #   Ignore -> jump past, install without the redist
       #   Abort  -> fall through to Quit (also the silent-install default)
-      MessageBox MB_ABORTRETRYIGNORE|MB_ICONEXCLAMATION "ComfyUI Desktop needs the Microsoft Visual C++ Redistributable. Installing it requires Windows permission, and that prompt was declined.$\n$\nRetry — show the permission prompt again (recommended)$\nIgnore — install ComfyUI anyway (it may not start until the Redistributable is installed)$\nAbort — stop and exit Setup" /SD IDABORT IDRETRY vcRedistAttempt IDIGNORE vcRedistIgnore
+      MessageBox MB_ABORTRETRYIGNORE|MB_ICONEXCLAMATION "Comfy Desktop needs the Microsoft Visual C++ Redistributable. Installing it requires Windows permission, and that prompt was declined.$\n$\nRetry — show the permission prompt again (recommended)$\nIgnore — install ComfyUI anyway (it may not start until the Redistributable is installed)$\nAbort — stop and exit Setup" /SD IDABORT IDRETRY vcRedistAttempt IDIGNORE vcRedistIgnore
       SetErrorLevel 2
       Quit
     ${EndIf}
 
+    DetailPrint "  Microsoft Visual C++ Redistributable installed."
     Goto vcRedistDone
     vcRedistIgnore:
-    SetDetailsPrint textonly
-    DetailPrint "Skipping Microsoft Visual C++ Redistributable — ComfyUI may not start until it is installed."
-    SetDetailsPrint none
+    DetailPrint "  Continuing without the Microsoft Visual C++ Redistributable — ComfyUI may not start until it is installed."
     vcRedistDone:
   ${Else}
-    SetDetailsPrint textonly
-    DetailPrint "Microsoft Visual C++ Redistributable $1 already installed (>= bundled ${VC_REDIST_VERSION}); skipping."
-    SetDetailsPrint none
+    DetailPrint "  Already up to date — skipping install."
   ${EndIf}
+
+  DetailPrint ""
+  DetailPrint "Step 2 of 3: Comfy Desktop application files"
+  DetailPrint "  Extracting to $INSTDIR (this may take a minute)..."
 
   Pop $R8
   Pop $2
@@ -148,9 +184,28 @@
 !macroend
 
 !macro customInstall
-  ${IfNot} ${isUpdated}
-    !insertmacro installVcRedist
-  ${EndIf}
+  ; VC++ Redistributable is now installed by the -VcRedistPreInstall
+  ; Section declared in customHeader so it runs BEFORE shortcuts are
+  ; placed (#715).
+  ;
+  ; electron-builder's installSection.nsh sets `SetDetailsPrint none`
+  ; at the top of `Section "install"` (line 6), which silences every
+  ; line that would otherwise stream through during file extraction,
+  ; shortcut creation, registry writes, and uninstaller registration.
+  ; By the time customInstall fires those operations have all
+  ; completed silently — we flip the mode back to `both` and narrate
+  ; them retroactively so the install-details list actually reads
+  ; like an install log instead of jumping from "Step 2 — Extracting…"
+  ; straight to the Finish page.
+  SetDetailsPrint both
+  DetailPrint "  Application files installed to: $INSTDIR"
+  DetailPrint "  Registered with Add or Remove Programs"
+  DetailPrint "  Start Menu shortcut created"
+  DetailPrint "  Uninstaller written: ${UNINSTALL_FILENAME}"
+  DetailPrint ""
+  DetailPrint "Step 3 of 3: Finishing up"
+  DetailPrint "  Cleaning up temporary files..."
+  DetailPrint "  Comfy Desktop is ready to launch."
 !macroend
 
 # Custom finish page: launch the app as the current user (not elevated)
@@ -169,10 +224,47 @@
     !define MUI_FINISHPAGE_RUN_FUNCTION "StartApp"
   !endif
 
+  # Opt-out desktop-shortcut checkbox (#682). Pairs with
+  # `nsis.createDesktopShortcut: false` in electron-builder.yml so the
+  # install section no longer drops a shortcut unconditionally — the user
+  # decides on the Finish page. Default is CHECKED so a user clicking
+  # straight through still gets a shortcut (no UX regression for the 90%
+  # who don't change defaults); only users who actively uncheck skip it.
+  #
+  # MUI2 trick: setting MUI_FINISHPAGE_SHOWREADME to an empty string makes
+  # the checkbox call the FUNCTION instead of trying to open a file/URL.
+  # Shortcut creation mirrors what electron-builder's addDesktopLink macro
+  # would have done (CreateShortCut → SetLnkAUMI → SHChangeNotify) so the
+  # resulting .lnk is identical to the previous always-on path.
+  Function CreateUserDesktopShortcut
+    CreateShortCut "$newDesktopLink" "$appExe" "" "$appExe" 0 "" "" "${APP_DESCRIPTION}"
+    ClearErrors
+    WinShell::SetLnkAUMI "$newDesktopLink" "${APP_ID}"
+    System::Call 'Shell32::SHChangeNotify(i 0x8000000, i 0, i 0, i 0)'
+  FunctionEnd
+
+  !define MUI_FINISHPAGE_SHOWREADME ""
+  !define MUI_FINISHPAGE_SHOWREADME_TEXT "Add a desktop shortcut"
+  !define MUI_FINISHPAGE_SHOWREADME_FUNCTION "CreateUserDesktopShortcut"
+
+  # NOTE: there was a longer effort to enable a working Cancel button +
+  # title-bar X on the Finish page (MUI_FINISHPAGE_CANCEL_ENABLED +
+  # MUI_CUSTOMFUNCTION_ABORT hooked into MUI2's .onUserAbort,
+  # SC_CLOSE re-enabled via EnableMenuItem, nsDialogs ${NSD_OnClick}
+  # subclassing as a fallback). None of them routed the click — a
+  # diagnostic MessageBox tripwire inside the abort handler never
+  # fired, which means nsDialogs swallows the click before NSIS's
+  # .onUserAbort sees it, and MUI_CUSTOMFUNCTION_ABORT never runs.
+  # The only remaining route is wizard-frame WindowProc subclassing,
+  # which is risky and out of scope here. Sticking with Finish-only:
+  # the user must click "Finish" to dismiss the wizard.
+
   !define MUI_PAGE_CUSTOMFUNCTION_PRE FinishPagePreCheck
   !insertmacro MUI_PAGE_FINISH
 
-  # Skip finish page during updates — auto-launch instead
+  # Skip finish page during updates — auto-launch instead. (Updates keep
+  # the existing desktop shortcut as-is — electron-builder's keepShortcuts
+  # handling is unaffected by createDesktopShortcut: false on update.)
   Function FinishPagePreCheck
     ${if} ${isUpdated}
       ${StdUtils.ExecShellAsUser} $0 "$launchLink" "open" "--updated"

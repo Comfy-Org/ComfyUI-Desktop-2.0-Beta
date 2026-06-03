@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { RefreshCcw, Settings2, SlidersHorizontal, X } from 'lucide-vue-next'
+import { HardDrive, RefreshCcw, Settings2, SlidersHorizontal, X } from 'lucide-vue-next'
 import UpdatesSection from './globalSettings/UpdatesSection.vue'
 import GlobalSettingsMicroSection from './globalSettings/GlobalSettingsMicroSection.vue'
+import GlobalStorageSections from './globalSettings/GlobalStorageSections.vue'
 import GitHubLinkCard from './globalSettings/GitHubLinkCard.vue'
 import SettingsSectionList from '../views/comfyUISettings/SettingsSectionList.vue'
 import { withMinDuration } from '../lib/uiTiming'
@@ -34,9 +35,6 @@ interface Snapshot {
   desktopUpdateFields: Record<string, unknown>[]
   cacheFields: Record<string, unknown>[]
   advancedFields: Record<string, unknown>[]
-  // TODO(brand-cleanup): Storage tab moved to instance-picker (see
-  // StoragePane.vue). Main still emits these for back-compat; remove
-  // once the snapshot builder in titlePopup.ts drops them.
   sharedDirectoriesFields: Record<string, unknown>[]
   modelsDirs: ModelsDir[]
   modelsSystemDefault: string
@@ -54,8 +52,6 @@ interface Snapshot {
   i18n: {
     overview: string
     updates: string
-    // TODO(brand-cleanup): consumed by StoragePane via useI18n now;
-    // keep here until main-side snapshot stops emitting them.
     storage: string
     models: string
     advanced: string
@@ -85,14 +81,21 @@ const bridge = (window as unknown as { __comfyTitlePopup?: GlobalSettingsBridge 
 
 const LAST_CHECKED_KEY = 'globalSettings.lastCheckedAt'
 
-type TabId = 'general' | 'updates' | 'advanced'
+type TabId = 'general' | 'updates' | 'storage' | 'advanced'
 const activeTab = ref<TabId>('general')
 
 const tabs = computed(() => [
   { id: 'general' as const, label: props.snapshot.i18n.overview, icon: Settings2 },
   { id: 'updates' as const, label: props.snapshot.i18n.updates, icon: RefreshCcw },
+  { id: 'storage' as const, label: props.snapshot.i18n.storage, icon: HardDrive },
   { id: 'advanced' as const, label: props.snapshot.i18n.advanced, icon: SlidersHorizontal }
 ])
+
+const storageSnapshot = computed(() => ({
+  sharedDirectoriesFields: props.snapshot.sharedDirectoriesFields,
+  modelsDirs: props.snapshot.modelsDirs,
+  modelsSystemDefault: props.snapshot.modelsSystemDefault,
+}))
 
 const generalSections = computed<DetailSection[]>(() => [
   { fields: props.snapshot.generalFields as unknown as DetailField[] }
@@ -258,6 +261,10 @@ onMounted(() => {
             @check-for-update="handleCheckForUpdate"
             @update-field="handleUpdateField"
           />
+        </template>
+
+        <template v-else-if="activeTab === 'storage'">
+          <GlobalStorageSections :snapshot="storageSnapshot" />
         </template>
 
         <template v-else>

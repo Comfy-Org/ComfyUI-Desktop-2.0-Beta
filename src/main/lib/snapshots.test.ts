@@ -105,13 +105,13 @@ describe('validateExportEnvelope', () => {
   })
 
   it('rejects wrong type field', () => {
-    expect(() => validateExportEnvelope({ ...makeEnvelope(), type: 'wrong' })).toThrow('not a ComfyUI Desktop 2.0 snapshot export')
+    expect(() => validateExportEnvelope({ ...makeEnvelope(), type: 'wrong' })).toThrow('not a Comfy Desktop snapshot export')
   })
 
   it('rejects missing type field', () => {
     const env = makeEnvelope()
     const { type: _, ...rest } = env
-    expect(() => validateExportEnvelope(rest)).toThrow('not a ComfyUI Desktop 2.0 snapshot export')
+    expect(() => validateExportEnvelope(rest)).toThrow('not a Comfy Desktop snapshot export')
   })
 
   it('rejects wrong version', () => {

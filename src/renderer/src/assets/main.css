@@ -1885,8 +1885,8 @@ input[type='checkbox']:checked::after {
 .subpage-pop-enter-active,
 .subpage-pop-leave-active {
   transition:
-    transform 220ms cubic-bezier(0.32, 0.72, 0, 1),
-    opacity 180ms ease;
+    transform 110ms cubic-bezier(0.32, 0.72, 0, 1),
+    opacity 90ms ease;
 }
 .subpage-push-enter-from {
   transform: translateX(24px);
@@ -1910,7 +1910,7 @@ input[type='checkbox']:checked::after {
   .subpage-push-leave-active,
   .subpage-pop-enter-active,
   .subpage-pop-leave-active {
-    transition: opacity 140ms ease;
+    transition: opacity 70ms ease;
   }
   .subpage-push-enter-from,
   .subpage-push-leave-to,

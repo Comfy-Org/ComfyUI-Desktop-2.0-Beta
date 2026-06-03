@@ -122,4 +122,28 @@ describe('StoragePane', () => {
     await openBtns[0]!.trigger('click')
     expect(bridge.openPathCalls).toEqual(['/home/u/ComfyUI/models'])
   })
+
+  // make-primary is a "touched" action; the note bar must flip to the
+  // warning color. Open is read-only and must not flip the bar.
+  it('flips the storage note to the warning state after make-primary', async () => {
+    installMockBridge()
+    const wrapper = mountPane()
+    await nextTick()
+    expect(wrapper.find('.storage-note.is-warning').exists()).toBe(false)
+    await wrapper.find('.models-dir-menu-wrap > button').trigger('click')
+    await nextTick()
+    await flushPromises()
+    await wrapper.find('.models-dir-menu button[role="menuitem"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.storage-note.is-warning').exists()).toBe(true)
+  })
+
+  it('does not flip the storage note when only opening a dir', async () => {
+    installMockBridge()
+    const wrapper = mountPane()
+    await nextTick()
+    await wrapper.findAll('.models-dir-row .models-dir-action')[0]!.trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.storage-note.is-warning').exists()).toBe(false)
+  })
 })

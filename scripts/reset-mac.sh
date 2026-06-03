@@ -34,23 +34,23 @@ if [ "$(uname -s)" != "Darwin" ]; then
 fi
 
 # Refuse to run while the app is open (includes the upcoming post-rename
-# "ComfyUI Desktop" process name)
-if pgrep -x "ComfyUI Desktop"     >/dev/null 2>&1 \
+# "Comfy Desktop" process name)
+if pgrep -x "Comfy Desktop"     >/dev/null 2>&1 \
    || pgrep -x "ComfyUI Desktop 2.0" >/dev/null 2>&1 \
    || pgrep -x "ComfyUI Launcher"  >/dev/null 2>&1; then
-  echo "ComfyUI Desktop / Launcher is running. Please quit it first (Cmd+Q),"
+  echo "Comfy Desktop / Launcher is running. Please quit it first (Cmd+Q),"
   echo "then re-run this script."
   exit 1
 fi
 
 # Product (display) names that map to ~/Library/Application Support and Logs
-# folders. Includes the upcoming post-rename name ("ComfyUI Desktop") so
+# folders. Includes the upcoming post-rename name ("Comfy Desktop") so
 # scripts shipped today still work after the 2.0 suffix drops, and the
 # legacy v1.x desktop productName ("ComfyUI") whose userData/logs survive
 # an upgrade to the 2.0 beta and have caused clean-install issues (#679).
 PRODUCT_NAMES=(
   "ComfyUI"
-  "ComfyUI Desktop"
+  "Comfy Desktop"
   "ComfyUI Desktop 2.0"
   "ComfyUI Launcher"
 )

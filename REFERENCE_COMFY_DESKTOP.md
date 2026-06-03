@@ -1,8 +1,8 @@
 # Reference: Legacy Desktop (Comfy-Org/desktop) Architecture
 
 > **This document is a reference analysis of [Comfy-Org/desktop](https://github.com/Comfy-Org/desktop), the Legacy Desktop app.**
-> It does NOT describe how ComfyUI Desktop 2.0 works. It exists solely as prior art for design decisions.
-> For ComfyUI Desktop 2.0's own architecture, see [DESIGN_PROCESS.md](./DESIGN_PROCESS.md).
+> It does NOT describe how Comfy Desktop works. It exists solely as prior art for design decisions.
+> For Comfy Desktop's own architecture, see [DESIGN_PROCESS.md](./DESIGN_PROCESS.md).
 
 ## Auto-Update System
 

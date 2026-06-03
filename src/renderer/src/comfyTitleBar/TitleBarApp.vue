@@ -8,13 +8,16 @@ import {
   Loader2,
   Menu as MenuIcon,
   MessageSquarePlus,
-  RefreshCw
+  RefreshCw,
+  RotateCw,
+  ZoomIn
 } from 'lucide-vue-next'
 import { useTitleBarTooltip } from './useTitleBarTooltip'
 import { useTitleBarMenus } from './useTitleBarMenus'
 import { useTitleBarIdentity } from './useTitleBarIdentity'
 import { useUpdatePills } from './useUpdatePills'
 import { useTitleBarHoverGate } from './useTitleBarHoverGate'
+import { useCentralPillCoachmark } from './useCentralPillCoachmark'
 import ComfyCLogo from '../components/icons/ComfyCLogo.vue'
 
 const { t, locale } = useI18n()
@@ -76,6 +79,18 @@ interface Bridge {
   showTooltip: (payload: { text: string; leftX: number; rightX: number; bottomY: number }) => void
   /** Issue #514 — hide the title-bar hover tooltip popup. */
   hideTooltip: () => void
+  /** First-instance onboarding coachmark (issue #701) — show/hide the
+   *  sticky card pointing at the centre pill; subscribe to its dismiss. */
+  showCoachmark: (payload: {
+    title: string
+    body: string
+    dismissLabel: string
+    leftX: number
+    rightX: number
+    bottomY: number
+  }) => void
+  hideCoachmark: () => void
+  onCoachmarkDismissed: (cb: () => void) => () => void
   onPanelChanged: (cb: (panel: ComfyPanelKey) => void) => () => void
   onTitleChanged: (cb: (title: string) => void) => () => void
   /** Install source-category pushes from main. The raw category
@@ -84,6 +99,7 @@ interface Bridge {
    *  install-less host windows; the renderer suppresses the icon in
    *  that case. */
   onSourceCategoryChanged: (cb: (category: string | null) => void) => () => void
+  onZoomChanged: (cb: (level: number) => void) => () => void
   onThemeChanged: (cb: (theme: { bg: string; text: string }) => void) => () => void
   onFullscreenChanged: (cb: (fullscreen: boolean) => void) => () => void
   onMenuOpened: (cb: (info: { menu: 'menu' | 'downloads' }) => void) => () => void
@@ -167,6 +183,11 @@ interface Bridge {
    *  which fires the `desktop2.feedback.opened` telemetry action and
    *  opens the support URL via `openExternal`. */
   clickFeedback: () => void
+  /** Click handler for the cloud-instance refresh button. Re-navigates
+   *  the host's comfyView via the same reload path as F5/Ctrl+R. */
+  clickRefreshInstance: () => void
+  /** Reset the host comfyView's zoom to 100%. */
+  resetZoom: () => void
   ready: () => void
 }
 
@@ -196,18 +217,33 @@ const {
   firstUseMode,
   isConsentLockdown,
   isFirstUseLockdown,
+  isLoadingLockdown,
   installTypeMeta,
   installTypeLabel,
   showInstallTypeIcon,
   showBrandMark,
   isLight
 } = useTitleBarIdentity({ bridge, isInstallLess })
-// Mark unused — sourceCategory feeds installTypeMeta inside the
-// composable, but the template doesn't reference it directly.
 // firstUseMode is consumed by isFirstUseLockdown / isConsentLockdown
 // inside the composable; the template only reads the derived booleans.
-void sourceCategory
+
+/** Browser-style refresh button — shown on remote web instances (cloud +
+ *  user-pointed remote ComfyUI), never on local installs, install-less
+ *  hosts, or during first-use lockdown. Clicking re-navigates the remote
+ *  comfyView via the same reload path as F5/Ctrl+R. */
+const showRefreshButton = computed(
+  () =>
+    (sourceCategory.value === 'cloud' || sourceCategory.value === 'remote') &&
+    !isInstallLess.value &&
+    !isFirstUseLockdown.value
+)
 void firstUseMode
+
+const zoomLevel = ref(0)
+const zoomPercent = computed(() => Math.round(Math.pow(1.2, zoomLevel.value) * 100))
+const showZoomReset = computed(
+  () => zoomLevel.value !== 0 && !isInstallLess.value && !isFirstUseLockdown.value
+)
 
 /**
  * Title-bar chrome lockdown. True whenever the bar should collapse to
@@ -238,6 +274,14 @@ const {
  *  entry lands on the same panel-side handler. */
 function handleFeedback(): void {
   bridge?.clickFeedback()
+}
+
+function handleRefreshInstance(): void {
+  bridge?.clickRefreshInstance()
+}
+
+function handleResetZoom(): void {
+  bridge?.resetZoom()
 }
 
 // Icon is ComfyUI-tab only; also visible while the drawer is open so
@@ -404,6 +448,7 @@ const {
   isInstancePickerOpen,
   downloadsActiveCount,
   unseenFinishedCount,
+  unseenErrorCount,
   downloadsTrayLabel,
   downloadsStartedAt,
   handleFileMenu,
@@ -416,6 +461,26 @@ const {
   downloadsBtnRef,
   installPillRef
 })
+
+// First-instance onboarding coachmark pointing at the centre pill. Shares
+// the menus composable's pill ref; opening the drawer acknowledges it.
+const coachmark = useCentralPillCoachmark({
+  bridge,
+  isInstallLess,
+  isFirstUseLockdown,
+  isLoadingLockdown,
+  installPillRef,
+  title: t('titleBar.pillHintTitle'),
+  body: t('titleBar.pillHintBody'),
+  dismissLabel: t('titleBar.pillHintDismiss')
+})
+
+/** Wrap the pill opener so opening the drawer retires the coachmark
+ *  (the hint did its job) before delegating to the real handler. */
+function handleInstallPillWithCoachmark(): void {
+  void coachmark.acknowledgeViaPillOpen()
+  handleInstallPill()
+}
 
 /** One-shot "downloads started" attention flash. Driven by
  *  `downloadsStartedAt` from the menus composable, which bumps each
@@ -438,6 +503,8 @@ watch(downloadsStartedAt, (next) => {
 
 let unsubPanel: (() => void) | undefined
 let unsubInstallationId: (() => void) | undefined
+let unsubZoom: (() => void) | undefined
+let unsubCoachmarkDismissed: (() => void) | undefined
 
 onMounted(() => {
   // Observe the trailing cluster so the left cluster can mirror its
@@ -476,11 +543,38 @@ onMounted(() => {
   unsubPanel = bridge.onPanelChanged((panel) => {
     activePanel.value = panel
   })
+  unsubZoom = bridge.onZoomChanged((level) => {
+    zoomLevel.value = level
+  })
   unsubInstallationId = bridge.onInstallationIdChanged((installationId) => {
     isInstallLess.value = installationId === null
   })
+  // The popup's own dismiss button (✕ / "Got it") routes through main
+  // back to here — flip the once-ever flag + hide.
+  unsubCoachmarkDismissed = bridge.onCoachmarkDismissed(() => {
+    void coachmark.dismiss()
+  })
   bridge.ready()
 })
+
+// Gate inputs settle async via main's pushes after mount, so watch them
+// and re-attempt on each transition (the composable is idempotent) rather
+// than firing once on mount.
+watch(
+  [isInstallLess, isFirstUseLockdown, isLoadingLockdown],
+  ([installLess, lockdown, loading]) => {
+    if (installLess || lockdown || loading) return
+    // Defer past the responsive fit settle so the pill's centre is final
+    // before anchoring: nextTick flushes the DOM, the rAF the layout.
+    void nextTick().then(() => {
+      requestAnimationFrame(() => {
+        if (unmounted) return
+        void coachmark.maybeShow()
+      })
+    })
+  },
+  { immediate: true }
+)
 
 // Invalidate the learned restore costs when anything that materially
 // changes the trailing cluster's content width flips. The fit
@@ -504,6 +598,9 @@ onUnmounted(() => {
   unmounted = true
   unsubPanel?.()
   unsubInstallationId?.()
+  unsubZoom?.()
+  unsubCoachmarkDismissed?.()
+  bridge?.hideCoachmark()
   hideTip()
   trailingObserver?.disconnect()
   trailingObserver = undefined
@@ -569,6 +666,18 @@ onUnmounted(() => {
       >
         <MenuIcon :size="18" />
       </button>
+      <!-- Browser-style refresh for remote/cloud instances, right of the
+           hamburger. Re-navigates the comfyView via the same reload path
+           as F5/Ctrl+R. -->
+      <button
+        v-if="showRefreshButton"
+        type="button"
+        class="title-menu-button title-menu-button--icon title-refresh-button"
+        v-bind="tooltipAttrs(t('titleBar.refreshInstanceTooltip'))"
+        @click="handleRefreshInstance"
+      >
+        <RotateCw :size="16" />
+      </button>
     </div>
 
     <!-- Center: install pill + install-update pill. The downloads tray
@@ -596,15 +705,16 @@ onUnmounted(() => {
         class="title-install-pill is-interactive"
         :class="{
           'is-open': isInstancePickerOpen,
+          'is-coachmark': coachmark.isShowing.value,
           'is-install-less': isInstallLess
         }"
         role="button"
         tabindex="0"
         aria-haspopup="dialog"
         :aria-expanded="isInstancePickerOpen"
-        @click="handleInstallPill"
-        @keydown.enter.prevent="handleInstallPill"
-        @keydown.space.prevent="handleInstallPill"
+        @click="handleInstallPillWithCoachmark"
+        @keydown.enter.prevent="handleInstallPillWithCoachmark"
+        @keydown.space.prevent="handleInstallPillWithCoachmark"
       >
         <!-- Leading mark: the Comfy logo only on the bare dashboard; on an
              actual instance the pill leads with that install's source/type
@@ -686,15 +796,28 @@ onUnmounted(() => {
         <RefreshCw v-else-if="appUpdateState.kind === 'ready'" :size="14" />
         <span class="title-update-pill-label">{{ appUpdatePillLabel ?? 'Desktop Update' }}</span>
       </button>
+      <!-- Zoom-level pill. Contextual — fades in only when the comfyView
+           is zoomed off 100%; click resets to 100% and it fades out. -->
+      <Transition name="title-zoom-fade">
+        <button
+          v-if="showZoomReset"
+          type="button"
+          class="title-zoom-reset"
+          v-bind="tooltipAttrs(t('titleBar.resetZoomTooltip'))"
+          @click="handleResetZoom"
+        >
+          <ZoomIn :size="14" class="title-zoom-reset-icon" />
+          <span class="title-zoom-reset-percent">{{ zoomPercent }}%</span>
+        </button>
+      </Transition>
       <button
         v-if="!isFirstUseLockdown"
         type="button"
-        class="title-menu-button title-feedback-button"
+        class="title-menu-button title-menu-button--icon title-feedback-button"
         v-bind="tooltipAttrs(t('titleBar.feedbackTooltip'), t('titleBar.feedback'))"
         @click="handleFeedback"
       >
         <MessageSquarePlus :size="16" />
-        <span class="title-feedback-label">{{ t('titleBar.feedback') }}</span>
       </button>
       <!-- Downloads tray. Click opens the title-bar dropdown popup in
            `'downloads'` mode anchored under the button. Distinct
@@ -710,7 +833,9 @@ onUnmounted(() => {
         class="title-downloads-tray"
         :class="{
           'has-active': downloadsActiveCount > 0,
-          'has-unseen': downloadsActiveCount === 0 && unseenFinishedCount > 0,
+          'has-error': unseenErrorCount > 0,
+          'has-unseen':
+            downloadsActiveCount === 0 && unseenErrorCount === 0 && unseenFinishedCount > 0,
           'is-flashing': downloadsFlash,
           'is-open': isDownloadsOpen
         }"
@@ -722,11 +847,26 @@ onUnmounted(() => {
           downloadsActiveCount
         }}</span>
         <span
+          v-else-if="unseenErrorCount > 0"
+          class="title-downloads-badge is-error"
+          aria-hidden="true"
+          >{{ unseenErrorCount }}</span
+        >
+        <span
           v-else-if="unseenFinishedCount > 0"
           class="title-downloads-badge is-unseen"
           aria-hidden="true"
           >{{ unseenFinishedCount }}</span
         >
+        <!-- Mid-batch failure marker: while downloads are still active the
+             badge shows the active count, so layer a small red dot on top
+             to surface a failure the instant it happens rather than waiting
+             for the queue to drain. -->
+        <span
+          v-if="downloadsActiveCount > 0 && unseenErrorCount > 0"
+          class="title-downloads-error-dot"
+          aria-hidden="true"
+        />
       </button>
     </div>
   </header>
@@ -872,7 +1012,11 @@ onUnmounted(() => {
   -webkit-app-region: no-drag;
   display: inline-flex;
   align-items: center;
-  justify-content: space-between;
+  /* Explicit gap (not space-between) so the leading icon ↔ name ↔ caret
+     keep a guaranteed minimum separation even when the pill hits its
+     min-width floor — the cramped short-name case. The flex:1 center
+     slot still absorbs slack and stays centered. */
+  gap: 8px;
   /* Shrink-to-content with bounded floor + ceiling. `inline-size:
      fit-content` lets the pill tighten around short install names
      (e.g. "ComfyUI") so the layout budget isn't held hostage by a
@@ -881,11 +1025,17 @@ onUnmounted(() => {
      fluid 22cqi growth up to a 360px ceiling, with ellipsis on the
      name beyond that — matching the dashboard pill. */
   inline-size: fit-content;
-  min-inline-size: 176px;
-  max-inline-size: clamp(176px, 22cqi, 360px);
+  min-inline-size: 200px;
+  max-inline-size: clamp(200px, 22cqi, 360px);
   height: 28px;
-  padding: 5px 8px;
+  /* Slightly tighter on the right: the ChevronDown glyph carries a little
+     baked-in whitespace on its right edge, so an equal 12px both sides reads
+     right-heavy. 10px on the right optically balances the inset. */
+  padding: 5px 10px 5px 12px;
   border-radius: 999px;
+  /* Transparent border at base so the .is-open state can lift it to brand
+     yellow without a layout shift (border-color alone paints nothing). */
+  border: 1px solid transparent;
   background: var(--chooser-surface-bg);
   color: var(--neutral-100);
   font: inherit;
@@ -904,10 +1054,20 @@ onUnmounted(() => {
 .title-install-pill.is-interactive {
   cursor: pointer;
 }
-.title-install-pill.is-interactive:hover,
+/* Hover/focus: a restrained lift that previews — but doesn't fully commit to —
+ * the open state. Surface warms, the transparent base border picks up a faint
+ * yellow, and the muted resting text/icons (`--neutral-100`) step toward brand
+ * yellow. Gated behind `.is-hover-active` so it matches every sibling titlebar
+ * control and stays suppressed during window drag / when unfocused. The full
+ * yellow border + text is reserved for `.is-open`. */
 .title-install-pill.is-interactive:focus-visible {
-  background: var(--brand-surface-bg-hover);
   outline: none;
+}
+.title-bar.is-hover-active .title-install-pill.is-interactive:hover:not(.is-open),
+.title-install-pill.is-interactive:focus-visible:not(.is-open) {
+  background: var(--chooser-surface-bg-hover);
+  border-color: color-mix(in srgb, var(--neutral-50) 35%, transparent);
+  color: color-mix(in srgb, var(--neutral-50) 70%, var(--neutral-100));
 }
 .title-install-pill.is-interactive.is-open {
   /* Lift border + text to brand yellow when the picker is showing.
@@ -954,19 +1114,68 @@ onUnmounted(() => {
   border-color: color-mix(in srgb, var(--comfy-yellow) 70%, var(--neutral-700));
   color: var(--neutral-700);
 }
+.title-zoom-reset {
+  -webkit-app-region: no-drag;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--comfy-yellow) 45%, transparent);
+  background: color-mix(in srgb, var(--comfy-yellow) 12%, transparent);
+  color: var(--comfy-yellow);
+  font: inherit;
+  font-size: 11px;
+  line-height: 14px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition:
+    background-color 0.12s,
+    border-color 0.12s;
+}
+.title-zoom-reset-percent {
+  letter-spacing: 0.01em;
+}
+.title-bar.is-hover-active .title-zoom-reset:hover {
+  background: color-mix(in srgb, var(--comfy-yellow) 20%, transparent);
+  border-color: var(--comfy-yellow);
+}
+.title-zoom-reset:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+.title-zoom-fade-enter-active,
+.title-zoom-fade-leave-active {
+  transition:
+    opacity 0.16s ease,
+    transform 0.16s ease;
+}
+.title-zoom-fade-enter-from,
+.title-zoom-fade-leave-to {
+  opacity: 0;
+  transform: scale(0.9);
+}
+
 .title-install-caret {
   color: currentColor;
   opacity: 0.7;
   flex-shrink: 0;
 }
-/* Install-less host windows: identity-only `Desktop 2.0 Beta` label. */
+/* Install-less host windows: identity-only `Comfy Desktop` label. */
 .title-install-pill.is-install-less {
   opacity: 0.85;
 }
 
+/* Leading + trailing slots are equal fixed width and center their icon,
+   so the icon-to-pill-edge inset is identical on both sides regardless of
+   the icon's own size (16px home mark vs 12px caret). Mirrored side slots
+   keep the pill visually symmetric — equal left/right insets, centered
+   name — at any content width. */
 .title-install-slot {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   flex: 0 0 18px;
 }
 .title-install-slot--center {
@@ -1173,6 +1382,34 @@ onUnmounted(() => {
   background: #22c55e;
 }
 
+.title-downloads-tray.has-error {
+  border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+}
+.title-downloads-badge.is-error {
+  /* Same shape as the other variants — the danger tone carries the
+   * "a download failed" meaning and takes precedence over the green
+   * "done, unseen" badge. */
+  background: var(--danger);
+}
+
+.title-downloads-error-dot {
+  /* Mid-batch failure marker. While downloads are still active the
+   * count badge occupies the top-right corner, so the failure dot
+   * anchors top-LEFT to avoid overlap. The red icon tint
+   * (`.has-error`) carries the colour meaning; this dot makes the
+   * failure legible at the badge level too. */
+  position: absolute;
+  top: -3px;
+  left: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--danger);
+  box-shadow: 0 0 0 2px var(--titlebar-bg, var(--neutral-900));
+  pointer-events: none;
+}
+
 @keyframes title-downloads-pulse {
   0%,
   100% {
@@ -1233,14 +1470,6 @@ onUnmounted(() => {
 
    Tooltips on every pill carry the full label, so icon-only states
    stay accessible without extra markup. */
-
-.title-bar.is-collapsed-feedback .title-feedback-label {
-  display: none;
-}
-.title-bar.is-collapsed-feedback .title-feedback-button {
-  padding: 4px 6px;
-  gap: 0;
-}
 
 /* When the update label collapses the pill drops to a 24×24 circle
    (matching the Settings + other icon-only chrome) instead of staying

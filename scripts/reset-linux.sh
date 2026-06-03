@@ -33,9 +33,9 @@ if [ "$(uname -s)" != "Linux" ]; then
 fi
 
 # Refuse to run while the app is open (includes the upcoming post-rename
-# "ComfyUI Desktop" display name)
-if pgrep -f "comfyui-desktop-2|ComfyUI Desktop 2.0|ComfyUI Desktop|comfyui-launcher|ComfyUI Launcher" >/dev/null 2>&1; then
-  echo "ComfyUI Desktop / Launcher is running. Please quit it first,"
+# "Comfy Desktop" display name)
+if pgrep -f "comfyui-desktop-2|ComfyUI Desktop 2.0|Comfy Desktop|comfyui-launcher|ComfyUI Launcher" >/dev/null 2>&1; then
+  echo "Comfy Desktop / Launcher is running. Please quit it first,"
   echo "then re-run this script."
   exit 1
 fi
@@ -47,7 +47,7 @@ XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
 XDG_STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
 
 # Every historical app/package name. The userData folder on Linux is named
-# after the package.json "name" field (NOT productName). "ComfyUI Desktop"
+# after the package.json "name" field (NOT productName). "Comfy Desktop"
 # is included for the upcoming post-rename productName. "ComfyUI" covers
 # the legacy v1.x desktop app (productName "ComfyUI") whose state can
 # survive an upgrade to the 2.0 beta and break a clean install (mirrors
@@ -56,7 +56,7 @@ APP_NAMES=(
   "comfyui-desktop-2"
   "comfyui-launcher"
   "ComfyUI"
-  "ComfyUI Desktop"
+  "Comfy Desktop"
   "ComfyUI Desktop 2.0"
   "ComfyUI Launcher"
 )

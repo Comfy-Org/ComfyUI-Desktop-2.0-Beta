@@ -51,7 +51,7 @@ describe('Content-Security-Policy: panel.html', () => {
     expect(csp['default-src']).toBe("'self'")
   })
 
-  it('allows the typeform feedback origin in frame-src (Send Beta Feedback modal)', () => {
+  it('allows the typeform feedback origin in frame-src (Send Feedback modal)', () => {
     expect(csp['frame-src']).toBe('https://form.typeform.com')
   })
 })

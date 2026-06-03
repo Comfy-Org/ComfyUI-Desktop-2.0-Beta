@@ -46,7 +46,7 @@ export async function applyAttachHostPreview(
   // OS-level title (taskbar / Alt+Tab / dock) — mirror the install-
   // backed format from `attachInstall` so a preview reads identically
   // to a live attach outside the title bar's Vue chrome.
-  entry.window.setTitle(`${installation.name} — Desktop 2.0 v${APP_VERSION}`)
+  entry.window.setTitle(`${installation.name} — Comfy Desktop v${APP_VERSION}`)
   if (!entry.titleBarView.webContents.isDestroyed()) {
     entry.titleBarView.webContents.send('comfy-titlebar:title-changed', entry.titleBarText)
     entry.titleBarView.webContents.send(

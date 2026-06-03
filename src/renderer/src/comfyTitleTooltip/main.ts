@@ -1,6 +1,6 @@
 // Pull in the same Inter font + design tokens (--surface, --border,
 // --text-muted, etc.) as the launcher / panel / title-bar renderers so the
-// tooltip is visually consistent with the rest of Desktop 2.0.
+// tooltip is visually consistent with the rest of Comfy Desktop.
 import '../assets/main.css'
 import { loadProprietaryFonts } from '../assets/proprietaryFonts'
 
