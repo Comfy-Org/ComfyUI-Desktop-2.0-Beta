@@ -112,6 +112,7 @@ import {
 import {
   destroyPanelView,
   ensurePanelView,
+  focusActiveBody,
   refreshComfyTabBody,
   registerPanelViewIpc,
   sendToPanelDeferred,
@@ -214,6 +215,12 @@ interface RelaunchState {
 const relaunchStates = new Map<string, RelaunchState>()
 /** Cancel functions for pending did-fail-load retry timers per installation. */
 const comfyFailRetryTimerCancels = new Map<string, () => void>()
+/** Browser-style comfyView reload per installation. Registered by
+ *  `attachInstall`; reached by the title-bar refresh button's IPC handler. */
+const comfyReloads = new Map<string, () => void>()
+/** comfyView zoom reset (→ 100%) per installation. Registered by
+ *  `attachInstall`; reached by the title-bar zoom pill's IPC handler. */
+const comfyZoomResets = new Map<string, () => void>()
 /** Counter for generating unique relaunch tokens. */
 let relaunchTokenCounter = 0
 
@@ -633,6 +640,32 @@ function _broadcastAppUpdateStateToTitleBars(state: updater.AppUpdateState): voi
  * and matches the spec's "modal" wording — overlays are a different
  * surface (Tier 1/2/3 popovers).
  */
+// Title-bar refresh button (cloud instances). Browser-style page reload:
+// re-navigates the host's comfyView via the same `reloadComfy` closure as
+// F5/Ctrl+R, which respects the relaunch-in-flight guard. Cloud-only gating
+// lives renderer-side; main reloads whatever comfyView the sender owns.
+ipcMain.on('comfy-window:click-refresh-instance', (event) => {
+  const found = findEntryByTitleBarSender(event.sender)
+  if (!found) return
+  const { entry } = found
+  if (entry.window.isDestroyed()) return
+  const id = entry.installationId
+  if (id === null) return
+  comfyReloads.get(id)?.()
+  focusActiveBody(entry)
+})
+
+ipcMain.on('comfy-window:reset-zoom', (event) => {
+  const found = findEntryByTitleBarSender(event.sender)
+  if (!found) return
+  const { entry } = found
+  if (entry.window.isDestroyed()) return
+  const id = entry.installationId
+  if (id === null) return
+  comfyZoomResets.get(id)?.()
+  focusActiveBody(entry)
+})
+
 ipcMain.on('comfy-window:click-app-update-pill', (event) => {
   const found = findEntryByTitleBarSender(event.sender)
   if (!found) return
@@ -1040,6 +1073,8 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     })
     setAttachFactories({
       comfyFailRetryTimerCancels,
+      comfyReloads,
+      comfyZoomResets,
       relaunchStates,
       computeInstallUpdateAvailable
     })

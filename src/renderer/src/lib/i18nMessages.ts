@@ -102,7 +102,9 @@ export const en = {
     desktopUpdateWithVersion: '{label} (v{version})',
     installUpdateAvailable: 'ComfyUI Update',
     installUpdateVersion: 'ComfyUI {version}',
-    installUpdateShort: 'Update'
+    installUpdateShort: 'Update',
+    refreshInstanceTooltip: 'Refresh',
+    resetZoomTooltip: 'Reset zoom to 100%'
   },
   fileMenu: {
     newWindow: 'New Window',

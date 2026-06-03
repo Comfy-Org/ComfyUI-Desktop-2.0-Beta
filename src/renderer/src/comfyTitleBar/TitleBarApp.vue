@@ -8,7 +8,9 @@ import {
   Loader2,
   Menu as MenuIcon,
   MessageSquarePlus,
-  RefreshCw
+  RefreshCw,
+  RotateCw,
+  Search
 } from 'lucide-vue-next'
 import { useTitleBarTooltip } from './useTitleBarTooltip'
 import { useTitleBarMenus } from './useTitleBarMenus'
@@ -84,6 +86,7 @@ interface Bridge {
    *  install-less host windows; the renderer suppresses the icon in
    *  that case. */
   onSourceCategoryChanged: (cb: (category: string | null) => void) => () => void
+  onZoomChanged: (cb: (level: number) => void) => () => void
   onThemeChanged: (cb: (theme: { bg: string; text: string }) => void) => () => void
   onFullscreenChanged: (cb: (fullscreen: boolean) => void) => () => void
   onMenuOpened: (cb: (info: { menu: 'menu' | 'downloads' }) => void) => () => void
@@ -167,6 +170,11 @@ interface Bridge {
    *  which fires the `desktop2.feedback.opened` telemetry action and
    *  opens the support URL via `openExternal`. */
   clickFeedback: () => void
+  /** Click handler for the cloud-instance refresh button. Re-navigates
+   *  the host's comfyView via the same reload path as F5/Ctrl+R. */
+  clickRefreshInstance: () => void
+  /** Reset the host comfyView's zoom to 100%. */
+  resetZoom: () => void
   ready: () => void
 }
 
@@ -202,12 +210,26 @@ const {
   showBrandMark,
   isLight
 } = useTitleBarIdentity({ bridge, isInstallLess })
-// Mark unused — sourceCategory feeds installTypeMeta inside the
-// composable, but the template doesn't reference it directly.
 // firstUseMode is consumed by isFirstUseLockdown / isConsentLockdown
 // inside the composable; the template only reads the derived booleans.
-void sourceCategory
+
+/** Browser-style refresh button — shown on remote web instances (cloud +
+ *  user-pointed remote ComfyUI), never on local installs, install-less
+ *  hosts, or during first-use lockdown. Clicking re-navigates the remote
+ *  comfyView via the same reload path as F5/Ctrl+R. */
+const showRefreshButton = computed(
+  () =>
+    (sourceCategory.value === 'cloud' || sourceCategory.value === 'remote') &&
+    !isInstallLess.value &&
+    !isFirstUseLockdown.value
+)
 void firstUseMode
+
+const zoomLevel = ref(0)
+const zoomPercent = computed(() => Math.round(Math.pow(1.2, zoomLevel.value) * 100))
+const showZoomReset = computed(
+  () => zoomLevel.value !== 0 && !isInstallLess.value && !isFirstUseLockdown.value
+)
 
 /**
  * Title-bar chrome lockdown. True whenever the bar should collapse to
@@ -238,6 +260,14 @@ const {
  *  entry lands on the same panel-side handler. */
 function handleFeedback(): void {
   bridge?.clickFeedback()
+}
+
+function handleRefreshInstance(): void {
+  bridge?.clickRefreshInstance()
+}
+
+function handleResetZoom(): void {
+  bridge?.resetZoom()
 }
 
 // Icon is ComfyUI-tab only; also visible while the drawer is open so
@@ -438,6 +468,7 @@ watch(downloadsStartedAt, (next) => {
 
 let unsubPanel: (() => void) | undefined
 let unsubInstallationId: (() => void) | undefined
+let unsubZoom: (() => void) | undefined
 
 onMounted(() => {
   // Observe the trailing cluster so the left cluster can mirror its
@@ -476,6 +507,9 @@ onMounted(() => {
   unsubPanel = bridge.onPanelChanged((panel) => {
     activePanel.value = panel
   })
+  unsubZoom = bridge.onZoomChanged((level) => {
+    zoomLevel.value = level
+  })
   unsubInstallationId = bridge.onInstallationIdChanged((installationId) => {
     isInstallLess.value = installationId === null
   })
@@ -504,6 +538,7 @@ onUnmounted(() => {
   unmounted = true
   unsubPanel?.()
   unsubInstallationId?.()
+  unsubZoom?.()
   hideTip()
   trailingObserver?.disconnect()
   trailingObserver = undefined
@@ -586,6 +621,19 @@ onUnmounted(() => {
            `loading-lockdown` keeps the pill interactive so the user
            can open the picker (switch / open another install) while
            an op runs in the background. -->
+      <!-- Browser-style refresh for remote/cloud instances, on the left
+           of the identity pill (reload sits before the address in a
+           browser). Re-navigates the comfyView via the same reload path
+           as F5/Ctrl+R. -->
+      <button
+        v-if="showRefreshButton"
+        type="button"
+        class="title-menu-button title-menu-button--icon title-refresh-button"
+        v-bind="tooltipAttrs(t('titleBar.refreshInstanceTooltip'))"
+        @click="handleRefreshInstance"
+      >
+        <RotateCw :size="16" />
+      </button>
       <!-- Interactive on every mode except first-use lockdown. The
            bootstrap UX is the only flow that needs to keep the user
            inside one window; long-running ops mount the ProgressModal
@@ -658,6 +706,18 @@ onUnmounted(() => {
         </div>
         <div class="title-install-slot title-install-slot--trailing"></div>
       </div>
+      <Transition name="title-zoom-fade">
+        <button
+          v-if="showZoomReset"
+          type="button"
+          class="title-zoom-reset"
+          v-bind="tooltipAttrs(t('titleBar.resetZoomTooltip'))"
+          @click="handleResetZoom"
+        >
+          <Search :size="13" class="title-zoom-reset-icon" />
+          <span class="title-zoom-reset-percent">{{ zoomPercent }}%</span>
+        </button>
+      </Transition>
     </div>
 
     <div ref="titleTrailing" class="title-trailing">
@@ -954,6 +1014,62 @@ onUnmounted(() => {
   border-color: color-mix(in srgb, var(--comfy-yellow) 70%, var(--neutral-700));
   color: var(--neutral-700);
 }
+.title-zoom-reset {
+  -webkit-app-region: no-drag;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--titlebar-icon);
+  font: inherit;
+  font-size: 11px;
+  line-height: 14px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  opacity: 0.85;
+  transition:
+    background-color 0.12s,
+    border-color 0.12s,
+    opacity 0.12s;
+}
+.title-zoom-reset-icon {
+  opacity: 0.75;
+}
+.title-zoom-reset-percent {
+  letter-spacing: 0.01em;
+}
+.title-bar.is-hover-active .title-zoom-reset:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+.title-bar.is-light .title-zoom-reset {
+  background: rgba(0, 0, 0, 0.06);
+}
+.title-bar.is-light.is-hover-active .title-zoom-reset:hover {
+  background: rgba(0, 0, 0, 0.1);
+  border-color: rgba(0, 0, 0, 0.18);
+}
+.title-zoom-reset:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+.title-zoom-fade-enter-active,
+.title-zoom-fade-leave-active {
+  transition:
+    opacity 0.16s ease,
+    transform 0.16s ease;
+}
+.title-zoom-fade-enter-from,
+.title-zoom-fade-leave-to {
+  opacity: 0;
+  transform: scale(0.9);
+}
+
 .title-install-caret {
   color: currentColor;
   opacity: 0.7;
