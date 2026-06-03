@@ -5,6 +5,7 @@ import { LayoutDashboard, Plus, Search, X } from 'lucide-vue-next'
 import BaseInput from '../components/ui/BaseInput.vue'
 import { FILTER_CHIPS, useInstallList } from '../composables/useInstallList'
 import { useCloudCapacity } from '../composables/useCloudCapacity'
+import { useDialogs } from '../composables/useDialogs'
 import { useSessionStore } from '../stores/sessionStore'
 import ComfyUISettingsContent from '../components/settings/ComfyUISettingsContent.vue'
 import InfoTooltip from '../components/InfoTooltip.vue'
@@ -145,7 +146,7 @@ interface PickerBridge {
   close?: () => void
   pickInstall: (installationId: string) => void
   openNewInstall: () => void
-  restartInstall: (installationId: string) => void
+  restartInstall: (installationId: string, opts?: { confirmed?: boolean }) => void
   setPickerSelectedInstall: (installationId: string | null) => void
   pickerUpdateField: (
     installationId: string,
@@ -523,6 +524,7 @@ function handleSettingsNavigateList(): void {
 // "Temporarily unavailable" chip on the cloud row itself is a follow-up
 // (the row's a child component `InstanceRow.vue`).
 const cloudCapacity = useCloudCapacity()
+const dialogs = useDialogs()
 /** Tier-aware capacity status passed down to per-row chips so a paid
  *  user doesn't see "Temporarily unavailable" on a row they can still
  *  click through. Mirrors what `confirmEntry()` will do. */
@@ -536,7 +538,35 @@ async function handleExpandedPrimaryAction(restartInPlace: boolean): Promise<voi
   // false. Matches the ChooserView path so the two can't diverge.
   if (inst.sourceCategory === 'cloud' && !(await cloudCapacity.confirmEntry())) return
   if (restartInPlace) {
-    bridge?.restartInstall(inst.id)
+    // Confirm in-drawer for local restarts before crossing the bridge.
+    // Cloud / remote restarts have no local process to kill (matches
+    // main-side `shouldConfirmKillForEntry`), so they skip the prompt.
+    // Doing the confirm here keeps it visually consistent with Update /
+    // Stop / etc. — the drawer stays open during the prompt instead of
+    // dismissing first and reopening as a system-modal over the host.
+    if (inst.sourceCategory === 'local') {
+      const result = await dialogs.confirm({
+        title: 'Restart instance?',
+        message: 'Restart this instance?',
+        confirmLabel: 'Restart',
+        cancelLabel: 'Cancel',
+        messageDetails: [
+          {
+            label: 'Heads up',
+            items: [
+              'Restarting will stop the running session.',
+              'Any unsaved work in the workflow will be lost.',
+            ],
+          },
+        ],
+      })
+      if (result !== 'primary') return
+    }
+    // `confirmed: true` tells main to skip its own system-modal — the
+    // renderer already handled the prompt. Main keeps the modal as a
+    // safety net for any future caller that fires the IPC without
+    // confirming first.
+    bridge?.restartInstall(inst.id, { confirmed: true })
   } else {
     bridge?.pickInstall(inst.id)
   }

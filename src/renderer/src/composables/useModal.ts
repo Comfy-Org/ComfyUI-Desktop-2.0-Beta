@@ -119,6 +119,35 @@ function getLastCheckboxValues(): Record<string, boolean> {
   return _lastCheckboxValues
 }
 
+/** Cancel value per `ModalType` — mirrors what a backdrop / ESC click
+ *  resolves to so an external dismiss never lies about the awaited
+ *  type (`null` for prompt/select/confirmWithOptions, `false` for
+ *  confirm, `undefined` for alert). */
+function cancelValueForType(type: ModalType): unknown {
+  switch (type) {
+    case 'confirm':
+      return false
+    case 'alert':
+      return undefined
+    case 'prompt':
+    case 'select':
+    case 'confirmWithOptions':
+      return null
+    default:
+      return null
+  }
+}
+
+/** External dismiss — resolve any open `useModal` entry as if the user
+ *  had clicked the backdrop. Used by the title-popup IPC that fires
+ *  when the picker is preempted by another title-bar dropdown so a
+ *  half-open confirm doesn't survive the kind-switch as orphaned
+ *  state. No-op when nothing is open. */
+function dismiss(): void {
+  if (!state.visible) return
+  close(cancelValueForType(state.type))
+}
+
 export function useModal() {
   function alert(opts: {
     title: string
@@ -256,6 +285,7 @@ export function useModal() {
     prompt,
     select,
     close,
+    dismiss,
     getLastCheckboxValues,
   }
 }
