@@ -8,7 +8,7 @@
     "!out/**/*.map",
     "!bootstrap-python/**"
   ],
-  "appId": "org.comfy.comfyui-desktop-2",
+  "appId": "com.todesktop.241012ess7yxs0e",
   "icon": "./assets/Comfy_Logo_x512.png",
   "packageManager": "pnpm",
   "pnpmVersion": "10.28.1",
