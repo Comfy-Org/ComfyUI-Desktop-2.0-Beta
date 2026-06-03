@@ -939,7 +939,7 @@
     "instanceRunningTitle": "An instance is already running",
     "instanceRunningMessage": "Close \"{name}\" and launch this instance instead, or run both at the same time.",
     "instanceRunningProceed": "Run Both",
-    "instanceRunningReplace": "Close & Launch This",
+    "instanceRunningReplace": "Close & Launch",
     "modelFolderRelaunchTitle": "Restarting ComfyUI",
     "modelFolderRelaunchDesc": "New model folders were detected from custom nodes. Restarting so ComfyUI can use them right away.",
     "steps": {
