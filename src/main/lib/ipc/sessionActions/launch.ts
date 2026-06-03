@@ -21,7 +21,7 @@ import {
 } from '../shared'
 import type { ChildProcess, LaunchCmd } from '../shared'
 import type { ActionContext, ActionResult } from './types'
-import { scrubStderr, lastNLines, stripAnsi } from '../../scrubStderr'
+import { lastNLines, stripAnsi } from '../../stderrTail'
 import { rotateLogFiles, getLogDir } from '../../logRotation'
 import { createExecutionTap } from '../../executionTap'
 import { clearCrash, recordCrash } from '../../crashBuffer'
@@ -255,7 +255,10 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     proc.on('exit', (code, signal) => {
       logStream.end()
       const crashed = _runningSessions.has(installationId) && isCrashedExit(code, signal)
-      const lastStderr = scrubStderr(lastNLines(stderrBuf, 100))
+      // Raw stderr — this payload is shown to the user in the crashed-state
+      // lifecycle UI. PII scrubbing happens on the telemetry path
+      // (`scrubTelemetryContext` in renderer bootstrap), not here.
+      const lastStderr = lastNLines(stderrBuf, 100)
       execTap.flushSummary()
       _removeSession(installationId)
       const exitedPayload = {
@@ -493,7 +496,8 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
   writePortLock(launchCmd.port!, { pid: proc.pid!, installationName: inst.name })
 
   if (!sender.isDestroyed()) {
-    const bootStderr = scrubStderr(lastNLines(launchResult.getStderr(), 50))
+    // Raw bootStderr — telemetry forwarders scrub it before it leaves the box.
+    const bootStderr = lastNLines(launchResult.getStderr(), 50)
     sender.send('comfy-boot-log', { installationId, bootStderr })
   }
 
@@ -638,7 +642,8 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
       }
       logStream.end()
       const crashed = _runningSessions.has(installationId) && isCrashedExit(code, signal)
-      const lastStderr = scrubStderr(lastNLines(currentGetStderr(), 100))
+      // Raw stderr — see note in the early-fail exit handler above.
+      const lastStderr = lastNLines(currentGetStderr(), 100)
       execTap.flushSummary()
       _removeSession(installationId)
       const exitedPayload = {

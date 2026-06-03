@@ -7,11 +7,14 @@
  * tracebacks and error messages can be safely forwarded to Datadog and
  * PostHog.
  *
- * Centralized so that everything which forwards user-visible text — the
- * renderer-bound `forwardDatadogError`, the main-process `executionTap`,
- * the boot-log scrubber, and the renderer-side telemetry action props
- * pass — applies identical rules. Adding a pattern here updates every
- * call site at once.
+ * Centralized so that every telemetry / off-box forwarder — the
+ * main-process `forwardDatadogError`, the `executionTap` traceback emitter,
+ * and the renderer-side `scrubTelemetryContext` safety net — applies
+ * identical rules. Adding a pattern here updates every call site at once.
+ *
+ * Not applied to logs displayed locally to the user (e.g. the crashed-state
+ * lifecycle view or the console modal) — those need to be readable for
+ * debugging and never leave the user's machine.
  *
  * Lives in `src/shared/` because both main and renderer import it; the
  * file has no runtime dependencies on Electron, Node, or the DOM so it
