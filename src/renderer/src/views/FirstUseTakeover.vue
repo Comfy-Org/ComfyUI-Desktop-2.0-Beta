@@ -136,15 +136,14 @@ const cloudDescriptionKey = computed(() => {
  *  Functional wiring (skipping optional setup steps) lands separately;
  *  for now the value is captured for telemetry only. */
 const expressInstall = ref(true)
-/** Nested sub-modifier under Express Install, only meaningful when an
+/** Peer modifier alongside Express Install, only rendered when an
  *  auto-tracked legacy install was detected on the machine. When
- *  checked, the Express path skips the fresh Standalone install and
- *  routes to chain-migrate instead — the existing install gets
- *  brought over rather than left behind. Pre-ticked so returning
- *  Desktop users land on the migration path by default. */
+ *  checked, Continue routes straight to chain-migrate so the existing
+ *  install is brought over instead of installing fresh. Pre-ticked so
+ *  returning Desktop users land on the migration path by default. */
 const migrateExisting = ref(true)
 const showMigrateExisting = computed(
-  () => pickedChoice.value === 'local' && expressInstall.value && hasLegacyDesktop.value
+  () => pickedChoice.value === 'local' && hasLegacyDesktop.value
 )
 /** Detected GPU vendor — populated by `window.api.detectGPU()` on
  *  `open()`. Surfaces as an inline confirmation line under the Express
@@ -330,19 +329,20 @@ async function routePostStart(): Promise<void> {
     }
     emitCompleted('cloud')
     emit('complete-cloud')
-  } else if (hasLegacyDesktop.value && expressInstall.value && migrateExisting.value) {
-    // Local + Express + the nested "Migrate existing install" sub-
-    // checkbox: route directly to chain-migrate. The sub-checkbox is
-    // only visible when Express is on AND a legacy install was
-    // detected, so its `true` value is an explicit opt-in to bring
-    // the existing install over instead of installing fresh.
+  } else if (hasLegacyDesktop.value && migrateExisting.value) {
+    // Local + the "Migrate existing install" peer checkbox: route
+    // straight to chain-migrate. The checkbox is only rendered when a
+    // legacy install was detected, so its `true` value is an explicit
+    // opt-in to bring the existing install over instead of installing
+    // fresh — and it takes precedence over Express, since Express
+    // controls a fresh install path and migrate replaces that path.
     emitTelemetryAction('desktop2.first_use.local_branch_chosen', { choice: 'migrate' })
     emitCompleted('local-migrate')
     emit('chain-migrate')
   } else if (hasLegacyDesktop.value && !expressInstall.value) {
-    // Express takes precedence: when checked, skip the migrate-vs-fresh
-    // sub-step and head straight to the express Standalone install. Only
-    // surface the localBranch fork when Express is unticked.
+    // Legacy detected but the user opted out of migrate and Express:
+    // surface the localBranch fork so they can still pick migrate-vs-
+    // fresh manually from the more detailed sub-step.
     step.value = 'localBranch'
     isContinuing.value = false
   } else {
@@ -967,24 +967,19 @@ defineExpose({ open })
   }
 }
 
-/* Sub-checkbox nested under Express Install. Indented and a notch
- * smaller than its parent so the visual hierarchy reads as
- * "Express → migrate is a sub-option of express", not as two peer
- * checkboxes competing for the same column. Same hide-with-class
- * pattern as `.start-express--hidden` so the row stays in the DOM
- * (no layout jump when toggled). */
+/* Peer checkbox sibling of `.start-express`. Mirrors the same metrics
+ * (gap, font-size, color, transition timing) so the two read as a row
+ * of equal-weight modifiers on the Local pick, not as a parent/child
+ * pair. Same hide-with-class pattern as `.start-express--hidden` so
+ * the row stays in the DOM (no layout jump when toggled). */
 .start-migrate-existing {
   display: inline-flex;
   align-self: center;
   align-items: flex-start;
   gap: 8px;
-  /* Visual indent under the Express checkbox: 16px (input width) + 8px
-   * (gap) = 24px lines this checkbox up with the start of the Express
-   * *label text* rather than with the parent input itself. */
-  margin-left: 24px;
   margin-top: 2px;
-  font-size: 12px;
-  color: var(--neutral-400);
+  font-size: 13px;
+  color: var(--neutral-300);
   opacity: 1;
   transform: translateY(0);
   transition:

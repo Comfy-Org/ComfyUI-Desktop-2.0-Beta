@@ -180,7 +180,7 @@ describe('FirstUseTakeover start step', () => {
     expect(emitted![0]).toEqual([{ express: false }])
   })
 
-  it('hasLegacyDesktop + Express OFF routes to the localBranch sub-step (migrate-vs-fresh fork preserved)', async () => {
+  it('hasLegacyDesktop + Express OFF + migrate OFF routes to the localBranch sub-step', async () => {
     const wrapper = mountTakeover()
     await (wrapper.vm as unknown as { open: (opts: { hasLegacyDesktop: boolean }) => Promise<void> }).open({
       hasLegacyDesktop: true,
@@ -192,29 +192,37 @@ describe('FirstUseTakeover start step', () => {
     await wrapper
       .find('[data-testid="first-use-express-install"] input[type="checkbox"]')
       .setValue(false)
+    // Migrate is pre-ticked when legacy is detected; the localBranch
+    // fork is only reachable when the user explicitly opts out of
+    // BOTH express and migrate-existing.
+    await wrapper
+      .find('[data-testid="first-use-migrate-existing"] input[type="checkbox"]')
+      .setValue(false)
     await wrapper.find('[data-testid="first-use-continue"]').trigger('click')
 
     // No chain-local fires — the user lands on the localBranch sub-step
-    // to make the migrate-vs-fresh decision.
+    // to make the migrate-vs-fresh decision manually.
     expect(wrapper.emitted('chain-local')).toBeFalsy()
     expect(wrapper.find('[data-testid="first-use-local-migrate"]').exists()).toBe(true)
   })
 
-  it('renders the "Migrate existing install" sub-checkbox only when hasLegacyDesktop is true', async () => {
+  it('renders the "Migrate existing install" checkbox only when hasLegacyDesktop is true', async () => {
     const wrapper = mountTakeover()
     // Default open() has hasLegacyDesktop = false — the row is not in
-    // the DOM at all (v-if), so no test-id should resolve.
+    // the DOM at all (v-if), so no test-id should resolve. No legacy
+    // install means Cloud stays the brand-anchor default with no
+    // migrate-related affordance shown anywhere on the start screen.
     expect(wrapper.find('[data-testid="first-use-migrate-existing"]').exists()).toBe(false)
-    // After the host plumbs the detected legacy install in, the sub-
-    // checkbox mounts. It still renders only inside the Local + Express
-    // context — the hidden-class controls visibility from there.
+    // After the host plumbs the detected legacy install in, the
+    // checkbox mounts as a peer of Express. Visibility is then driven
+    // by the Local pick via the hidden-class pattern.
     await (wrapper.vm as unknown as { open: (opts: { hasLegacyDesktop: boolean }) => Promise<void> }).open({
       hasLegacyDesktop: true,
     })
     expect(wrapper.find('[data-testid="first-use-migrate-existing"]').exists()).toBe(true)
   })
 
-  it('routes Local + Express + migrate-existing to `chain-migrate` (skips localBranch)', async () => {
+  it('routes Local + migrate-existing to `chain-migrate` (regardless of Express)', async () => {
     const wrapper = mountTakeover()
     await (wrapper.vm as unknown as { open: (opts: { hasLegacyDesktop: boolean }) => Promise<void> }).open({
       hasLegacyDesktop: true,
@@ -223,15 +231,14 @@ describe('FirstUseTakeover start step', () => {
       .find('[data-testid="first-use-consent-tos"] input[type="checkbox"]')
       .setValue(true)
     await wrapper.find('[data-testid="first-use-pick-local"]').trigger('click')
-    // Express stays checked (pre-ticked default) and the migrate sub-
-    // checkbox is pre-ticked too on the legacy-desktop path — just
-    // press Continue to commit the migrate route.
+    // Migrate is pre-ticked on the legacy-desktop path — just press
+    // Continue. Migrate replaces the install path entirely, so it
+    // takes precedence over Express (which controls *fresh* install).
     await wrapper.find('[data-testid="first-use-continue"]').trigger('click')
 
     expect(wrapper.emitted('chain-migrate')).toBeTruthy()
     expect(wrapper.emitted('chain-local')).toBeFalsy()
     expect(wrapper.emitted('complete-cloud')).toBeFalsy()
-    // Migrate skips the localBranch sub-step entirely.
     expect(wrapper.find('[data-testid="first-use-local-migrate"]').exists()).toBe(false)
   })
 
@@ -244,8 +251,8 @@ describe('FirstUseTakeover start step', () => {
       .find('[data-testid="first-use-consent-tos"] input[type="checkbox"]')
       .setValue(true)
     await wrapper.find('[data-testid="first-use-pick-local"]').trigger('click')
-    // Untick the migrate sub-checkbox: returning user explicitly opts
-    // out and wants a clean Standalone install instead.
+    // Untick the migrate checkbox: returning user explicitly opts out
+    // and wants a clean Standalone install instead.
     await wrapper
       .find('[data-testid="first-use-migrate-existing"] input[type="checkbox"]')
       .setValue(false)
