@@ -555,7 +555,17 @@ onUnmounted(() => {
   window.api.setFirstUseMode('none')
 })
 
-defineExpose({ open })
+/** Host-callable: clears the Continue-button spinner without resetting
+ *  picker state. Used by chain handlers (most prominently
+ *  `handleFirstUseChainMigrate`) when their post-emit confirm modal
+ *  returns null — the takeover stays mounted on the start step with
+ *  all selections preserved, but the spinner needs to clear so the
+ *  user can retry Continue. */
+function resetContinue(): void {
+  isContinuing.value = false
+}
+
+defineExpose({ open, resetContinue })
 </script>
 
 <template>
