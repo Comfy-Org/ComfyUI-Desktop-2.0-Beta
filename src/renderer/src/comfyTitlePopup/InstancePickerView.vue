@@ -80,6 +80,13 @@ interface PickerSnapshot {
    *  window via `useInstallCta`. */
   launchingInstallationIds: string[]
   selectedInstallationId: string | null
+  /** Monotonic counter bumped only when main intentionally retargets
+   *  the picker selection (open / "Manage…" deep-link). Snapshot
+   *  rebroadcasts from live-data events forward the current value
+   *  unchanged. The view only applies `selectedInstallationId` over a
+   *  local user pick when this advances, so a stale rebroadcast can't
+   *  snap the user back to a previously-selected row (issue #788). */
+  pickerSelectionEpoch?: number
   selectedSettings: DetailSection[] | null
   selectedSnapshots: SnapshotListData | null
   initialTab?: string | null
@@ -268,24 +275,34 @@ function resolveInitialSelection(snapshot: PickerSnapshot): string | null {
   return mostRecentInstallId(snapshot.installs)
 }
 const selectedId = ref<string | null>(resolveInitialSelection(props.snapshot))
+// Epoch already consumed by the local `selectedId`. Tracks the largest
+// `pickerSelectionEpoch` we've applied; only a strictly-greater snapshot
+// epoch counts as a main-authoritative retarget. Initial mount counts
+// as "applied" — `resolveInitialSelection` above already honoured the
+// snapshot's seed.
+const appliedSelectionEpoch = ref<number>(props.snapshot.pickerSelectionEpoch ?? 0)
+
 watch(
-  () => props.snapshot.selectedInstallationId,
-  (next) => {
-    if (next) selectedId.value = next
+  () => props.snapshot.pickerSelectionEpoch ?? 0,
+  (nextEpoch) => {
+    if (nextEpoch <= appliedSelectionEpoch.value) return
+    // Main intentionally retargeted (open / "Manage…" deep-link). Adopt
+    // its selection, even if the user had locally clicked something
+    // else in the meantime — a fresh open is a clear user intent that
+    // overrides any prior in-popup selection.
+    appliedSelectionEpoch.value = nextEpoch
+    selectedId.value = resolveInitialSelection(props.snapshot)
   }
 )
-watch(
-  () => props.snapshot.activeInstallationId,
-  (next) => {
-    if (!props.snapshot.selectedInstallationId) {
-      selectedId.value = next ?? mostRecentInstallId(props.snapshot.installs)
-    }
-  }
-)
+
+// Cold-start fallback: if the snapshot first arrives with no installs
+// and a `null` selection, this watcher seeds `selectedId` once installs
+// land. Once a selection exists (whether from user click or initial
+// resolve), live install-list updates must not touch it — they'd
+// otherwise reintroduce the snap-back this fix guards against.
 watch(
   () => props.snapshot.installs,
   (installs) => {
-    if (props.snapshot.selectedInstallationId || props.snapshot.activeInstallationId) return
     if (selectedId.value) return
     const id = mostRecentInstallId(installs)
     if (id) {

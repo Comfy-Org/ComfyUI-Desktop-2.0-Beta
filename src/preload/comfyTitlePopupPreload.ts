@@ -59,6 +59,13 @@ export interface PopupInstancePickerSnapshot {
    *  to the host's active install on open; flips when the user picks
    *  a different row (popup pushes via `setPickerSelectedInstall`). */
   selectedInstallationId: string | null
+  /** Monotonic counter bumped only when main intentionally retargets
+   *  the picker selection (open / "Manage…" deep-link). Plain live-data
+   *  rebroadcasts forward the current value unchanged. The picker view
+   *  applies the snapshot's `selectedInstallationId` only when this
+   *  advances, so a stale broadcast can't override the user's local
+   *  click (issue #788). Optional on the wire for older bundles. */
+  pickerSelectionEpoch?: number
   /** Detail sections for the selected install — same shape
    *  `getDetailSections` returns to the renderer. `null` when no
    *  selection or the source can't produce sections. Typed loosely
@@ -545,6 +552,7 @@ function isInstancePickerSnapshot(value: unknown): value is PopupInstancePickerS
     activeInstallationId?: unknown
     runningInstallationIds?: unknown
     selectedInstallationId?: unknown
+    pickerSelectionEpoch?: unknown
     selectedSettings?: unknown
     selectedSnapshots?: unknown
     mode?: unknown
@@ -560,6 +568,10 @@ function isInstancePickerSnapshot(value: unknown): value is PopupInstancePickerS
     v.selectedInstallationId !== undefined
     && v.selectedInstallationId !== null
     && typeof v.selectedInstallationId !== 'string'
+  ) return false
+  if (
+    v.pickerSelectionEpoch !== undefined
+    && typeof v.pickerSelectionEpoch !== 'number'
   ) return false
   if (
     v.selectedSettings !== undefined
