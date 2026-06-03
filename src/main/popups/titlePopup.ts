@@ -1296,6 +1296,17 @@ function openTitlePopup(opts: OpenTitlePopupOpts): void {
   // kind) before `entry.kind` is overwritten below.
   const isOpenOrPending = entry.view.isOpen || entry.view.pendingShowTimer !== null
   if (isOpenOrPending && opts.kind !== entry.kind) {
+    // When the outgoing kind is the instance-picker, tell the popup
+    // renderer to cancel any open `useModal` / `useDialogs` entry
+    // first. The picker's `useComfyUISettings.runAction` chain can
+    // park a confirm/prompt waiting on user input; hiding the WCV
+    // alone doesn't resolve that Promise, so the next time the picker
+    // opens (or re-renders) the modal would silently resurface.
+    // Treat the kind-switch click as the same dismiss the modal's own
+    // backdrop fires (issue #770).
+    if (entry.kind === 'instance-picker' && !entry.view.popup.webContents.isDestroyed()) {
+      entry.view.popup.webContents.send('comfy-titlepopup:dismiss-modals')
+    }
     hideTitlePopup(entry, { releaseFocusToParent: false })
   }
 
@@ -1663,6 +1674,19 @@ function openInstancePickerForHost(
     theme: parentEntry.lastTheme,
     titleBarSender,
   })
+
+  // The snapshot above already carries `autoAction`/`autoActionNonce`
+  // baked in (a fresh object built by `buildInstancePickerSnapshot`),
+  // so clearing them on the entry now is safe — that snapshot reaches
+  // the renderer unchanged. Subsequent `broadcastInstancePickerSnapshotToTitlePopups`
+  // rebuilds reread these fields and would otherwise keep re-sending
+  // the same one-shot autoAction forever, re-firing the confirm modal
+  // any time the picker's renderer-side `consumedAutoActionKey` is
+  // lost (renderer reload, prop transition cycles).
+  const ensuredEntry = titlePopupsByParent.get(parentEntry.window.id)
+  if (ensuredEntry) {
+    ensuredEntry.pickerAutoAction = null
+  }
 
   // Kick the data refresh asynchronously. When it lands,
   // `broadcastInstancePickerSnapshotToTitlePopups` pushes the updated

@@ -481,6 +481,14 @@ export interface ComfyTitlePopupBridge {
   /** Dismiss a completed (success/error/cancelled) background op so the
    *  right pane returns to the settings view. */
   pickerDismissBackgroundOp(installationId: string): void
+  /** Fires when main wants the popup renderer to cancel any open modal
+   *  / dialog state — e.g. the picker is about to be hidden because
+   *  another title-bar dropdown was clicked, and we don't want a
+   *  half-open confirm to survive the kind-switch as orphaned state.
+   *  The renderer handler should resolve open `useModal` / `useDialogs`
+   *  entries with their kind-appropriate cancel value (mirrors a
+   *  backdrop click). */
+  onDismissModals(cb: () => void): () => void
 }
 
 function isPopupConfig(value: unknown): value is TitlePopupConfig {
@@ -780,6 +788,11 @@ const bridge: ComfyTitlePopupBridge = {
   },
   pickerDismissBackgroundOp: (installationId) => {
     ipcRenderer.send('comfy-titlepopup:dismiss-background-op', { installationId })
+  },
+  onDismissModals: (cb) => {
+    const handler = (): void => cb()
+    ipcRenderer.on('comfy-titlepopup:dismiss-modals', handler)
+    return () => ipcRenderer.removeListener('comfy-titlepopup:dismiss-modals', handler)
   },
 }
 
