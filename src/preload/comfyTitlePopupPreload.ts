@@ -59,6 +59,13 @@ export interface PopupInstancePickerSnapshot {
    *  to the host's active install on open; flips when the user picks
    *  a different row (popup pushes via `setPickerSelectedInstall`). */
   selectedInstallationId: string | null
+  /** Monotonic counter bumped only when main intentionally retargets
+   *  the picker selection (open / "Manage…" deep-link). Plain live-data
+   *  rebroadcasts forward the current value unchanged. The picker view
+   *  applies the snapshot's `selectedInstallationId` only when this
+   *  advances, so a stale broadcast can't override the user's local
+   *  click (issue #788). Optional on the wire for older bundles. */
+  pickerSelectionEpoch?: number
   /** Detail sections for the selected install — same shape
    *  `getDetailSections` returns to the renderer. `null` when no
    *  selection or the source can't produce sections. Typed loosely
@@ -194,9 +201,8 @@ export type PopupDownloadAction =
   | { action: 'clear-finished' }
 
 /** Settings tabs the popup can deep-link the host's panelView into.
- *  Mirrors `SettingsTab` in `views/SettingsModal.vue` — kept inline
- *  because the popup's tsconfig slice can't see the renderer's view
- *  layer. */
+ *  Defined inline because the popup's tsconfig slice can't see the
+ *  renderer's view layer. */
 export type PopupSettingsTab = 'comfy' | 'directories' | 'downloads' | 'global'
 
 export interface ComfyTitlePopupBridge {
@@ -263,12 +269,16 @@ export interface ComfyTitlePopupBridge {
    *  window's new-install panel — same surface the file menu's
    *  "New Install" entry lands on. */
   openNewInstall(): void
-  /** Picker → Restart on a running install. Main confirms via a native
-   *  dialog (parented to the picker's host window), stops the running
-   *  session, then re-runs the focus-or-launch flow against the same
-   *  install so the user lands in a fresh Comfy window. Cancelling the
-   *  confirm is a no-op. */
-  restartInstall(installationId: string): void
+  /** Picker → Restart on a running install. Stops the running session
+   *  and re-runs the focus-or-launch flow against the same install so
+   *  the user lands in a fresh Comfy window.
+   *
+   *  Pass `{ confirmed: true }` when the caller (typically the picker
+   *  renderer) has already shown an in-drawer confirm and the user
+   *  accepted; main skips its own system-modal in that case. Omitting
+   *  the flag falls back to main's system-modal confirm — kept as a
+   *  safety net for non-renderer-confirmed callers. */
+  restartInstall(installationId: string, opts?: { confirmed?: boolean }): void
   /** Capacity-protection status for Cloud entry points (PostHog
    *  `desktop-cloud-capacity`). The popup runs in a separate
    *  WebContentsView with its own preload and does not have
@@ -481,6 +491,14 @@ export interface ComfyTitlePopupBridge {
   /** Dismiss a completed (success/error/cancelled) background op so the
    *  right pane returns to the settings view. */
   pickerDismissBackgroundOp(installationId: string): void
+  /** Fires when main wants the popup renderer to cancel any open modal
+   *  / dialog state — e.g. the picker is about to be hidden because
+   *  another title-bar dropdown was clicked, and we don't want a
+   *  half-open confirm to survive the kind-switch as orphaned state.
+   *  The renderer handler should resolve open `useModal` / `useDialogs`
+   *  entries with their kind-appropriate cancel value (mirrors a
+   *  backdrop click). */
+  onDismissModals(cb: () => void): () => void
 }
 
 function isPopupConfig(value: unknown): value is TitlePopupConfig {
@@ -534,6 +552,7 @@ function isInstancePickerSnapshot(value: unknown): value is PopupInstancePickerS
     activeInstallationId?: unknown
     runningInstallationIds?: unknown
     selectedInstallationId?: unknown
+    pickerSelectionEpoch?: unknown
     selectedSettings?: unknown
     selectedSnapshots?: unknown
     mode?: unknown
@@ -549,6 +568,10 @@ function isInstancePickerSnapshot(value: unknown): value is PopupInstancePickerS
     v.selectedInstallationId !== undefined
     && v.selectedInstallationId !== null
     && typeof v.selectedInstallationId !== 'string'
+  ) return false
+  if (
+    v.pickerSelectionEpoch !== undefined
+    && typeof v.pickerSelectionEpoch !== 'number'
   ) return false
   if (
     v.selectedSettings !== undefined
@@ -627,8 +650,11 @@ const bridge: ComfyTitlePopupBridge = {
   openNewInstall: () => {
     ipcRenderer.send('comfy-titlepopup:open-new-install')
   },
-  restartInstall: (installationId) => {
-    ipcRenderer.send('comfy-titlepopup:restart-install', { installationId })
+  restartInstall: (installationId, opts) => {
+    ipcRenderer.send('comfy-titlepopup:restart-install', {
+      installationId,
+      confirmed: opts?.confirmed === true,
+    })
   },
   getCloudCapacity: async () => {
     // Reuses the main-side IPC handler registered for the panel
@@ -780,6 +806,11 @@ const bridge: ComfyTitlePopupBridge = {
   },
   pickerDismissBackgroundOp: (installationId) => {
     ipcRenderer.send('comfy-titlepopup:dismiss-background-op', { installationId })
+  },
+  onDismissModals: (cb) => {
+    const handler = (): void => cb()
+    ipcRenderer.on('comfy-titlepopup:dismiss-modals', handler)
+    return () => ipcRenderer.removeListener('comfy-titlepopup:dismiss-modals', handler)
   },
 }
 

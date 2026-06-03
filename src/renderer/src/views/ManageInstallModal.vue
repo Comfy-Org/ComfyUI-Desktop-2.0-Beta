@@ -9,10 +9,9 @@ import type { Installation, ShowProgressOpts } from '../types/ipc'
  * Per-install management modal. Opens centered from the four dashboard /
  * chooser entry-points (chooser-card kebab "Manage…", install-pill kebab,
  * `comfy://install-update/<id>` deep link, `comfy://open-settings`
- * deep link). Replaces the legacy `SettingsModal` for these surfaces —
- * the global-settings tab moved to the title-popup, and directories /
- * downloads have other homes now, so this modal only carries the
- * per-install body (DetailModal in `embedded` mode).
+ * deep link). Carries the per-install body (DetailModal in `embedded`
+ * mode); global settings and directories/downloads live in the
+ * title-popup, not here.
  *
  * Chrome is delegated to the shared `BaseModal` primitive: Teleport,
  * fade transition, focus capture+restore, body scroll lock, ESC dismiss,
@@ -81,9 +80,8 @@ function handleUpdateInstallation(inst: Installation) {
   >
     <!-- DetailModal's embedded body owns its full internal layout
          (title row, tab strip, scrollable body, pinned action bar).
-         The 20px gutter wrapper replicates the legacy SettingsModal's
-         `.settings-content-padded` so the bottom action bar's negative
-         margin still lines up with the body's edges. -->
+         The 20px gutter wrapper gives the bottom action bar's negative
+         `margin: 0 -20px` a body edge to align with. -->
     <div v-if="installation" class="manage-install-body">
       <DetailModal
         :installation="installation"
@@ -106,11 +104,10 @@ function handleUpdateInstallation(inst: Installation) {
   padding: 0;
 }
 
-/* 20px gutter mirroring the legacy `.settings-content-padded` host —
- * DetailModal's pinned action bar uses `margin: 0 -20px` to span the
- * full width, so this padding is load-bearing. The column itself stays
- * `overflow: hidden` so the embedded `.view-scroll` is the only
- * scrollable surface. */
+/* 20px gutter — DetailModal's pinned action bar uses `margin: 0 -20px`
+ * to span the full width, so this padding is load-bearing. The column
+ * itself stays `overflow: hidden` so the embedded `.view-scroll` is
+ * the only scrollable surface. */
 .manage-install-body {
   display: flex;
   flex-direction: column;

@@ -114,11 +114,11 @@ describe('GlobalSettingsView', () => {
     document.body.innerHTML = ''
   })
 
-  it('renders the three tabs and the general tab is active by default', () => {
+  it('renders all four tabs and the general tab is active by default', () => {
     installMockBridge()
     const wrapper = mountView()
     const tabLabels = wrapper.findAll('.gs-tab').map((t) => t.text())
-    expect(tabLabels).toEqual(['General', 'Updates', 'Advanced'])
+    expect(tabLabels).toEqual(['General', 'Updates', 'Storage', 'Advanced'])
   })
 
   it('GitHub link card click routes through the bridge', async () => {
@@ -130,8 +130,62 @@ describe('GlobalSettingsView', () => {
     expect(bridge.openExternalCalls).toEqual(['https://github.com/comfyanonymous/ComfyUI'])
   })
 
-  // Storage-tab coverage migrated to StoragePane.test.ts when the
-  // Storage tab moved from this popup into the Instance Picker.
+  // Storage tab — shares `GlobalStorageSections` with the per-instance
+  // StoragePane. Tab-presence + bridge-wiring is the surface owned by
+  // this view; rendering behavior is covered by `StoragePane.test.ts`.
+  it('Storage tab routes a make-primary click through the bridge', async () => {
+    const bridge = installMockBridge()
+    const wrapper = mountView()
+    await wrapper.findAll('.gs-tab').find((t) => t.text() === 'Storage')!.trigger('click')
+    await nextTick()
+    const toggles = wrapper.findAll('.models-dir-menu-wrap > button')
+    expect(toggles).toHaveLength(1)
+    await toggles[0]!.trigger('click')
+    await nextTick()
+    await flushPromises()
+    const makePrimary = wrapper.find('.models-dir-menu button[role="menuitem"]')
+    await makePrimary.trigger('click')
+    await flushPromises()
+    expect(bridge.setModelsDirsCalls).toEqual([
+      ['/mnt/extra/models', '/home/u/ComfyUI/models'],
+    ])
+  })
+
+  it('Storage tab opens a models dir through the bridge', async () => {
+    const bridge = installMockBridge()
+    const wrapper = mountView()
+    await wrapper.findAll('.gs-tab').find((t) => t.text() === 'Storage')!.trigger('click')
+    await nextTick()
+    const openBtns = wrapper.findAll('.models-dir-row .models-dir-action')
+    await openBtns[0]!.trigger('click')
+    expect(bridge.openPathCalls).toEqual(['/home/u/ComfyUI/models'])
+  })
+
+  // Covers the Shared Directories half of GlobalStorageSections —
+  // a SettingsSectionList field write routes through
+  // `globalSettingsUpdateField`, not just the model-dir actions.
+  it('Storage tab routes a Shared Directories field update through the bridge', async () => {
+    const bridge = installMockBridge()
+    const snapshot = makeSnapshot({
+      sharedDirectoriesFields: [
+        {
+          id: 'sharedOutputDir',
+          label: 'Shared output dir',
+          value: false,
+          editable: true,
+          editType: 'boolean',
+        },
+      ],
+    })
+    const wrapper = mountView(snapshot)
+    await wrapper.findAll('.gs-tab').find((t) => t.text() === 'Storage')!.trigger('click')
+    await nextTick()
+    const toggle = wrapper.find('.settings-v2-boolean-row button')
+    expect(toggle.exists()).toBe(true)
+    await toggle.trigger('click')
+    await flushPromises()
+    expect(bridge.updateFieldCalls).toEqual([{ id: 'sharedOutputDir', value: true }])
+  })
 
   it('close button routes to bridge.close', async () => {
     const bridge = installMockBridge()

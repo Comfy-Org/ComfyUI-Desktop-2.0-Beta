@@ -154,6 +154,10 @@ export interface DetailField {
    *  Renderer shows a per-field tag + promotes the footer Restart
    *  button when one of these is edited while the install is running. */
   requiresRestart?: boolean
+  /** Inline explanatory text rendered beneath the control. Used for
+   *  fields whose effect is not self-evident from the label (e.g.
+   *  Chinese mirrors lists which hosts it swaps). */
+  description?: string
   // text / number support — surfaced from SettingsField when DetailField
   // is built from a global SettingsSection (Global Settings panel).
   placeholder?: string
@@ -959,9 +963,8 @@ export interface ElectronApi {
   closeCurrentPanel(): void
   /** Open the Global Settings popup for the panel's host window. Used
    *  by the panel-side file-menu "Settings" item and the
-   *  `comfy://open-settings?tab=global` deep link — both previously
-   *  routed to the legacy `SettingsModal` overlay. Main reuses the same
-   *  helper the hamburger Settings entry calls. */
+   *  `comfy://open-settings?tab=global` deep link. Main reuses the
+   *  same helper the hamburger Settings entry calls. */
   openGlobalSettings(): void
   /** Open the instance-picker popup for the panel's host window with
    *  `installationId` seeded as the picker's right-pane selection.

@@ -5,6 +5,7 @@ import { LayoutDashboard, Plus, Search, X } from 'lucide-vue-next'
 import BaseInput from '../components/ui/BaseInput.vue'
 import { FILTER_CHIPS, useInstallList } from '../composables/useInstallList'
 import { useCloudCapacity } from '../composables/useCloudCapacity'
+import { useDialogs } from '../composables/useDialogs'
 import { useSessionStore } from '../stores/sessionStore'
 import ComfyUISettingsContent from '../components/settings/ComfyUISettingsContent.vue'
 import InfoTooltip from '../components/InfoTooltip.vue'
@@ -79,6 +80,13 @@ interface PickerSnapshot {
    *  window via `useInstallCta`. */
   launchingInstallationIds: string[]
   selectedInstallationId: string | null
+  /** Monotonic counter bumped only when main intentionally retargets
+   *  the picker selection (open / "Manage…" deep-link). Snapshot
+   *  rebroadcasts from live-data events forward the current value
+   *  unchanged. The view only applies `selectedInstallationId` over a
+   *  local user pick when this advances, so a stale rebroadcast can't
+   *  snap the user back to a previously-selected row (issue #788). */
+  pickerSelectionEpoch?: number
   selectedSettings: DetailSection[] | null
   selectedSnapshots: SnapshotListData | null
   initialTab?: string | null
@@ -145,7 +153,7 @@ interface PickerBridge {
   close?: () => void
   pickInstall: (installationId: string) => void
   openNewInstall: () => void
-  restartInstall: (installationId: string) => void
+  restartInstall: (installationId: string, opts?: { confirmed?: boolean }) => void
   setPickerSelectedInstall: (installationId: string | null) => void
   pickerUpdateField: (
     installationId: string,
@@ -267,24 +275,34 @@ function resolveInitialSelection(snapshot: PickerSnapshot): string | null {
   return mostRecentInstallId(snapshot.installs)
 }
 const selectedId = ref<string | null>(resolveInitialSelection(props.snapshot))
+// Epoch already consumed by the local `selectedId`. Tracks the largest
+// `pickerSelectionEpoch` we've applied; only a strictly-greater snapshot
+// epoch counts as a main-authoritative retarget. Initial mount counts
+// as "applied" — `resolveInitialSelection` above already honoured the
+// snapshot's seed.
+const appliedSelectionEpoch = ref<number>(props.snapshot.pickerSelectionEpoch ?? 0)
+
 watch(
-  () => props.snapshot.selectedInstallationId,
-  (next) => {
-    if (next) selectedId.value = next
+  () => props.snapshot.pickerSelectionEpoch ?? 0,
+  (nextEpoch) => {
+    if (nextEpoch <= appliedSelectionEpoch.value) return
+    // Main intentionally retargeted (open / "Manage…" deep-link). Adopt
+    // its selection, even if the user had locally clicked something
+    // else in the meantime — a fresh open is a clear user intent that
+    // overrides any prior in-popup selection.
+    appliedSelectionEpoch.value = nextEpoch
+    selectedId.value = resolveInitialSelection(props.snapshot)
   }
 )
-watch(
-  () => props.snapshot.activeInstallationId,
-  (next) => {
-    if (!props.snapshot.selectedInstallationId) {
-      selectedId.value = next ?? mostRecentInstallId(props.snapshot.installs)
-    }
-  }
-)
+
+// Cold-start fallback: if the snapshot first arrives with no installs
+// and a `null` selection, this watcher seeds `selectedId` once installs
+// land. Once a selection exists (whether from user click or initial
+// resolve), live install-list updates must not touch it — they'd
+// otherwise reintroduce the snap-back this fix guards against.
 watch(
   () => props.snapshot.installs,
   (installs) => {
-    if (props.snapshot.selectedInstallationId || props.snapshot.activeInstallationId) return
     if (selectedId.value) return
     const id = mostRecentInstallId(installs)
     if (id) {
@@ -523,6 +541,7 @@ function handleSettingsNavigateList(): void {
 // "Temporarily unavailable" chip on the cloud row itself is a follow-up
 // (the row's a child component `InstanceRow.vue`).
 const cloudCapacity = useCloudCapacity()
+const dialogs = useDialogs()
 /** Tier-aware capacity status passed down to per-row chips so a paid
  *  user doesn't see "Temporarily unavailable" on a row they can still
  *  click through. Mirrors what `confirmEntry()` will do. */
@@ -536,7 +555,35 @@ async function handleExpandedPrimaryAction(restartInPlace: boolean): Promise<voi
   // false. Matches the ChooserView path so the two can't diverge.
   if (inst.sourceCategory === 'cloud' && !(await cloudCapacity.confirmEntry())) return
   if (restartInPlace) {
-    bridge?.restartInstall(inst.id)
+    // Confirm in-drawer for local restarts before crossing the bridge.
+    // Cloud / remote restarts have no local process to kill (matches
+    // main-side `shouldConfirmKillForEntry`), so they skip the prompt.
+    // Doing the confirm here keeps it visually consistent with Update /
+    // Stop / etc. — the drawer stays open during the prompt instead of
+    // dismissing first and reopening as a system-modal over the host.
+    if (inst.sourceCategory === 'local') {
+      const result = await dialogs.confirm({
+        title: 'Restart instance?',
+        message: 'Restart this instance?',
+        confirmLabel: 'Restart',
+        cancelLabel: 'Cancel',
+        messageDetails: [
+          {
+            label: 'Heads up',
+            items: [
+              'Restarting will stop the running session.',
+              'Any unsaved work in the workflow will be lost.',
+            ],
+          },
+        ],
+      })
+      if (result !== 'primary') return
+    }
+    // `confirmed: true` tells main to skip its own system-modal — the
+    // renderer already handled the prompt. Main keeps the modal as a
+    // safety net for any future caller that fires the IPC without
+    // confirming first.
+    bridge?.restartInstall(inst.id, { confirmed: true })
   } else {
     bridge?.pickInstall(inst.id)
   }
