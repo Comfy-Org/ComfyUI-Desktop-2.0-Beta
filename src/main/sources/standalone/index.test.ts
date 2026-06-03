@@ -74,41 +74,43 @@ describe('standalone.buildInstallation', () => {
     } as unknown as Record<string, unknown>,
   })
 
-  it('sets autoUpdateComfyUI when release value is "latest"', () => {
+  it('Stable: sets autoUpdateComfyUI (post-install update-to-stable), updateChannel left undefined', () => {
     const result = standalone.buildInstallation({
-      release: makeRelease('latest', 'v0.18.2-env1'),
+      release: makeRelease('stable', 'v0.18.2-env1'),
       variant: makeVariant(VENDOR_ID),
     })
     expect(result.autoUpdateComfyUI).toBe(true)
+    // updateChannel stays falsy: `getEffectiveChannel` defaults to
+    // 'stable' so the IPP picker still opens on Stable.
+    expect(result.updateChannel).toBeUndefined()
   })
 
-  it('does NOT set autoUpdateComfyUI for a specific release tag', () => {
-    const result = standalone.buildInstallation({
-      release: makeRelease('v0.18.2-env1'),
-      variant: makeVariant(VENDOR_ID),
-    })
-    expect(result.autoUpdateComfyUI).toBeUndefined()
-  })
-
-  it('uses r2Release tag as releaseTag when "latest" is selected', () => {
+  it('Latest on GitHub: persists updateChannel="latest", no autoUpdate', () => {
     const result = standalone.buildInstallation({
       release: makeRelease('latest', 'v0.18.2-env1'),
       variant: makeVariant(VENDOR_ID),
     })
-    expect(result.releaseTag).toBe('v0.18.2-env1')
+    expect(result.autoUpdateComfyUI).toBeUndefined()
+    // Persisted so the IPP Update tab opens on Latest on GitHub.
+    expect(result.updateChannel).toBe('latest')
   })
 
-  it('uses the release value directly as releaseTag for specific releases', () => {
-    const result = standalone.buildInstallation({
-      release: makeRelease('v0.18.2-env1'),
+  it('uses r2Release tag as releaseTag for both channels', () => {
+    const stable = standalone.buildInstallation({
+      release: makeRelease('stable', 'v0.18.2-env1'),
       variant: makeVariant(VENDOR_ID),
     })
-    expect(result.releaseTag).toBe('v0.18.2-env1')
+    const latest = standalone.buildInstallation({
+      release: makeRelease('latest', 'v0.18.2-env1'),
+      variant: makeVariant(VENDOR_ID),
+    })
+    expect(stable.releaseTag).toBe('v0.18.2-env1')
+    expect(latest.releaseTag).toBe('v0.18.2-env1')
   })
 
   it('freezes originalBuild and originalTorchVersion from r2Release on the installation', () => {
     const result = standalone.buildInstallation({
-      release: makeRelease('v0.18.2-env1'),
+      release: makeRelease('stable', 'v0.18.2-env1'),
       variant: makeVariant(VENDOR_ID),
     })
     expect(result.originalBuild).toBe(1)
@@ -132,51 +134,42 @@ describe('standalone.getFieldOptions release', () => {
     })
   }
 
-  it('includes "Latest Stable" when includeLatestStable is true', async () => {
+  it('returns exactly the two IPP channel options (Stable + Latest on GitHub)', async () => {
     setupMockReleases()
     const options = await standalone.getFieldOptions!('release', {}, { includeLatestStable: true })
-    expect(options[0]!.value).toBe('latest')
+    // No per-tag entries — only the two channel options surface, in
+    // the same order + with the same value ids the IPP Update tab uses.
+    expect(options.length).toBe(2)
+    expect(options[0]!.value).toBe('stable')
     expect(options[0]!.recommended).toBe(true)
-    // Real releases follow
-    expect(options[1]!.value).toBe('v0.18.3-env1')
-    expect(options[2]!.value).toBe('v0.18.2-env1')
+    expect(options[1]!.value).toBe('latest')
+    expect(options[1]!.recommended).toBeUndefined()
   })
 
-  it('excludes "Latest Stable" by default (no context flag)', async () => {
+  it('returns no options when includeLatestStable is omitted', async () => {
     setupMockReleases()
     const options = await standalone.getFieldOptions!('release', {}, {})
-    expect(options.every((o) => o.value !== 'latest')).toBe(true)
-    expect(options[0]!.value).toBe('v0.18.3-env1')
+    expect(options).toEqual([])
   })
 
-  it('excludes "Latest Stable" when includeLatestStable is false', async () => {
-    setupMockReleases()
-    const options = await standalone.getFieldOptions!('release', {}, { includeLatestStable: false })
-    expect(options.every((o) => o.value !== 'latest')).toBe(true)
-  })
-
-  it('"Latest Stable" entry uses the newest release tag', async () => {
+  it('both entries point data.tag at the newest available bundle', async () => {
     setupMockReleases()
     const options = await standalone.getFieldOptions!('release', {}, { includeLatestStable: true })
-    const latestEntry = options.find((o) => o.value === 'latest')!
-    const underlyingData = latestEntry.data as Record<string, unknown>
-    expect(underlyingData.tag).toBe('v0.18.3-env1')
+    const stableData = options.find((o) => o.value === 'stable')!.data as Record<string, unknown>
+    const latestData = options.find((o) => o.value === 'latest')!.data as Record<string, unknown>
+    expect(stableData.tag).toBe('v0.18.3-env1')
+    expect(latestData.tag).toBe('v0.18.3-env1')
   })
 
-  it('"Latest Stable" entry shows the upstream ComfyUI tag in description when resolved', async () => {
+  it('Stable entry threads the upstream stable tag through data.latestStableTag', async () => {
+    // The variant card reads `data.latestStableTag` to show the version
+    // the user lands on after post-install update — that survived the
+    // IPP-label cleanup so issue #708 stays fixed.
     setupMockReleases()
     mockedGetLatestStableTag.mockResolvedValue('v1.19.5')
     const options = await standalone.getFieldOptions!('release', {}, { includeLatestStable: true })
-    const latestEntry = options.find((o) => o.value === 'latest')!
-    expect(latestEntry.description).toBe('v1.19.5')
-  })
-
-  it('"Latest Stable" entry omits description when the tag lookup fails', async () => {
-    setupMockReleases()
-    mockedGetLatestStableTag.mockResolvedValue(null)
-    const options = await standalone.getFieldOptions!('release', {}, { includeLatestStable: true })
-    const latestEntry = options.find((o) => o.value === 'latest')!
-    expect(latestEntry.description).toBeUndefined()
+    const stableData = options.find((o) => o.value === 'stable')!.data as Record<string, unknown>
+    expect(stableData.latestStableTag).toBe('v1.19.5')
   })
 })
 
@@ -307,10 +300,10 @@ describe('standalone.getFieldOptions variant version display', () => {
     return releaseOptions.find((o) => o.value === value)!
   }
 
-  it('variant card shows the upstream stable version (not the bundled one) when "Latest Stable" is selected', async () => {
+  it('variant card shows the upstream stable version (not the bundled one) when "Stable" is selected', async () => {
     const { vendorId } = setupVersionGap()
     mockedGetLatestStableTag.mockResolvedValue('v0.22.3')
-    const release = await getReleaseOption('latest')
+    const release = await getReleaseOption('stable')
 
     const variants = await standalone.getFieldOptions!('variant', { release }, {})
     const card = variants.find((o) => o.value === vendorId)!
@@ -322,21 +315,23 @@ describe('standalone.getFieldOptions variant version display', () => {
   it('variant card falls back to the bundled version when the upstream tag is unresolved', async () => {
     const { vendorId } = setupVersionGap()
     mockedGetLatestStableTag.mockResolvedValue(null)
-    const release = await getReleaseOption('latest')
+    const release = await getReleaseOption('stable')
 
     const variants = await standalone.getFieldOptions!('variant', { release }, {})
     const card = variants.find((o) => o.value === vendorId)!
     expect(card.description).toContain('ComfyUI 0.20.1')
   })
 
-  it('variant card shows the bundled version for a pinned (non-latest) release', async () => {
+  it('variant card shows the bundled version when "Latest on GitHub" is selected', async () => {
     const { vendorId } = setupVersionGap()
     mockedGetLatestStableTag.mockResolvedValue('v0.22.3')
-    const release = await getReleaseOption('v0.20.1-env1')
+    const release = await getReleaseOption('latest')
 
     const variants = await standalone.getFieldOptions!('variant', { release }, {})
     const card = variants.find((o) => o.value === vendorId)!
-    // Pinned releases legitimately show the version baked into that env.
+    // Latest-on-GitHub leaves the install on whatever the bundle
+    // shipped with (master-ish HEAD); the card advertises that, not
+    // the stable tag the OTHER channel would land on.
     expect(card.description).toContain('ComfyUI 0.20.1')
   })
 })
