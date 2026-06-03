@@ -33,13 +33,21 @@
   !pragma warning enable 6030
 
   ; Quit handler invoked from the Finish-page Cancel-button click handler
-  ; (see FinishPageShow / OnFinishCancelClick in customFinishPage). Lives
-  ; here because Functions must be declared at script top level —
-  ; customHeader expands at the top of installer.nsi, before any Section.
+  ; (see FinishPageShow in customFinishPage). Lives here because
+  ; Functions must be declared at script top level — customHeader expands
+  ; at the top of installer.nsi, before any Section.
+  ;
+  ; ${NSD_OnClick} wires this function at run time, but NSIS's compile-
+  ; time reference checker doesn't count the wiring as a reference and
+  ; would emit `warning 6010: install function ... not referenced`,
+  ; which `-WX` then promotes to an error. Suppress just that warning
+  ; around this Function — same pattern as the LangString block above.
+  !pragma warning disable 6010
   Function OnFinishCancelClick
     SetErrorLevel 0
     Quit
   FunctionEnd
+  !pragma warning enable 6010
 
   ; Reveal the install-details list view during install. electron-builder's
   ; common.nsh (included at installer.nsi line 8) defaults to
