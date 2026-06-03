@@ -1,4 +1,4 @@
-appId: org.comfy.comfyui-desktop-2
+appId: com.todesktop.241012ess7yxs0e
 productName: Comfy Desktop
 directories:
   buildResources: resources
@@ -7,7 +7,7 @@ files:
   - '!src/*'
   - '!electron.vite.config.{js,ts,mjs,cjs}'
   - '!eslint.config.ts'
-  - '!{.eslintcache,.prettierrc.json,README.md,DESIGN_PROCESS.md,MANAGER_RESTART.md,REFERENCE_COMFY_DESKTOP.md}'
+  - '!{.eslintcache,.prettierrc.json,README.md,AGENTS.md}'
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
   - '!{.env,.env.*,.npmrc}'
   - '!docs/*'
@@ -55,7 +55,7 @@ mac:
       filter:
         - '**/*'
 dmg:
-  title: ComfyUI Desktop 2.0
+  title: Comfy Desktop
   # background + background@2x live under resources/ (directories.buildResources).
   background: dmg/background.png
   iconSize: 84

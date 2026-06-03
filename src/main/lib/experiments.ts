@@ -149,7 +149,7 @@ export function getFlag(key: string): FeatureFlagValue | undefined {
  * Record an exposure event for a given experiment / variant.
  *
  * Per-session dedup: the same `(experimentKey, variant)` pair fires at
- * most one `desktop2.experiment.exposed` event per process lifetime.
+ * most one `comfy.desktop.experiment.exposed` event per process lifetime.
  * Reset on next boot.
  *
  * `source` tells dashboards how the assignment was obtained:
@@ -168,7 +168,7 @@ export function recordExposure(
   const dedupKey = `${experimentKey}:${variant}`
   if (exposedThisSession.has(dedupKey)) return
   exposedThisSession.add(dedupKey)
-  mainTelemetry.capture('desktop2.experiment.exposed', {
+  mainTelemetry.capture('comfy.desktop.experiment.exposed', {
     experiment_key: experimentKey,
     variant,
     source

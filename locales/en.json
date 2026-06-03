@@ -689,7 +689,7 @@
     "reuseOutput": "Reuse your existing output files in place",
     "addModels": "Add Legacy Desktop models to shared paths",
     "migrateBeforeLaunchTitle": "Migrate before launching?",
-    "migrateBeforeLaunchMessage": "Legacy ComfyUI Desktop must be migrated to Desktop 2.0 before it can launch. We'll adopt your existing data, Python environment, and models in place, then start ComfyUI.",
+    "migrateBeforeLaunchMessage": "Legacy ComfyUI Desktop must be migrated to Comfy Desktop before it can launch. We'll adopt your existing data, Python environment, and models in place, then start ComfyUI.",
     "migrateBeforeLaunchConfirm": "Migrate and launch",
     "adoptConfirmTitle": "Adopt Legacy Desktop install",
     "adoptConfirmMessage": "Reuses your existing data folder, Python environment, and models in place. ComfyUI source is staged into a new managed directory so updates work normally. Your Legacy Desktop installation is not modified.",

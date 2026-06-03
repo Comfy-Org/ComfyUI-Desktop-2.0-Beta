@@ -231,7 +231,7 @@ export function registerSnapshotHandlers(): void {
     // dialog returns above, so this never counts cancels. Pairs with the
     // existing snapshot.created / .imported / .restore_* events so the
     // Snapshots dashboard can show the full create → share → import loop.
-    telemetry.emit('desktop2.snapshot.shared', {
+    telemetry.emit('comfy.desktop.snapshot.shared', {
       installation_id: installationId,
       scope: 'latest',
       trigger: snapshot.trigger
@@ -255,7 +255,7 @@ export function registerSnapshotHandlers(): void {
     })
     if (canceled || !filePath) return { ok: false }
     await fs.promises.writeFile(filePath, JSON.stringify(envelope, null, 2))
-    telemetry.emit('desktop2.snapshot.shared', {
+    telemetry.emit('comfy.desktop.snapshot.shared', {
       installation_id: installationId,
       scope: 'all',
       count: entries.length

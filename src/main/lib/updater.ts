@@ -164,8 +164,8 @@ function bindUpdaterEvents(): void {
     const version = versionFromPayload(info)
     if (!version) return
     const autoInstall = isAutoInstallEnabled()
-    if (_shouldEmitAppUpdateOnce('desktop2.app_update.available', version)) {
-      emitTelemetry('desktop2.app_update.available', {
+    if (_shouldEmitAppUpdateOnce('comfy.desktop.app_update.available', version)) {
+      emitTelemetry('comfy.desktop.app_update.available', {
         version,
         auto_update_setting: autoInstall ? 'on' : 'off'
       })
@@ -184,8 +184,8 @@ function bindUpdaterEvents(): void {
       // underlying updater fires the event multiple times per version.
       if (_autoDownloadTriggeredFor !== version) {
         _autoDownloadTriggeredFor = version
-        if (_shouldEmitAppUpdateOnce('desktop2.app_update.download_started', version)) {
-          emitTelemetry('desktop2.app_update.download_started', { version, initiator: 'auto' })
+        if (_shouldEmitAppUpdateOnce('comfy.desktop.app_update.download_started', version)) {
+          emitTelemetry('comfy.desktop.app_update.download_started', { version, initiator: 'auto' })
         }
       }
       return
@@ -197,8 +197,8 @@ function bindUpdaterEvents(): void {
     const version = versionFromPayload(event)
     if (!version) return
     _autoDownloadTriggeredFor = null
-    if (_shouldEmitAppUpdateOnce('desktop2.app_update.download_complete', version)) {
-      emitTelemetry('desktop2.app_update.download_complete', { version })
+    if (_shouldEmitAppUpdateOnce('comfy.desktop.app_update.download_complete', version)) {
+      emitTelemetry('comfy.desktop.app_update.download_complete', { version })
     }
     _setUpdateState({ kind: 'ready', version, autoUpdate: isAutoInstallEnabled() })
     if (_userInitiatedDownload) {
@@ -229,7 +229,7 @@ function bindUpdaterEvents(): void {
         : _appUpdateState.kind === 'downloading' || _autoDownloadTriggeredFor || wasUserInitiated
           ? 'download'
           : 'check'
-    emitTelemetry('desktop2.app_update.error', {
+    emitTelemetry('comfy.desktop.app_update.error', {
       stage,
       error_bucket: bucketError(updaterErrorMessage(args)),
       user_initiated: wasUserInitiated
@@ -303,7 +303,7 @@ function bindUpdaterEvents(): void {
  *  app-open / dashboard-revisit / IPP-click code path that quietly
  *  re-runs a check) are implementation details and would otherwise
  *  fire on every periodic interval without carrying analytical
- *  signal, so `desktop2.app_update.checked` only emits for the
+ *  signal, so `comfy.desktop.app_update.checked` only emits for the
  *  user-initiated set. Per-version dedup also applies — a user
  *  mashing the menu item while a download is staged still produces
  *  one event per version. The `up_to_date` result is intentionally
@@ -317,7 +317,7 @@ async function checkForUpdate(
   const updater = getAutoUpdater()
   if (!updater) {
     if (USER_INITIATED_CHECK_TRIGGERS.has(source)) {
-      emitTelemetry('desktop2.app_update.checked', {
+      emitTelemetry('comfy.desktop.app_update.checked', {
         trigger: source,
         result: 'updater_unavailable'
       })
@@ -333,9 +333,9 @@ async function checkForUpdate(
   if (
     version &&
     USER_INITIATED_CHECK_TRIGGERS.has(source) &&
-    _shouldEmitAppUpdateOnce('desktop2.app_update.checked', version)
+    _shouldEmitAppUpdateOnce('comfy.desktop.app_update.checked', version)
   ) {
-    emitTelemetry('desktop2.app_update.checked', { trigger: source, result: 'available' })
+    emitTelemetry('comfy.desktop.app_update.checked', { trigger: source, result: 'available' })
   }
   return version ? { available: true, version } : { available: false }
 }
@@ -400,7 +400,7 @@ export function onUpdateStateChanged(cb: (state: AppUpdateState) => void): () =>
  */
 export async function downloadUpdate(): Promise<void> {
   _userInitiatedDownload = true
-  emitTelemetry('desktop2.app_update.download_started', {
+  emitTelemetry('comfy.desktop.app_update.download_started', {
     version: _appUpdateState.version,
     initiator: 'user'
   })
@@ -433,7 +433,7 @@ export function installUpdate(): void {
     _broadcastToRenderer('app-update:user-action-failed', { message: UPDATER_UNAVAILABLE_MESSAGE })
     return
   }
-  emitTelemetry('desktop2.app_update.install_triggered', {
+  emitTelemetry('comfy.desktop.app_update.install_triggered', {
     version: _appUpdateState.version,
     auto_update_setting: isAutoInstallEnabled() ? 'on' : 'off'
   })

@@ -7,7 +7,13 @@ import type { Source, FieldOption, ShowProgressOpts } from '../types/ipc'
 import { emitTelemetryAction, toVariantBucket } from '../lib/telemetry'
 import { stripVariantPrefix, sortedCardOptions } from '../lib/variants'
 import VariantCardGrid from '../components/VariantCardGrid.vue'
-import { trackGuardrailBlocked, createDiskSpaceChecker, showPathIssueAlerts, checkNvidiaDriverOrWarn, checkDiskSpaceOrWarn } from '../lib/installHelpers'
+import {
+  trackGuardrailBlocked,
+  createDiskSpaceChecker,
+  showPathIssueAlerts,
+  checkNvidiaDriverOrWarn,
+  checkDiskSpaceOrWarn
+} from '../lib/installHelpers'
 import InstallNamePath from '../components/InstallNamePath.vue'
 import TakeoverHeader from '../components/TakeoverHeader.vue'
 import TakeoverBack from '../components/TakeoverBack.vue'
@@ -21,7 +27,6 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const modal = useModal()
 
-
 const source = ref<Source | null>(null)
 const detectedGpu = ref('')
 const variantOptions = ref<FieldOption[]>([])
@@ -33,7 +38,13 @@ const errorMessage = ref('')
 const instName = ref('')
 const instPath = ref('')
 const defaultInstPath = ref('')
-const { diskSpace, diskSpaceLoading, pathIssues, fetchDiskSpace, reset: resetDiskSpace } = createDiskSpaceChecker()
+const {
+  diskSpace,
+  diskSpaceLoading,
+  pathIssues,
+  fetchDiskSpace,
+  reset: resetDiskSpace
+} = createDiskSpaceChecker()
 
 const estimatedInstallSize = computed(() => {
   const files = selectedVariant.value?.data?.downloadFiles as Array<{ size: number }> | undefined
@@ -41,8 +52,12 @@ const estimatedInstallSize = computed(() => {
   return downloadBytes > 0 ? Math.ceil(downloadBytes * 2.25) : 0
 })
 
-const canInstall = computed(() =>
-  !loading.value && !installing.value && selectedVariant.value !== null && pathIssues.value.length === 0
+const canInstall = computed(
+  () =>
+    !loading.value &&
+    !installing.value &&
+    selectedVariant.value !== null &&
+    pathIssues.value.length === 0
 )
 
 watch(instPath, (newPath) => {
@@ -50,8 +65,6 @@ watch(instPath, (newPath) => {
   pathIssues.value = []
   fetchDiskSpace(newPath)
 })
-
-
 
 async function handleBrowse(): Promise<void> {
   const chosen = await window.api.browseFolder(instPath.value)
@@ -94,14 +107,14 @@ async function open(): Promise<void> {
       window.api.getSources(),
       window.api.detectGPU().catch(() => null),
       installDirPromise ?? window.api.getDefaultInstallDir().catch(() => ''),
-      window.api.validateHardware(),
+      window.api.validateHardware()
     ])
 
     if (!hw.supported) {
       trackGuardrailBlocked('unsupported_hw', 'quick', 'open')
       await modal.alert({
         title: t('newInstall.unsupportedHardwareTitle'),
-        message: hw.error || '',
+        message: hw.error || ''
       })
       emit('close')
       return
@@ -123,14 +136,19 @@ async function open(): Promise<void> {
       return
     }
     source.value = standalone
-    emitTelemetryAction('desktop2.install.method.selected', {
+    emitTelemetryAction('comfy.desktop.install.method.selected', {
       source_id: standalone.id,
       source_category: standalone.category || standalone.id,
-      flow: 'quick',
+      flow: 'quick'
     })
 
     // Load releases and auto-select latest
-    const releases = await window.api.getFieldOptions('standalone', 'release', {}, { includeLatestStable: true })
+    const releases = await window.api.getFieldOptions(
+      'standalone',
+      'release',
+      {},
+      { includeLatestStable: true }
+    )
     if (releases.length === 0) {
       errorMessage.value = t('newInstall.noOptions')
       loading.value = false
@@ -139,11 +157,9 @@ async function open(): Promise<void> {
     releaseSelection.value = releases[0]!
 
     // Load variants for the selected release
-    const variants = await window.api.getFieldOptions(
-      'standalone',
-      'variant',
-      { release: JSON.parse(JSON.stringify(toRaw(releaseSelection.value))) as FieldOption }
-    )
+    const variants = await window.api.getFieldOptions('standalone', 'variant', {
+      release: JSON.parse(JSON.stringify(toRaw(releaseSelection.value))) as FieldOption
+    })
     variantOptions.value = variants
 
     // Auto-select recommended variant
@@ -159,10 +175,10 @@ async function open(): Promise<void> {
 
 function selectVariant(option: FieldOption): void {
   selectedVariant.value = option
-  emitTelemetryAction('desktop2.install.variant.selected', {
+  emitTelemetryAction('comfy.desktop.install.variant.selected', {
     variant_bucket: toVariantBucket((option.data?.variantId as string | undefined) || option.value),
     recommended: !!option.recommended,
-    flow: 'quick',
+    flow: 'quick'
   })
 }
 
@@ -174,7 +190,7 @@ async function handleInstall(): Promise<void> {
     // Warn if NVIDIA driver is too old for the bundled PyTorch
     const variantId = selectedVariant.value.data?.variantId as string | undefined
     if (variantId && stripVariantPrefix(variantId).startsWith('nvidia')) {
-      if (!await checkNvidiaDriverOrWarn('quick', 'install', modal.confirm, t)) {
+      if (!(await checkNvidiaDriverOrWarn('quick', 'install', modal.confirm, t))) {
         installing.value = false
         return
       }
@@ -184,7 +200,7 @@ async function handleInstall(): Promise<void> {
     if (instPath.value) {
       try {
         const issues = await window.api.validateInstallPath(instPath.value)
-        if (!await showPathIssueAlerts(issues, 'quick', 'install', modal.alert, t)) {
+        if (!(await showPathIssueAlerts(issues, 'quick', 'install', modal.alert, t))) {
           installing.value = false
           return
         }
@@ -197,19 +213,20 @@ async function handleInstall(): Promise<void> {
     if (instPath.value) {
       try {
         const downloadFiles = selectedVariant.value.data?.downloadFiles as
-          Array<{ size: number }> | undefined
-        const downloadBytes = downloadFiles
-          ? downloadFiles.reduce((sum, f) => sum + f.size, 0)
-          : 0
+          | Array<{ size: number }>
+          | undefined
+        const downloadBytes = downloadFiles ? downloadFiles.reduce((sum, f) => sum + f.size, 0) : 0
         const estimatedRequired = downloadBytes > 0 ? downloadBytes * 2 : 0
 
-        if (!await checkDiskSpaceOrWarn({
-          path: instPath.value,
-          estimatedRequired,
-          flow: 'quick',
-          confirm: modal.confirm,
-          t,
-        })) {
+        if (
+          !(await checkDiskSpaceOrWarn({
+            path: instPath.value,
+            estimatedRequired,
+            flow: 'quick',
+            confirm: modal.confirm,
+            t
+          }))
+        ) {
           installing.value = false
           return
         }
@@ -244,7 +261,7 @@ async function handleInstall(): Promise<void> {
         title: `${t('newInstall.installing')} — ${name}`,
         apiCall: () => window.api.installInstance(result.entry!.id),
         autoLaunchOnFinish: true,
-        opKind: 'install',
+        opKind: 'install'
       })
     }
   } catch (err: unknown) {
@@ -261,67 +278,64 @@ defineExpose({ open })
 
 <template>
   <ModalShell binding content-class="quick-install-modal" @close="emit('close')">
-      <template #header>
-        <div class="takeover-stacked-header">
-          <TakeoverBack
-            :label="$t('common.backToDashboard')"
-            @back="emit('close')"
-          />
-          <TakeoverHeader
-            :title="$t('quickInstall.grandTitle')"
-            :subtitle="$t('quickInstall.grandSubtitle')"
+    <template #header>
+      <div class="takeover-stacked-header">
+        <TakeoverBack :label="$t('common.backToDashboard')" @back="emit('close')" />
+        <TakeoverHeader
+          :title="$t('quickInstall.grandTitle')"
+          :subtitle="$t('quickInstall.grandSubtitle')"
+        />
+      </div>
+    </template>
+    <div class="view-scroll">
+      <div v-if="loading" class="wizard-loading with-spinner">
+        {{ $t('newInstall.loading') }}
+      </div>
+
+      <div v-else-if="errorMessage" class="wizard-loading">
+        {{ errorMessage }}
+      </div>
+
+      <template v-else>
+        <p class="quick-install-desc">{{ $t('quickInstall.desc') }}</p>
+
+        <div class="detected-hardware">{{ detectedGpu }}</div>
+
+        <div class="field">
+          <label>{{ $t('quickInstall.selectVariant') }}</label>
+          <VariantCardGrid
+            :options="sortedCardOptions(variantOptions)"
+            :selected-value="selectedVariant?.value"
+            @select="selectVariant"
           />
         </div>
+
+        <InstallNamePath
+          :name="instName"
+          :path="instPath"
+          :default-path="defaultInstPath"
+          :path-issues="pathIssues"
+          :disk-space-loading="diskSpaceLoading"
+          :disk-space="diskSpace"
+          :estimated-size="estimatedInstallSize"
+          @update:name="instName = $event"
+          @update:path="instPath = $event"
+          @browse="handleBrowse"
+        />
       </template>
-        <div class="view-scroll">
-          <div v-if="loading" class="wizard-loading with-spinner">
-            {{ $t('newInstall.loading') }}
-          </div>
+    </div>
 
-          <div v-else-if="errorMessage" class="wizard-loading">
-            {{ errorMessage }}
-          </div>
-
-          <template v-else>
-            <p class="quick-install-desc">{{ $t('quickInstall.desc') }}</p>
-
-            <div class="detected-hardware">{{ detectedGpu }}</div>
-
-            <div class="field">
-              <label>{{ $t('quickInstall.selectVariant') }}</label>
-              <VariantCardGrid
-                :options="sortedCardOptions(variantOptions)"
-                :selected-value="selectedVariant?.value"
-                @select="selectVariant"
-              />
-            </div>
-
-            <InstallNamePath
-              :name="instName"
-              :path="instPath"
-              :default-path="defaultInstPath"
-              :path-issues="pathIssues"
-              :disk-space-loading="diskSpaceLoading"
-              :disk-space="diskSpace"
-              :estimated-size="estimatedInstallSize"
-              @update:name="instName = $event"
-              @update:path="instPath = $event"
-              @browse="handleBrowse"
-            />
-          </template>
-        </div>
-
-        <div class="wizard-footer">
-          <div class="wizard-back-placeholder"></div>
-          <div></div>
-          <button
-            class="primary quick-install-btn"
-            :class="{ loading: installing }"
-            :disabled="!canInstall"
-            @click="handleInstall"
-          >
-            {{ installing ? $t('newInstall.installing') : $t('quickInstall.confirmInstall') }}
-          </button>
-        </div>
+    <div class="wizard-footer">
+      <div class="wizard-back-placeholder"></div>
+      <div></div>
+      <button
+        class="primary quick-install-btn"
+        :class="{ loading: installing }"
+        :disabled="!canInstall"
+        @click="handleInstall"
+      >
+        {{ installing ? $t('newInstall.installing') : $t('quickInstall.confirmInstall') }}
+      </button>
+    </div>
   </ModalShell>
 </template>

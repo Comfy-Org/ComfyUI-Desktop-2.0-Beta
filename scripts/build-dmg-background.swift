@@ -83,7 +83,7 @@ func drawText(_ s: String, centerX: Double, topY: Double, size: Double,
     NSGraphicsContext.restoreGraphicsState()
 }
 
-drawText("ComfyUI Desktop 2.0", centerX: 270, topY: titleTopY, size: 18, weight: .medium,
+drawText("Comfy Desktop", centerX: 270, topY: titleTopY, size: 18, weight: .medium,
          tracking: 0.3, alpha: 0.85)
 drawText("Drag to Applications to install", centerX: 270, topY: subtitleTopY, size: 11,
          weight: .regular, tracking: 0.5, alpha: 0.50)

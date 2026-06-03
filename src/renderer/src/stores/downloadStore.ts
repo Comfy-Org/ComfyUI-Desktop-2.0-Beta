@@ -31,7 +31,7 @@ export const useDownloadStore = defineStore('downloads', () => {
     // sighting of a non-terminal download. Today only `.result` exists,
     // so attempt-vs-success rate is unknowable.
     if (!previous && !isTerminalModelDownloadStatus(progress.status)) {
-      emitTelemetryAction('desktop2.model_download.started', {
+      emitTelemetryAction('comfy.desktop.model_download.started', {
         directory_bucket: toModelDirectoryBucket(progress.directory),
         file_ext: toFileExtension(progress.filename),
         size_bucket: toSizeBucket(progress.totalBytes)
@@ -42,7 +42,7 @@ export const useDownloadStore = defineStore('downloads', () => {
       isTerminalModelDownloadStatus(progress.status) &&
       (!previous || previous.status !== progress.status)
     ) {
-      emitTelemetryAction('desktop2.model_download.result', {
+      emitTelemetryAction('comfy.desktop.model_download.result', {
         result: progress.status,
         directory_bucket: toModelDirectoryBucket(progress.directory),
         file_ext: toFileExtension(progress.filename),

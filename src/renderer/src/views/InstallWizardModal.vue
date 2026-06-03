@@ -314,7 +314,7 @@ async function selectSourceCard(source: Source): Promise<void> {
   }
 
   await selectSource(source)
-  emitTelemetryAction('desktop2.install.method.selected', {
+  emitTelemetryAction('comfy.desktop.install.method.selected', {
     source_id: source.id,
     source_category: source.category || source.id,
     flow: 'wizard'
@@ -469,7 +469,7 @@ function handleFieldSelectChange(field: SourceField, fieldIndex: number, value: 
 function selectCardOption(field: SourceField, fieldIndex: number, option: FieldOption): void {
   selections.value[field.id] = option
   if (field.id === 'variant') {
-    emitTelemetryAction('desktop2.install.variant.selected', {
+    emitTelemetryAction('comfy.desktop.install.variant.selected', {
       variant_bucket: toVariantBucket(
         (option.data?.variantId as string | undefined) || option.value
       ),
@@ -615,7 +615,7 @@ async function handleSave(): Promise<void> {
       title: `${t('newInstall.installing')} — ${name}`,
       apiCall: () => window.api.installInstance(result.entry!.id),
       autoLaunchOnFinish: true,
-      opKind: 'install',
+      opKind: 'install'
     })
     return
   }
@@ -804,7 +804,9 @@ defineExpose({ open })
                             :placeholder="field.defaultValue || ''"
                             :aria-invalid="field.id === 'url' && !!urlFieldError"
                             :aria-describedby="
-                              field.id === 'url' && urlFieldError ? `sf-${field.id}-error` : undefined
+                              field.id === 'url' && urlFieldError
+                                ? `sf-${field.id}-error`
+                                : undefined
                             "
                             @input="
                               textFieldValues.set(

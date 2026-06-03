@@ -30,3 +30,6 @@ release-cache.json
 # Exported design-process HTML scratch (local only; never ship)
 settings-html/
 settings-html.zip
+
+# Internal telemetry architecture notes — kept locally, not published
+docs/telemetry.md

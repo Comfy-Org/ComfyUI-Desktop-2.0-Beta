@@ -208,9 +208,7 @@ async function handleBrowseVenv(): Promise<void> {
 async function handleSave(): Promise<void> {
   if (!selectedProbe.value) return
 
-  const name =
-    trackName.value.trim() ||
-    `ComfyUI (${selectedProbe.value.sourceLabel})`
+  const name = trackName.value.trim() || `ComfyUI (${selectedProbe.value.sourceLabel})`
 
   const rawProbe = JSON.parse(JSON.stringify(toRaw(selectedProbe.value))) as Record<string, unknown>
   if (venvOverride.value !== null) {
@@ -230,10 +228,10 @@ async function handleSave(): Promise<void> {
     })
     return
   }
-  emitTelemetryAction('desktop2.track_existing.saved', {
+  emitTelemetryAction('comfy.desktop.track_existing.saved', {
     detected_source_label: selectedProbe.value.sourceLabel || 'unknown',
     probe_count_bucket: toCountBucket(probeResults.value.length),
-    custom_name_used: trackName.value.trim().length > 0,
+    custom_name_used: trackName.value.trim().length > 0
   })
   isOpen.value = false
   emit('close')
@@ -310,11 +308,7 @@ defineExpose({ open })
             <div class="track-path-row">
               <div class="brand-input track-path-input">
                 <HardDrive :size="14" aria-hidden="true" />
-                <input
-                  type="text"
-                  :value="effectiveVenvName || $t('git.venvNotFound')"
-                  disabled
-                />
+                <input type="text" :value="effectiveVenvName || $t('git.venvNotFound')" disabled />
               </div>
               <button class="brand-tertiary" type="button" @click="handleBrowseVenv">
                 {{ $t('common.browse') }}
@@ -324,11 +318,7 @@ defineExpose({ open })
         </div>
 
         <div class="brand-card__footer">
-          <button
-            class="brand-primary track-save"
-            :disabled="saveDisabled"
-            @click="handleSave"
-          >
+          <button class="brand-primary track-save" :disabled="saveDisabled" @click="handleSave">
             {{ $t('track.trackInstallation') }}
           </button>
         </div>

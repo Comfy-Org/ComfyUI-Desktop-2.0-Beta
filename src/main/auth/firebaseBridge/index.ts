@@ -5,7 +5,7 @@ import {
   buildCopyLinkBannerScript,
   buildRemoveCopyLinkBannerScript,
   COPY_LINK_BANNER_CSS,
-  OPEN_LINK_SENTINEL,
+  OPEN_LINK_SENTINEL
 } from './copyLinkBanner'
 import { buildIndexedDbInjectScript } from './inject'
 import { extractProviderId, type SupportedProvider } from './intercept'
@@ -138,26 +138,28 @@ function showCopyLinkBanner(comfyContents: WebContents, loginUrl: string): void 
     copy: i18n.t('cloud.signInBanner.copy'),
     copied: i18n.t('cloud.signInBanner.copied'),
     openAgain: i18n.t('cloud.signInBanner.openAgain'),
-    dismiss: i18n.t('cloud.signInBanner.dismiss'),
+    dismiss: i18n.t('cloud.signInBanner.dismiss')
   }
 
   void comfyContents
     .insertCSS(COPY_LINK_BANNER_CSS)
     .then(() => comfyContents.executeJavaScript(buildCopyLinkBannerScript(loginUrl, labels), true))
-    .catch(() => { })
+    .catch(() => {})
 
-  const onConsoleMessage = (details: Electron.Event<Electron.WebContentsConsoleMessageEventParams>): void => {
+  const onConsoleMessage = (
+    details: Electron.Event<Electron.WebContentsConsoleMessageEventParams>
+  ): void => {
     // Top-frame only: ignore the sentinel if an iframe logs it.
     if (details.frame?.parent != null) return
     if (details.message !== OPEN_LINK_SENTINEL) return
-    void shell.openExternal(loginUrl).catch(() => { })
+    void shell.openExternal(loginUrl).catch(() => {})
   }
   comfyContents.on('console-message', onConsoleMessage)
 
   activeBannerCleanup = () => {
     comfyContents.off('console-message', onConsoleMessage)
     if (!comfyContents.isDestroyed()) {
-      void comfyContents.executeJavaScript(buildRemoveCopyLinkBannerScript(), true).catch(() => { })
+      void comfyContents.executeJavaScript(buildRemoveCopyLinkBannerScript(), true).catch(() => {})
     }
   }
 }
@@ -182,7 +184,7 @@ export async function handleFirebasePopup(
   // Sign-in funnel: started -> (app:user_logged_in | auth.sign_in_failed).
   // `provider` splits Google vs GitHub conversion + failure rates. The
   // success leg is emitted by bindSignedInUser's app:user_logged_in.
-  mainTelemetry.capture('desktop2.auth.sign_in_started', { provider: providerId })
+  mainTelemetry.capture('comfy.desktop.auth.sign_in_started', { provider: providerId })
   const env = detectFirebaseEnv(url)
 
   // Kill any stale bridge from a prior sign-in attempt the user
@@ -248,7 +250,7 @@ export async function handleFirebasePopup(
     // Mirrored to Datadog (allow-list) so ops can alert if sign-in
     // breaks for a provider. error_bucket keeps the dashboard low-
     // cardinality; the raw message stays out (may carry tokens / URLs).
-    mainTelemetry.emit('desktop2.auth.sign_in_failed', {
+    mainTelemetry.emit('comfy.desktop.auth.sign_in_failed', {
       provider: providerId,
       error_bucket: mainTelemetry.bucketError(error.message)
     })

@@ -2,25 +2,25 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 vi.mock('../git', () => ({
-  readGitHead: vi.fn(),
+  readGitHead: vi.fn()
 }))
 
 vi.mock('../nodes', () => ({
   scanCustomNodes: vi.fn(),
-  nodeKey: vi.fn((n: { type: string; dirName: string }) => `${n.type}:${n.dirName}`),
+  nodeKey: vi.fn((n: { type: string; dirName: string }) => `${n.type}:${n.dirName}`)
 }))
 
 vi.mock('../pip', () => ({
-  pipFreeze: vi.fn(),
+  pipFreeze: vi.fn()
 }))
 
 vi.mock('../pythonEnv', () => ({
   getUvPath: vi.fn(() => '/fake/uv'),
-  getActivePythonPath: vi.fn(() => null),
+  getActivePythonPath: vi.fn(() => null)
 }))
 
 vi.mock('../telemetry', () => ({
-  emit: vi.fn(),
+  emit: vi.fn()
 }))
 
 vi.mock('fs', async (importOriginal) => {
@@ -38,10 +38,12 @@ vi.mock('fs', async (importOriginal) => {
         writeFile: vi.fn(async () => {}),
         rename: vi.fn(async () => {}),
         readdir: vi.fn(async () => []),
-        readFile: vi.fn(async () => { throw new Error('not found') }),
-        unlink: vi.fn(async () => {}),
-      },
-    },
+        readFile: vi.fn(async () => {
+          throw new Error('not found')
+        }),
+        unlink: vi.fn(async () => {})
+      }
+    }
   }
 })
 
@@ -111,7 +113,7 @@ describe('captureState commit-matching guard', () => {
       createdAt: '2026-01-01T00:00:00.000Z',
       installPath: '/test/install',
       sourceId: 'test',
-      comfyVersion: { commit: 'abc1234', baseTag: 'v0.17.2', commitsAhead: 12 },
+      comfyVersion: { commit: 'abc1234', baseTag: 'v0.17.2', commitsAhead: 12 }
     } as InstallationRecord
 
     const state = await captureState('/test/install', installation)
@@ -129,7 +131,7 @@ describe('captureState commit-matching guard', () => {
       createdAt: '2026-01-01T00:00:00.000Z',
       installPath: '/test/install',
       sourceId: 'test',
-      comfyVersion: { commit: 'abc1234', baseTag: 'v0.17.2', commitsAhead: 12 },
+      comfyVersion: { commit: 'abc1234', baseTag: 'v0.17.2', commitsAhead: 12 }
     } as InstallationRecord
 
     const state = await captureState('/test/install', installation)
@@ -146,7 +148,7 @@ describe('captureState commit-matching guard', () => {
       name: 'Test',
       createdAt: '2026-01-01T00:00:00.000Z',
       installPath: '/test/install',
-      sourceId: 'test',
+      sourceId: 'test'
     } as InstallationRecord
 
     const state = await captureState('/test/install', installation)
@@ -164,7 +166,7 @@ describe('captureState commit-matching guard', () => {
       createdAt: '2026-01-01T00:00:00.000Z',
       installPath: '/test/install',
       sourceId: 'test',
-      comfyVersion: { commit: 'deadbeef', baseTag: 'v0.18.0', commitsAhead: 0 },
+      comfyVersion: { commit: 'deadbeef', baseTag: 'v0.18.0', commitsAhead: 0 }
     } as InstallationRecord
 
     const state = await captureState('/test/install', installation)
@@ -182,7 +184,7 @@ describe('captureState commit-matching guard', () => {
       createdAt: '2026-01-01T00:00:00.000Z',
       installPath: '/test/install',
       sourceId: 'test',
-      comfyVersion: { commit: 'abc1234', baseTag: 'v0.17.2', commitsAhead: 12 },
+      comfyVersion: { commit: 'abc1234', baseTag: 'v0.17.2', commitsAhead: 12 }
     } as InstallationRecord
 
     const state = await captureState('/test/install', installation)
@@ -198,24 +200,24 @@ describe('saveSnapshot telemetry', () => {
     vi.resetAllMocks()
     mockedScanCustomNodes.mockResolvedValue([
       { id: 'a', type: 'cnr', dirName: 'a', enabled: true, version: '1.0.0' },
-      { id: 'b', type: 'cnr', dirName: 'b', enabled: true, version: '2.0.0' },
+      { id: 'b', type: 'cnr', dirName: 'b', enabled: true, version: '2.0.0' }
     ])
     mockedReadGitHead.mockReturnValue('abc1234')
   })
 
-  it('emits desktop2.snapshot.created with installation_id, trigger, counts, and dedup flag', async () => {
+  it('emits comfy.desktop.snapshot.created with installation_id, trigger, counts, and dedup flag', async () => {
     const installation = {
       id: 'install-42',
       name: 'Test',
       createdAt: '2026-01-01T00:00:00.000Z',
       installPath: '/test/install',
-      sourceId: 'test',
+      sourceId: 'test'
     } as InstallationRecord
 
     await saveSnapshot('/test/install', installation, 'manual', 'my label')
 
     expect(mockedTelemetryEmit).toHaveBeenCalledTimes(1)
-    expect(mockedTelemetryEmit).toHaveBeenCalledWith('desktop2.snapshot.created', {
+    expect(mockedTelemetryEmit).toHaveBeenCalledWith('comfy.desktop.snapshot.created', {
       installation_id: 'install-42',
       trigger: 'manual',
       custom_nodes_count: 2,
@@ -223,7 +225,7 @@ describe('saveSnapshot telemetry', () => {
       pip_packages_count: 0,
       has_label: true,
       // saveSnapshot never deduplicates a previous snapshot
-      deduplicated_previous: false,
+      deduplicated_previous: false
     })
   })
 
@@ -233,14 +235,14 @@ describe('saveSnapshot telemetry', () => {
       name: 'Test',
       createdAt: '2026-01-01T00:00:00.000Z',
       installPath: '/test/install',
-      sourceId: 'test',
+      sourceId: 'test'
     } as InstallationRecord
 
     await saveSnapshot('/test/install', installation, 'pre-update')
 
     expect(mockedTelemetryEmit).toHaveBeenCalledWith(
-      'desktop2.snapshot.created',
-      expect.objectContaining({ trigger: 'pre-update', has_label: false }),
+      'comfy.desktop.snapshot.created',
+      expect.objectContaining({ trigger: 'pre-update', has_label: false })
     )
   })
 })
@@ -266,14 +268,17 @@ describe('captureSnapshotIfChanged telemetry', () => {
       customNodes: [],
       pipPackages: {},
       pythonVersion: undefined,
-      updateChannel: 'stable',
+      updateChannel: 'stable'
     }
     const lastFilename = 'last.json'
     // loadSnapshot reads through `resolveSnapshotPath` which uses
     // `path.resolve` — on Windows that prepends the drive letter, so the
     // memory key has to be the resolved absolute path, not a path.join
     // form, or the readFile mock won't find it.
-    memory.set(path.resolve('/test/install', '.launcher', 'snapshots', lastFilename), JSON.stringify(matching))
+    memory.set(
+      path.resolve('/test/install', '.launcher', 'snapshots', lastFilename),
+      JSON.stringify(matching)
+    )
 
     const installation = {
       id: 'install-1',
@@ -281,7 +286,7 @@ describe('captureSnapshotIfChanged telemetry', () => {
       createdAt: '2026-01-01T00:00:00.000Z',
       installPath: '/test/install',
       sourceId: 'test',
-      lastSnapshot: lastFilename,
+      lastSnapshot: lastFilename
     } as unknown as InstallationRecord
 
     const result = await captureSnapshotIfChanged('/test/install', installation, 'boot')
@@ -304,21 +309,24 @@ describe('captureSnapshotIfChanged telemetry', () => {
       customNodes: [],
       pipPackages: {},
       pythonVersion: undefined,
-      updateChannel: 'stable',
+      updateChannel: 'stable'
     }
     // Filename uses the same `YYYYMMDD_HHMMSS_mmm-<trigger>-<suffix>.json`
     // shape `formatTimestamp` produces; an older lexicographic key ensures
     // it sorts AFTER the freshly-written one (newest-first sort in
     // `listSnapshots`).
     const intermediateFilename = '20260101_120000_000-restart-aaaaaa.json'
-    memory.set(path.join('/test/install', '.launcher', 'snapshots', intermediateFilename), JSON.stringify(intermediate))
+    memory.set(
+      path.join('/test/install', '.launcher', 'snapshots', intermediateFilename),
+      JSON.stringify(intermediate)
+    )
 
     const installation = {
       id: 'install-9',
       name: 'Test',
       createdAt: '2026-02-01T00:00:00.000Z',
       installPath: '/test/install',
-      sourceId: 'test',
+      sourceId: 'test'
     } as InstallationRecord
 
     const result = await captureSnapshotIfChanged('/test/install', installation, 'restart')
@@ -326,13 +334,13 @@ describe('captureSnapshotIfChanged telemetry', () => {
     expect(result.saved).toBe(true)
     expect(result.deduplicated).toBe(intermediateFilename)
     expect(mockedTelemetryEmit).toHaveBeenCalledTimes(1)
-    expect(mockedTelemetryEmit).toHaveBeenCalledWith('desktop2.snapshot.created', {
+    expect(mockedTelemetryEmit).toHaveBeenCalledWith('comfy.desktop.snapshot.created', {
       installation_id: 'install-9',
       trigger: 'restart',
       custom_nodes_count: 0,
       pip_packages_count: 0,
       has_label: false,
-      deduplicated_previous: true,
+      deduplicated_previous: true
     })
   })
 })

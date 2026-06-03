@@ -34,7 +34,7 @@ import { bindE2EPanelHooks } from './e2eRendererHooks'
 import { resolvePickerTab } from '../lib/pickerTabs'
 import {
   SUCCESS_ACTION_GO_DASHBOARD,
-  SUCCESS_ACTION_OPEN_INSTANCE,
+  SUCCESS_ACTION_OPEN_INSTANCE
 } from '../lib/progressTerminalPresets'
 import type { Installation } from '../types/ipc'
 
@@ -125,7 +125,7 @@ const {
   handleFirstUseChainLocal,
   handleFirstUseChainMigrate,
   handleNewInstallTakeoverClose,
-  handleNewInstallBackToLocalBranch,
+  handleNewInstallBackToLocalBranch
 } = firstUseChain
 
 overlays = usePanelOverlays({
@@ -137,7 +137,7 @@ overlays = usePanelOverlays({
   quickInstallRef,
   firstUseRef,
   prepareChooserHostHandoff: (id) => chooserHandoff.prepareChooserHostHandoff(id),
-  firstUseChain: firstUseChain.hooks,
+  firstUseChain: firstUseChain.hooks
 })
 const {
   activePanel,
@@ -149,7 +149,7 @@ const {
   handleProgressClose,
   openFirstUseTakeover,
   dismissTakeoverDirect,
-  switchPanel,
+  switchPanel
 } = overlays
 
 // E2E surface: tests drive UI-level flows (e.g. inject a finished
@@ -161,14 +161,12 @@ const {
 if (params.get('e2e') === '1') {
   bindE2EPanelHooks({
     showProgress: handleShowProgress,
-    actionGuard: useActionGuard(),
+    actionGuard: useActionGuard()
   })
 }
 
 const firstUseTakeoverActive = computed(
-  () =>
-    currentOverlay.value?.kind === 'takeover' &&
-    currentOverlay.value.component === 'first-use',
+  () => currentOverlay.value?.kind === 'takeover' && currentOverlay.value.component === 'first-use'
 )
 
 /** Chooser/lifecycle body: show immediately when main already knows
@@ -182,7 +180,7 @@ const showPanelBody = computed(() => {
 
 chooserHandoff = useChooserHandoff({
   showProgress: handleShowProgress,
-  switchPanel,
+  switchPanel
 })
 const { handleChooserPick, handleChooserShowNewInstall } = chooserHandoff
 
@@ -223,10 +221,10 @@ const { triggerAction: triggerInstallAction } = useInstallContextMenu({
     window.api.openInstancePicker({
       installationId: inst.id,
       initialTab: resolvePickerTab(initialTab, 'config'),
-      autoAction,
+      autoAction
     })
   },
-  onShowProgress: (showOpts) => handleShowProgress(showOpts),
+  onShowProgress: (showOpts) => handleShowProgress(showOpts)
 })
 
 useDeepLinkRouter({
@@ -257,7 +255,7 @@ useDeepLinkRouter({
     // `runAction` IPC or an `onManage` overlay open.
     await triggerInstallAction(actionId, inst)
   },
-  showProgressFromPicker: (showOpts) => handleShowProgress(showOpts),
+  showProgressFromPicker: (showOpts) => handleShowProgress(showOpts)
 })
 
 // Picker-driven mutating ops resolve here when the user picks a CTA on
@@ -313,10 +311,10 @@ watch(
   (next) => {
     document.body.classList.toggle(
       'panel-overlay-mode',
-      next === 'downloads-v2' || next === 'feedback',
+      next === 'downloads-v2' || next === 'feedback'
     )
   },
-  { immediate: true },
+  { immediate: true }
 )
 
 onMounted(async () => {
@@ -327,8 +325,7 @@ onMounted(async () => {
   // FirstUseTakeover chain — if it landed mid-takeover (e.g. due to a
   // slow bootstrap) the chain would silently fall back to the modal.
   registerMigrateTakeover({
-    open: (title, confirmLabel) =>
-      migrateTakeoverRef.value!.open(title, confirmLabel),
+    open: (title, confirmLabel) => migrateTakeoverRef.value!.open(title, confirmLabel),
     update: (opts) => migrateTakeoverRef.value?.update(opts)
   })
 
@@ -414,9 +411,9 @@ onMounted(async () => {
         }
       })()
       if (cleared) {
-        emitTelemetryAction('desktop2.instance.return_to_dashboard', {
+        emitTelemetryAction('comfy.desktop.instance.return_to_dashboard', {
           from: 'menu',
-          reason,
+          reason
         })
       }
       window.api.respondReturnToDashboardRequest({ requestId, cleared })
@@ -441,7 +438,7 @@ onMounted(async () => {
     })
   })
 
-// The file-menu "Skip Onboarding" IPC subscription lives in
+  // The file-menu "Skip Onboarding" IPC subscription lives in
   // useFirstUseChain so the chain owns its own input surface; no
   // duplicate listener here.
 
@@ -451,8 +448,7 @@ onMounted(async () => {
     // installationStore wires its own onInstallationsChanged listener.
     const shouldOpenFirstUse =
       urlFirstUsePending ||
-      (!urlFirstUseCompleted &&
-        (!launcherPrefsLoaded.value || !firstUseCompleted.value))
+      (!urlFirstUseCompleted && (!launcherPrefsLoaded.value || !firstUseCompleted.value))
 
     if (shouldOpenFirstUse && !isFlowPanel(initialPanel)) {
       void openFirstUseTakeover()
@@ -464,7 +460,7 @@ onMounted(async () => {
       launcherPrefs.loadPrefs(),
       loadLocale().catch((err) => {
         console.error('Panel: loadLocale failed', err)
-      }),
+      })
     ])
 
     // If the URL-driven initial panel mounts as a flow wizard takeover,
@@ -600,17 +596,13 @@ onUnmounted(() => {
       />
     </template>
 
-<!-- Brand-redesigned "View All Downloads" surface. Mounts only
+    <!-- Brand-redesigned "View All Downloads" surface. Mounts only
          when main flips us into `'downloads-v2'` mode (from the title-
          bar downloads popup's footer link). `v-if` mirrors the rest of
          this file's overlay convention — keeps the store init + body
          scroll lock out of every PanelApp mount that doesn't open the
          modal. Dismiss routes back through `closeCurrentPanel()`. -->
-    <DownloadsModal
-      v-if="activePanel === 'downloads-v2'"
-      open
-      @close="closeDownloadsV2"
-    />
+    <DownloadsModal v-if="activePanel === 'downloads-v2'" open @close="closeDownloadsV2" />
 
     <FeedbackModal :open="feedbackOpen" :url="feedbackUrl" @close="closeFeedback" />
 

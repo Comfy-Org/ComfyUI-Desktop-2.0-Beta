@@ -7,9 +7,14 @@ import { createCache } from './cache'
 import { extractNested as extract } from './extract'
 import { defaultInstallDir, sanitizeDirName, allocateUniqueDir } from './paths'
 import {
-  validateExportEnvelope, importSnapshots,
-  saveSnapshot, getSnapshotCount, restoreCustomNodes, restorePipPackages,
-  restoreComfyUIVersion, buildPostRestoreState,
+  validateExportEnvelope,
+  importSnapshots,
+  saveSnapshot,
+  getSnapshotCount,
+  restoreCustomNodes,
+  restorePipPackages,
+  restoreComfyUIVersion,
+  buildPostRestoreState
 } from './snapshots'
 
 import * as installations from '../installations'
@@ -63,16 +68,18 @@ export type StandaloneTargetSelection =
  */
 export function sendMigrationSteps(
   sendProgress: MigrationTools['sendProgress'],
-  opts: { includeScan: boolean; scanLabel: string; dataPhaseLabel: string },
+  opts: { includeScan: boolean; scanLabel: string; dataPhaseLabel: string }
 ): void {
-  sendProgress('steps', { steps: [
-    ...(opts.includeScan ? [{ phase: 'scan', label: opts.scanLabel }] : []),
-    { phase: 'download', label: i18n.t('common.download') },
-    { phase: 'extract', label: i18n.t('common.extract') },
-    { phase: 'setup', label: i18n.t('standalone.setupEnv') },
-    { phase: 'restore-nodes', label: i18n.t('standalone.snapshotRestoreNodesPhase') },
-    { phase: 'migrate', label: opts.dataPhaseLabel },
-  ] })
+  sendProgress('steps', {
+    steps: [
+      ...(opts.includeScan ? [{ phase: 'scan', label: opts.scanLabel }] : []),
+      { phase: 'download', label: i18n.t('common.download') },
+      { phase: 'extract', label: i18n.t('common.extract') },
+      { phase: 'setup', label: i18n.t('standalone.setupEnv') },
+      { phase: 'restore-nodes', label: i18n.t('standalone.snapshotRestoreNodesPhase') },
+      { phase: 'migrate', label: opts.dataPhaseLabel }
+    ]
+  })
 }
 
 /**
@@ -82,7 +89,7 @@ export function sendMigrationSteps(
 async function resolveStandaloneInstallData(
   target: StandaloneTargetSelection | undefined,
   sourceMap: Record<string, SourcePlugin>,
-  cleanupOnError: () => void,
+  cleanupOnError: () => void
 ): Promise<{ instData: Record<string, unknown>; standaloneSource: SourcePlugin }> {
   const standaloneSource = sourceMap['standalone']!
 
@@ -101,7 +108,11 @@ async function resolveStandaloneInstallData(
     release = releaseOptions[0]!
 
     const gpu = await detectGPU()
-    const variantOptions = await standaloneSource.getFieldOptions!('variant', { release }, { gpu: gpu?.id })
+    const variantOptions = await standaloneSource.getFieldOptions!(
+      'variant',
+      { release },
+      { gpu: gpu?.id }
+    )
     if (variantOptions.length === 0) {
       cleanupOnError()
       throw new Error('No compatible variants found for this platform.')
@@ -112,7 +123,7 @@ async function resolveStandaloneInstallData(
   const instData = {
     sourceId: 'standalone',
     sourceLabel: standaloneSource.label,
-    ...standaloneSource.buildInstallation({ release, variant }),
+    ...standaloneSource.buildInstallation({ release, variant })
   }
 
   return { instData, standaloneSource }
@@ -127,7 +138,7 @@ export async function restoreSnapshotIntoInstallation(
   stagedFile: string,
   ownsStagedFile: boolean,
   tools: Pick<MigrationTools, 'sendProgress' | 'sendOutput' | 'signal'>,
-  update: (data: Record<string, unknown>) => Promise<void>,
+  update: (data: Record<string, unknown>) => Promise<void>
 ): Promise<void> {
   const { sendProgress, sendOutput, signal } = tools
   const freshInst = await installations.get(entry.id)
@@ -142,27 +153,54 @@ export async function restoreSnapshotIntoInstallation(
 
     // Restore ComfyUI version
     sendOutput('\n── Restore ComfyUI Version ──\n')
-    const comfyResult = await telemetry.trackedStep('desktop2.snapshot.restore_comfyui_version', restoreContext, async () => {
-      return restoreComfyUIVersion(freshInst.installPath, targetSnapshot, sendOutput)
-    })
+    const comfyResult = await telemetry.trackedStep(
+      'comfy.desktop.snapshot.restore_comfyui_version',
+      restoreContext,
+      async () => {
+        return restoreComfyUIVersion(freshInst.installPath, targetSnapshot, sendOutput)
+      }
+    )
 
     sendOutput('\n── Restore Nodes ──\n')
-    await telemetry.trackedStep('desktop2.snapshot.restore_custom_nodes', restoreContext, async () => {
-      await restoreCustomNodes(freshInst.installPath, freshInst, targetSnapshot, sendProgress, sendOutput, signal, settings.getMirrorConfig())
-    })
+    await telemetry.trackedStep(
+      'comfy.desktop.snapshot.restore_custom_nodes',
+      restoreContext,
+      async () => {
+        await restoreCustomNodes(
+          freshInst.installPath,
+          freshInst,
+          targetSnapshot,
+          sendProgress,
+          sendOutput,
+          signal,
+          settings.getMirrorConfig()
+        )
+      }
+    )
 
     if (!signal.aborted && !targetSnapshot.skipPipSync) {
       sendOutput('\n── Restore Packages ──\n')
-      await telemetry.trackedStep('desktop2.snapshot.restore_pip_packages', restoreContext, async () => {
-        await restorePipPackages(freshInst.installPath, freshInst, targetSnapshot,
-          (phase, data) => sendProgress(phase === 'restore' ? 'restore-pip' : phase, data),
-          sendOutput, signal, settings.getMirrorConfig())
-      })
+      await telemetry.trackedStep(
+        'comfy.desktop.snapshot.restore_pip_packages',
+        restoreContext,
+        async () => {
+          await restorePipPackages(
+            freshInst.installPath,
+            freshInst,
+            targetSnapshot,
+            (phase, data) => sendProgress(phase === 'restore' ? 'restore-pip' : phase, data),
+            sendOutput,
+            signal,
+            settings.getMirrorConfig()
+          )
+        }
+      )
     }
 
     // Update installation state with restored version/channel metadata
     const restoreState = buildPostRestoreState(
-      targetSnapshot, comfyResult,
+      targetSnapshot,
+      comfyResult,
       freshInst.updateInfoByChannel as Record<string, Record<string, unknown>> | undefined,
       freshInst.comfyVersion as ComfyVersion | undefined
     )
@@ -175,7 +213,9 @@ export async function restoreSnapshotIntoInstallation(
       await update({ lastSnapshot: snapFilename, snapshotCount })
     } catch {}
   } catch (restoreErr) {
-    sendOutput(`\n⚠ Snapshot restore failed: ${(restoreErr as Error).message}\nYou can restore manually from the Snapshots tab.\n`)
+    sendOutput(
+      `\n⚠ Snapshot restore failed: ${(restoreErr as Error).message}\nYou can restore manually from the Snapshots tab.\n`
+    )
   } finally {
     if (ownsStagedFile) fs.promises.unlink(stagedFile).catch(() => {})
     await update({ pendingSnapshotRestore: undefined })
@@ -189,16 +229,21 @@ async function copyMigrationData(
   sourcePaths: SharedMigrationInput['sourcePaths'],
   destComfyUIDir: string,
   labels: SharedMigrationInput['labels'],
-  sendProgress: MigrationTools['sendProgress'],
+  sendProgress: MigrationTools['sendProgress']
 ): Promise<void> {
   // Verify read access to source directories before copying (macOS TCC may block)
-  for (const dir of [sourcePaths.userDir, sourcePaths.inputDir, sourcePaths.outputDir, sourcePaths.modelsDir]) {
+  for (const dir of [
+    sourcePaths.userDir,
+    sourcePaths.inputDir,
+    sourcePaths.outputDir,
+    sourcePaths.modelsDir
+  ]) {
     if (dir && fs.existsSync(dir)) assertReadable(dir)
   }
 
   // User data
   if (sourcePaths.userDir && fs.existsSync(sourcePaths.userDir)) {
-    await telemetry.trackedStep('desktop2.migrate.user_files', {}, async () => {
+    await telemetry.trackedStep('comfy.desktop.migrate.user_files', {}, async () => {
       sendProgress('migrate', { percent: 0, status: labels.userData })
       const dstUserDir = path.join(destComfyUIDir, 'user')
       await mergeDirFlat(sourcePaths.userDir!, dstUserDir, (copied, skipped, fileTotal) => {
@@ -210,8 +255,9 @@ async function copyMigrationData(
 
   // Input
   if (sourcePaths.inputDir && fs.existsSync(sourcePaths.inputDir)) {
-    await telemetry.trackedStep('desktop2.migrate.input', {}, async () => {
-      const dstInput = (settings.get('inputDir') as string | undefined) || settings.defaults.inputDir
+    await telemetry.trackedStep('comfy.desktop.migrate.input', {}, async () => {
+      const dstInput =
+        (settings.get('inputDir') as string | undefined) || settings.defaults.inputDir
       sendProgress('migrate', { percent: 40, status: labels.input })
       await mergeDirFlat(sourcePaths.inputDir!, dstInput)
     })
@@ -219,8 +265,9 @@ async function copyMigrationData(
 
   // Output
   if (sourcePaths.outputDir && fs.existsSync(sourcePaths.outputDir)) {
-    await telemetry.trackedStep('desktop2.migrate.output', {}, async () => {
-      const dstOutput = (settings.get('outputDir') as string | undefined) || settings.defaults.outputDir
+    await telemetry.trackedStep('comfy.desktop.migrate.output', {}, async () => {
+      const dstOutput =
+        (settings.get('outputDir') as string | undefined) || settings.defaults.outputDir
       sendProgress('migrate', { percent: 60, status: labels.output })
       await mergeDirFlat(sourcePaths.outputDir!, dstOutput)
     })
@@ -228,10 +275,12 @@ async function copyMigrationData(
 
   // Models — add to shared paths, no copy
   if (sourcePaths.modelsDir) {
-    await telemetry.trackedStep('desktop2.migrate.models', {}, async () => {
+    await telemetry.trackedStep('comfy.desktop.migrate.models', {}, async () => {
       sendProgress('migrate', { percent: 90, status: labels.models })
       const resolved = path.resolve(sourcePaths.modelsDir!)
-      const currentModelsDirs = (settings.get('modelsDirs') as string[] | undefined) || [...settings.defaults.modelsDirs]
+      const currentModelsDirs = (settings.get('modelsDirs') as string[] | undefined) || [
+        ...settings.defaults.modelsDirs
+      ]
       const normalizedCurrent = currentModelsDirs.map((d) => path.resolve(d))
       if (fs.existsSync(resolved) && !normalizedCurrent.includes(resolved)) {
         currentModelsDirs.push(resolved)
@@ -249,7 +298,7 @@ async function copyMigrationData(
  */
 export async function migrateToStandaloneFromSnapshot(
   input: SharedMigrationInput,
-  tools: MigrationTools,
+  tools: MigrationTools
 ): Promise<{ entry: InstallationRecord; destPath: string }> {
   const { sendProgress, signal, uniqueName } = tools
   const { stagedSnapshot, sourcePaths, labels, target } = input
@@ -259,7 +308,11 @@ export async function migrateToStandaloneFromSnapshot(
   }
 
   // 1. Resolve release/variant
-  const { instData, standaloneSource } = await resolveStandaloneInstallData(target, tools.sourceMap, cleanupStagedFile)
+  const { instData, standaloneSource } = await resolveStandaloneInstallData(
+    target,
+    tools.sourceMap,
+    cleanupStagedFile
+  )
 
   // 2. Create new standalone installation record
   const name = await uniqueName(input.installNameBase)
@@ -274,18 +327,23 @@ export async function migrateToStandaloneFromSnapshot(
     ...instData,
     status: 'installing',
     seen: false,
-    ...(input.sourceInstallationId ? {
-      copiedFrom: input.sourceInstallationId,
-      copiedFromName: input.sourceInstallationName,
-      copiedAt: new Date().toISOString(),
-      copyReason: 'standalone-migration',
-    } : {}),
+    ...(input.sourceInstallationId
+      ? {
+          copiedFrom: input.sourceInstallationId,
+          copiedFromName: input.sourceInstallationName,
+          copiedAt: new Date().toISOString(),
+          copyReason: 'standalone-migration'
+        }
+      : {})
   })
 
   // 3. Install standalone (download + extract + setup env)
   await fs.promises.mkdir(destPath, { recursive: true })
   await fs.promises.writeFile(path.join(destPath, MARKER_FILE), entry.id)
-  const cache = createCache(settings.get('cacheDir') as string, settings.get('maxCachedFiles') as number)
+  const cache = createCache(
+    settings.get('cacheDir') as string,
+    settings.get('maxCachedFiles') as number
+  )
   const installRecord = { ...instData, installPath: destPath } as unknown as InstallationRecord
 
   const releaseTag = (instData['releaseTag'] as string | undefined) ?? null
@@ -293,21 +351,33 @@ export async function migrateToStandaloneFromSnapshot(
   const installContext = {
     installation_id: entry.id,
     release_tag: releaseTag,
-    variant_id: variantId,
+    variant_id: variantId
   }
 
-  await telemetry.trackedStep('desktop2.install.standalone', installContext, async () => {
-    await standaloneSource.install!(installRecord, { sendProgress, download, cache, extract, signal })
+  await telemetry.trackedStep('comfy.desktop.install.standalone', installContext, async () => {
+    await standaloneSource.install!(installRecord, {
+      sendProgress,
+      download,
+      cache,
+      extract,
+      signal
+    })
   })
 
   const update = (data: Record<string, unknown>): Promise<void> =>
     installations.update(entry!.id, data).then(() => {})
-  await telemetry.trackedStep('desktop2.install.post_install', installContext, async () => {
+  await telemetry.trackedStep('comfy.desktop.install.post_install', installContext, async () => {
     await standaloneSource.postInstall!(installRecord, { sendProgress, update })
   })
 
   // 4. Restore snapshot (custom nodes + pip packages)
-  await restoreSnapshotIntoInstallation(entry, stagedSnapshot.path, stagedSnapshot.owned, tools, update)
+  await restoreSnapshotIntoInstallation(
+    entry,
+    stagedSnapshot.path,
+    stagedSnapshot.owned,
+    tools,
+    update
+  )
 
   // 5. Copy user data, input, output, models
   const dstComfyUI = path.join(destPath, 'ComfyUI')

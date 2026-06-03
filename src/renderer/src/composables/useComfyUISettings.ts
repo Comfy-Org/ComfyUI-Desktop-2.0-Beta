@@ -1,4 +1,13 @@
-import { computed, onScopeDispose, ref, toValue, watch, type ComputedRef, type MaybeRefOrGetter, type Ref } from 'vue'
+import {
+  computed,
+  onScopeDispose,
+  ref,
+  toValue,
+  watch,
+  type ComputedRef,
+  type MaybeRefOrGetter,
+  type Ref
+} from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useModal } from './useModal'
 import { useDialogs } from './useDialogs'
@@ -15,10 +24,14 @@ import {
   type DetailSection,
   type DiskSpaceInfo,
   type Installation,
-  type ShowProgressOpts,
+  type ShowProgressOpts
 } from '../types/ipc'
 import { shareLatestSnapshot } from '../lib/snapshots'
-import { IN_PLACE_RELAUNCH, augmentActionWithStopWarning, stopAndWaitForExit } from '../lib/stopWarning'
+import {
+  IN_PLACE_RELAUNCH,
+  augmentActionWithStopWarning,
+  stopAndWaitForExit
+} from '../lib/stopWarning'
 import { sleepRemainder } from '../lib/uiTiming'
 import type { SectionTab } from '../lib/pickerTabs'
 import {
@@ -26,7 +39,7 @@ import {
   runDiskSpaceCheck,
   runFieldSelectsChain,
   runPromptChain,
-  runSelectChain,
+  runSelectChain
 } from './actionShoppingList'
 
 /**
@@ -260,7 +273,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     try {
       const [secs, disk] = await Promise.all([
         window.api.getDetailSections(installationId),
-        installPath ? window.api.getDiskSpace(installPath).catch(() => null) : Promise.resolve(null),
+        installPath ? window.api.getDiskSpace(installPath).catch(() => null) : Promise.resolve(null)
       ])
       if (seq !== requestSeq) return
       sections.value = secs
@@ -423,7 +436,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
       timerKey,
       setTimeout(() => {
         clearFieldError(installId, fieldId)
-      }, ERROR_TAG_TTL_MS),
+      }, ERROR_TAG_TTL_MS)
     )
   }
 
@@ -466,7 +479,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     try {
       await withTimeout(
         window.api.updateInstallation(installId, { [field.id]: value }),
-        UPDATE_TIMEOUT_MS,
+        UPDATE_TIMEOUT_MS
       )
     } catch (err: unknown) {
       // Roll back the optimistic write.
@@ -494,10 +507,10 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
         setRestartDirty(installId, field.id, baseline)
       }
     }
-    emitTelemetryAction('desktop2.settings.changed', {
+    emitTelemetryAction('comfy.desktop.settings.changed', {
       setting_key: field.id,
       value_kind: field.editType || 'text',
-      bool_value: typeof value === 'boolean' ? value : undefined,
+      bool_value: typeof value === 'boolean' ? value : undefined
     })
     // Parity with legacy DetailSection: a field can declare an
     // `onChangeAction` to fire automatically after its value changes
@@ -510,7 +523,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
       } catch (err: unknown) {
         await dialogs.alert({
           title: t('common.error', 'Error'),
-          message: err instanceof Error ? err.message : String(err),
+          message: err instanceof Error ? err.message : String(err)
         })
       }
     }
@@ -519,9 +532,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     // subtrees and collapse state for sections the user wasn't
     // touching.
     if (field.refreshSection) {
-      const owningSection = sections.value.find(
-        (s) => s.fields?.some((f) => f.id === field.id),
-      )
+      const owningSection = sections.value.find((s) => s.fields?.some((f) => f.id === field.id))
       await refreshSection(owningSection?.title)
     } else {
       await reload()
@@ -568,7 +579,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
           message:
             result.reason === 'none'
               ? t('snapshots.noSnapshotsToShare', 'There are no snapshots to share yet.')
-              : result.message ?? t('snapshots.shareFailed', 'Could not share the snapshot.'),
+              : (result.message ?? t('snapshots.shareFailed', 'Could not share the snapshot.'))
         })
       }
       return
@@ -600,7 +611,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
       if (!migrateResult) return
       mutableAction = {
         ...mutableAction,
-        data: { ...mutableAction.data, ...migrateResult },
+        data: { ...mutableAction.data, ...migrateResult }
       }
     }
 
@@ -613,7 +624,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     if (requiresStoppedGuard && wasRunning && !ownsPreflight) {
       mutableAction = augmentActionWithStopWarning(
         mutableAction,
-        t('errors.willStopRunning', { name: inst?.name || 'ComfyUI' }),
+        t('errors.willStopRunning', { name: inst?.name || 'ComfyUI' })
       )
     }
 
@@ -644,7 +655,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
       mutableAction = afterConfirm
     }
 
-    if (!await runDiskSpaceCheck(mutableAction, inst, modal, t, null, dialogs)) return
+    if (!(await runDiskSpaceCheck(mutableAction, inst, modal, t, null, dialogs))) return
 
     // 9. showProgress — emit show-progress for the host's ProgressModal.
     //    The synthetic `restart` id maps to stop → wait → launch so the
@@ -655,7 +666,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     if (mutableAction.showProgress) {
       const rawTitle = (mutableAction.progressTitle || mutableAction.label).replace(
         /\{(\w+)\}/g,
-        (_, k: string) => String((mutableAction.data as Record<string, unknown>)?.[k] ?? k),
+        (_, k: string) => String((mutableAction.data as Record<string, unknown>)?.[k] ?? k)
       )
       const title = `${rawTitle} — ${inst.name}`
       const isRestart = mutableAction.id === 'restart'
@@ -664,21 +675,25 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
       const isRunning = (): boolean => sessionStore.isRunning(inst.id)
       const apiCall = isRestart
         ? async (): Promise<ReturnType<typeof window.api.runAction>> => {
-          await stopAndWaitForExit(inst.id, isRunning)
-          return window.api.runAction(inst.id, 'launch')
-        }
+            await stopAndWaitForExit(inst.id, isRunning)
+            return window.api.runAction(inst.id, 'launch')
+          }
         : needsSelfStop
           ? async (): Promise<ReturnType<typeof window.api.runAction>> => {
-            await stopAndWaitForExit(inst.id, isRunning)
-            const result = await window.api.runAction(inst.id, mutableAction.id, mutableAction.data)
-            if (wantsRelaunch && result?.ok !== false) {
-              await window.api.runAction(inst.id, 'launch')
+              await stopAndWaitForExit(inst.id, isRunning)
+              const result = await window.api.runAction(
+                inst.id,
+                mutableAction.id,
+                mutableAction.data
+              )
+              if (wantsRelaunch && result?.ok !== false) {
+                await window.api.runAction(inst.id, 'launch')
+              }
+              return result
             }
-            return result
-          }
           : (): ReturnType<typeof window.api.runAction> =>
-            window.api.runAction(inst.id, mutableAction.id, mutableAction.data)
-      emitTelemetryAction('desktop2.action.invoked', telemetryContext)
+              window.api.runAction(inst.id, mutableAction.id, mutableAction.data)
+      emitTelemetryAction('comfy.desktop.action.invoked', telemetryContext)
       opts.onShowProgress({
         installationId: inst.id,
         title,
@@ -692,7 +707,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
         opKind: isRestart ? 'launch' : progressOpKindForActionId(mutableAction.id),
         destroysInstance: destroysInstanceForActionId(mutableAction.id),
         actionId: mutableAction.id,
-        actionData: mutableAction.data,
+        actionData: mutableAction.data
       })
       return
     }
@@ -708,7 +723,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     // read as a no-op. See `MIN_BUSY_FEEDBACK_MS` in `lib/uiTiming.ts`.
     const busyStartedAt = Date.now()
     try {
-      emitTelemetryAction('desktop2.action.invoked', telemetryContext)
+      emitTelemetryAction('comfy.desktop.action.invoked', telemetryContext)
       if (wasRunning && requiresStoppedGuard) {
         await stopAndWaitForExit(inst.id, () => sessionStore.isRunning(inst.id))
       }
@@ -720,8 +735,11 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
         await actionGuard.checkBeforeAction(inst.id, mutableAction.label)
         return
       }
-      const resultValue = result.cancelled ? 'cancelled' : (result.ok === false ? 'failed' : 'ok')
-      emitTelemetryAction('desktop2.action.result', { result: resultValue, ...telemetryContext })
+      const resultValue = result.cancelled ? 'cancelled' : result.ok === false ? 'failed' : 'ok'
+      emitTelemetryAction('comfy.desktop.action.result', {
+        result: resultValue,
+        ...telemetryContext
+      })
       if (result.navigate === 'list') {
         opts.onClose?.()
         opts.onNavigateList?.()
@@ -741,14 +759,14 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
         await reload()
       }
     } catch (err: unknown) {
-      emitTelemetryAction('desktop2.action.result', {
+      emitTelemetryAction('comfy.desktop.action.result', {
         result: 'failed',
         error_bucket: toErrorBucket(err),
-        ...telemetryContext,
+        ...telemetryContext
       })
       await dialogs.alert({
         title: mutableAction.label,
-        message: err instanceof Error ? err.message : String(err),
+        message: err instanceof Error ? err.message : String(err)
       })
     } finally {
       await sleepRemainder(busyStartedAt)
@@ -765,7 +783,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
   }
 
   const pinBottomSection = computed<DetailSection | null>(
-    () => sections.value.find((s) => s.pinBottom) ?? null,
+    () => sections.value.find((s) => s.pinBottom) ?? null
   )
 
   // Launch→Restart synthetic swap, mirrored from DetailModal.vue's
@@ -774,7 +792,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
   // routes through stopComfyUI → wait → launch.
   const pinBottomActions = computed<ActionDef[]>(() => {
     const acts = (pinBottomSection.value?.actions ?? []).filter(
-      (a) => a.id !== 'launch' && a.id !== 'restart',
+      (a) => a.id !== 'launch' && a.id !== 'restart'
     )
     const inst = toValue(opts.installation)
     if (!inst) return acts
@@ -790,7 +808,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     if (installSize.value !== null) {
       return {
         label: t('comfyUISettings.diskUsage', 'Disk Usage'),
-        value: formatBytes(installSize.value),
+        value: formatBytes(installSize.value)
       }
     }
     // While the directory scan is still in flight, fall back to a
@@ -799,7 +817,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     if (!diskSpace.value) return null
     return {
       label: t('comfyUISettings.diskUsage', 'Disk Usage'),
-      value: '—',
+      value: '—'
     }
   })
 
@@ -825,7 +843,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     () => {
       void reload()
     },
-    { immediate: true },
+    { immediate: true }
   )
 
   // Background enrichment in the main process (release-cache.enrichCommitsAhead)
@@ -871,7 +889,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
           errorMessages.value = next
         }
       }
-    },
+    }
   )
 
   const sectionsFresh = computed<boolean>(() => {
@@ -897,6 +915,6 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     sectionsForTab,
     diskUsageItem,
     pinBottomSection,
-    pinBottomActions,
+    pinBottomActions
   }
 }
