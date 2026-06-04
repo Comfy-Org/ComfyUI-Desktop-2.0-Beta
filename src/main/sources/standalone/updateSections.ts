@@ -17,6 +17,19 @@ export const COMFYUI_REPO = 'Comfy-Org/ComfyUI'
 export const RELEASE_REPO = 'Comfy-Org/ComfyUI-Standalone-Environments'
 export const R2_BASE_URL = 'https://desktop-assets.comfy.org/standalone-environments'
 
+// Fallback host for regions where the primary R2 edge is throttled (e.g. mainland China
+// without an ICP-licensed CDN). Wired into the install-wizard JSON fetches as a single
+// retry — primary is still the source of truth and stays the ETag cache key. Empty string
+// disables the fallback. Infra populates this once an Aliyun OSS (or equivalent) mirror
+// of the same manifest files is provisioned.
+export const R2_MIRROR_BASE_URL = ''
+
+export function r2MirrorUrl(primaryUrl: string): string | undefined {
+  if (!R2_MIRROR_BASE_URL) return undefined
+  if (!primaryUrl.startsWith(R2_BASE_URL)) return undefined
+  return R2_MIRROR_BASE_URL + primaryUrl.slice(R2_BASE_URL.length)
+}
+
 function getChannelDefs(): ChannelDef[] {
   return [
     { value: 'stable', label: t('standalone.channelStable'), description: t('standalone.channelStableDesc'), recommended: true },

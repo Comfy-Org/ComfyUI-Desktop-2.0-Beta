@@ -30,7 +30,7 @@ vi.mock('../../lib/git', () => ({
 }))
 
 import * as releaseCache from '../../lib/release-cache'
-import { getDetailSections, getEffectiveChannel } from './updateSections'
+import { getDetailSections, getEffectiveChannel, R2_BASE_URL, R2_MIRROR_BASE_URL, r2MirrorUrl } from './updateSections'
 
 interface UpdateAction {
   id: string
@@ -186,5 +186,17 @@ describe('updateSections — channel picker reflects de-facto channel', () => {
     } as Partial<InstallationRecord>)) as unknown as UpdateSection[]
     const field = sections.find((s) => s.tab === 'update')?.fields?.find((f) => f.id === 'updateChannel')
     expect((field as unknown as { value: string }).value).toBe('latest')
+  })
+})
+
+describe('r2MirrorUrl', () => {
+  it('returns undefined when R2_MIRROR_BASE_URL is empty (default)', () => {
+    expect(R2_MIRROR_BASE_URL).toBe('')
+    expect(r2MirrorUrl(`${R2_BASE_URL}/latest.json`)).toBeUndefined()
+  })
+
+  it('returns undefined for URLs outside the R2 namespace, even if a mirror is set', () => {
+    expect(r2MirrorUrl('https://api.github.com/repos/Comfy-Org/ComfyUI/releases')).toBeUndefined()
+    expect(r2MirrorUrl('https://example.com/standalone-environments/latest.json')).toBeUndefined()
   })
 })

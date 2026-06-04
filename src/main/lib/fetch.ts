@@ -68,15 +68,16 @@ function _headerString(value: string | string[] | undefined): string | undefined
   return Array.isArray(value) ? value[0] : value
 }
 
-export function fetchJSON(url: string, opts?: { refresh?: boolean }): Promise<unknown> {
-  _ensureLoaded()
-  // `refresh` ignores the persisted ETag so the response is never served from cache. Used
-  // for R2 manifests where a stale value would strand users on an old release.
-  const cached = opts?.refresh ? undefined : _cache.get(url)
+interface FetchJSONOpts {
+  refresh?: boolean
+  // Tried once if the primary URL fails with a network/connection error. The
+  // primary URL stays the cache key, so subsequent revalidation continues to
+  // negotiate against the primary's ETag.
+  mirrorUrl?: string
+}
 
+function fetchJSONOnce(url: string, cached: CacheEntry | undefined, cacheKey: string): Promise<unknown> {
   return new Promise((resolve, reject) => {
-    // "no-cache" forces Chromium to revalidate (send If-None-Match) instead of serving from
-    // its disk cache. GitHub returns 304 for free when the ETag matches.
     const request = net.request({ url, cache: "no-cache" })
     request.setHeader("User-Agent", "ComfyUI-Desktop-2")
 
@@ -102,11 +103,6 @@ export function fetchJSON(url: string, opts?: { refresh?: boolean }): Promise<un
           return
         }
         if (response.statusCode !== 200) {
-          // On error, fall back to cached data if available
-          if (cached) {
-            resolve(structuredClone(cached.data))
-            return
-          }
           let msg = `HTTP ${response.statusCode}`
           if (response.statusCode === 403 || response.statusCode === 429) {
             const resetHeader = _headerString(response.headers["x-ratelimit-reset"])
@@ -131,28 +127,38 @@ export function fetchJSON(url: string, opts?: { refresh?: boolean }): Promise<un
         try {
           parsed = JSON.parse(data)
         } catch {
-          if (cached) {
-            resolve(structuredClone(cached.data))
-            return
-          }
           reject(new Error(`Invalid JSON response from ${url}`))
           return
         }
         const etag = _headerString(response.headers["etag"])
         if (etag) {
-          _cacheSet(url, { etag, data: parsed })
+          _cacheSet(cacheKey, { etag, data: parsed })
         }
         resolve(parsed)
       })
     })
-    request.on("error", (err) => {
-      // Network error — fall back to cached data if available
-      if (cached) {
-        resolve(structuredClone(cached.data))
-        return
-      }
-      reject(err)
-    })
+    request.on("error", (err) => reject(err))
     request.end()
   })
+}
+
+export async function fetchJSON(url: string, opts?: FetchJSONOpts): Promise<unknown> {
+  _ensureLoaded()
+  // `refresh` ignores the persisted ETag so the response is never served from cache. Used
+  // for R2 manifests where a stale value would strand users on an old release.
+  const cached = opts?.refresh ? undefined : _cache.get(url)
+
+  try {
+    return await fetchJSONOnce(url, cached, url)
+  } catch (primaryErr) {
+    if (opts?.mirrorUrl && opts.mirrorUrl !== url) {
+      try {
+        return await fetchJSONOnce(opts.mirrorUrl, cached, url)
+      } catch {
+        // fall through to cache / primary error
+      }
+    }
+    if (cached) return structuredClone(cached.data)
+    throw primaryErr
+  }
 }

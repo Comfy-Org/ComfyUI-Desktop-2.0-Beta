@@ -12,7 +12,7 @@ import {
   getVenvDir, recommendVariant, writeComfyEnvironment,
 } from './envPaths'
 import { install, postInstall, probeInstallation } from './install'
-import { getListPreview, getStatusTag, getDetailSections, R2_BASE_URL } from './updateSections'
+import { getListPreview, getStatusTag, getDetailSections, R2_BASE_URL, r2MirrorUrl } from './updateSections'
 import { handleAction } from './actions'
 import type { InstallationRecord } from '../../installations'
 import type {
@@ -284,13 +284,15 @@ export const standalone: SourcePlugin = {
       // Always revalidate R2 manifests when populating the install wizard —
       // a stale persisted ETag can otherwise hide a freshly-shipped standalone
       // release and strand new installs on whatever the previous run cached.
-      const latest = await fetchJSON(`${R2_BASE_URL}/latest.json`, { refresh: true }) as R2Latest
+      const latestUrl = `${R2_BASE_URL}/latest.json`
+      const latest = await fetchJSON(latestUrl, { refresh: true, mirrorUrl: r2MirrorUrl(latestUrl) }) as R2Latest
       const vendorIds = Object.keys(latest).filter((id) => id.startsWith(prefix))
       if (vendorIds.length === 0) return []
 
       const vendorReleases = Object.fromEntries(
         await Promise.all(vendorIds.map(async (id) => {
-          const data = await fetchJSON(`${R2_BASE_URL}/${id}/releases.json`, { refresh: true }) as R2VendorReleases
+          const releasesUrl = `${R2_BASE_URL}/${id}/releases.json`
+          const data = await fetchJSON(releasesUrl, { refresh: true, mirrorUrl: r2MirrorUrl(releasesUrl) }) as R2VendorReleases
           return [id, data.releases] as const
         }))
       )

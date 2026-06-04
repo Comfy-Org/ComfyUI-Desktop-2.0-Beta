@@ -17,6 +17,7 @@ import {
   isEffectivelyEmptyInstallDir,
   UPDATE_CHECK_INTERVAL
 } from './shared'
+import { r2MirrorUrl } from '../../sources/standalone/updateSections'
 import * as releaseCache from '../release-cache'
 import type { RegisterCallbacks } from './shared'
 import { registerAppHandlers } from './registerAppHandlers'
@@ -190,7 +191,8 @@ export function register(callbacks: RegisterCallbacks = {}): void {
   // Pre-warm the ETag cache
   void (async () => {
     try {
-      await fetchJSON('https://desktop-assets.comfy.org/standalone-environments/latest.json')
+      const prewarmUrl = 'https://desktop-assets.comfy.org/standalone-environments/latest.json'
+      await fetchJSON(prewarmUrl, { mirrorUrl: r2MirrorUrl(prewarmUrl) })
     } catch {}
   })()
 
