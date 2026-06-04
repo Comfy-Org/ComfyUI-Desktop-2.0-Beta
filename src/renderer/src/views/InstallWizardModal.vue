@@ -721,8 +721,8 @@ defineExpose({ open })
                     id="inst-path"
                     :value="instPath"
                     type="text"
+                    readonly
                     :disabled="!!currentSource?.skipInstall"
-                    @input="instPath = ($event.target as HTMLInputElement).value"
                   />
                 </div>
                 <button
