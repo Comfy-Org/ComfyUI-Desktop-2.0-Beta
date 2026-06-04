@@ -93,6 +93,39 @@ const {
 // doesn't reference the ref directly (chips are TODO(brand-cleanup)).
 defineExpose({ activeFilter })
 
+// --- Cluster top offset ---
+
+/** Unfiltered tile count: New Install + Cloud slot are always present. Reads
+ *  the raw list, not `visibleInstalls`, so search never shifts the cluster. */
+const baseTileCount = computed(() => 2 + nonCloudInstalls.value.length)
+
+const TILES_PER_ROW = 4
+const TOP_MAX_PX = 220 // 1-row resting spot (centered hero)
+const TOP_MIN_PX = 32 // floor once the grid claims the height
+const TOP_STEP_PX = 110 // shed per extra row
+
+/** Top offset for `--cluster-top`: shrinks as rows grow, so the cluster rises
+ *  and hands its space to the grid; bottoms out at `TOP_MIN_PX`. */
+const clusterTop = computed(() => {
+  const rows = Math.ceil(baseTileCount.value / TILES_PER_ROW)
+  const px = TOP_MAX_PX - Math.max(0, rows - 1) * TOP_STEP_PX
+  return `${Math.max(TOP_MIN_PX, px)}px`
+})
+
+/** Freeze a leaving tile's box so it doesn't collapse under `position:
+ *  absolute`, letting survivors FLIP into the gap immediately. */
+function lockLeavingTileSize(el: Element): void {
+  const node = el as HTMLElement
+  const grid = node.parentElement
+  if (!grid) return
+  const rect = node.getBoundingClientRect()
+  const gridRect = grid.getBoundingClientRect()
+  node.style.width = `${rect.width}px`
+  node.style.height = `${rect.height}px`
+  node.style.left = `${rect.left - gridRect.left + grid.scrollLeft}px`
+  node.style.top = `${rect.top - gridRect.top + grid.scrollTop}px`
+}
+
 // --- Manage / context menu ---
 // All Manage routes go through `window.api.openInstancePicker` (the
 // picker popup) — the legacy `useOverlay`-driven `ManageInstallModal`
@@ -199,7 +232,7 @@ function handleNewInstallClick(): void {
 
 <template>
   <BrandBackground v-show="props.visible" class="chooser-bg">
-    <div class="chooser-view">
+    <div class="chooser-view" :style="{ '--cluster-top': clusterTop }">
       <ComfyWordmark class="chooser-wordmark" aria-hidden="true" />
       <div class="chooser-search">
         <BaseInput
@@ -222,8 +255,19 @@ function handleNewInstallClick(): void {
         {{ t('chooser.noMatches') }}
       </div>
 
-      <div v-else class="chooser-grid">
-        <button type="button" class="chooser-tile chooser-tile-new" @click="handleNewInstallClick">
+      <TransitionGroup
+        v-else
+        tag="div"
+        name="tile"
+        class="chooser-grid"
+        @before-leave="lockLeavingTileSize"
+      >
+        <button
+          key="__new"
+          type="button"
+          class="chooser-tile chooser-tile-new"
+          @click="handleNewInstallClick"
+        >
           <div class="chooser-tile-icon"><Plus :size="32" /></div>
           <div class="chooser-tile-name">{{ t('chooser.newInstall') }}</div>
           <div class="chooser-tile-meta">{{ t('chooser.newInstallDesc') }}</div>
@@ -231,6 +275,7 @@ function handleNewInstallClick(): void {
 
         <div
           v-if="showCloudCard"
+          key="__cloud"
           role="button"
           :tabindex="dashboardCapacityStatus === 'disabled' ? -1 : 0"
           :aria-disabled="dashboardCapacityStatus === 'disabled' ? true : undefined"
@@ -294,7 +339,7 @@ function handleNewInstallClick(): void {
           @trigger-action="(action, installation) => triggerAction(action, installation)"
           @close-running="closeRunningInstance"
         />
-      </div>
+      </TransitionGroup>
 
       <ContextMenu
         :open="ctxMenu.open"
@@ -326,23 +371,24 @@ function handleNewInstallClick(): void {
   left: anchor(center, clamp(39%, calc(52.5vw - 135px), 44%));
 }
 
+/* `--cluster-top` drives the top spacer (see `clusterTop`). Registered as a
+ * <length> so it interpolates — a bare custom property won't transition. */
+@property --cluster-top {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 220px;
+}
+
 .chooser-view {
-  /* Anchored cluster + bottom-slack pattern:
-   *   - Top spacer is a fixed viewport-proportional offset, NOT 1fr,
-   *     so the wordmark+search row sits at a stable y regardless of
-   *     how many tiles the grid currently renders. This prevents the
-   *     cold-start jump (empty → populated) and the search-as-you-type
-   *     jump (filter shrinks the grid under the input).
-   *   - Bottom spacer absorbs all remaining slack as 1fr.
-   *   - Very tall grid → grid scrolls internally (max-height 100%)
-   *     so the cluster + viewport bounds are never breached.
-   *
-   * Row layout: [top offset] [wordmark] [search] [grid] [bottom spacer] */
+  /* Only the top spacer flexes; wordmark/search/grid stay tight. Shrinking
+   * `--cluster-top` raises the cluster and hands height to the grid, which
+   * scrolls internally once the bottom spacer (1fr) runs out.
+   * Rows: [top spacer] [wordmark] [search] [grid] [bottom spacer] */
   flex: 1 1 auto;
   min-height: 0;
   display: grid;
   grid-template-rows:
-    clamp(24px, 4vh, 56px)
+    var(--cluster-top)
     auto
     auto
     minmax(0, auto)
@@ -353,12 +399,24 @@ function handleNewInstallClick(): void {
   max-width: 1280px;
   padding: 24px;
   row-gap: 32px;
+  transition: --cluster-top 260ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chooser-view {
+    transition-duration: 1ms;
+  }
 }
 
 .chooser-wordmark {
   grid-row: 2;
+  /* `align-self` + `aspect-ratio` keep the SVG from stretching to fill the
+   * grid row (default `align-self: stretch` distorts it). */
+  align-self: center;
+  display: block;
   width: clamp(120px, 8vw, 180px);
   height: auto;
+  aspect-ratio: 173 / 48;
   color: var(--comfy-yellow);
   flex-shrink: 0;
   anchor-name: --brand-beam-target;
@@ -397,6 +455,8 @@ function handleNewInstallClick(): void {
 
 .chooser-grid {
   grid-row: 4;
+  /* Containing block for absolutely-positioned leaving tiles (`.tile-leave-active`). */
+  position: relative;
   width: 100%;
   /* 4 fixed tracks @ 280px + 3 × 16px gaps = 1168px. Keeps the 280px
    * fixed-track contract from the comment below intact while letting
@@ -435,6 +495,48 @@ function handleNewInstallClick(): void {
       black calc(100% - 32px),
       transparent 100%
     );
+  }
+}
+
+/* Tile FLIP: enter rises in (ease-out), leave fades out of flow so survivors
+ * slide into the gap, move uses the app's iOS-derived curve. Transform/opacity
+ * only — GPU-friendly. */
+.tile-enter-active {
+  transition:
+    opacity 200ms ease,
+    transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.tile-enter-from {
+  opacity: 0;
+  transform: translateY(8px) scale(0.98);
+}
+
+.tile-leave-active {
+  transition:
+    opacity 140ms ease,
+    transform 140ms cubic-bezier(0.32, 0.72, 0, 1);
+  position: absolute;
+}
+.tile-leave-to {
+  opacity: 0;
+  transform: scale(0.98);
+}
+
+.tile-move {
+  transition: transform 220ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tile-enter-active,
+  .tile-leave-active,
+  .tile-move {
+    /* Non-zero so Vue's transitionend-driven cleanup still fires and leaving
+     * nodes are removed. */
+    transition-duration: 1ms;
+  }
+  .tile-enter-from,
+  .tile-leave-to {
+    transform: none;
   }
 }
 
