@@ -230,7 +230,10 @@ export function parseExtraModelsYaml(content: string): string[] {
  *    when `useSharedModels: true`.
  *  - `front-end-root`, `log-stdout` are v2 plumbing the user can't
  *    meaningfully override.
- *  - `database-url` is v2-specific (legacy SQLite path won't apply).
+ *  - `database-url` is pinned by `standalone.getLaunchCommand` to the
+ *    legacy `user/comfyui.db` so we own it as structural plumbing; the
+ *    user can still override it by re-adding `--database-url` to their
+ *    launchArgs.
  */
 const STRIPPED_LAUNCH_KEYS: ReadonlySet<string> = new Set([
   'extra-model-paths-config',

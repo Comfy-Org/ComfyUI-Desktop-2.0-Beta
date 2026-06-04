@@ -239,6 +239,45 @@ describe('standalone.getLaunchCommand for adopted Legacy Desktop installs', () =
     expect(args.includes('--output-directory')).toBe(false)
   })
 
+  it('pins --database-url at the legacy user dir so SQLite can open it', () => {
+    // ComfyUI's default --database-url resolves to <source>/../user/comfyui.db,
+    // which for an adopted install lives in the empty new install dir — the
+    // parent `user/` doesn't exist there, so SQLite raised "unable to open
+    // database file" on launch. Anchor the URL at the legacy user folder.
+    const cmd = standalone.getLaunchCommand!(makeAdoptedRecord())!
+    const args = cmd.args!
+    const idx = args.indexOf('--database-url')
+    expect(idx).toBeGreaterThanOrEqual(0)
+    expect(args[idx + 1]).toBe(
+      `sqlite:///${path.join(adoptedBaseDir, 'user', 'comfyui.db')}`
+    )
+  })
+
+  it('does not override a user-supplied --database-url', () => {
+    const userUrl = 'sqlite:///D:/custom/path/my.db'
+    const cmd = standalone.getLaunchCommand!(
+      makeAdoptedRecord({ launchArgs: `--port 8188 --database-url ${userUrl}` })
+    )!
+    const args = cmd.args!
+    // Only one --database-url, and it's the user's value.
+    const positions = args
+      .map((value, index) => (value === '--database-url' ? index : -1))
+      .filter((index) => index >= 0)
+    expect(positions.length).toBe(1)
+    expect(args[positions[0]! + 1]).toBe(userUrl)
+  })
+
+  it('does not override a user-supplied --database-url=VALUE form', () => {
+    const cmd = standalone.getLaunchCommand!(
+      makeAdoptedRecord({ launchArgs: '--port 8188 --database-url=sqlite:///:memory:' })
+    )!
+    const args = cmd.args!
+    // Adopt branch must not inject its own --database-url alongside the
+    // `=`-style override.
+    expect(args.includes('--database-url')).toBe(false)
+    expect(args.some((a) => a === '--database-url=sqlite:///:memory:')).toBe(true)
+  })
+
   it('places adopt CLI args before user launchArgs so user values win on conflict', () => {
     const cmd = standalone.getLaunchCommand!(makeAdoptedRecord({
       launchArgs: '--listen 0.0.0.0 --port 9000 --base-directory /custom/override',
