@@ -9,7 +9,6 @@
 [![release](https://img.shields.io/github/v/release/Comfy-Org/Comfy-Desktop?display_name=tag&style=flat&label=release&color=4f46e5)](https://github.com/Comfy-Org/Comfy-Desktop/releases/latest)
 [![ci](https://img.shields.io/github/actions/workflow/status/Comfy-Org/Comfy-Desktop/ci.yml?branch=main&style=flat&label=ci)](https://github.com/Comfy-Org/Comfy-Desktop/actions/workflows/ci.yml)
 [![license](https://img.shields.io/github/license/Comfy-Org/Comfy-Desktop?style=flat&label=license&color=blue)](LICENSE)
-[![star us on github](https://img.shields.io/badge/⭐_star_us-on_github-f5c518?style=flat)](https://github.com/Comfy-Org/Comfy-Desktop/stargazers)
 [![discord](https://img.shields.io/badge/discord-comfy.org-5865F2?style=flat&logo=discord&logoColor=white)](https://www.comfy.org/discord)
 ![platforms](https://img.shields.io/badge/platforms-windows%20·%20macos%20·%20linux-555?style=flat)
 
