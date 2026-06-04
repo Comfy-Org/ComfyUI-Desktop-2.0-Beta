@@ -119,13 +119,19 @@ export const en = {
   },
   downloadsTab: {
     title: 'Downloads',
-    empty: 'No downloads to show',
+    empty: 'No downloads yet',
+    emptyHint: 'Downloads will appear here.',
     filterAll: 'All',
     filterActive: 'Active',
     filterCompleted: 'Completed',
     filterErrored: 'Failed',
     filterAriaLabel: 'Status filter',
-    retry: 'Retry'
+    retry: 'Retry',
+    badgeFailed: 'Failed',
+    badgeCancelled: 'Cancelled',
+    footerActive: '{n} active',
+    footerCompleted: '{n} completed',
+    clearFinished: 'Clear finished'
   },
   settingsModal: {
     title: 'Settings',
