@@ -230,10 +230,17 @@ export function registerAppHandlers(): void {
       }))
     }
 
+    // `detectGPU()` only resolves the vendor (NVIDIA / AMD / Intel /
+    // Apple Silicon) — its `model` field is hardcoded null. The
+    // systeminformation `controllers[]` data already collected for
+    // `allGpus` carries the actual chipset name, so fall back to it.
+    // Empty strings from the lib normalise to null so cohort filters on
+    // "is set" work consistently.
+    const primaryGpuModel = (allGpus[0]?.model || null) ?? gpu?.model ?? null
     return {
       gpu_vendor: gpu?.id ?? null,
       gpu_label: gpu?.label ?? null,
-      gpu_model: gpu?.model ?? null,
+      gpu_model: primaryGpuModel,
       gpus: allGpus,
       nvidia_driver_version: nvidiaCheck?.driverVersion ?? null,
       nvidia_driver_supported: nvidiaCheck?.supported ?? null,

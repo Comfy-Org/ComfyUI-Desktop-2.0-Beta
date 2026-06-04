@@ -185,6 +185,18 @@ describe('telemetry.bucketError', () => {
     expect(telemetry.bucketError('Prompt outputs failed validation')).toBe('validation')
     expect(telemetry.bucketError('validation_failed for node 5')).toBe('validation')
   })
+  it('classifies migration source-missing failures', () => {
+    // Observed at launch: gitcode mirror clones that stall mid-stream
+    // and Desktop 1 trees that lost their ComfyUI source path so the
+    // adopter tries to "switch to managed" and finds nothing to copy.
+    expect(
+      telemetry.bucketError(
+        'source-missing: Downloading ComfyUI source from https://gitcode.com/gh_mirrors/co/ComfyUI.git'
+      )
+    ).toBe('source_missing')
+    expect(telemetry.bucketError('source-missing-switch-to-managed')).toBe('source_missing')
+    expect(telemetry.bucketError('source_missing')).toBe('source_missing')
+  })
   it('keeps "other" for messages with no known signal', () => {
     expect(telemetry.bucketError('this is just a sentence')).toBe('other')
   })
@@ -302,6 +314,69 @@ describe('telemetry.trackedStep', () => {
     await telemetry.trackedStep('test.step', {}, async () => 'ok')
     expect(captured).toHaveLength(0)
     telemetry.setConsent(true)
+  })
+
+  it('scrubs error_message before emit so user paths never leave the process', async () => {
+    captured.length = 0
+    await expect(
+      telemetry.trackedStep('migrate.flow', { foo: 'bar' }, async () => {
+        throw new Error("ENOENT 'C:\\Users\\Administrator\\ComfyUI-Installs\\ComfyUI\\__init__.py'")
+      })
+    ).rejects.toThrow()
+    expect(captured[1]!.event).toBe('migrate.flow.error')
+    const msg = captured[1]!.properties?.error_message as string
+    expect(msg).toContain('[REDACTED]')
+    expect(msg).not.toContain('Administrator')
+  })
+})
+
+describe('telemetry SDK-level privacy safety nets', () => {
+  beforeEach(async () => {
+    captured.length = 0
+    process.env['POSTHOG_API_KEY'] = 'test-key'
+    process.env['POSTHOG_ENABLED'] = '1'
+    telemetry.initTelemetry({ appVersion: '0.0.0', appEnv: 'test', isPackaged: true })
+    await telemetry.identify('test-distinct-id')
+    telemetry.setConsent(true)
+  })
+
+  afterEach(() => {
+    delete process.env['POSTHOG_API_KEY']
+    delete process.env['POSTHOG_ENABLED']
+  })
+
+  it('strips $ip from every emit so PostHog can never store it', () => {
+    captured.length = 0
+    telemetry.capture('comfy.desktop.session.started', { foo: 'bar' })
+    expect(captured).toHaveLength(1)
+    expect(captured[0]!.properties?.['$ip']).toBe('')
+  })
+
+  it('scrubs string properties as a last-resort safety net for emit sites that forget', () => {
+    captured.length = 0
+    // Simulates a call site that forgot to scrub locally — typical
+    // future-regression risk. The SDK pass redacts the path.
+    telemetry.capture('comfy.desktop.execution.error', {
+      error_class: 'FileNotFoundError',
+      error_message: "ENOENT 'C:\\Users\\64911\\Documents\\workflow.json'"
+    })
+    expect(captured).toHaveLength(1)
+    const msg = captured[0]!.properties?.error_message as string
+    expect(msg).toContain('[REDACTED]')
+    expect(msg).not.toContain('64911')
+  })
+
+  it('leaves non-string property types untouched', () => {
+    captured.length = 0
+    telemetry.capture('comfy.desktop.execution.completed', {
+      duration_seconds: 12.5,
+      completed_count: 7,
+      crashed: false
+    })
+    const props = captured[0]!.properties
+    expect(props?.duration_seconds).toBe(12.5)
+    expect(props?.completed_count).toBe(7)
+    expect(props?.crashed).toBe(false)
   })
 })
 

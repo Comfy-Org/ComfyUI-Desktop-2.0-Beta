@@ -18,6 +18,7 @@ export type ErrorBucket =
   | 'model_load'
   | 'validation'
   | 'python'
+  | 'source_missing'
   | 'other'
   | 'unknown'
 
@@ -77,6 +78,19 @@ export function bucketError(input: unknown): ErrorBucket {
     message.includes('prompt outputs failed validation')
   ) {
     return 'validation'
+  }
+  // Migration `source` phase — either the legacy ComfyUI tree is gone
+  // ("source-missing-switch-to-managed") or the replacement clone from
+  // a git mirror stalled mid-stream ("source-missing: Downloading
+  // ComfyUI source from …"). Bucketed before `network` because the
+  // mirror-clone failures also reach a fetch site and would otherwise
+  // bucket as network.
+  if (
+    message.includes('source-missing') ||
+    message.includes('source_missing') ||
+    /source.*clone.*fail/.test(message)
+  ) {
+    return 'source_missing'
   }
   if (message.includes('network') || message.includes('fetch')) return 'network'
   if (message.includes('disk') || message.includes('space') || message.includes('enospc'))

@@ -489,6 +489,7 @@ describe('adoptDesktopInstall', () => {
     expect(telemetry.capture).toHaveBeenCalledWith(
       'comfy.desktop.adopt.failed',
       expect.objectContaining({
+        stage: 'detect',
         error_bucket: 'no-legacy-install'
       })
     )

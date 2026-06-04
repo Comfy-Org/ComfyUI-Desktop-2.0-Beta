@@ -140,14 +140,19 @@ export function createExecutionTap(opts: {
     const errorClass = exceptionLine.split(':')[0]?.trim() || 'unknown'
     const scrubbedMessage = scrubAll(exceptionLine).slice(0, ERROR_MESSAGE_MAX)
     state.errorCount++
-    // An error consumes a pending start so wall-clock pairing stays sane.
-    consumePromptStart()
+    // Wall-clock between the matching `Got prompt` and the error end —
+    // mirror what `execution.completed` already emits so error-vs-success
+    // duration can be compared directly on the dashboard. Null when the
+    // error fired without a paired start (already-pending traceback at
+    // boot, etc.).
+    const wallMs = consumePromptStart()
     telemetry.emit('comfy.desktop.execution.error', {
       ...baseContext,
       error_class: errorClass.slice(0, ERROR_CLASS_MAX),
       error_message: scrubbedMessage,
       error_bucket: telemetry.bucketError(scrubbedMessage),
-      error_count: state.errorCount
+      error_count: state.errorCount,
+      wall_clock_ms: wallMs
     })
     state.tracebackPhase = 'none'
     state.tracebackBuffer = []
@@ -200,13 +205,14 @@ export function createExecutionTap(opts: {
     const validationMatch = trimmed.match(VALIDATION_FAIL)
     if (validationMatch?.groups) {
       state.errorCount++
-      consumePromptStart()
+      const wallMs = consumePromptStart()
       telemetry.emit('comfy.desktop.execution.error', {
         ...baseContext,
         error_class: 'validation_failed',
         error_bucket: 'validation',
         error_count: state.errorCount,
-        node_id: validationMatch.groups['nodeId']
+        node_id: validationMatch.groups['nodeId'],
+        wall_clock_ms: wallMs
       })
       return
     }

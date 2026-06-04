@@ -112,6 +112,7 @@ import {
 } from '../../shared/posthogConfig'
 import { isDatadogMirroredEvent } from '../../shared/datadogMirroredEvents'
 import { bucketError as sharedBucketError } from '../../shared/errorBucket'
+import { scrubAll } from '../../shared/piiScrub'
 
 export type TelemetryValue = boolean | number | string | null | undefined
 export type TelemetryContext = Record<string, TelemetryValue | TelemetryValue[]>
@@ -483,14 +484,15 @@ export function initTelemetry(opts: InitOptions): void {
       host: cfg.host,
       flushAt: 20,
       flushInterval: 10_000,
-      // posthog-node defaults `disableGeoip: true` (it assumes a server
-      // whose IP isn't the user's). Here posthog-node runs in the
-      // desktop main process ON the user's machine, so the request IP is
-      // the real user IP — opt back into GeoIP so PostHog derives
-      // `$geoip_country_name` / region / city for geo cohorts. Only
-      // consented users emit at all (capture() is consent-gated), and we
-      // surface country/region for analytics, not the raw `$ip`.
-      disableGeoip: false
+      // Privacy: posthog-node runs in the desktop main process ON the
+      // user's machine, so the request IP would be the real user IP and
+      // the server would derive city-level geo. Both are high-cardinality
+      // identifiers we don't need for product analytics — explicitly
+      // disable server-side GeoIP derivation. Also strip `$ip` from
+      // every event payload (see `capture`) so PostHog never stores it.
+      // If we ever need country-level cohorts for paying users, derive
+      // it from Stripe checkout country at subscription time instead.
+      disableGeoip: true
     })
   } catch {
     client = null
@@ -684,6 +686,29 @@ export function unbindUserId(): void {
   }
 }
 
+/**
+ * Defense-in-depth: run every string-valued property through `scrubAll`
+ * before it leaves the process. Callers should still scrub at the emit
+ * site (so the field shape is intentional and the scrub is visible in
+ * code review) — this is the last-resort safety net that catches future
+ * emit sites that forget. Mirrors the renderer's `scrubTelemetryContext`
+ * pass; without it, any new main-process call site that ships raw
+ * strings (`error_message`, `last_stderr`, free-text from external libs)
+ * is one regression away from leaking a user path.
+ */
+function scrubProperties(properties: TelemetryContext): TelemetryContext {
+  let mutated: TelemetryContext | null = null
+  for (const key of Object.keys(properties)) {
+    const value = properties[key]
+    if (typeof value !== 'string') continue
+    const cleaned = scrubAll(value)
+    if (cleaned === value) continue
+    if (!mutated) mutated = { ...properties }
+    mutated[key] = cleaned
+  }
+  return mutated ?? properties
+}
+
 export function capture(event: string, properties: TelemetryContext = {}): void {
   if (!canEmit() || !distinctId) return
   if (!isAllowedToFire(event)) return
@@ -693,10 +718,14 @@ export function capture(event: string, properties: TelemetryContext = {}): void 
     // Per-call properties override defaults on key collision — callers
     // that explicitly pass `app_version` (e.g. session-start payload,
     // legacy event re-emitters) win.
+    // `$ip: ''` tells the PostHog server to treat the request as
+    // IP-less — paired with `disableGeoip: true` at init, this
+    // suppresses both raw IP storage and server-side geo derivation.
+    const merged = { ...defaultEventProperties, ...properties, $ip: '' }
     client!.capture({
       distinctId,
       event,
-      properties: { ...defaultEventProperties, ...properties }
+      properties: scrubProperties(merged)
     })
   } catch {
     // ignore – telemetry must never break the app
@@ -856,11 +885,16 @@ export async function trackedStep<T>(
     return result
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
+    // Bucket runs on raw text — its regexes don't care about user paths
+    // and would otherwise miss legitimate matches hidden inside a
+    // `[REDACTED]` substitution. The wire-bound field gets scrubbed
+    // before the 500-char slice so the redaction prefix can't get
+    // truncated mid-token.
     capture(`${step}.error`, {
       ...context,
       duration_ms: Date.now() - t0,
       error_bucket: bucketError(message),
-      error_message: message.slice(0, 500)
+      error_message: scrubAll(message).slice(0, 500)
     })
     throw err
   }
