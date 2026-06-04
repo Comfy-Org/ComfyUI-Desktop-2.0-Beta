@@ -407,6 +407,19 @@ function _notifyEnriched(repo: string): void {
 }
 
 /**
+ * Compare two tag-ish strings tolerant of a leading `v`. The comfyui_version.py
+ * `__version__` string is bare ("0.24.0") while GitHub tag names are
+ * "v"-prefixed ("v0.24.0"); legacy code paths persist either form. Without
+ * this normalization an adopted install permanently looks one revision
+ * behind because "0.24.0" !== "v0.24.0".
+ */
+function tagsEqual(a: string | undefined, b: string | undefined): boolean {
+  if (!a || !b) return false
+  if (a === b) return true
+  return a.replace(/^v/, '') === b.replace(/^v/, '')
+}
+
+/**
  * Determine if an update is available for the given channel, using local data only.
  * Handles cross-channel switches (e.g. last update was on "latest" but viewing "stable").
  */
@@ -436,7 +449,7 @@ export function isUpdateAvailable(
     const postHead = (lastRollback?.postUpdateHead as string | undefined) || ''
     const shortHead = postHead.slice(0, 7)
     const displayVersion = cv ? formatComfyVersion(cv, 'short') : ''
-    if (displayVersion === info.latestTag || displayVersion === info.releaseName) return false
+    if (tagsEqual(displayVersion, info.latestTag) || tagsEqual(displayVersion, info.releaseName)) return false
     if (shortHead && (shortHead === info.latestTag || info.releaseName?.includes(shortHead))) return false
     return true
   }
@@ -446,6 +459,12 @@ export function isUpdateAvailable(
 
   // Raw tag/sha mismatch (also check releaseName since the latest channel uses a SHA as latestTag).
   // Skip if installedTag is 'unknown' (brand-new install before first update).
-  if (info.installedTag && info.installedTag !== 'unknown' && info.installedTag !== info.latestTag && info.installedTag !== info.releaseName) return true
+  if (
+    info.installedTag &&
+    info.installedTag !== 'unknown' &&
+    !tagsEqual(info.installedTag, info.latestTag) &&
+    !tagsEqual(info.installedTag, info.releaseName)
+  )
+    return true
   return false
 }
