@@ -4,7 +4,7 @@
 
 # Comfy Desktop
 
-**Install, run, and manage [ComfyUI](https://github.com/comfyanonymous/ComfyUI) from one app — no dependency hell.**
+**Install, run, and manage [ComfyUI](https://github.com/Comfy-Org/ComfyUI) from one app — no dependency hell.**
 
 [![Release](https://img.shields.io/github/v/release/Comfy-Org/Comfy-Desktop?display_name=tag&style=flat&label=release&color=4f46e5)](https://github.com/Comfy-Org/Comfy-Desktop/releases/latest)
 [![CI](https://img.shields.io/github/actions/workflow/status/Comfy-Org/Comfy-Desktop/ci.yml?branch=main&style=flat&label=CI)](https://github.com/Comfy-Org/Comfy-Desktop/actions/workflows/ci.yml)
@@ -225,7 +225,7 @@ Issues and pull requests are welcome. Before opening a PR, please run `pnpm run 
 - 💬 **Discord** — [comfy.org/discord](https://www.comfy.org/discord)
 - 🌐 **Website** — [comfy.org](https://www.comfy.org)
 - 🐛 **Issues** — [GitHub Issues](https://github.com/Comfy-Org/Comfy-Desktop/issues)
-- 🧠 **ComfyUI** — [github.com/comfyanonymous/ComfyUI](https://github.com/comfyanonymous/ComfyUI)
+- 🧠 **ComfyUI** — [github.com/Comfy-Org/ComfyUI](https://github.com/Comfy-Org/ComfyUI)
 - 📦 **Standalone Environments** — [ComfyUI-Standalone-Environments](https://github.com/Comfy-Org/ComfyUI-Standalone-Environments)
 
 ## License
