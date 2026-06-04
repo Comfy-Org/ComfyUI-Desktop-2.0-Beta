@@ -244,20 +244,87 @@ export function setPortArg(launchCmd: LaunchCmd, port: number): void {
 }
 
 /**
- * Check whether a port is already in use by attempting to bind a temporary
- * server to it.  This works regardless of which user owns the listener,
- * unlike `lsof` / `findPidsByPort` which can only see same-user processes
- * on Linux.
+ * Whether a TCP connect to `host:port` succeeds within `timeoutMs`. Used as
+ * a positive proof that something is listening — bind probes alone aren't
+ * reliable on Windows because Winsock can let a `127.0.0.1` bind succeed
+ * while another process owns the same port via `0.0.0.0` / `::`.
  */
-export function isPortListening(port: number, host: string = '127.0.0.1'): Promise<boolean> {
+function canConnect(port: number, host: string, timeoutMs: number = 250): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = new net.Socket()
+    let settled = false
+    const finish = (result: boolean): void => {
+      if (settled) return
+      settled = true
+      socket.destroy()
+      resolve(result)
+    }
+    socket.setTimeout(timeoutMs)
+    socket.once('connect', () => finish(true))
+    socket.once('timeout', () => finish(false))
+    socket.once('error', () => finish(false))
+    try {
+      socket.connect(port, host)
+    } catch {
+      finish(false)
+    }
+  })
+}
+
+/**
+ * Whether a server can bind `host:port`. Returns `true` when the bind
+ * succeeds (port appears free on that interface), `false` when the bind
+ * fails with `EADDRINUSE` / `EACCES` (port owned by something), and
+ * `null` when the address family itself is unavailable
+ * (`EAFNOSUPPORT` / `EADDRNOTAVAIL` — e.g. probing `::` on a host with
+ * IPv6 disabled). Callers ignore `null` results so an IPv6-disabled box
+ * doesn't mark every port busy.
+ */
+function canBind(port: number, host: string): Promise<boolean | null> {
   return new Promise((resolve) => {
     const server = net.createServer()
-    server.once('error', () => resolve(true))
-    server.listen(port, host, () => {
-      server.once('close', () => resolve(false))
-      server.close()
+    server.once('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EADDRINUSE' || err.code === 'EACCES') return resolve(false)
+      // EAFNOSUPPORT / EADDRNOTAVAIL / EINVAL: address family / address
+      // not usable on this host — not a signal about the port itself.
+      return resolve(null)
     })
+    try {
+      server.listen(port, host, () => {
+        server.once('close', () => resolve(true))
+        server.close()
+      })
+    } catch {
+      resolve(null)
+    }
   })
+}
+
+/**
+ * Check whether a port is already in use. Combines two probes so we don't
+ * miss listeners on Windows, where a `127.0.0.1` bind test can succeed
+ * even when another process owns the same port via `0.0.0.0` / `::`:
+ *
+ *  1. TCP connect to loopback (`127.0.0.1`, `::1`) — positive proof that
+ *     a listener is reachable, regardless of which interface it bound.
+ *  2. Bind probe across `host`, `127.0.0.1`, `0.0.0.0`, `::` — catches
+ *     non-listening reservations and ports owned by other users that
+ *     `lsof` / `findPidsByPort` can't see on Linux.
+ *
+ * Either probe reporting "busy" wins. `null` bind results (address family
+ * unsupported) are ignored.
+ */
+export async function isPortListening(port: number, host: string = '127.0.0.1'): Promise<boolean> {
+  const connectHosts = ['127.0.0.1', '::1']
+  const connectResults = await Promise.all(connectHosts.map((h) => canConnect(port, h)))
+  if (connectResults.some(Boolean)) return true
+
+  const bindHosts = Array.from(new Set([host, '127.0.0.1', '0.0.0.0', '::']))
+  for (const bindHost of bindHosts) {
+    const result = await canBind(port, bindHost)
+    if (result === false) return true
+  }
+  return false
 }
 
 export async function findAvailablePort(host: string, startPort: number, endPort: number, excludePorts?: ReadonlySet<number>): Promise<number> {

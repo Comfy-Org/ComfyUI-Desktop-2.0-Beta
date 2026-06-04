@@ -643,7 +643,7 @@
     "portConflictLauncher": "端口 {port} 已被 \"{name}\" 占用，该实例由另一个 Comfy Desktop 启动。请先停止它或在启动参数中更改端口。",
     "portConflictComfy": "端口 {port} 已被 {process} 占用，看起来是一个 ComfyUI 实例。请先停止它或在启动参数中更改端口。",
     "portConflictOther": "端口 {port} 已被 {process} 占用。请在启动参数中更改端口以避免冲突。",
-    "portConflictUsePort": "改用端口 {port}",
+    "portConflictUsePort": "使用下一个可用端口",
     "unknownProcess": "未知进程",
     "portConflictKill": "停止进程并重试",
     "portConflictKillConfirmTitle": "停止现有进程",

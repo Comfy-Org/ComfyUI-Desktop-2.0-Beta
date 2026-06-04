@@ -1111,17 +1111,21 @@ defineExpose({ startOperation, showOperation })
             </template>
             <template v-else-if="isPortConflictOpen && currentOp.result?.portConflict">
               <button
+                type="button"
+                class="brand-ghost brand-progress__footer-btn"
+                @click="returnToDashboard('crashed')"
+              >
+                <ArrowLeft :size="14" />
+                {{ $t('progress.returnToDashboard') }}
+              </button>
+              <button
                 v-if="currentOp.result.portConflict.nextPort"
                 type="button"
                 class="brand-primary brand-progress__footer-btn"
                 :data-testid="TID.progressPortConflictUsePort"
                 @click="handleUseNextPort(currentOp.result.portConflict.nextPort!)"
               >
-                {{
-                  $t('errors.portConflictUsePort', {
-                    port: currentOp.result.portConflict.nextPort
-                  })
-                }}
+                {{ $t('errors.portConflictUsePort') }}
               </button>
               <button
                 v-if="currentOp.result.portConflict.isComfy"

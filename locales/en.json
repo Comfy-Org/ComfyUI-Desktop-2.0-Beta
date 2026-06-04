@@ -991,7 +991,7 @@
     "portConflictComfy": "Port {port} is already in use by {process}, which appears to be a ComfyUI instance. You can use the next available port, stop the process, or change the port in Startup Arguments.",
     "portConflictOther": "Port {port} is already in use by {process}. You can use the next available port or change the port in Startup Arguments.",
     "portConflictTitle": "Port already in use",
-    "portConflictUsePort": "Use port {port} instead",
+    "portConflictUsePort": "Use next available port",
     "portConflictKill": "Stop process and retry",
     "portConflictKillConfirmTitle": "Stop Existing Process",
     "portConflictKillConfirmMessage": "This will forcefully stop the process currently using this port. Any unsaved work in that ComfyUI instance will be lost.",
