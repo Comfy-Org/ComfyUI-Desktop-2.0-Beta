@@ -129,6 +129,20 @@ describe('settings unset/default semantics', () => {
     expect(readPersistedSettings()['customKey']).toBeNull()
   })
 
+  it('defaults installDir to ~/ComfyUI-Installs and persists overrides', () => {
+    const builtinDefault = path.join(homePath, 'ComfyUI-Installs')
+    expect(settings.get('installDir')).toBe(builtinDefault)
+
+    const custom = path.join(homePath, 'Custom', 'Installs')
+    settings.set('installDir', custom)
+    expect(settings.get('installDir')).toBe(custom)
+    expect(readPersistedSettings()['installDir']).toBe(custom)
+
+    settings.set('installDir', undefined)
+    expect(settings.get('installDir')).toBe(builtinDefault)
+    expect(readPersistedSettings()).not.toHaveProperty('installDir')
+  })
+
   it('treats empty and whitespace-only strings as unset for pypiMirror', () => {
     settings.set('pypiMirror', 'https://mirrors.aliyun.com/pypi/simple/')
     expect(settings.get('pypiMirror')).toBe('https://mirrors.aliyun.com/pypi/simple/')

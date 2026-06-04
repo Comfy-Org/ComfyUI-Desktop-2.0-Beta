@@ -158,6 +158,26 @@ export function buildModelsPayload(): { systemDefault: string; sections: Setting
   }
 }
 
+// Default suggested install location (global-only; intentionally NOT part of
+// buildMediaSections so it doesn't leak into the per-instance Storage tab).
+export function buildInstallLocationFields(): SettingsSection[] {
+  const s = settings.getAll()
+  return [
+    {
+      fields: [
+        {
+          id: 'installDir',
+          label: i18n.t('media.installDir'),
+          type: 'path' as const,
+          value: s.installDir || settings.defaults.installDir,
+          openable: true,
+          tooltip: i18n.t('tooltips.installDir')
+        }
+      ]
+    }
+  ]
+}
+
 // Shared input/output directories.
 export function buildMediaSections(): SettingsSection[] {
   const s = settings.getAll()

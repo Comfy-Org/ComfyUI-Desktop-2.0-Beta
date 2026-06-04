@@ -36,6 +36,7 @@ interface Snapshot {
   cacheFields: Record<string, unknown>[]
   advancedFields: Record<string, unknown>[]
   sharedDirectoriesFields: Record<string, unknown>[]
+  installLocationFields: Record<string, unknown>[]
   modelsDirs: ModelsDir[]
   modelsSystemDefault: string
   appUpdate: {
@@ -94,6 +95,7 @@ const tabs = computed(() => [
 
 const storageSnapshot = computed(() => ({
   sharedDirectoriesFields: props.snapshot.sharedDirectoriesFields,
+  installLocationFields: props.snapshot.installLocationFields,
   modelsDirs: props.snapshot.modelsDirs,
   modelsSystemDefault: props.snapshot.modelsSystemDefault,
 }))
