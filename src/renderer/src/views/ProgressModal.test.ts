@@ -64,7 +64,7 @@ const messages = {
     },
     errors: {
       portConflictTitle: 'Port already in use',
-      portConflictUsePort: 'Use port {port} instead',
+      portConflictUsePort: 'Use next available port',
       portConflictKill: 'Stop process and retry',
     },
   },
@@ -363,11 +363,12 @@ describe('ProgressModal — brand branch state transitions', () => {
       'Port 8188 is already in use',
     )
 
-    // Footer carries Use-Port + Kill-Process — not Return-to-Dashboard.
+    // Footer carries Return-to-Dashboard alongside Use-Port + Kill-Process
+    // so the user is never stuck on the conflict screen.
     expect(body.exists('.brand-progress__footer')).toBe(true)
-    expect(body.selectorText('.brand-progress__footer')).toContain('Use port 8189 instead')
+    expect(body.selectorText('.brand-progress__footer')).toContain('Return to Dashboard')
+    expect(body.selectorText('.brand-progress__footer')).toContain('Use next available port')
     expect(body.selectorText('.brand-progress__footer')).toContain('Stop process and retry')
-    expect(body.selectorText('.brand-progress__footer')).not.toContain('Return to Dashboard')
 
     // Port conflict is explicitly excluded from auto-close so the user
     // has time to pick a resolution.
@@ -391,10 +392,39 @@ describe('ProgressModal — brand branch state transitions', () => {
       } as ActionResult,
     })
 
-    expect(body.selectorText('.brand-progress__footer')).toContain('Use port 8189 instead')
+    expect(body.selectorText('.brand-progress__footer')).toContain('Use next available port')
     // Kill-Process is only shown when the offender is itself a Comfy
     // process — there's nothing safe to suggest killing otherwise.
     expect(body.selectorText('.brand-progress__footer')).not.toContain('Stop process and retry')
+    // Return-to-Dashboard is always present so non-Comfy conflicts still
+    // have a non-destructive escape.
+    expect(body.selectorText('.brand-progress__footer')).toContain('Return to Dashboard')
+  })
+
+  it('renders only Return to Dashboard when a port conflict has no suggested fix', async () => {
+    // Worst-case: main couldn't find a next port and the offender isn't
+    // ComfyUI. Without the back button the user is stuck on the takeover.
+    const portConflict: PortConflictInfo = {
+      port: 8188,
+      isComfy: false,
+    }
+    const { body } = await mountWithOp('inst-1', {
+      finished: true,
+      result: {
+        ok: false,
+        message: 'Port 8188 is already in use',
+        portConflict,
+      } as ActionResult,
+    })
+
+    expect(body.exists('.brand-progress__footer')).toBe(true)
+    expect(body.selectorText('.brand-progress__footer')).toContain('Return to Dashboard')
+    expect(body.selectorText('.brand-progress__footer')).not.toContain('Use next available port')
+    expect(body.selectorText('.brand-progress__footer')).not.toContain('Stop process and retry')
+
+    const api = (window as unknown as { api: MockApi }).api
+    expect(await body.click('.brand-progress__footer-bar button')).toBe(true)
+    expect(api.returnToDashboard).toHaveBeenCalledTimes(1)
   })
 
   it('renders Cancel (not Return to Dashboard) in flight for destroy ops', async () => {

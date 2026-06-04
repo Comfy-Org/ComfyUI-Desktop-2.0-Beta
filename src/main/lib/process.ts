@@ -244,20 +244,87 @@ export function setPortArg(launchCmd: LaunchCmd, port: number): void {
 }
 
 /**
- * Check whether a port is already in use by attempting to bind a temporary
- * server to it.  This works regardless of which user owns the listener,
- * unlike `lsof` / `findPidsByPort` which can only see same-user processes
- * on Linux.
+ * Whether a TCP connect to `host:port` succeeds within `timeoutMs`. Used as
+ * positive proof that something is listening — bind probes alone aren't
+ * reliable on Windows because Winsock can let a `127.0.0.1` bind succeed
+ * while another process owns the same port via `0.0.0.0` / `::`.
+ *
+ * Loopback only: never connect to a non-loopback address, both because we
+ * don't want to touch arbitrary remote hosts and because loopback connects
+ * never trigger Windows Defender / macOS firewall prompts.
  */
-export function isPortListening(port: number, host: string = '127.0.0.1'): Promise<boolean> {
+function canConnect(port: number, host: string, timeoutMs: number = 250): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = new net.Socket()
+    let settled = false
+    const finish = (result: boolean): void => {
+      if (settled) return
+      settled = true
+      socket.destroy()
+      resolve(result)
+    }
+    socket.setTimeout(timeoutMs)
+    socket.once('connect', () => finish(true))
+    socket.once('timeout', () => finish(false))
+    socket.once('error', () => finish(false))
+    try {
+      socket.connect(port, host)
+    } catch {
+      finish(false)
+    }
+  })
+}
+
+/**
+ * Whether a server can bind `host:port`. Resolves `true` on successful
+ * bind, `false` on `EADDRINUSE` / `EACCES`. Other errors (address family
+ * unavailable, etc.) resolve `false` too — the caller treats "couldn't
+ * bind for any reason" as "don't try to launch here."
+ *
+ * Never binds a non-loopback / non-requested address: a bind on `0.0.0.0`
+ * or `::` would trigger the OS firewall ("allow incoming connections?")
+ * prompt the first time the app runs, which is a poor first-launch
+ * experience just to probe a port. The loopback connect probe in
+ * `isPortListening` already catches the wildcard-peer case we'd otherwise
+ * want this for.
+ */
+function canBind(port: number, host: string): Promise<boolean> {
   return new Promise((resolve) => {
     const server = net.createServer()
-    server.once('error', () => resolve(true))
-    server.listen(port, host, () => {
-      server.once('close', () => resolve(false))
-      server.close()
-    })
+    server.once('error', () => resolve(false))
+    try {
+      server.listen(port, host, () => {
+        server.once('close', () => resolve(true))
+        server.close()
+      })
+    } catch {
+      resolve(false)
+    }
   })
+}
+
+/**
+ * Check whether a port is already in use. Combines two probes so we don't
+ * miss listeners on Windows, where a `127.0.0.1` bind test can succeed
+ * even when another process owns the same port via `0.0.0.0` / `::`:
+ *
+ *  1. TCP connect to loopback (`127.0.0.1`, `::1`) — positive proof that
+ *     a listener is reachable, regardless of which interface it bound.
+ *     A peer on `0.0.0.0:N` or `[::]:N` answers loopback connects too, so
+ *     we don't need to bind-probe the wildcard ourselves (which would
+ *     trigger the OS firewall prompt).
+ *  2. Bind probe on the requested host — catches non-listening
+ *     reservations and ports owned by other users that
+ *     `lsof` / `findPidsByPort` can't see on Linux.
+ *
+ * Either probe reporting "busy" wins.
+ */
+export async function isPortListening(port: number, host: string = '127.0.0.1'): Promise<boolean> {
+  const connectHosts = ['127.0.0.1', '::1']
+  const connectResults = await Promise.all(connectHosts.map((h) => canConnect(port, h)))
+  if (connectResults.some(Boolean)) return true
+
+  return !(await canBind(port, host))
 }
 
 export async function findAvailablePort(host: string, startPort: number, endPort: number, excludePorts?: ReadonlySet<number>): Promise<number> {
