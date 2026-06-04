@@ -24,17 +24,20 @@ export function useDownloadThumbnail(
   entry: () => ThumbnailEntry,
   fetcher: ThumbnailFetcher
 ): Ref<string | null> {
-  const url = ref<string | null>(null)
+  // The resolved thumbnail data: URL (not the download's source URL).
+  const thumbnail = ref<string | null>(null)
 
   watchEffect(() => {
     const e = entry()
-    url.value = null
+    thumbnail.value = null
+    // Only completed image assets carry a readable on-disk file; `savePath` is a
+    // local filesystem path, never the (possibly external) download `url`.
     if (!e.isImage || e.status !== 'completed' || !e.savePath) return
 
     const savePath = e.savePath
     const cached = cache.get(savePath)
     if (cached !== undefined) {
-      url.value = cached
+      thumbnail.value = cached
       return
     }
 
@@ -55,9 +58,9 @@ export function useDownloadThumbnail(
 
     void pending.then((result) => {
       // Guard against the row's savePath changing while the fetch was in flight.
-      if (entry().savePath === savePath) url.value = result
+      if (entry().savePath === savePath) thumbnail.value = result
     })
   })
 
-  return url
+  return thumbnail
 }

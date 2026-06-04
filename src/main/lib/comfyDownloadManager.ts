@@ -803,9 +803,15 @@ const thumbnailCache = new Map<string, string>()
 
 /** Read a completed image download and return a small `data:` URL preview, or
  *  `null` for non-images, missing/unreadable files, or any decode failure.
- *  Lazy + cached so it only runs for visible image rows. */
+ *  Lazy + cached so it only runs for visible image rows.
+ *
+ *  `savePath` is a LOCAL filesystem path (a download's `savePath`), never a
+ *  remote/source URL — this only ever reads from disk, never the network. A
+ *  value with a URL scheme is rejected so a caller passing the wrong field
+ *  (e.g. the entry's `url`) can't trigger a path-resolve on a URL. */
 export async function getDownloadThumbnail(savePath: unknown): Promise<string | null> {
   if (typeof savePath !== 'string' || !savePath) return null
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(savePath)) return null
   const resolved = path.resolve(savePath)
   if (!hasImageExtension(resolved)) return null
 
