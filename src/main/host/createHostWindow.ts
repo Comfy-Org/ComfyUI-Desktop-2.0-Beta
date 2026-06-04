@@ -28,6 +28,7 @@ import {
 } from '../lib/ipc/shared'
 import * as mainTelemetry from '../lib/telemetry'
 import { forwardDatadogError } from '../lib/processErrorHandlers'
+import { isQuitInProgress } from '../lib/quit-state'
 import * as updater from '../lib/updater'
 import { getSavedBounds, getWindowOptions, saveWindowBounds } from '../lib/windowState'
 import { ensureSystemModal } from '../popups/systemModal'
@@ -103,14 +104,30 @@ export function shouldBailAfterCloseConfirm(confirmed: boolean, forceClose: bool
  *  Exit-All) is a different intent: the caller already wants the
  *  window gone, and leaving a stray dashboard window behind after a
  *  swap-installs flow is noise. Force-close therefore skips the
- *  detach branch and falls through to the normal teardown. */
+ *  detach branch and falls through to the normal teardown.
+ *
+ *  Same logic applies when `app.quit()` is in flight (Cmd+Q, app menu
+ *  Quit, electron-updater's `restartAndInstall`): the caller wants the
+ *  process to exit, not the host to flip in place. Detaching here would
+ *  swallow the quit and leave a dashboard window alive after a "Restart
+ *  to install" click — which was exactly bug #(see PR description): the
+ *  first restart click was a no-op because the close handler intercepted
+ *  the quit into a dashboard detach. The second click worked only
+ *  because the window was already on the dashboard by then. */
 export function shouldDetachLastInstallWindowToDashboard(
   isInstallHostWindow: boolean,
   hasEntry: boolean,
   isLastWindow: boolean,
   forceClose: boolean,
+  quitInProgress: boolean,
 ): boolean {
-  return isInstallHostWindow && hasEntry && isLastWindow && !forceClose
+  return (
+    isInstallHostWindow &&
+    hasEntry &&
+    isLastWindow &&
+    !forceClose &&
+    !quitInProgress
+  )
 }
 
 /** Constants reused by both host modes. Defined here because they only
@@ -876,6 +893,7 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
             !!entryForClose,
             isLastWindow,
             forceClose,
+            isQuitInProgress(),
           )
           && entryForClose
         ) {
