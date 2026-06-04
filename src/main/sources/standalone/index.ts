@@ -142,11 +142,27 @@ export const standalone: SourcePlugin = {
     // fields (`installation.inputDir` / `outputDir`) handled by launch.ts'
     // shared-input-output branch — adopted records ship with both set to
     // `<legacyBasePath>/{input,output}` so the end result is the same.
+    //
+    // `--database-url` is also pinned: ComfyUI's default DB path resolves
+    // to `<source>/../user/comfyui.db`, which for an adopted install
+    // points at the empty `<newInstallPath>/user/` (parent dir doesn't
+    // exist) → SQLite "unable to open database file". The user's real
+    // SQLite DB lives in the legacy user dir, so point ComfyUI at it
+    // explicitly. Skipped when the user already set their own
+    // `--database-url` in launchArgs.
     const adoptedBaseDir = adopted ? (installation.adoptedBaseDir as string | undefined) : undefined
-    const adoptArgs = adoptedBaseDir ? [
-      '--base-directory', adoptedBaseDir,
-      '--user-directory', path.join(adoptedBaseDir, 'user'),
-    ] : []
+    const userSetDatabaseUrl = parsed.some(
+      (a) => a === '--database-url' || a.startsWith('--database-url=')
+    )
+    const adoptArgs = adoptedBaseDir
+      ? [
+          '--base-directory', adoptedBaseDir,
+          '--user-directory', path.join(adoptedBaseDir, 'user'),
+          ...(userSetDatabaseUrl
+            ? []
+            : ['--database-url', `sqlite:///${path.join(adoptedBaseDir, 'user', 'comfyui.db')}`]),
+        ]
+      : []
     // Desktop-managed feature flags (e.g. show_signin_button) are injected in
     // handleLaunch after we discover the running ComfyUI's feature-flag registry,
     // so we only set keys the install actually knows about.

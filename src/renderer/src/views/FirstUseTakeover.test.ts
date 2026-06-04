@@ -116,22 +116,22 @@ describe('FirstUseTakeover start step', () => {
     expect(tooltip?.getAttribute('data-text')).toBe('firstUse.whyTryCloud')
   })
 
-  it('Express-install checkbox is hidden on the default Cloud pick and revealed only after Local is picked', async () => {
+  it('Express-install checkbox is visible on the default Local pick and hides only when Cloud is picked', async () => {
     const wrapper = mountTakeover()
     // The row stays mounted (reserved layout space, no jump on swap)
-    // but is visually + a11y hidden until Local is picked.
+    // but is visually + a11y hidden whenever Cloud is the active pick.
     const express = () => wrapper.find('[data-testid="first-use-express-install"]')
     expect(express().exists()).toBe(true)
-    expect(express().classes()).toContain('start-express--hidden')
-    expect(express().attributes('aria-hidden')).toBe('true')
-
-    await wrapper.find('[data-testid="first-use-pick-local"]').trigger('click')
     expect(express().classes()).not.toContain('start-express--hidden')
     expect(express().attributes('aria-hidden')).toBe('false')
 
     await wrapper.find('[data-testid="first-use-pick-cloud"]').trigger('click')
     expect(express().classes()).toContain('start-express--hidden')
     expect(express().attributes('aria-hidden')).toBe('true')
+
+    await wrapper.find('[data-testid="first-use-pick-local"]').trigger('click')
+    expect(express().classes()).not.toContain('start-express--hidden')
+    expect(express().attributes('aria-hidden')).toBe('false')
   })
 
   it('emits `chain-local` with `express: true` when Local is picked with Express on (no legacy desktop)', async () => {
@@ -194,9 +194,9 @@ describe('FirstUseTakeover start step', () => {
   it('renders the "Migrate existing install" checkbox only when hasLegacyDesktop is true', async () => {
     const wrapper = mountTakeover()
     // Default open() has hasLegacyDesktop = false — the row is not in
-    // the DOM at all (v-if), so no test-id should resolve. No legacy
-    // install means Cloud stays the brand-anchor default with no
-    // migrate-related affordance shown anywhere on the start screen.
+    // the DOM at all (v-if), so no test-id should resolve. With no
+    // legacy install detected, no migrate-related affordance is shown
+    // anywhere on the start screen.
     expect(wrapper.find('[data-testid="first-use-migrate-existing"]').exists()).toBe(false)
     // After the host plumbs the detected legacy install in, the
     // checkbox mounts as a peer of Express. Visibility is then driven
@@ -273,12 +273,13 @@ describe('FirstUseTakeover start step', () => {
     expect(emitted![0]).toEqual([{ express: true }])
   })
 
-  it('emits `complete-cloud` (not `chain-local`) when Cloud is picked, regardless of Express', async () => {
+  it('emits `complete-cloud` (not `chain-local`) when the user flips to Cloud and presses Continue', async () => {
     const wrapper = mountTakeover()
     await wrapper
       .find('[data-testid="first-use-consent-tos"] input[type="checkbox"]')
       .setValue(true)
-    // Cloud is the default selection — just press Continue.
+    // Local is the default — flip to Cloud, then Continue.
+    await wrapper.find('[data-testid="first-use-pick-cloud"]').trigger('click')
     await wrapper.find('[data-testid="first-use-continue"]').trigger('click')
 
     expect(wrapper.emitted('complete-cloud')).toBeTruthy()
@@ -336,5 +337,16 @@ describe('FirstUseTakeover start step', () => {
     // termsDoc to null, which unmounts the v-if-gated modal.
     await stub.vm.$emit('close')
     expect(wrapper.find('[data-testid="stub-terms-modal"]').exists()).toBe(false)
+  })
+
+  it('Continue without touching the picker routes to chain-local (Local is the default)', async () => {
+    const wrapper = mountTakeover()
+    await wrapper
+      .find('[data-testid="first-use-consent-tos"] input[type="checkbox"]')
+      .setValue(true)
+    await wrapper.find('[data-testid="first-use-continue"]').trigger('click')
+
+    expect(wrapper.emitted('chain-local')).toBeTruthy()
+    expect(wrapper.emitted('complete-cloud')).toBeFalsy()
   })
 })

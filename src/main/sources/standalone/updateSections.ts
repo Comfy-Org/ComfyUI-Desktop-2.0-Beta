@@ -228,7 +228,11 @@ export function getDetailSections(installation: InstallationRecord): Record<stri
           } },
         openFolderAction(installation.installPath),
         { id: 'share', label: t('actions.share'), style: 'default', enabled: installed },
-        untrackAction(),
+        // Adopted installs are non-forgettable: the `.comfyui-desktop-2`
+        // marker on disk would also stop the legacy auto-tracker from
+        // resurfacing them, stranding the user. Matches the same gate in
+        // the chooser context menu (useInstallContextMenu).
+        ...(installation.adopted ? [] : [untrackAction()]),
         deleteAction(installation),
       ],
     },

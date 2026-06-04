@@ -147,7 +147,13 @@ export const useProgressStore = defineStore('progress', () => {
     const op = operations.get(installationId)
     if (!op || op.finished) return null
     if (op.steps && op.activePhase) {
-      const status = op.lastStatus[op.activePhase] || op.activePhase
+      // Prefer real status detail, then the registered step label, only
+      // falling back to the raw phase id when neither is available — so
+      // ambient surfaces never surface dev-y slugs like "source".
+      const raw = op.lastStatus[op.activePhase]
+      const stepLabel = op.steps.find((s) => s.phase === op.activePhase)?.label
+      const status =
+        (raw && raw !== op.activePhase ? raw : null) || stepLabel || op.activePhase
       return { status, percent: op.activePercent }
     }
     return { status: op.flatStatus || op.title, percent: op.flatPercent }

@@ -95,10 +95,12 @@ const emit = defineEmits<{
 const step = ref<Step>('start')
 const telemetryEnabled = ref(true)
 const locale = ref('en')
-/** Cloud-vs-Local selection picked on the merged start screen.
- *  Cloud is the brand-anchor card (glow + beam target) so it ships
- *  pre-selected — users can flip to Local before pressing Continue. */
-const pickedChoice = ref<'cloud' | 'local'>('cloud')
+/** Cloud-vs-Local selection picked on the merged start screen. Local
+ *  is the default everywhere — the user got here by clicking
+ *  "Download Local" upstream, so honor that intent. Cloud is still
+ *  rendered as an equal-weight peer card; users can flip to it before
+ *  pressing Continue. */
+const pickedChoice = ref<'cloud' | 'local'>('local')
 
 // Capacity-protection switch for Cloud (PostHog flag
 // `desktop-cloud-capacity`). At first-use, we follow the flag
@@ -111,28 +113,16 @@ const cloudCapacity = useCloudCapacity()
 const capacityReady = ref(false)
 /** What the picker rendered as default before the user could interact —
  *  used to split `fork_chosen` conversion by signal-vs-defaulting: a
- *  user keeping the default cloud pick is different from a user
- *  actively flipping local→cloud. Reseeded on every `open()` from the
- *  resolved capacity status. */
-const initialDefaultChoice = ref<'cloud' | 'local'>('cloud')
-function deriveDefaultChoice(): 'cloud' | 'local' {
-  // Returning Desktop user with a detected legacy install lands on
-  // Local by default: the migrate-existing-install path is the obvious
-  // next step for them and pre-selecting Local lines the start screen
-  // up so they only press Continue. Cloud disabled still wins (no
-  // viable cloud path) so the precedence is disabled > legacy > cloud.
-  if (cloudCapacity.isDisabled()) return 'local'
-  if (hasLegacyDesktop.value) return 'local'
-  return 'cloud'
-}
+ *  user keeping the default Local pick is different from a user
+ *  actively flipping to Cloud. */
+const initialDefaultChoice = ref<'cloud' | 'local'>('local')
 onMounted(async () => {
   await cloudCapacity.whenReady()
-  if (cloudCapacity.isDisabled()) {
-    pickedChoice.value = 'local'
-  }
-  initialDefaultChoice.value = deriveDefaultChoice()
   capacityReady.value = true
 })
+// Defensive: if the user manually flipped to Cloud and the kill-switch
+// then transitions to `disabled` mid-flow, snap them back to Local so
+// they can't proceed into a disabled cloud path.
 watch(cloudCapacity.status, (status) => {
   if (status === 'disabled' && pickedChoice.value === 'cloud') {
     pickedChoice.value = 'local'
@@ -467,12 +457,11 @@ async function open(opts: OpenOpts = {}): Promise<void> {
   whyCloudOpen.value = false
   termsDoc.value = null
   acceptedTos.value = false
-  // Re-derive default pick from current capacity. On first mount the
-  // `onMounted` `whenReady` await handles this; on takeover replay
-  // (capacity already resolved) we apply it inline so a `disabled`
-  // flag isn't clobbered by the reset.
-  pickedChoice.value = deriveDefaultChoice()
-  initialDefaultChoice.value = deriveDefaultChoice()
+  // Local is the default everywhere. Cloud-disabled and Legacy-Desktop-
+  // detected used to flip the default to Local; both now collapse into
+  // the same default, so the reset is unconditional.
+  pickedChoice.value = 'local'
+  initialDefaultChoice.value = 'local'
   expressInstall.value = true
   migrateExisting.value = true
   // `onContinue` keeps `isContinuing` true past `routePostStart()`

@@ -27,6 +27,7 @@ Subcommands:
 
 import os
 import sys
+import time
 from collections import deque
 
 import pygit2
@@ -442,18 +443,53 @@ def cmd_fetch_commit(repo_path, sha):
     print("Fetched commit %s." % sha, file=sys.stderr)
 
 
+def _format_bytes(n):
+    """Human-readable bytes (binary units, one decimal)."""
+    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+        if n < 1024 or unit == "TiB":
+            return "%.1f %s" % (n, unit)
+        n /= 1024.0
+
+
 def cmd_clone(url, dest):
-    """Clone a repository. Print progress to stderr."""
-    print("Cloning %s into %s..." % (url, dest), file=sys.stderr)
+    """Clone a repository. Print user-readable progress to stderr.
+
+    The launcher main process captures this stream and surfaces each line
+    in the install/migration log, so we emit newline-terminated lines
+    (no carriage-return TTY tricks) and throttle to ~1 update per second
+    so the UI doesn't get spammed.
+    """
+    print("Downloading ComfyUI source from %s into %s ..." % (url, dest),
+          file=sys.stderr)
     try:
         class Progress(pygit2.RemoteCallbacks):
+            def __init__(self):
+                super().__init__()
+                self._last_emit = 0.0
+                self._last_total = 0
+
             def transfer_progress(self, stats):
-                print("\r  Objects: %d/%d, Received: %d bytes" % (
-                    stats.indexed_objects, stats.total_objects,
-                    stats.received_bytes), end='', file=sys.stderr)
+                now = time.monotonic()
+                total = stats.total_objects or 0
+                indexed = stats.indexed_objects or 0
+                done = total > 0 and indexed >= total
+                # Throttle progress lines to ~1/sec, but always emit on
+                # completion and on the first tick where the server has
+                # told us the total object count.
+                if (not done
+                        and self._last_total == total
+                        and now - self._last_emit < 1.0):
+                    return
+                self._last_emit = now
+                self._last_total = total
+                pct = (indexed * 100 // total) if total else 0
+                print("  Downloading: %d%% (%d/%d objects, %s received)" % (
+                    pct, indexed, total,
+                    _format_bytes(stats.received_bytes)),
+                    file=sys.stderr)
+
         pygit2.clone_repository(url, dest, callbacks=Progress())
-        print(file=sys.stderr)  # newline after progress
-        print("Clone complete.", file=sys.stderr)
+        print("Download complete.", file=sys.stderr)
     except Exception as e:
         print("Error: clone failed: %s" % e, file=sys.stderr)
         sys.exit(1)

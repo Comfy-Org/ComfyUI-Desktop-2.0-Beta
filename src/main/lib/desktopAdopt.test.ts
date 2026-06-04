@@ -38,10 +38,32 @@ vi.mock('../settings', () => {
 
 // Stub the latest-stable-tag lookup + git checkout so adoption tests
 // don't need network access or a real ComfyUI git tree.
-const { getLatestStableTagMock, gitCheckoutCommitMock } = vi.hoisted(() => ({
+const {
+  getLatestStableTagMock,
+  gitCheckoutCommitMock,
+  readGitHeadMock,
+  fetchTagsMock,
+  isGitAvailableMock,
+  isPygit2ConfiguredMock,
+  tryConfigurePygit2FallbackMock,
+  resolveLocalVersionMock
+} = vi.hoisted(() => ({
   getLatestStableTagMock: vi.fn<() => Promise<string | null>>(),
   gitCheckoutCommitMock:
-    vi.fn<(...args: unknown[]) => Promise<{ exitCode: number; stdout: string; stderr: string }>>()
+    vi.fn<(...args: unknown[]) => Promise<{ exitCode: number; stdout: string; stderr: string }>>(),
+  readGitHeadMock: vi.fn<(repoPath: string) => string | null>(),
+  fetchTagsMock: vi.fn<(repoPath: string) => Promise<boolean>>(),
+  isGitAvailableMock: vi.fn<() => Promise<boolean>>(),
+  isPygit2ConfiguredMock: vi.fn<() => boolean>(),
+  tryConfigurePygit2FallbackMock: vi.fn<(installPath: string) => Promise<boolean>>(),
+  resolveLocalVersionMock:
+    vi.fn<
+      (
+        comfyuiDir: string,
+        commit: string,
+        fallbackTag?: string
+      ) => Promise<{ commit: string; baseTag?: string; commitsAhead?: number } | undefined>
+    >()
 }))
 
 vi.mock('./comfyui-releases', () => ({
@@ -52,9 +74,18 @@ vi.mock('./git', async () => {
   const actual = await vi.importActual<typeof gitModule>('./git')
   return {
     ...actual,
-    gitCheckoutCommit: gitCheckoutCommitMock
+    gitCheckoutCommit: gitCheckoutCommitMock,
+    readGitHead: readGitHeadMock,
+    fetchTags: fetchTagsMock,
+    isGitAvailable: isGitAvailableMock,
+    isPygit2Configured: isPygit2ConfiguredMock,
+    tryConfigurePygit2Fallback: tryConfigurePygit2FallbackMock
   }
 })
+
+vi.mock('./version-resolve', () => ({
+  resolveLocalVersion: resolveLocalVersionMock
+}))
 
 // Stub the pip helpers so adoption tests don't need a real uv binary on disk.
 const { installFilteredRequirementsMock, runUvPipMock } = vi.hoisted(() => ({
@@ -253,6 +284,15 @@ beforeEach(() => {
   // Default "no tag available" makes the one-shot update a no-op for unrelated tests.
   getLatestStableTagMock.mockResolvedValue(null)
   gitCheckoutCommitMock.mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' })
+  // Default git helpers to "git is available, no HEAD, no resolved
+  // version" so the comfyVersion-resolution branch is a no-op for
+  // tests that don't opt in. Specific tests override these as needed.
+  readGitHeadMock.mockReturnValue(null)
+  fetchTagsMock.mockResolvedValue(true)
+  isGitAvailableMock.mockResolvedValue(true)
+  isPygit2ConfiguredMock.mockReturnValue(true)
+  tryConfigurePygit2FallbackMock.mockResolvedValue(true)
+  resolveLocalVersionMock.mockResolvedValue(undefined)
 })
 
 afterEach(() => {
@@ -813,6 +853,151 @@ describe('adoptDesktopInstall', () => {
           adopted_comfy_tag_at_migration: null
         })
       )
+    } finally {
+      legacy.cleanup()
+    }
+  })
+
+  it('populates comfyVersion from the freshly checked-out source so update checks see the real git tag', async () => {
+    // Without comfyVersion, the release-cache falls back to comparing
+    // installation.version ("0.24.0", bare) against latestTag ("v0.24.0",
+    // "v"-prefixed) and reports a false "update available" forever.
+    readGitHeadMock.mockReturnValue('deadbeefdeadbeefdeadbeefdeadbeefdeadbeef')
+    resolveLocalVersionMock.mockResolvedValue({
+      commit: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+      baseTag: 'v0.24.0',
+      commitsAhead: 0
+    })
+    getLatestStableTagMock.mockResolvedValue('v0.24.0')
+    const legacy = buildFakeLegacy({ configFiles: { 'comfy.settings.json': '{}' } })
+    try {
+      const cloneFn = vi.fn(async (_url: string, dest: string) => {
+        fs.mkdirSync(dest, { recursive: true })
+        fs.mkdirSync(path.join(dest, '.git'), { recursive: true })
+        fs.writeFileSync(path.join(dest, 'main.py'), '# clone')
+        fs.writeFileSync(path.join(dest, 'comfyui_version.py'), '__version__ = "0.24.0"\n')
+        return { ok: true as const }
+      })
+      const tools = buildSilentTools()
+      const record = await adoptDesktopInstall({
+        tools,
+        deps: buildDeps({ cloneSourceFromGit: cloneFn }, legacy.info)
+      })
+      // resolveLocalVersion was invoked against the destination ComfyUI
+      // dir with the fallback tag threaded through from updateInfo.
+      expect(resolveLocalVersionMock).toHaveBeenCalledWith(
+        expect.stringContaining('ComfyUI'),
+        'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+        'v0.24.0'
+      )
+      expect(fetchTagsMock).toHaveBeenCalledWith(expect.stringContaining('ComfyUI'))
+      expect(record.comfyVersion).toEqual({
+        commit: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+        baseTag: 'v0.24.0',
+        commitsAhead: 0
+      })
+      // The bare-string `version` field is still set (used as the
+      // human-friendly display in the manage view) — both coexist.
+      expect(record.version).toBe('0.24.0')
+    } finally {
+      legacy.cleanup()
+    }
+  })
+
+  it('omits comfyVersion when no .git directory exists in the source tree', async () => {
+    // Pre-swap-copy mode often delivers a tarball with no .git. We can't
+    // resolve a real tag in that case, and falling back to the bare
+    // __version__ string is intentional — the release-cache change
+    // tolerates that mismatch on the comparison side.
+    readGitHeadMock.mockReturnValue('deadbeefdeadbeefdeadbeefdeadbeefdeadbeef')
+    resolveLocalVersionMock.mockResolvedValue({
+      commit: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+      baseTag: 'v0.24.0',
+      commitsAhead: 0
+    })
+    const legacy = buildFakeLegacy({ configFiles: { 'comfy.settings.json': '{}' } })
+    try {
+      writeFakeStagedSource(path.join(legacy.configDir, 'legacy-staging', 'comfyui'), '0.24.0')
+      const tools = buildSilentTools()
+      const record = await adoptDesktopInstall({
+        tools,
+        deps: buildDeps({}, legacy.info)
+      })
+      expect(resolveLocalVersionMock).not.toHaveBeenCalled()
+      expect(record).not.toHaveProperty('comfyVersion')
+      expect(record.version).toBe('0.24.0')
+    } finally {
+      legacy.cleanup()
+    }
+  })
+
+  it('adoption is non-fatal when comfyVersion resolution throws', async () => {
+    readGitHeadMock.mockReturnValue('deadbeefdeadbeefdeadbeefdeadbeefdeadbeef')
+    resolveLocalVersionMock.mockRejectedValue(new Error('pygit2 not configured'))
+    const legacy = buildFakeLegacy({ configFiles: { 'comfy.settings.json': '{}' } })
+    try {
+      const cloneFn = vi.fn(async (_url: string, dest: string) => {
+        fs.mkdirSync(dest, { recursive: true })
+        fs.mkdirSync(path.join(dest, '.git'), { recursive: true })
+        fs.writeFileSync(path.join(dest, 'main.py'), '# clone')
+        return { ok: true as const }
+      })
+      const tools = buildSilentTools()
+      const record = await adoptDesktopInstall({
+        tools,
+        deps: buildDeps({ cloneSourceFromGit: cloneFn }, legacy.info)
+      })
+      expect(record).not.toHaveProperty('comfyVersion')
+      // Warning surfaced to the user-facing output stream
+      expect(tools.sendOutput).toHaveBeenCalledWith(
+        expect.stringContaining('could not resolve adopted ComfyUI version: pygit2 not configured')
+      )
+    } finally {
+      legacy.cleanup()
+    }
+  })
+
+  it('registers human-readable step labels for the progress UI', async () => {
+    const legacy = buildFakeLegacy({ configFiles: { 'comfy.settings.json': '{}' } })
+    try {
+      const tools = buildSilentTools()
+      await adoptDesktopInstall({
+        tools,
+        deps: buildDeps({}, legacy.info)
+      })
+      // The very first sendProgress call must announce the step list so
+      // the renderer can replace its phase-id fallback with the real
+      // labels (issue: "Migration progress is weird").
+      const stepsCalls = (tools.sendProgress as ReturnType<typeof vi.fn>).mock.calls.filter(
+        ([phase]) => phase === 'steps'
+      )
+      expect(stepsCalls).toHaveLength(1)
+      const stepList = (stepsCalls[0]![1] as { steps: Array<{ phase: string; label: string }> }).steps
+      const phases = stepList.map((s) => s.phase)
+      // All adoption phases that emit sendProgress(...) below must be
+      // represented so the renderer never falls back to displaying the
+      // raw phase id like "source".
+      expect(phases).toContain('backup')
+      expect(phases).toContain('venv')
+      expect(phases).toContain('snapshot')
+      expect(phases).toContain('allocate')
+      expect(phases).toContain('source')
+      expect(phases).toContain('comfy-update')
+      expect(phases).toContain('requirements')
+      expect(phases).toContain('settings')
+      expect(phases).toContain('register')
+      // `tcc` is darwin-only — assert symmetry with the actual platform.
+      if (process.platform === 'darwin') {
+        expect(phases).toContain('tcc')
+      } else {
+        expect(phases).not.toContain('tcc')
+      }
+      // Every registered step has a non-empty label string.
+      for (const step of stepList) {
+        expect(typeof step.label).toBe('string')
+        expect(step.label.length).toBeGreaterThan(0)
+        expect(step.label).not.toBe(step.phase)
+      }
     } finally {
       legacy.cleanup()
     }

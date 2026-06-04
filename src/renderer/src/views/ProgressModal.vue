@@ -85,26 +85,43 @@ const LAUNCH_SLOT_STARTS = [0, 10, 25, 45, 70] as const
 /** Soft per-step duration estimate for interpolating the bar fill when no stdout signal arrives. Steps still advance on the timer + stdout regexes. */
 const LAUNCH_STEP_BUDGET_MS = 4_000
 
-// User-facing caption per phase. Stepped ops map `activePhase` to a curated `progress.phaseLabel.<phase>` (falling back to the raw status); flat ops pass through `flatStatus`.
+// Friendly label registered by main via `sendProgress('steps', { steps })` for the active phase (used by the adopt/migration flow).
+const activeStepLabel = computed<string | null>(() => {
+  const op = currentOp.value
+  if (!op?.steps || !op.activePhase) return null
+  return op.steps.find((s) => s.phase === op.activePhase)?.label?.trim() || null
+})
+
+// Trimmed raw status string main pushed for the active phase.
+const activePhaseStatus = computed<string | null>(() => {
+  const op = currentOp.value
+  if (!op?.steps || !op.activePhase) return null
+  return op.lastStatus[op.activePhase]?.trim() || null
+})
+
+// User-facing caption per phase. Stepped ops resolve in order: curated `progress.phaseLabel.<phase>` → registered step label → real status detail → raw phase id (last resort). Flat ops pass through `flatStatus`.
 const friendlyCaption = computed<string>(() => {
   const op = currentOp.value
   if (!op) return t('progress.starting')
   if (op.steps && op.activePhase) {
     const key = `progress.phaseLabel.${op.activePhase}`
     const friendly = t(key)
-    // vue-i18n returns the key itself when missing; fall back so the UI never shows the dotted key.
     if (friendly !== key) return friendly
-    return op.lastStatus[op.activePhase] || op.activePhase
+    if (activeStepLabel.value) return activeStepLabel.value
+    const raw = activePhaseStatus.value
+    if (raw && raw !== op.activePhase) return raw
+    return op.activePhase
   }
   return op.flatStatus || t('progress.starting')
 })
 
-// Second-line caption: the rich `lastStatus[activePhase]` (bytes/speed/ETA) for stepped phases where it differs from the curated headline. Null otherwise.
+// Second-line caption: rich `lastStatus[activePhase]` (bytes/speed/ETA) when it adds info beyond the headline. Suppresses the raw phase-id fallback so dev-y slugs never leak in as a sub-label.
 const subStatus = computed<string | null>(() => {
-  const op = currentOp.value
-  if (!op?.steps || !op.activePhase) return null
-  const raw = op.lastStatus[op.activePhase]
+  const raw = activePhaseStatus.value
   if (!raw) return null
+  const op = currentOp.value
+  if (op?.activePhase && raw === op.activePhase) return null
+  if (raw === activeStepLabel.value) return null
   if (raw === friendlyCaption.value) return null
   return raw
 })

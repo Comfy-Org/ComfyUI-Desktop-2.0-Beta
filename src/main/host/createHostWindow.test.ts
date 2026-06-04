@@ -158,24 +158,34 @@ describe('shouldBailAfterCloseConfirm', () => {
 describe('shouldDetachLastInstallWindowToDashboard', () => {
   it('detaches an install host with a live entry when it is the last window', () => {
     // OS ✕ on the last install window → flip to dashboard in place.
-    expect(shouldDetachLastInstallWindowToDashboard(true, true, true, false)).toBe(true)
+    expect(shouldDetachLastInstallWindowToDashboard(true, true, true, false, false)).toBe(true)
   })
 
   it('does not detach on a force-close even if it is the last install window', () => {
     // Launch-guard swap / bulk Exit-All want the window gone, not a
     // stray dashboard window left behind.
-    expect(shouldDetachLastInstallWindowToDashboard(true, true, true, true)).toBe(false)
+    expect(shouldDetachLastInstallWindowToDashboard(true, true, true, true, false)).toBe(false)
   })
 
   it('does not detach when other host windows are still open', () => {
-    expect(shouldDetachLastInstallWindowToDashboard(true, true, false, false)).toBe(false)
+    expect(shouldDetachLastInstallWindowToDashboard(true, true, false, false, false)).toBe(false)
   })
 
   it('does not detach a chooser/dashboard host (no install backing)', () => {
-    expect(shouldDetachLastInstallWindowToDashboard(false, true, true, false)).toBe(false)
+    expect(shouldDetachLastInstallWindowToDashboard(false, true, true, false, false)).toBe(false)
   })
 
   it('does not detach when the entry has already been dropped from the registry', () => {
-    expect(shouldDetachLastInstallWindowToDashboard(true, false, true, false)).toBe(false)
+    expect(shouldDetachLastInstallWindowToDashboard(true, false, true, false, false)).toBe(false)
+  })
+
+  it('does not detach when a quit is in progress (Cmd+Q, app-update restart, etc.)', () => {
+    // Regression for: clicking "Restart Now" in the Desktop Update modal
+    // fired app.quit() which fired close on the last install window —
+    // and that close was being intercepted into a dashboard-detach,
+    // swallowing the quit. The first restart click was a silent no-op
+    // because the window flipped to dashboard instead of destroying;
+    // only the second click (after the flip) actually restarted.
+    expect(shouldDetachLastInstallWindowToDashboard(true, true, true, false, true)).toBe(false)
   })
 })

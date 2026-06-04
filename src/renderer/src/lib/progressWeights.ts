@@ -42,6 +42,33 @@ const TABLES: Record<string, Record<string, number>> = {
     'restore-nodes': 0.18,
     'restore-pip': 0.12,
   },
+  // Legacy Desktop adoption (non-macOS — no `tcc` step). Source +
+  // comfy-update + requirements dominate wall time; the rest are fast.
+  'allocate|backup|comfy-update|register|requirements|settings|snapshot|source|venv': {
+    backup: 0.05,
+    venv: 0.03,
+    snapshot: 0.05,
+    allocate: 0.02,
+    source: 0.30,
+    'comfy-update': 0.15,
+    requirements: 0.30,
+    settings: 0.05,
+    register: 0.05,
+  },
+  // Legacy Desktop adoption on macOS — same shape plus a `tcc` access
+  // check step.
+  'allocate|backup|comfy-update|register|requirements|settings|snapshot|source|tcc|venv': {
+    backup: 0.05,
+    tcc: 0.02,
+    venv: 0.03,
+    snapshot: 0.05,
+    allocate: 0.02,
+    source: 0.28,
+    'comfy-update': 0.15,
+    requirements: 0.30,
+    settings: 0.05,
+    register: 0.05,
+  },
 }
 
 export function fingerprintSteps(steps: readonly ProgressStep[]): string {

@@ -42,3 +42,16 @@ export function formatComfyVersion(
 
   return `${baseTag} + ${commitsAhead} commit${commitsAhead !== 1 ? 's' : ''} (${shortSha})`
 }
+
+/**
+ * Compare two tag-ish strings tolerant of a leading `v`. The comfyui_version.py
+ * `__version__` string is bare ("0.24.0") while GitHub tag names are
+ * "v"-prefixed ("v0.24.0"); legacy code paths persist either form. Without
+ * this normalization an adopted install permanently looks one revision
+ * behind because "0.24.0" !== "v0.24.0".
+ */
+export function tagsEqual(a: string | undefined, b: string | undefined): boolean {
+  if (!a || !b) return false
+  if (a === b) return true
+  return a.replace(/^v/, '') === b.replace(/^v/, '')
+}

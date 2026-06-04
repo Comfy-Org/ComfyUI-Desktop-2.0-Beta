@@ -10,7 +10,7 @@ import { dataDir } from './paths'
 import { writeFileSafe } from './safe-file'
 import { fetchLatestRelease, getLatestStableTag, truncateNotes } from './comfyui-releases'
 import { fetchTags, countCommitsAhead, fetchCommitSha, findNearestTag } from './git'
-import { formatComfyVersion } from './version'
+import { formatComfyVersion, tagsEqual } from './version'
 import type { ComfyVersion } from './version'
 
 export interface ReleaseCacheEntry {
@@ -354,7 +354,7 @@ export function isUpdateAvailable(
     const postHead = (lastRollback?.postUpdateHead as string | undefined) || ''
     const shortHead = postHead.slice(0, 7)
     const displayVersion = cv ? formatComfyVersion(cv, 'short') : ''
-    if (displayVersion === info.latestTag || displayVersion === info.releaseName) return false
+    if (tagsEqual(displayVersion, info.latestTag) || tagsEqual(displayVersion, info.releaseName)) return false
     if (shortHead && (shortHead === info.latestTag || info.releaseName?.includes(shortHead))) return false
     return true
   }
@@ -364,6 +364,12 @@ export function isUpdateAvailable(
 
   // Raw tag/sha mismatch (releaseName too, since latest uses a SHA as latestTag). Skip when
   // installedTag is 'unknown' (brand-new install before first update).
-  if (info.installedTag && info.installedTag !== 'unknown' && info.installedTag !== info.latestTag && info.installedTag !== info.releaseName) return true
+  if (
+    info.installedTag &&
+    info.installedTag !== 'unknown' &&
+    !tagsEqual(info.installedTag, info.latestTag) &&
+    !tagsEqual(info.installedTag, info.releaseName)
+  )
+    return true
   return false
 }
