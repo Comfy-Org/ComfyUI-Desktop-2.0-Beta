@@ -54,6 +54,11 @@ const i18n = createI18n({
 
 beforeEach(() => {
   window.api = {
+    // Default to the Mac platform so existing assertions that assume
+    // Cloud is the start-screen default keep their semantics. The
+    // Windows / Linux default-to-Local branch is exercised in its own
+    // describe() below with `platform` overridden per test.
+    platform: 'darwin',
     setSetting: vi.fn().mockResolvedValue(undefined),
     getSetting: vi.fn().mockResolvedValue(true),
     getLocale: vi.fn().mockResolvedValue('en'),
@@ -336,5 +341,41 @@ describe('FirstUseTakeover start step', () => {
     // termsDoc to null, which unmounts the v-if-gated modal.
     await stub.vm.$emit('close')
     expect(wrapper.find('[data-testid="stub-terms-modal"]').exists()).toBe(false)
+  })
+})
+
+describe('FirstUseTakeover default pick by platform', () => {
+  it('defaults to Local on Windows (Express row visible, Continue routes to chain-local)', async () => {
+    ;(window.api as unknown as { platform: string }).platform = 'win32'
+    const wrapper = mountTakeover()
+
+    // Express row mounts visible because Local is the default pick —
+    // no need for the user to click the Local card first.
+    const express = wrapper.find('[data-testid="first-use-express-install"]')
+    expect(express.exists()).toBe(true)
+    expect(express.classes()).not.toContain('start-express--hidden')
+    expect(express.attributes('aria-hidden')).toBe('false')
+
+    // Accept T&C and press Continue without touching the picker.
+    await wrapper
+      .find('[data-testid="first-use-consent-tos"] input[type="checkbox"]')
+      .setValue(true)
+    await wrapper.find('[data-testid="first-use-continue"]').trigger('click')
+
+    expect(wrapper.emitted('chain-local')).toBeTruthy()
+    expect(wrapper.emitted('complete-cloud')).toBeFalsy()
+  })
+
+  it('defaults to Local on Linux too (Continue routes to chain-local)', async () => {
+    ;(window.api as unknown as { platform: string }).platform = 'linux'
+    const wrapper = mountTakeover()
+
+    await wrapper
+      .find('[data-testid="first-use-consent-tos"] input[type="checkbox"]')
+      .setValue(true)
+    await wrapper.find('[data-testid="first-use-continue"]').trigger('click')
+
+    expect(wrapper.emitted('chain-local')).toBeTruthy()
+    expect(wrapper.emitted('complete-cloud')).toBeFalsy()
   })
 })

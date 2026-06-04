@@ -95,10 +95,17 @@ const emit = defineEmits<{
 const step = ref<Step>('start')
 const telemetryEnabled = ref(true)
 const locale = ref('en')
-/** Cloud-vs-Local selection picked on the merged start screen.
- *  Cloud is the brand-anchor card (glow + beam target) so it ships
- *  pre-selected — users can flip to Local before pressing Continue. */
-const pickedChoice = ref<'cloud' | 'local'>('cloud')
+/** Host platform exposed synchronously by the preload (`process.platform`).
+ *  Used to bias the default fork pick: Mac users land on Cloud (strong
+ *  observed conversion + the bulk of Mac hardware can't run local models
+ *  reliably), every other platform lands on Local (matches the explicit
+ *  "download local" intent that brought them here). */
+const isMacHost = window.api?.platform === 'darwin'
+/** Cloud-vs-Local selection picked on the merged start screen. Initial
+ *  value mirrors `deriveDefaultChoice` so a slow-resolving capacity
+ *  fetch doesn't flash the wrong card; the post-mount derive call only
+ *  flips on `disabled` capacity or detected legacy install. */
+const pickedChoice = ref<'cloud' | 'local'>(isMacHost ? 'cloud' : 'local')
 
 // Capacity-protection switch for Cloud (PostHog flag
 // `desktop-cloud-capacity`). At first-use, we follow the flag
@@ -111,19 +118,24 @@ const cloudCapacity = useCloudCapacity()
 const capacityReady = ref(false)
 /** What the picker rendered as default before the user could interact —
  *  used to split `fork_chosen` conversion by signal-vs-defaulting: a
- *  user keeping the default cloud pick is different from a user
- *  actively flipping local→cloud. Reseeded on every `open()` from the
- *  resolved capacity status. */
-const initialDefaultChoice = ref<'cloud' | 'local'>('cloud')
+ *  user keeping the default pick is different from a user actively
+ *  flipping the card. Reseeded on every `open()` from the resolved
+ *  capacity status + platform. */
+const initialDefaultChoice = ref<'cloud' | 'local'>(isMacHost ? 'cloud' : 'local')
 function deriveDefaultChoice(): 'cloud' | 'local' {
-  // Returning Desktop user with a detected legacy install lands on
-  // Local by default: the migrate-existing-install path is the obvious
-  // next step for them and pre-selecting Local lines the start screen
-  // up so they only press Continue. Cloud disabled still wins (no
-  // viable cloud path) so the precedence is disabled > legacy > cloud.
+  // Precedence: disabled > legacy > platform.
+  //   - `disabled` cloud: no viable cloud path, pre-select Local.
+  //   - Legacy Desktop detected: migrate-existing is the obvious next
+  //     step for a returning user — pre-select Local so Continue just
+  //     runs the migration.
+  //   - Otherwise: Mac users default to Cloud (the bulk of Mac hardware
+  //     can't run local models reliably, and observed conversion is
+  //     strong); every other platform defaults to Local — that's the
+  //     "download local" intent we want to honor as the obvious primary
+  //     path, with Cloud still surfaced as the equal-weight peer.
   if (cloudCapacity.isDisabled()) return 'local'
   if (hasLegacyDesktop.value) return 'local'
-  return 'cloud'
+  return isMacHost ? 'cloud' : 'local'
 }
 onMounted(async () => {
   await cloudCapacity.whenReady()
