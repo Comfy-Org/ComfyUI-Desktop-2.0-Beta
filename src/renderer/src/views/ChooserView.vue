@@ -327,21 +327,22 @@ function handleNewInstallClick(): void {
 }
 
 .chooser-view {
-  /* Fluid centering pattern with a top-spacer floor:
-   *   - Short grid (initial state, few tiles) → both spacers grow
-   *     toward 1fr → cluster centered, as before
-   *   - More tiles → spacers shrink symmetrically; top spacer floors
-   *     at ~4vh / 24-56px so the wordmark+search keep getting pushed
-   *     toward the top of the frame and the grid gains rows in-view
+  /* Anchored cluster + bottom-slack pattern:
+   *   - Top spacer is a fixed viewport-proportional offset, NOT 1fr,
+   *     so the wordmark+search row sits at a stable y regardless of
+   *     how many tiles the grid currently renders. This prevents the
+   *     cold-start jump (empty → populated) and the search-as-you-type
+   *     jump (filter shrinks the grid under the input).
+   *   - Bottom spacer absorbs all remaining slack as 1fr.
    *   - Very tall grid → grid scrolls internally (max-height 100%)
-   *     so the cluster + viewport bounds are never breached
+   *     so the cluster + viewport bounds are never breached.
    *
-   * Row layout: [top spacer] [wordmark] [search] [grid] [bottom spacer] */
+   * Row layout: [top offset] [wordmark] [search] [grid] [bottom spacer] */
   flex: 1 1 auto;
   min-height: 0;
   display: grid;
   grid-template-rows:
-    minmax(clamp(24px, 4vh, 56px), 1fr)
+    clamp(24px, 4vh, 56px)
     auto
     auto
     minmax(0, auto)
