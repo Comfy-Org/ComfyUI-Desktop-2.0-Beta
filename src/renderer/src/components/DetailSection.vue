@@ -35,7 +35,7 @@ const emit = defineEmits<{
 const isCollapsed = ref(props.collapsed === true)
 const sectionRef = ref<HTMLDivElement | null>(null)
 
-// Channel-cards draft state: local selection before committing
+// Channel-cards local selection before committing.
 const draftValues = reactive<Record<string, string>>({})
 
 function getDraft(f: DetailField): string {
@@ -53,7 +53,7 @@ function getSelectedActions(f: DetailField): ActionDef[] | undefined {
   return data?.actions as ActionDef[] | undefined
 }
 
-// Reset draft when the committed value changes (e.g., after refresh)
+// Reset draft when the committed value changes (e.g. after refresh).
 watch(() => props.fields, () => {
   for (const f of props.fields ?? []) {
     if (f.editType === 'channel-cards' && draftValues[f.id] === String(f.value)) {
@@ -73,7 +73,7 @@ async function toggleCollapse(): Promise<void> {
 }
 
 async function handleFieldChange(field: DetailField, value: string | boolean | Record<string, string>): Promise<void> {
-  // Update local field value immediately so tab switches reflect the change
+  // Update local value immediately so tab switches reflect the change.
   field.value = value
   await window.api.updateInstallation(props.installationId, { [field.id]: value })
   if (field.refreshSection && props.title) {
@@ -112,7 +112,6 @@ v-if="title" class="detail-section-title"
     <div v-show="!isCollapsed" class="detail-section-body">
       <div v-if="description" class="detail-section-desc">{{ description }}</div>
 
-      <!-- Items -->
       <div v-if="items?.length" class="detail-item-list">
         <div v-for="item in items" :key="item.label" class="detail-item" :class="{ active: item.active }">
           <div class="detail-item-label">{{ item.label }}{{ item.active ? ' (active)' : '' }}<span v-if="item.tag" class="detail-item-tag">{{ item.tag }}</span></div>
@@ -127,10 +126,8 @@ v-for="a in item.actions" :key="a.id"
         </div>
       </div>
 
-      <!-- Fields -->
       <div v-if="fields?.length" class="detail-fields">
         <div v-for="f in fields" :key="f.id">
-          <!-- Channel cards -->
           <template v-if="f.editable && f.editType === 'channel-cards'">
             <div class="detail-field-label">{{ f.label }}<InfoTooltip v-if="f.tooltip" :text="f.tooltip" /></div>
             <select
@@ -167,7 +164,6 @@ v-for="a in item.actions" :key="a.id"
             <div v-else-if="getDraft(f) !== String(f.value)" class="channel-preview channel-preview-empty">
               {{ $t('channelCards.noInfo') }}
             </div>
-            <!-- Channel actions (e.g. Update Now): shown for the selected channel -->
             <div v-if="getSelectedActions(f)?.length" class="channel-actions">
               <span v-if="getDraft(f) !== String(f.value)" class="channel-switch-hint">
                 {{ $t('channelCards.switchTo', { channel: getSelectedOption(f)?.label }) }}
@@ -183,7 +179,6 @@ v-for="a in item.actions" :key="a.id"
               </TooltipWrap>
             </div>
           </template>
-          <!-- Args builder -->
           <template v-else-if="f.editable && f.editType === 'args-builder'">
             <div class="detail-field-label">{{ f.label }}<InfoTooltip v-if="f.tooltip" :text="f.tooltip" /></div>
             <ArgsBuilder
@@ -192,7 +187,6 @@ v-for="a in item.actions" :key="a.id"
               @update:model-value="handleFieldChange(f, $event)"
             />
           </template>
-          <!-- Env vars editor -->
           <template v-else-if="f.editable && f.editType === 'env-vars'">
             <div class="detail-field-label">{{ f.label }}<InfoTooltip v-if="f.tooltip" :text="f.tooltip" /></div>
             <EnvVarsEditor
@@ -202,34 +196,28 @@ v-for="a in item.actions" :key="a.id"
           </template>
           <template v-else>
             <div class="detail-field-label">{{ f.label }}<InfoTooltip v-if="f.tooltip" :text="f.tooltip" /></div>
-            <!-- Select -->
             <select
 v-if="f.editable && f.editType === 'select'" class="detail-field-input"
                     :value="f.value" @change="handleFieldChange(f, ($event.target as HTMLSelectElement).value)">
               <option v-for="opt in f.options" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
             </select>
-            <!-- Boolean -->
             <input
 v-else-if="f.editable && f.editType === 'boolean'" type="checkbox" class="detail-field-toggle"
                    :checked="f.value !== false" @change="handleFieldChange(f, ($event.target as HTMLInputElement).checked)">
-            <!-- Path with browse -->
             <div v-else-if="f.editable && f.editType === 'path'" class="path-input">
               <input
 type="text" class="detail-field-input"
                      :value="f.value ?? ''" :readonly="f.browseOnly" @change="!f.browseOnly && handleFieldChange(f, ($event.target as HTMLInputElement).value)">
               <button @click="handleBrowseField(f)">{{ $t('common.browse') }}</button>
             </div>
-            <!-- Text editable -->
             <input
 v-else-if="f.editable" type="text" class="detail-field-input"
                    :value="f.value ?? ''" @change="handleFieldChange(f, ($event.target as HTMLInputElement).value)">
-            <!-- Read-only -->
             <div v-else class="detail-field-value">{{ f.value }}</div>
           </template>
         </div>
       </div>
 
-      <!-- Actions -->
       <div v-if="actions?.length" class="detail-actions">
         <TooltipWrap v-for="a in actions" :key="a.id" :text="a.tooltip">
           <button

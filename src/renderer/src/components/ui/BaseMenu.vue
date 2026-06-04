@@ -1,55 +1,27 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
 
-/**
- * Actions-menu primitive. Renders a trigger button (default slot:
- * trigger label) and a popover list of clickable items that fire
- * `select` and close on pick. Unlike `BaseSelect` this carries no
- * `modelValue` — each item is an action, not a selection.
- *
- * Auto-flips placement: opens downward when there's room beneath the
- * trigger, upward when there isn't. Matches the affordance the
- * instance-picker's footer "More" button needs (picker is anchored
- * near the bottom of the screen so a downward drop would clip).
- *
- * Popover is teleported to <body> so any `overflow:hidden` on an
- * ancestor (popup webContents body, drawer chrome) can't clip it.
- *
- * The design language matches `BaseSelect` and the rest of the shadcn-
- * style ui primitives — same surface/border tokens, same chevron
- * rotation on open, same enter/leave transition timing.
- */
+// Actions-menu primitive: a trigger and a popover list of items that fire
+// `select` on pick. Auto-flips up/down by available space and teleports the
+// popover to <body> so ancestor `overflow:hidden` can't clip it.
 
 export interface BaseMenuItem {
   id: string
   label: string
   disabled?: boolean
-  /** Optional style hint. `danger` renders the row in `--danger` color
-   *  so destructive items (Delete, Untrack) read correctly without a
-   *  per-call CSS override. */
   style?: 'default' | 'danger'
-  /** When true, a thin divider is drawn above this item — useful for
-   *  grouping destructive items below the rest. */
+  /** Draws a divider above this item. */
   separator?: boolean
 }
 
 interface Props {
   items: BaseMenuItem[]
-  /** Accessible label for the trigger button. */
   triggerAriaLabel?: string
-  /** Minimum width applied to the popover so labels don't reflow as
-   *  the menu opens. Defaults to the trigger's measured width. */
+  /** Min popover width so labels don't reflow on open. */
   minWidth?: number
-  /** Horizontal alignment of the menu relative to the trigger —
-   *  mirrors Radix / shadcn `DropdownMenu`'s `align` prop.
-   *  - `'start'` (default): menu's left edge aligns with the trigger's
-   *    left edge (open down-and-right).
-   *  - `'end'`: menu's right edge aligns with the trigger's right edge
-   *    (open down-and-left). Use this for trailing-side triggers like a
-   *    footer "More" pill — the menu tucks back into the viewport
-   *    instead of trying to escape past the right edge. */
+  /** `start` aligns the menu's left edge with the trigger's; `end` aligns
+   *  the right edges, tucking trailing-side menus back into the viewport. */
   align?: 'start' | 'end'
-  /** Pixel gap between the trigger and the menu. */
   offset?: number
 }
 
@@ -78,20 +50,9 @@ function firstEnabledIndex(): number {
 
 const VIEWPORT_PAD_PX = 4
 
-/**
- * Position the menu with shadcn / Radix semantics:
- *
- *   1. Pick a side (top vs bottom) based on which has more space.
- *   2. Pick an x anchor based on `align` (start = trigger left,
- *      end = trigger right).
- *   3. Clamp the menu's bounding box into the viewport so it can't
- *      escape on any edge — Radix calls this "collision avoidance."
- *
- * Called once before paint with an estimated menu rect, then again
- * after the first frame with the menu's measured rect. The second
- * call is what makes long labels stop clipping at the right edge —
- * we only know the menu's real width once the DOM has it.
- */
+// Picks a side by available space, anchors x by `align`, and clamps into
+// the viewport. Called once with an estimated rect, then again post-mount
+// with the measured rect (needed so long labels stop clipping).
 function updatePosition(): void {
   const trigger = triggerRef.value
   if (!trigger) return
@@ -105,16 +66,12 @@ function updatePosition(): void {
   const estimatedHeight = Math.min(props.items.length * 36 + 16, 320)
   const menuHeight = measured?.height ?? estimatedHeight
 
-  // Vertical side decision.
   const spaceBelow = vh - rect.bottom - props.offset
   const spaceAbove = rect.top - props.offset
   const openUp =
     menuHeight + VIEWPORT_PAD_PX > spaceBelow && spaceAbove > spaceBelow
   const top = openUp ? rect.top - props.offset - menuHeight : rect.bottom + props.offset
 
-  // Horizontal anchor — start aligns with trigger's left, end with
-  // trigger's right. Once anchored we clamp into the viewport so the
-  // menu can never sit outside [VIEWPORT_PAD_PX, vw - VIEWPORT_PAD_PX].
   const anchorLeft = props.align === 'end' ? rect.right - menuWidth : rect.left
   const clampedLeft = Math.min(
     Math.max(anchorLeft, VIEWPORT_PAD_PX),
@@ -137,10 +94,7 @@ function openPanel(): void {
   if (props.items.length === 0) return
   open.value = true
   activeIndex.value = firstEnabledIndex()
-  // First pass: place with the estimated rect so the first paint
-  // doesn't flash at (0, 0). Second pass (post-mount): re-measure
-  // and clamp against the real menu rect so long labels can't push
-  // the right edge past the viewport.
+  // First pass avoids a flash at (0,0); second re-measures the real rect.
   updatePosition()
   void nextTick(() => {
     updatePosition()
@@ -324,11 +278,7 @@ defineExpose({ open: openPanel, close: closePanel, toggle })
 </template>
 
 <style scoped>
-/* Default trigger chrome — matches the dark pill affordance used by
- * other menu/secondary buttons across the app (--pick-bg-active fill,
- * 8px radius, 12px label, 32px row, brightness on hover). Consumers
- * can still re-skin via class fallthrough — keep selectors at single-
- * class specificity so overrides land cleanly. */
+/* Single-class specificity so consumer class overrides land cleanly. */
 .ui-menu-trigger {
   display: inline-flex;
   align-items: center;
@@ -358,10 +308,6 @@ defineExpose({ open: openPanel, close: closePanel, toggle })
 <style>
 /* Listbox is teleported to <body>, so it can't be scoped. */
 .ui-menu-list {
-  /* Comfortable resting width — long labels like "Copy Installation"
-   * shouldn't sit flush against the menu border. The positioning
-   * logic clamps this against the viewport, so widening here is
-   * safe; narrow viewports just trim via `maxWidth` set inline. */
   min-width: 200px;
   margin: 0;
   padding: 6px;

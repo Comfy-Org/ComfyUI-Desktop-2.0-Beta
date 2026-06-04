@@ -45,7 +45,6 @@ describe('rotateLogFiles', () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'log-rotate-'))
     const baseName = 'app.log'
 
-    // Create rotated files that exceed maxFiles
     const oldFile = `${baseName}_2020-01-01T00-00-00-000Z.log`
     const newFile = `${baseName}_2025-01-01T00-00-00-000Z.log`
     fs.writeFileSync(path.join(tmpDir, oldFile), 'old')

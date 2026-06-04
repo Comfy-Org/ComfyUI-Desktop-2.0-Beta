@@ -1,19 +1,8 @@
 /**
- * Retry wrapper for Playwright Electron `app.evaluate(...)` calls.
- *
- * Playwright's electron evaluation channel intermittently throws
- * "Execution context was destroyed, most likely because of a
- * navigation" on heavily-loaded CI runners (especially Windows). The
- * underlying CDP channel can be torn down briefly when the host
- * window's child WebContentsViews (popup pre-warm, tray open/close,
- * system-modal pre-warm) are created or destroyed in quick succession
- * — Playwright's evaluation target gets invalidated, and the very
- * next call fails before the channel is re-established.
- *
- * The error is recoverable: a retry on the next event-loop tick lands
- * on a fresh evaluation context. Wrap evaluate-style calls in this
- * helper instead of letting transient channel resets fail the whole
- * test.
+ * Retry wrapper for Playwright Electron `app.evaluate(...)` calls. The
+ * evaluation channel intermittently throws "Execution context was destroyed"
+ * on loaded CI runners when child WebContentsViews churn; a retry on the next
+ * tick lands on a fresh, working evaluation context.
  */
 
 const RETRY_PATTERN = /Execution context was destroyed/i
@@ -30,9 +19,6 @@ export async function evalWithRetry<T>(
       lastErr = err
       const msg = err instanceof Error ? err.message : String(err)
       if (!RETRY_PATTERN.test(msg)) throw err
-      // Backoff just long enough for Playwright to re-attach to a
-      // fresh evaluation context — 50ms is well past the typical
-      // re-attach window we've measured in CI.
       await new Promise((r) => setTimeout(r, 50 * (i + 1)))
     }
   }

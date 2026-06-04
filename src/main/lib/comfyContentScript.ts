@@ -1,31 +1,10 @@
 /**
- * Returns a self-contained JavaScript string to be injected into ComfyUI
- * webview pages via webContents.executeJavaScript().
- *
- * The script intercepts model downloads triggered by the "Missing Models"
- * dialog or the right side panel Errors tab and routes them through the
- * Launcher's download manager (exposed as window.__comfyDesktop2 by
- * comfyPreload.ts) so that model files land in the correct shared-models
- * subdirectory.
- *
- * It supports the legacy dialog (PrimeVue Listbox with class
- * "comfy-missing-models"), the newer redesigned dialog, and the right side
- * panel's Missing Models error section.
- *
- * Download progress is surfaced via the title-bar downloads tray (see
- * `comfyTitleBarPreload.ts` / `TitleBarApp.vue` /
- * `comfyTitlePopup/DownloadsView.vue`) so the affordance lives in
- * Launcher chrome rather than inside ComfyUI's page surface. What
- * stays here is exactly what must run inside the ComfyUI page:
- *   - Missing-models dialog / errors-tab scraping (we need to read
- *     the dialog DOM to know which model directory each download
- *     should land in).
- *   - The `<a>.click()` interception that re-routes the download
- *     through `window.__comfyDesktop2.downloadModel` (the
- *     `directory` hint comes from the scraped cache).
- *   - The remote/cloud WebSocket auto-download intercept (workflow
- *     outputs from a remote ComfyUI server are downloaded to the
- *     local output dir without user action).
+ * Self-contained JS injected into ComfyUI pages via executeJavaScript(). It
+ * scrapes the Missing-Models dialog / Errors-tab DOM to learn each model's
+ * target directory, intercepts the download `<a>.click()` to route it through
+ * `window.__comfyDesktop2.downloadModel`, and (for remote/cloud sessions)
+ * intercepts WebSocket output messages to auto-download workflow outputs.
+ * Supports the legacy and redesigned dialogs plus the side-panel error section.
  */
 export function getModelDownloadContentScript(): string {
   return `(function() {
@@ -157,11 +136,8 @@ export function getModelDownloadContentScript(): string {
     var panel = document.querySelector('[data-testid="properties-panel"]');
     var errorsTabOpen = false;
     if (panel) {
-      // The Missing Models section title contains "Missing Models" in a
-      // span with the destructive-background-hover style, but we need a
-      // more specific check: look for a download button with aria-label
-      // starting with "Download " inside the panel, which only appears in
-      // the missing models section.
+      // A download button with aria-label starting "Download " only appears in
+      // the missing-models section, so it's a reliable presence check.
       var downloadBtns = panel.querySelectorAll('button[aria-label^="Download "]');
       errorsTabOpen = downloadBtns.length > 0;
     }

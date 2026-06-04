@@ -3,9 +3,7 @@ import fs from 'fs'
 import { dataDir } from './paths'
 import { writeFileSafe } from './safe-file'
 
-// Canonical ComfyUI model folder types from folder_paths.py.
-// When ComfyUI adds `all_model_folders` support in extra_model_paths.yaml,
-// this list can be replaced with a single `all_model_folders: true` flag.
+// Canonical ComfyUI model folder types from folder_paths.py. Must stay in sync with that list.
 export const MODEL_FOLDER_TYPES = [
   'checkpoints',
   'classifiers',
@@ -31,8 +29,7 @@ export const MODEL_FOLDER_TYPES = [
 
 const YAML_PATH: string = path.join(dataDir(), 'shared_model_paths.yaml')
 
-// Canonical names + legacy/alias directory names that ComfyUI creates on disk
-// but maps to canonical names (e.g. unet→diffusion_models, clip→text_encoders).
+// Canonical names plus legacy/alias directory names ComfyUI maps to canonical names.
 const KNOWN_MODEL_FOLDERS = new Set<string>([
   ...MODEL_FOLDER_TYPES,
   'clip', // legacy alias for text_encoders
@@ -40,16 +37,9 @@ const KNOWN_MODEL_FOLDERS = new Set<string>([
   't2i_adapter' // secondary dir for controlnet
 ])
 
-// Folder names that must NEVER be registered as model search paths, even if
-// they appear inside a shared models directory. These are either ComfyUI
-// system directories (custom_nodes, user, input, output, temp), dotfolders
-// owned by tooling (.venv, .snapshots, .git, __pycache__), or the `models`
-// self-reference produced when a ComfyUI install root is itself configured
-// as a shared models dir.
-//
-// `custom_nodes` is especially important: ComfyUI's prestartup does
-// `os.listdir(path)` on every registered `custom_nodes` path and crashes if
-// the directory is missing under any shared base_path.
+// Folder names that must NEVER be registered as model search paths (system dirs, tooling
+// dotfolders, `models` self-reference). `custom_nodes` is critical: ComfyUI's prestartup
+// does `os.listdir` on every registered custom_nodes path and crashes if it's missing.
 const NON_MODEL_FOLDERS = new Set<string>([
   'custom_nodes',
   'user',
@@ -73,10 +63,7 @@ export interface SyncResult {
   config: ModelPathsResult | null
 }
 
-/**
- * Lists all subdirectory names in a directory, including symlinks that
- * resolve to directories.
- */
+/** Lists subdirectory names, including symlinks that resolve to directories. */
 function allFoldersIn(dir: string): string[] {
   try {
     return fs
@@ -98,23 +85,14 @@ function allFoldersIn(dir: string): string[] {
   }
 }
 
-/**
- * Scans a directory for subdirectories whose names are not in
- * KNOWN_MODEL_FOLDERS and not in NON_MODEL_FOLDERS (system/tooling dirs that
- * must never be treated as model search paths).
- */
+/** Subdirectories not in KNOWN_MODEL_FOLDERS or NON_MODEL_FOLDERS. */
 function extraFoldersIn(dir: string): string[] {
   return allFoldersIn(dir).filter(
     (name) => !KNOWN_MODEL_FOLDERS.has(name) && !NON_MODEL_FOLDERS.has(name)
   )
 }
 
-/**
- * Scans the ComfyUI models directory of an installation for subdirectories
- * that aren't in KNOWN_MODEL_FOLDERS (i.e. directories created by custom nodes).
- * Checks both `{installPath}/ComfyUI/models` (standalone) and
- * `{installPath}/models` (portable/other layouts).
- */
+/** Extra (custom-node-created) model folders, checking both standalone and portable layouts. */
 export function discoverExtraModelFolders(installPath: string): string[] {
   const candidates = [path.join(installPath, 'ComfyUI', 'models'), path.join(installPath, 'models')]
   const seen = new Set<string>()
@@ -126,10 +104,7 @@ export function discoverExtraModelFolders(installPath: string): string[] {
   return [...seen].sort()
 }
 
-/**
- * Collects the deduplicated, sorted set of extra model folder names present
- * in any of the shared model directories.
- */
+/** Deduplicated, sorted extra model folder names across all shared model directories. */
 function discoverExtraFoldersFromSharedDirs(modelsDirs: string[]): string[] {
   const seen = new Set<string>()
   for (const dir of modelsDirs) {
@@ -166,11 +141,8 @@ function buildYaml(modelsDirs: string[], extraFolders: string[] = []): string {
 }
 
 /**
- * Ensures the shared model paths YAML is up to date.
- * Automatically includes any extra subdirectories already present in the
- * shared model directories (previously discovered from custom nodes).
- * Returns the YAML path and the list of extra folders included, or null
- * if no directories are configured.
+ * Ensures the shared model paths YAML is up to date, including extra subdirectories
+ * already present in the shared dirs. Returns null if no directories are configured.
  */
 export function ensureModelPathsConfig(
   modelsDirs: string[] | null | undefined
@@ -192,10 +164,7 @@ export function ensureModelPathsConfig(
   return { yamlPath: YAML_PATH, extraFolders }
 }
 
-/**
- * Collects all subdirectory names from the installation's models directory,
- * checking both standalone and portable layouts.
- */
+/** All subdirectory names from the install's models dir, checking standalone and portable layouts. */
 function allInstallModelFolders(installPath: string): string[] {
   const candidates = [path.join(installPath, 'ComfyUI', 'models'), path.join(installPath, 'models')]
   const seen = new Set<string>()
@@ -208,10 +177,8 @@ function allInstallModelFolders(installPath: string): string[] {
 }
 
 /**
- * Syncs all model directories from the installation to the shared model roots,
- * ensuring every folder present in the install is available in the shared dirs.
- * Rewrites the YAML to include any extra (non-canonical) folders.
- * Returns the list of newly added extra folder names and the updated config.
+ * Syncs all model folders from the install to the shared model roots and rewrites the YAML.
+ * Returns newly added extra folder names and the updated config.
  */
 export function syncCustomModelFolders(
   installPath: string,
@@ -222,8 +189,7 @@ export function syncCustomModelFolders(
     return { newFolders: [], config: null }
   }
 
-  // Sync ALL model folders (including canonical ones) to shared roots so
-  // users can place models in the shared directory for any folder type.
+  // Sync ALL folders (including canonical) so users can place models in any folder type.
   const allFolders = allInstallModelFolders(installPath)
   for (const dir of modelsDirs) {
     for (const folder of allFolders) {
@@ -234,12 +200,10 @@ export function syncCustomModelFolders(
     }
   }
 
-  // Determine which extra (non-canonical) folders are new for relaunch decisions
   const extraFolders = discoverExtraModelFolders(installPath)
   const previousSet = new Set(previousExtras)
   const newFolders = extraFolders.filter((f) => !previousSet.has(f))
 
-  // Rewrite the YAML so subsequent launches include extra folders
   const config = ensureModelPathsConfig(modelsDirs)
 
   return { newFolders, config }

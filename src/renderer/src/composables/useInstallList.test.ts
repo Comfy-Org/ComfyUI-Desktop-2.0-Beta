@@ -25,16 +25,10 @@ function makeInstall(overrides: Partial<Installation>): Installation {
 }
 
 describe('useInstallList', () => {
-  // Re-use a single i18n instance across tests — useI18n() needs an
-  // installed plugin in the active Vue scope.
   let i18n: ReturnType<typeof createI18n>
 
   beforeEach(() => {
     i18n = createI18n({ legacy: false, locale: 'en', messages })
-    // Activate i18n globally so useI18n() resolves outside of a
-    // component's setup. vue-i18n's composition mode reads from the
-    // injected scope; mimicking with createApp + use is the canonical
-    // workaround for testing composables that depend on it.
   })
 
   afterEach(() => {
@@ -347,15 +341,8 @@ describe('useInstallList', () => {
   })
 })
 
-/**
- * vue-i18n's composition mode needs an active app scope to install its
- * provide / inject pair. For composables that only call `useI18n()` for
- * `t()`, the minimal shim is to install the plugin into a transient
- * effectScope-equivalent by running the composable through a stub Vue app.
- * `createApp(...).runWithContext(fn)` would be ideal but vitest's jsdom
- * env makes `mount`-style helpers heavier than needed. Instead we install
- * a stub component that captures the composable's return value.
- */
+/** Runs `fn` inside a stub Vue app with i18n installed, so `useI18n()`
+ *  resolves; captures and returns the composable's value. */
 function withI18nScope<T>(
   i18n: ReturnType<typeof createI18n>,
   fn: () => T,

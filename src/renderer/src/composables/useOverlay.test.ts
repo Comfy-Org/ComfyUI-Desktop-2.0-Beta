@@ -1,11 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { useOverlay } from './useOverlay'
 
-// Inline mocks — useOverlay pulls in vue-i18n via `../i18n` and
-// `useModal` from a sibling composable. Both have heavy module-load
-// side effects we don't need here; the only behaviour under test is
-// the cancel-prompt copy dispatch and the silent-swap rules already
-// covered by the PanelApp integration tests.
 const confirmMock = vi.fn<(opts: {
   title: string
   message: string
@@ -22,9 +17,7 @@ vi.mock('./useModal', () => ({
 }))
 
 vi.mock('../i18n', () => ({
-  // Identity translator — the tests assert against the i18n keys
-  // themselves so we don't have to keep the locale file in sync with
-  // the test's expected copy.
+  // Identity translator — tests assert against the i18n keys themselves.
   i18n: { global: { t: (key: string) => key } },
 }))
 
@@ -135,10 +128,7 @@ describe('useOverlay — onCancel firing', () => {
   })
 
   it('fires onCancel after the user confirms the cancel-prompt for an in-flight progress overlay', async () => {
-    // Window-close consult / dashboard-return path: closeOverlay()
-    // prompts and, on confirm, fires the overlay's onCancel BEFORE
-    // clearing the slot so the underlying main-side op can roll back
-    // (e.g. progressStore.cancelOperation → window.api.cancelOperation).
+    // onCancel must fire before the slot clears so the main-side op rolls back.
     confirmMock.mockResolvedValueOnce(true)
     const onCancel = vi.fn()
     const { openOverlay, closeOverlay, current } = useOverlay()
@@ -156,9 +146,8 @@ describe('useOverlay — onCancel firing', () => {
   })
 
   it('fires onCancel after confirm when an in-flight progress overlay is pre-empted by a Tier 3 takeover (no orphaned op)', async () => {
-    // The Tier 2 → Tier 3 swap drives the same prompt path; without
-    // onCancel firing here the original op would be silently
-    // orphaned mid-flight when the takeover replaces it.
+    // Without onCancel here the original op would be orphaned when the
+    // takeover replaces it.
     confirmMock.mockResolvedValueOnce(true)
     const onCancel = vi.fn()
     const { openOverlay, current } = useOverlay()
@@ -199,11 +188,8 @@ describe('useOverlay — onCancel firing', () => {
   })
 
   it('does NOT fire onCancel on a Tier 3 → Tier 3 swap when both overlays target the same installationId (re-present, not abandon)', async () => {
-    // Picker forward / window handoff re-presents the same in-flight
-    // update takeover for the same install. Firing the prior
-    // takeover's onCancel here would cancel the very op the new
-    // overlay is about to show — guard caller from a self-inflicted
-    // cancel.
+    // Same install = re-present; firing onCancel would cancel the very op
+    // the new overlay is about to show.
     const onCancel = vi.fn()
     const { openOverlay, current } = useOverlay()
     await openOverlay({

@@ -1,49 +1,17 @@
 <script setup lang="ts">
-/**
- * Tier-3 takeover chrome shared across the brand-refreshed first-use
- * screens (cloud-vs-local pick, Configure Comfy Desktop, name-your-install,
- * download progress).
- *
- * Owns:
- *   - Teleport-to-body root so callers don't have to remember it.
- *   - Full-viewport fixed positioning over the launcher panel.
- *   - Fade-in animation on mount.
- *   - ComfyC logo pinned top-left.
- *   - Dialog a11y baseline: role="dialog", aria-modal, focus capture on
- *     mount + restore on unmount. Every takeover inherits this so we
- *     never ship one without it.
- *
- * Background visuals (outer frame, inner frame, beams, optional vignette)
- * live in `BrandBackground.vue` so non-takeover surfaces (chooser
- * dashboard) can reuse them without the chrome above.
- *
- * Slots:
- *   - default: hero content (heading, body, action).
- *   - footer-left: bottom-left affordance (e.g. pick step's
- *     "Why try Cloud?"). Forwarded into BrandBackground's same-named
- *     slot so any `position: absolute` rules on the slotted child still
- *     resolve against `.brand-outer-frame` like before the extraction.
- *   - footer: bottom-centered action band (e.g. ProgressModal's
- *     Cancel / Back-to-Dashboard buttons on a finished op). Sibling to
- *     `footer-left` so `position: absolute; bottom; left/right` rules
- *     resolve against `.brand-outer-frame` consistently.
- *
- * The chrome forces `data-theme="dark"` — light-mode brand parity is
- * deferred. Same approach the inline implementation used before this
- * was extracted.
- */
+// Takeover chrome shared across the brand-refreshed first-use screens.
+// Owns the teleport-to-body root, fixed full-viewport positioning, fade-in,
+// the top-left logo, and the dialog a11y baseline (role, aria-modal, focus
+// capture/restore). Background visuals live in BrandBackground.vue.
+// Forces dark; light-mode brand parity is deferred.
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import ComfyCLogo from './icons/ComfyCLogo.vue'
 import BrandBackground from './BrandBackground.vue'
 
 withDefaults(
   defineProps<{
-    /** Theme override. Defaults to 'dark' — the brand chrome only
-     *  ships dark today. Pass 'light' once light-mode parity lands. */
     theme?: 'dark' | 'light'
     vignette?: boolean
-    /** Optional accessible name for the takeover. Falls back to a
-     *  generic label so screen readers always announce something. */
     ariaLabel?: string
   }>(),
   { theme: 'dark', vignette: false, ariaLabel: undefined },

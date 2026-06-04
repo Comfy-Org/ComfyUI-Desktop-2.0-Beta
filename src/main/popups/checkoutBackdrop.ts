@@ -2,21 +2,9 @@ import { WebContentsView, ipcMain } from 'electron'
 import type { BrowserWindow } from 'electron'
 
 /**
- * Dim + blur scrim painted behind the credits-checkout popup.
- *
- * The checkout is a separate, floating child `BrowserWindow` (its page
- * forbids iframing, so it can't be an in-window view). To make it read
- * as a focused modal rather than a stray second window, we darken the
- * host window underneath it. A separate OS window floats above ALL of
- * the parent's content views, so a transparent `WebContentsView` added
- * to the parent's `contentView` sits correctly *under* the popup.
- *
- * Clicking the scrim dismisses the checkout (modal click-outside), via
- * the per-parent `onDismiss` callback passed to `showCheckoutBackdrop`.
- *
- * Independent of the title-popup backdrop (`titlePopup.ts`) on purpose:
- * that one drives the picker / global-settings popups; this one is
- * dedicated to the checkout window's lifecycle.
+ * Dim + blur scrim behind the credits-checkout popup. The checkout is a separate floating window
+ * (its page forbids iframing), so this scrim darkens the host underneath to read as a modal.
+ * Clicking the scrim dismisses via `onDismiss`. Separate from the title-popup backdrop on purpose.
  */
 
 interface CheckoutBackdropEntry {
@@ -28,11 +16,7 @@ interface CheckoutBackdropEntry {
 const backdropsByParent = new Map<number, CheckoutBackdropEntry>()
 const parentByWebContents = new Map<number, number>()
 
-/** Fixed scrim: a translucent dim with a blur so the host chrome reads
- *  as a frosted background behind the checkout. Tint matches the app's
- *  title-bar color (`#211927` / neutral-800) at 0.4 so the background
- *  stays clearly visible through it. A click anywhere fires the dismiss
- *  IPC. */
+/** Translucent dim + blur scrim; a click anywhere fires the dismiss IPC. */
 const CHECKOUT_BACKDROP_HTML = `<!doctype html>
 <html><head><meta charset="utf-8"><style>
   html,body{margin:0;width:100%;height:100%;background:transparent;overflow:hidden;-webkit-user-select:none;user-select:none}
@@ -85,8 +69,7 @@ function ensureBackdrop(parent: BrowserWindow): CheckoutBackdropEntry {
   backdropsByParent.set(parent.id, entry)
   parentByWebContents.set(view.webContents.id, parent.id)
 
-  // Keep the scrim fitted to the host's content area while visible so it
-  // doesn't leak past the edges or leave an undimmed strip on resize.
+  // Keep the scrim fitted to the host's content area on resize.
   parent.on('resize', () => {
     if (!entry.visible || parent.isDestroyed() || view.webContents.isDestroyed()) return
     view.setBounds(fullBounds(parent))
@@ -100,9 +83,7 @@ function ensureBackdrop(parent: BrowserWindow): CheckoutBackdropEntry {
   return entry
 }
 
-/** Show the dim scrim over `parent`, re-stacked to the top of its
- *  content views (still below the separate popup window). `onDismiss`
- *  fires when the user clicks the scrim (click-outside-to-close). */
+/** Show the scrim over `parent`, re-stacked above its content views (still below the popup window). */
 export function showCheckoutBackdrop(parent: BrowserWindow, onDismiss: () => void): void {
   if (parent.isDestroyed()) return
   const entry = ensureBackdrop(parent)

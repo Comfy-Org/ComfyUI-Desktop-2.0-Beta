@@ -119,8 +119,7 @@ describe('installAppMenu', () => {
     }>
     const appEntry = template[0]
     expect(appEntry).toBeTruthy()
-    // Stock `appMenu` role is expanded into an explicit submenu so the
-    // item can sit right after About.
+    // Expanded into an explicit submenu so the item sits right after About.
     expect(appEntry?.role).toBeUndefined()
     const items = appEntry?.submenu ?? []
     const aboutIndex = items.findIndex((i) => i.role === 'about')

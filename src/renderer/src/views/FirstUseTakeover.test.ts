@@ -1,19 +1,4 @@
-/**
- * Start-screen behaviour tests for FirstUseTakeover (merged T&C +
- * Cloud-vs-Local picker).
- *
- * Scope:
- *   - Continue button stays disabled until the Terms checkbox is
- *     checked (legally required affirmative-assent gate).
- *   - The two inline links on the Terms row route to the right docs
- *     (`'eula'` and `'tos'`), and the telemetry Learn-more routes to
- *     `'privacy'`. If routing is crossed the user sees the wrong doc
- *     for the link they clicked.
- *
- * Heavy children (BrandTakeoverLayout, ModalShell, TermsModal,
- * WhyTryCloudModal, etc.) are stubbed so the test can focus on the
- * start-step DOM without dragging in their dependencies.
- */
+// Start-screen tests for FirstUseTakeover. Heavy children are stubbed to focus on the start-step DOM.
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'

@@ -9,9 +9,7 @@ interface CacheEntry {
   data: unknown
 }
 
-// ETag cache: url -> { etag, data }
-// Persisted to disk so cached responses survive app restarts.
-// Bounded to MAX_CACHE_SIZE entries; oldest evicted first.
+// ETag cache (url -> { etag, data }) persisted to disk; bounded, oldest evicted first.
 const MAX_CACHE_SIZE = 100
 const CACHE_FILE = path.join(cacheDir(), "fetch-cache.json")
 
@@ -54,7 +52,7 @@ function _persist(): void {
 }
 
 function _cacheSet(url: string, entry: CacheEntry): void {
-  _cache.delete(url) // refresh insertion order
+  _cache.delete(url) // re-insert to refresh LRU order
   _cache.set(url, entry)
   if (_cache.size > MAX_CACHE_SIZE) {
     const oldest = _cache.keys().next().value
@@ -72,16 +70,13 @@ function _headerString(value: string | string[] | undefined): string | undefined
 
 export function fetchJSON(url: string, opts?: { refresh?: boolean }): Promise<unknown> {
   _ensureLoaded()
-  // When `refresh` is set, ignore the persisted ETag so the response is
-  // never served from cache. Used by the install wizard for R2 manifests
-  // that decide which standalone env release a user can pick — stale
-  // values there silently strand users on old versions.
+  // `refresh` ignores the persisted ETag so the response is never served from cache. Used
+  // for R2 manifests where a stale value would strand users on an old release.
   const cached = opts?.refresh ? undefined : _cache.get(url)
 
   return new Promise((resolve, reject) => {
-    // Use cache: "no-cache" so Chromium always revalidates with the server
-    // (sends If-None-Match), rather than silently serving from its disk cache.
-    // GitHub returns 304 for free (no rate limit cost) when the ETag matches.
+    // "no-cache" forces Chromium to revalidate (send If-None-Match) instead of serving from
+    // its disk cache. GitHub returns 304 for free when the ETag matches.
     const request = net.request({ url, cache: "no-cache" })
     request.setHeader("User-Agent", "ComfyUI-Desktop-2")
 

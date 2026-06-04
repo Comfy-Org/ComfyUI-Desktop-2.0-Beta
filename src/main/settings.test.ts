@@ -197,20 +197,15 @@ describe('settings path sanitization', () => {
 describe('settings.has (persisted-only check)', () => {
   it('returns false when settings.json does not exist yet', () => {
     expect(settings.has('theme')).toBe(false)
-    // Built-in defaults must NOT register as user choices — that's the
-    // bug `has()` exists to avoid. `inputDir` has a default value from
-    // `settings.defaults` and would show up in `getAll()`, but the file
-    // doesn't carry it.
+    // Built-in defaults must NOT register as user choices, even though they show up in getAll().
     expect(settings.has('inputDir')).toBe(false)
   })
 
   it('returns false for keys with defaults even after first load creates settings.json', () => {
-    // Touch a key to force a write of settings.json so the file exists
-    // but doesn't carry the defaulted keys.
+    // Force a write so the file exists but doesn't carry the defaulted keys.
     settings.set('theme', 'dark')
     expect(fs.existsSync(settingsPath)).toBe(true)
     expect(settings.has('theme')).toBe(true)
-    // Built-in defaults must still NOT be marked as persisted.
     expect(settings.has('inputDir')).toBe(false)
     expect(settings.has('cacheDir')).toBe(false)
   })

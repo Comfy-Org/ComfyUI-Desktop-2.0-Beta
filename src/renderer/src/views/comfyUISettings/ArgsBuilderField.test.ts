@@ -4,13 +4,7 @@ import { createI18n } from 'vue-i18n'
 import ArgsBuilderField from './ArgsBuilderField.vue'
 import type { ComfyArgDef, DetailField } from '../../types/ipc'
 
-/**
- * The outer field row on the Settings panel is where the user types
- * their args day-to-day. The autocomplete affordance ported from the
- * legacy ArgsBuilder modal needs to live here — these tests pin that
- * it appears, narrows on typing, and commits the picked flag through
- * the `update` emit.
- */
+// Tests that the args-field autocomplete appears, narrows on typing, and commits the picked flag via `update`.
 
 const i18n = createI18n({
   legacy: false,

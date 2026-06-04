@@ -3,11 +3,8 @@ import { CircleHelp } from 'lucide-vue-next'
 import Tooltip from './ui/Tooltip.vue'
 import type { TooltipSide } from '../composables/useTooltip'
 
-/**
- * Inline help-icon trigger that composes the shared `Tooltip` primitive.
- * Owns the icon + hover affordance; defers placement, teleport, arrow,
- * and viewport collision handling to the primitive in `/ui`.
- */
+// Inline help-icon trigger composing the shared Tooltip primitive; defers
+// placement, teleport, arrow, and collision handling to it.
 const props = withDefaults(
   defineProps<{
     text: string

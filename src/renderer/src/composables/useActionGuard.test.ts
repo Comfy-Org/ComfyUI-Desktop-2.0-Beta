@@ -75,10 +75,8 @@ describe('useActionGuard.checkBeforeAction', () => {
   })
 
   it('treats a progressStore-only in-flight op (no active session) as busy', async () => {
-    // copy / release-update / migrate-from register progress without
-    // ever populating a sessionStore entry, so the busy guard must
-    // consult progressStore directly or those ops can be raced by any
-    // non-REQUIRES_STOPPED action runner.
+    // Some ops register progress without a sessionStore entry, so the busy
+    // guard must consult progressStore directly.
     progressState.info.set(INSTALL_ID, { status: 'Copying…', percent: 42 })
     mockConfirm.mockResolvedValue(false)
 

@@ -48,73 +48,39 @@ interface UseTitleBarMenusOpts {
 
 interface TitleBarMenusApi {
   isMenuOpen: Ref<boolean>
-  /** Mirror of `isMenuOpen` scoped to the downloads-tray popup only.
-   *  Used by the title-bar to highlight the download-tray icon (brand
-   *  yellow) while the popover is showing — matches the convention
-   *  the waffle button already enjoys via its native-menu open state. */
+  /** `isMenuOpen` scoped to the downloads tray; drives the icon highlight. */
   isDownloadsOpen: Ref<boolean>
   downloadsState: Ref<DownloadsTrayState>
   downloadsActiveCount: ComputedRef<number>
-  /** Number of `recent` (terminal) entries the user hasn't reviewed
-   *  yet. Reset to zero whenever the downloads popup is opened. */
+  /** Unreviewed terminal entries; reset when the downloads popup opens. */
   unseenFinishedCount: ComputedRef<number>
-  /** Subset of `unseenFinishedCount` limited to failures (`error`) —
-   *  drives the red error badge. */
+  /** Subset of `unseenFinishedCount` limited to failures; drives the red badge. */
   unseenErrorCount: ComputedRef<number>
-  /** Tooltip / aria-label for the tray button — switches between an
-   *  in-progress label, an unseen-finished label, and the idle
-   *  "Downloads" label. */
   downloadsTrayLabel: ComputedRef<string>
-  /** Monotonic timestamp bumped each time a brand-new active download
-   *  appears so the title bar can play a one-shot "downloads started"
-   *  attention animation. `0` means "no pulse yet" — the renderer can
-   *  treat it as a guard for the initial mount. */
+  /** Bumped when a new active download appears so the title bar can play a
+   *  one-shot pulse. `0` = no pulse yet. */
   downloadsStartedAt: Ref<number>
-  /** Mirror of `isMenuOpen` scoped to the instance-picker popup.
-   *  Drives the centre pill's `is-open` pressed-state styling so the
-   *  pill reads as actively engaged while the popover is showing — same
-   *  convention the waffle + downloads tray buttons use. */
+  /** `isMenuOpen` scoped to the instance-picker; drives the pill's pressed state. */
   isInstancePickerOpen: Ref<boolean>
   handleFileMenu: () => void
   handleDownloadsTray: () => void
-  /** Click handler for the centre install pill. Toggle-closes if the
-   *  picker is already open; otherwise opens the popup anchored
-   *  beneath the pill's bottom edge. */
   handleInstallPill: () => void
 }
 
 /**
- * Title-bar native-menu openers + downloads-tray state.
- *
- * Both popups (the waffle / file menu and the downloads tray) share a
- * single WebContentsView in main, so they share dismiss / reopen
- * behaviour:
- *   - `isMenuOpen` is mirrored from main via `onMenuOpened` /
- *     `onMenuClosed` so click handlers can toggle-close instead of
- *     racing the OS-driven dismiss.
- *   - `menuClosedAt` per-kind suppression catches the platform case
- *     where the dismiss propagates before our click handler runs (the
- *     same click that closed the popup also retargets the opener
- *     button); without it the popup flickers immediately back open.
- *
- * Tracked per-kind because the waffle and the downloads-tray live on
- * separate buttons — clicking one shouldn't suppress a fresh open of
- * the other.
- *
- * The composable also owns the "unseen finished" book-keeping for the
- * downloads tray (issue #558): when downloads complete while the user
- * isn't looking, the tray tags itself as unseen until the popup is
- * opened. URLs already in `recent` on first sight are treated as
- * already-acknowledged so a window opening mid-flow doesn't paint a
- * stale indicator.
+ * Title-bar menu openers + downloads-tray state. `isMenuOpen` is mirrored from
+ * main so click handlers toggle-close instead of racing the OS dismiss;
+ * `menuClosedAt` per-kind suppression catches the case where the dismiss lands
+ * before the click handler runs (which would flicker the popup back open).
+ * Tracked per-kind since the buttons are separate. Also owns the "unseen
+ * finished" book-keeping for the downloads tray.
  */
 export function useTitleBarMenus(opts: UseTitleBarMenusOpts): TitleBarMenusApi {
   const { t } = useI18n()
 
-  /** Per-menu suppression window: the OS dismisses the popup before
-   *  the click event reaches the renderer, so a naïve handler would
-   *  re-pop the popup on the same click. 100ms covers the worst-case
-   *  Windows / Linux retarget gap. */
+  /** Per-menu suppression: the OS dismisses the popup before the click reaches
+   *  the renderer, so a naïve handler would re-pop on the same click. 100ms
+   *  covers the worst-case Windows/Linux retarget gap. */
   const MENU_REOPEN_GUARD_MS = 100
   const menuClosedAt: Record<TitleMenuKind, number> = {
     menu: 0,
@@ -126,12 +92,9 @@ export function useTitleBarMenus(opts: UseTitleBarMenusOpts): TitleBarMenusApi {
   const isDownloadsOpen = ref(false)
   const isInstancePickerOpen = ref(false)
   const downloadsState = ref<DownloadsTrayState>({ active: [], recent: [] })
-  /** URLs the user has already acknowledged. Used to derive the
-   *  unseen-finished count without persisting per-entry state on the
-   *  upstream payload. */
+  /** URLs already acknowledged, used to derive the unseen-finished count. */
   const seenUrls = reactive(new Set<string>())
-  /** Last set of active URLs — diffed against the next push to detect
-   *  "a new download appeared". */
+  /** Last active URLs, diffed against the next push to detect a new download. */
   const previousActiveUrls = new Set<string>()
   let firstDownloadsPush = true
   const downloadsStartedAt = ref(0)
@@ -140,9 +103,8 @@ export function useTitleBarMenus(opts: UseTitleBarMenusOpts): TitleBarMenusApi {
   const unseenFinishedCount = computed(() =>
     downloadsState.value.recent.filter((d) => !seenUrls.has(d.url)).length,
   )
-  /** Unseen *failures* only (`error`, not user-initiated `cancelled`) —
-   *  drives the red error badge that takes precedence over the green
-   *  "completed" badge so a failed download never reads as success. */
+  /** Unseen failures only (not user-`cancelled`); the red badge takes
+   *  precedence over green so a failure never reads as success. */
   const unseenErrorCount = computed(() =>
     downloadsState.value.recent.filter((d) => d.status === 'error' && !seenUrls.has(d.url)).length,
   )
@@ -150,8 +112,8 @@ export function useTitleBarMenus(opts: UseTitleBarMenusOpts): TitleBarMenusApi {
     const active = downloadsActiveCount.value
     const errors = unseenErrorCount.value
     if (active > 0) {
-      // Surface a mid-batch failure in the tooltip too — the red dot is
-      // the visual cue, this is its accessible/explanatory counterpart.
+      // Surface a mid-batch failure in the tooltip (accessible counterpart to
+      // the red dot).
       const inProgress = t('titleBar.downloadsInProgress', { n: active }, active)
       if (errors > 0) {
         return `${inProgress} · ${t('titleBar.downloadsFailedUnseen', { n: errors }, errors)}`
@@ -189,8 +151,7 @@ export function useTitleBarMenus(opts: UseTitleBarMenusOpts): TitleBarMenusApi {
 
   function handleFileMenu(): void {
     opts.hideTip()
-    // Toggle-close only when the file menu itself is open. macOS doesn't
-    // reliably blur a sibling WebContentsView, so dismiss explicitly.
+    // Toggle-close explicitly — macOS doesn't reliably blur a sibling view.
     if (isFileMenuOpen.value) {
       opts.bridge?.dismissFileMenu()
       return
@@ -201,38 +162,25 @@ export function useTitleBarMenus(opts: UseTitleBarMenusOpts): TitleBarMenusApi {
 
   function handleDownloadsTray(): void {
     opts.hideTip()
-    /** Toggle + reopen suppression live in main (see `click-downloads-
-     *  tray` handler in titlePopup.ts) — the renderer just dispatches.
-     *  Reading `isMenuOpen` here used to race the blur-driven close,
-     *  causing the "click closes, immediately reopens" symptom. */
+    // Toggle + reopen suppression live in main; the renderer just dispatches.
+    // Reading `isMenuOpen` here would race the blur-driven close.
     opts.bridge?.clickDownloadsTray(anchorDownloadsBelow(opts.downloadsBtnRef.value))
   }
 
   function handleInstallPill(): void {
     opts.hideTip()
-    // Main owns the toggle + reopen-suppression for the picker —
-    // single source of truth. The renderer just dispatches the click;
-    // main checks `titlePopupsByParent` to decide open vs close vs
-    // suppress-spurious-reopen-after-blur. This eliminates the IPC
-    // race between the blur-driven close (fires on focus shift /
-    // mousedown) and the renderer's `menu-closed` listener (lags by
-    // an IPC roundtrip) — the renderer's `isMenuOpen` could be
-    // wrong at the moment the click handler runs, so trusting it
-    // here was the source of the "click closes, immediately
-    // reopens, click again to actually close" bug.
+    // Main owns the toggle + reopen-suppression; the renderer just dispatches.
+    // Trusting the renderer's (IPC-lagged) `isMenuOpen` here raced the
+    // blur-driven close.
     opts.bridge?.clickInstallPill(anchorDownloadsBelow(opts.installPillRef.value))
   }
 
-  /** Mark every current `recent` entry as seen. Triggered by main
-   *  pushing `menu: 'downloads'` in `onMenuOpened` so opening the
-   *  popup is what acknowledges the indicator. */
+  /** Mark current `recent` entries seen; triggered by main's `onMenuOpened`. */
   function acknowledgeRecent(): void {
     for (const d of downloadsState.value.recent) seenUrls.add(d.url)
   }
 
-  /** Diff helper — returns true if `next.active` carries a URL that
-   *  wasn't in the previous active set. Used to bump the "started"
-   *  timestamp once per new in-flight item. */
+  /** True if `next.active` carries a URL not in the previous active set. */
   function hasNewActive(next: DownloadsTrayState): boolean {
     for (const d of next.active) {
       if (!previousActiveUrls.has(d.url)) return true
@@ -242,12 +190,8 @@ export function useTitleBarMenus(opts: UseTitleBarMenusOpts): TitleBarMenusApi {
 
   function ingestDownloadsState(next: DownloadsTrayState): void {
     if (firstDownloadsPush) {
-      // The first push happens after main's `ready()` and reflects
-      // whatever was in flight when the window came up. Treat all
-      // entries (active + recent) as already-known so we don't fire
-      // the "started" pulse for downloads the user already initiated
-      // and don't paint an unseen indicator for items that finished
-      // before the window opened.
+      // First push reflects what was in flight at window open; treat all entries
+      // as already-known so we don't pulse / flag pre-existing downloads.
       for (const d of next.active) previousActiveUrls.add(d.url)
       for (const d of next.recent) seenUrls.add(d.url)
       firstDownloadsPush = false
@@ -257,8 +201,7 @@ export function useTitleBarMenus(opts: UseTitleBarMenusOpts): TitleBarMenusApi {
     if (hasNewActive(next)) downloadsStartedAt.value = Date.now()
     previousActiveUrls.clear()
     for (const d of next.active) previousActiveUrls.add(d.url)
-    // Drop seen URLs that no longer appear in `recent` so the set
-    // doesn't grow unbounded across the window's lifetime.
+    // Drop seen URLs no longer in `recent` so the set stays bounded.
     const stillRecent = new Set(next.recent.map((d) => d.url))
     for (const url of [...seenUrls]) {
       if (!stillRecent.has(url)) seenUrls.delete(url)

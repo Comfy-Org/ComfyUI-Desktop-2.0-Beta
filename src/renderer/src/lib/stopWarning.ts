@@ -1,11 +1,8 @@
 export { IN_PLACE_RELAUNCH } from '../../../types/ipc'
 
-/** Prepend the `errors.willStopRunning` sentence to an existing message
- *  body. Used by every renderer surface that runs a REQUIRES_STOPPED
- *  action against a currently-running install — the per-action confirm /
- *  prompt copy doesn't mention the stop, and the standalone
- *  stop-confirm modal was removed, so this sentence is the only
- *  surfaced warning the user gets before the apiCall stops the session. */
+/** Prepend the `errors.willStopRunning` sentence to a message body. This
+ *  is the only warning the user gets before a REQUIRES_STOPPED apiCall
+ *  stops a running session. */
 export function augmentMessageWithStopWarning(
   existing: string | undefined,
   willStopRunning: string,
@@ -20,13 +17,9 @@ interface ActionLike {
   prompt?: { message?: string }
 }
 
-/** Apply the willStopRunning warning to an action's confirm + prompt
- *  copy, returning a new ActionDef-shaped object. Synthesizes a
- *  bare-bones confirm when the action has neither so the warning is
- *  never silent. Used by every surface that runs a REQUIRES_STOPPED
- *  action through its own confirm/prompt chain. The generic preserves
- *  the caller's full ActionDef shape so downstream `.id` / `.data` /
- *  etc. stay accessible after augmentation. */
+/** Apply the willStopRunning warning to an action's confirm + prompt copy.
+ *  Synthesizes a bare confirm when the action has neither so the warning
+ *  is never silent. Preserves the caller's full ActionDef shape. */
 export function augmentActionWithStopWarning<T extends ActionLike>(action: T, willStopRunning: string): T {
   let mut: T = action
   if (mut.confirm) {
@@ -56,10 +49,8 @@ export function augmentActionWithStopWarning<T extends ActionLike>(action: T, wi
   return mut
 }
 
-/** Stop the install's running ComfyUI and poll until the session store
- *  reports it as stopped, with a 10s deadline. Shared by every apiCall
- *  wrapper that needs to drop a running session before invoking a
- *  REQUIRES_STOPPED action. */
+/** Stop the install's ComfyUI and poll until the session store reports it
+ *  stopped, with a 10s deadline. */
 export async function stopAndWaitForExit(
   installationId: string,
   isRunning: () => boolean,

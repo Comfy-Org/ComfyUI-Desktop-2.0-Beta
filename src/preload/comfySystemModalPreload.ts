@@ -2,19 +2,9 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type { IpcRendererEvent } from 'electron'
 
 /**
- * System-modal popup bridge.
- *
- * Hosts shell-level confirm modals (app-update prompts, etc.) inside a
- * dedicated transparent full-window `WebContentsView` per parent host
- * window. The view is reused across opens (created once per parent,
- * hidden between uses); main pushes a fresh `set-modal` payload on
- * every open. The renderer renders backdrop + modal box and posts back
- * the user's action.
- *
- * Mirrors the title-popup primitive (see `comfyTitlePopupPreload.ts`)
- * but sized to the full content area so the modal can dim the entire
- * window — making it visually distinct from in-canvas modals owned by
- * the comfyView (which dim only the canvas).
+ * System-modal popup bridge. Hosts shell-level confirm modals in a transparent
+ * full-window WebContentsView per host (reused across opens, fed `set-modal` pushes).
+ * Full-window sizing dims the whole window, distinguishing it from in-canvas modals.
  */
 
 export type SystemModalConfirmStyle = 'primary' | 'danger'
@@ -25,13 +15,10 @@ export interface SystemModalDetailGroup {
 }
 
 export interface SystemModalSpec {
-  /** Unique identifier per open. Echoed back on action ack so main
-   *  can route the result to the right callback. */
+  /** Echoed back on action ack so main routes the result to the right callback. */
   id: string
   title: string
   message: string
-  /** Optional structured detail groups rendered beneath the message
-   *  (label + bulleted items). Mirrors `BaseAlert`'s `messageDetails`. */
   details?: SystemModalDetailGroup[]
   confirmLabel: string
   cancelLabel: string
@@ -47,19 +34,12 @@ export interface SystemModalActionPayload {
 }
 
 export interface ComfySystemModalBridge {
-  /** A button was clicked — `confirm` or `cancel`. Main resolves the
-   *  associated callback and hides the view. */
+  /** A confirm/cancel button was clicked; main resolves the callback and hides the view. */
   action(payload: SystemModalActionPayload): void
-  /** Signal that the renderer is mounted and listening for modal
-   *  pushes — main flushes any spec that was queued before the
-   *  renderer was ready. */
+  /** Renderer is mounted; main flushes any spec queued before ready. */
   ready(): void
-  /** Signal that the renderer applied a modal push and the new DOM
-   *  has painted. Main waits for this before flipping the view
-   *  visible so the user never sees a frame of the previous open's
-   *  content on a fresh open. */
+  /** Renderer painted the latest push. Main waits for this before showing. */
   notifyRendered(): void
-  /** Subscribe to modal pushes (one fires for every open). */
   onModal(cb: (spec: SystemModalSpec) => void): () => void
 }
 

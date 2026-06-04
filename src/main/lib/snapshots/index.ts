@@ -1,4 +1,3 @@
-// Types
 export type {
   Snapshot,
   SnapshotEntry,
@@ -12,10 +11,8 @@ export type {
   NodeRestoreResult,
 } from './types'
 
-// Diff
 export { formatSnapshotVersion, resolveSnapshotVersion, diffSnapshots, diffAgainstCurrent } from './diff'
 
-// Store
 export {
   captureSnapshotIfChanged,
   deleteSnapshot,
@@ -28,11 +25,8 @@ export {
   pruneAutoSnapshots,
 } from './store'
 
-// Export / Import
 export { buildExportEnvelope, validateExportEnvelope, importSnapshots } from './exportImport'
 
-// Restore
 export { restoreComfyUIVersion, buildPostRestoreState, restorePipPackages, restoreCustomNodes } from './restore'
 
-// Tab Data
 export { getSnapshotListData, getSnapshotDetailData, getSnapshotDiffVsPrevious } from './tabData'

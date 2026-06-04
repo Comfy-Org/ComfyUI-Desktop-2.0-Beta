@@ -48,11 +48,7 @@ export interface PipMirrorConfig {
   useChineseMirrors?: boolean
 }
 
-/**
- * Read a requirements file, filter out PyTorch packages, write a temp file,
- * and install via `uv pip install -r`. Cleans up the temp file afterward.
- * Returns the exit code (0 = success).
- */
+/** Install a requirements file via `uv pip install -r`, filtering out PyTorch packages first. */
 export async function installFilteredRequirements(
   reqPath: string,
   uvPath: string,
@@ -79,28 +75,11 @@ export async function installFilteredRequirements(
 /** The canonical PyPI index — always used as the primary `--index-url`. */
 export const PYPI_INDEX_URL = 'https://pypi.org/simple/'
 
-/**
- * Additional PyPI mirror URLs for users in regions with restricted access
- * to the default package source (e.g. China). Mirrors Desktop's constant.
- */
+/** Additional PyPI mirror URLs for regions with restricted access (e.g. China). */
 export const PYPI_MIRROR_URLS: string[] = [
   'https://mirrors.aliyun.com/pypi/simple/',
   'https://mirrors.cloud.tencent.com/pypi/simple/',
 ]
-
-/**
- * Build `--index-url` and `--extra-index-url` arguments for uv pip commands.
- *
- * When a user-configured `pypiMirror` is set, it becomes the primary
- * `--index-url` and pypi.org is demoted to `--extra-index-url`.
- *
- * When `useChineseMirrors` is true (and no user mirror is set), the first
- * Chinese mirror becomes `--index-url` and pypi.org is an extra fallback.
- * This avoids the slowdown caused by uv's `first-match` strategy checking
- * the (unreachable) pypi.org before falling back to the Chinese mirrors.
- *
- * When neither is set, pypi.org remains the primary `--index-url`.
- */
 
 /** Trim whitespace and ensure a trailing slash for consistent URL comparison. */
 function normalizeIndexUrl(url: string): string {
@@ -111,10 +90,9 @@ function normalizeIndexUrl(url: string): string {
 export function getPipIndexArgs(pypiMirror?: string, useChineseMirrors?: boolean): string[] {
   const mirror = pypiMirror?.trim() || undefined
 
-  // Determine the primary --index-url:
-  // 1. User-provided mirror takes highest priority
-  // 2. First Chinese mirror when useChineseMirrors is enabled
-  // 3. Default pypi.org
+  // Primary --index-url priority: user mirror, then first Chinese mirror, then pypi.org.
+  // The Chinese mirror goes first (not pypi.org as a fallback extra) to avoid uv's first-match
+  // strategy stalling on the unreachable pypi.org before falling back.
   let primary: string
   if (mirror) {
     primary = mirror
@@ -128,7 +106,6 @@ export function getPipIndexArgs(pypiMirror?: string, useChineseMirrors?: boolean
   const seen = new Set<string>([normalizeIndexUrl(primary)])
   const extras: string[] = []
 
-  // Add pypi.org as a fallback extra when it's not the primary
   const pypiNorm = normalizeIndexUrl(PYPI_INDEX_URL)
   if (!seen.has(pypiNorm)) {
     extras.push(PYPI_INDEX_URL)

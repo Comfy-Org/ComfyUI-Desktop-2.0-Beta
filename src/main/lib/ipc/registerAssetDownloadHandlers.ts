@@ -4,11 +4,8 @@ import type { InstallationRecord } from '../../installations'
 import * as settings from '../../settings'
 import { startAssetDownload } from '../comfyDownloadManager'
 
-/**
- * IPC handler that lets the panel renderer push asset URLs into the
- * shared download manager so they land in the install's output folder.
- */
-
+// Lets the panel renderer push asset URLs into the shared download manager so
+// they land in the install's output folder.
 function resolveOutputDir(inst: InstallationRecord): string | null {
   if ((inst.autoDownloadOutputs as boolean | undefined) === false) return null
   if ((inst.useSharedOutputDir as boolean | undefined) !== false) {

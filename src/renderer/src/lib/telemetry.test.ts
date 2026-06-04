@@ -85,10 +85,6 @@ describe('deriveGpuTier', () => {
   })
 
   it("returns apple for the canonical 'mps' GpuId that main reports for Apple Silicon", () => {
-    // main/lib/gpu.ts emits gpu_vendor: 'mps' for Apple Silicon (per the
-    // canonical GpuId enum, where 'mps' → "Apple Silicon" label). Verified
-    // by observation: dev session on an M-series Mac shipped gpu_tier:
-    // 'sub_low' because this branch wasn't checking 'mps'.
     expect(deriveGpuTier({ vendor: 'mps', vramGb: null })).toBe('apple')
     expect(deriveGpuTier({ vendor: 'MPS', vramGb: 64 })).toBe('apple')
   })

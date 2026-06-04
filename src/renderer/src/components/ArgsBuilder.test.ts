@@ -32,8 +32,6 @@ describe('ArgsBuilder', () => {
     return wrapper
   }
 
-  // --- Validation: bare positional args ---
-
   it('flags bare positional tokens as unsupported', async () => {
     const wrapper = await ready('foo bar')
     const tokens = wrapper.findAll('.token-bad')
@@ -49,8 +47,6 @@ describe('ArgsBuilder', () => {
     expect(bad.length).toBe(0)
     wrapper.unmount()
   })
-
-  // --- Validation: --flag= with empty value ---
 
   it('flags --port= (empty inline value) as missing-value', async () => {
     const wrapper = await ready('--port=')
@@ -78,8 +74,6 @@ describe('ArgsBuilder', () => {
     wrapper.unmount()
   })
 
-  // --- Autocomplete: suppression for required-value flags ---
-
   it('suppresses autocomplete when typing a value after --port', async () => {
     const wrapper = await ready('--port 81')
     const input = wrapper.find('input')
@@ -96,12 +90,9 @@ describe('ArgsBuilder', () => {
     await input.trigger('focus')
     await input.setValue('--listen low')
     await flushPromises()
-    // 'low' matches 'lowvram' and listen is optional-value, so autocomplete should show
     expect(wrapper.find('.args-autocomplete').exists()).toBe(true)
     wrapper.unmount()
   })
-
-  // --- Autocomplete: bare word matching ---
 
   it('shows autocomplete for bare word matching a flag name exactly', async () => {
     const wrapper = await ready('')
@@ -135,8 +126,6 @@ describe('ArgsBuilder', () => {
     wrapper.unmount()
   })
 
-  // --- Schema refresh on installationId change ---
-
   it('re-fetches schema when installationId changes', async () => {
     const wrapper = await ready('', 'inst-a')
     expect(window.api.getComfyArgs).toHaveBeenCalledWith('inst-a')
@@ -147,14 +136,10 @@ describe('ArgsBuilder', () => {
     wrapper.unmount()
   })
 
-  // --- Exclusive group radio rendering ---
-
   it('renders exclusive group args as checkboxes in a grouped container', async () => {
     const wrapper = await ready('')
-    // Open the helper panel
     await wrapper.find('.args-configure-btn').trigger('click')
     await flushPromises()
-    // Should find the radio group container with checkboxes for the 3 exclusive VRAM args
     const group = wrapper.find('.arg-radio-group')
     expect(group.exists()).toBe(true)
     const checkboxes = group.findAll('input[type="checkbox"]')
@@ -166,7 +151,6 @@ describe('ArgsBuilder', () => {
     const wrapper = await ready('')
     await wrapper.find('.args-configure-btn').trigger('click')
     await flushPromises()
-    // Active section header is always present, even with no active args
     const activeGroup = wrapper.find('.args-group-active')
     expect(activeGroup.exists()).toBe(true)
     expect(activeGroup.find('.args-active-header').exists()).toBe(true)

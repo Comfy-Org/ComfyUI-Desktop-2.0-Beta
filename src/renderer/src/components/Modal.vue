@@ -4,17 +4,10 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 /**
  * Single modal primitive.
  *
- * - `binding`: true → no click-outside / Esc dismiss. Caller provides an
- *   explicit close affordance (back chevron, cancel button). Defaults the
- *   backdrop to `opaque` so the user reads "no escape via X / outside-click".
- * - `opacity`: 'dim' | 'heavy-dim' | 'opaque'.
- * - `width`: 'regular' (~600px) | 'wide' (~900px).
- * - `inline`: true → render the content frame only (no Teleport, no
- *   backdrop, no Esc handling). Used when the same component renders
- *   embedded in a panel body (e.g. DetailModal in the install-settings
- *   panel) instead of as an overlay. The slot still goes inside a
- *   `view-modal-content view-modal-inline` div so the inner header /
- *   body / footer layout stays identical between modes.
+ * - `binding`: true → no click-outside / Esc dismiss; defaults the backdrop to
+ *   `opaque`. Caller must provide an explicit close affordance.
+ * - `inline`: true → render the content frame only (no Teleport/backdrop/Esc)
+ *   for embedding in a panel body; layout stays identical to overlay mode.
  */
 type Opacity = 'dim' | 'heavy-dim' | 'opaque'
 
@@ -72,8 +65,6 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <!-- Inline mode: no Teleport, no backdrop. The host panel positions
-       this; the content keeps its standard header/body/footer layout. -->
   <div
     v-if="inline"
     class="view-modal-content view-modal-inline"

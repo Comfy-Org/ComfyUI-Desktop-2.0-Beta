@@ -1,5 +1,4 @@
-// Re-export all IPC types from the canonical shared location.
-// Renderer components import from here for convenience.
+// Re-export IPC types from the canonical shared location for renderer convenience.
 export type {
   Unsubscribe,
   Installation,

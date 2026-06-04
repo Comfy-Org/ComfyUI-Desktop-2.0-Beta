@@ -6,15 +6,8 @@ import BaseAlert from './ui/BaseAlert.vue'
 import SnapshotDiffView from './SnapshotDiffView.vue'
 import { useDialogs } from '../composables/useDialogs'
 
-/**
- * Singleton renderer for `useDialogs()` — mirrors the role
- * `ModalDialog.vue` plays for `useModal()`. Mount once per renderer
- * entry point (panel, popup) next to `<ModalDialog />`.
- *
- * Reads `useDialogs().state` and renders whichever primitive the
- * current `kind` calls for. Resolution forwards back through the
- * composable so the in-flight promise settles.
- */
+// Singleton renderer for useDialogs(), mirroring ModalDialog.vue's role for
+// useModal(). Mount once per renderer entry point next to <ModalDialog />.
 
 const {
   state,
@@ -60,9 +53,8 @@ const showConfirm = computed(() => state.open && state.kind === 'confirm')
     @cancel="cancel"
   />
 
-  <!-- Alert: single OK, no Cancel. ESC / backdrop resolve via `close`
-       (treated as acknowledgement, matching browser-`alert()`
-       semantics — there's nothing to "cancel" against). -->
+  <!-- ESC / backdrop resolve via `close` (acknowledgement), matching
+       browser alert() semantics where there's nothing to cancel. -->
   <BaseAlert
     :open="showAlert"
     :title="state.alert.title"
@@ -73,10 +65,6 @@ const showConfirm = computed(() => state.open && state.kind === 'confirm')
     @close="acknowledgeAlert"
   />
 
-  <!-- Confirm: primary + optional secondary + cancel (footer button
-       and/or header ✕). `BaseAlert` renders all three; resolution
-       routes back to `confirmPrimary` / `confirmSecondary` / `cancel`
-       so the awaited promise settles with the right ConfirmResult. -->
   <BaseAlert
     :open="showConfirm"
     :title="state.confirm.title"
@@ -93,10 +81,7 @@ const showConfirm = computed(() => state.open && state.kind === 'confirm')
     @secondary="confirmSecondary"
     @cancel="cancel"
   >
-    <!-- Restore-confirm preview: reuse the Snapshots-tab diff component as a
-         collapsible accordion (node / pip sections collapse so a large diff
-         doesn't overflow the modal). Only provided when a diff is attached so
-         other confirms don't render an empty block. -->
+    <!-- Restore-confirm diff preview; only rendered when a diff is attached. -->
     <template v-if="state.confirm.restoreDiff" #extra>
       <SnapshotDiffView :diff="state.confirm.restoreDiff" collapsible />
     </template>

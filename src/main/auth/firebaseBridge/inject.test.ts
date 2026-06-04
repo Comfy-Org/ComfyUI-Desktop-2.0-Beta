@@ -30,8 +30,7 @@ describe('buildIndexedDbInjectScript', () => {
 
   it('is parseable as JavaScript', () => {
     const script = buildIndexedDbInjectScript(sampleUser, 'AIzaTEST')
-    // `Function` constructor surfaces syntax errors without executing the
-    // body — IndexedDB is not in scope but the parse alone is enough.
+    // `Function` surfaces syntax errors without executing the body.
     expect(() => new Function(script)).not.toThrow()
   })
 

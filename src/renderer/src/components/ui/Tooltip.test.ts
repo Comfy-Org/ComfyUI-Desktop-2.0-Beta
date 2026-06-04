@@ -2,14 +2,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import Tooltip from './Tooltip.vue'
 
-/**
- * Position-aware tooltip primitive. These tests pin the contracts that
- * call sites depend on: bubble appears after the delay, teleports to
- * body (no overflow clipping), the `disabled` and missing-text gates
- * suppress, and the placement resolver flips when the requested side
- * lacks room.
- */
-
 const wrappers: VueWrapper[] = []
 
 afterEach(() => {
@@ -27,11 +19,7 @@ function mountTooltip(props: Record<string, unknown> = {}) {
   return wrapper
 }
 
-/**
- * jsdom returns zero-sized rects by default. Stub `getBoundingClientRect`
- * on every element so the placement resolver gets real numbers, and
- * pin `innerWidth`/`innerHeight` so we can drive the flip behavior.
- */
+// jsdom returns zero-sized rects, so stub them for the placement resolver.
 function stubViewport(width: number, height: number) {
   Object.defineProperty(window, 'innerWidth', { value: width, configurable: true })
   Object.defineProperty(window, 'innerHeight', { value: height, configurable: true })

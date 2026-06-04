@@ -3,18 +3,9 @@ import { useI18n } from 'vue-i18n'
 import Modal from './Modal.vue'
 
 /**
- * Shared chrome for every modal: standard header (title + close) and
- * scrollable body, all sized by the unified `.view-modal-content` rules.
- *
- * Wraps `Modal.vue` and forwards its sizing/backdrop props. Use slots
- * to override individual rows:
- *   - `#header` — replace the entire header row (e.g. takeovers
- *     mounting `TakeoverBack` + `TakeoverHeader`).
- *   - `#title` — replace just the title content (e.g. DetailModal's
- *     contenteditable name).
- *   - default — the body content.
- *   - `#footer` — pinned `view-modal-footer` row (ProgressModal,
- *     ConsoleModal, action bars).
+ * Shared modal chrome (header + scrollable body) wrapping `Modal.vue` and
+ * forwarding its sizing/backdrop props. Slots: `#header` (whole header row),
+ * `#title` (title content only), default (body), `#footer` (pinned footer row).
  */
 
 type Opacity = 'dim' | 'heavy-dim' | 'opaque'

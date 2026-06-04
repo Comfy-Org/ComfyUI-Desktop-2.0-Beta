@@ -18,13 +18,8 @@ import { humanizeOpStatus, operationInflightLabel, operationSuccessLabel } from 
 import type { ActionDef, DetailField, Installation, ShowProgressOpts } from '../../types/ipc'
 import { TID } from '../../../../shared/testIds'
 
-/**
- * Per-install settings body (tab strip + scrollable body + footer).
- * Extracted from `ComfyUISettingsPanel.vue` so the same UI can be hosted
- * by both the drawer chrome and the instance-picker's expanded right
- * pane. The host owns slide-in / popup chrome, focus trap, ESC/Tab and
- * backdrop dismissal; this component is the pure inner UI.
- */
+/** Per-install settings body. The host owns chrome, focus trap, and
+ *  dismissal; this component is the pure inner UI. */
 
 export type ComfyUISettingsTab = PickerTab
 
@@ -44,37 +39,19 @@ interface ActiveOperation {
 interface Props {
   installation: Installation | null
   initialTab?: ComfyUISettingsTab
-  /** Optional action id to fire automatically once `sections` are
-   *  loaded — mirrors `DetailModal`'s `autoAction` prop. Used by the
-   *  picker's expanded mode when opened via dashboard kebab
-   *  `Copy Installation` / `Untrack` / `Delete` / `Migrate to
-   *  Standalone`. Consumed exactly once per (autoAction, autoActionNonce)
-   *  transition; later section reloads or selection changes do not
-   *  re-fire. */
+  /** Action id to fire automatically once `sections` load. Consumed
+   *  once per (autoAction, autoActionNonce) transition. */
   autoAction?: string | null
-  /** Bumped by the picker on each explicit (re)open that seeds an
-   *  `autoAction`. The picker popup is cached, so a repeat trigger
-   *  re-sends the same `autoAction` value — keying the consumed-guard on
-   *  this nonce lets a second click re-fire. Absent (drawer host) → the
-   *  guard falls back to value-only keying. */
+  /** Bumped on each explicit (re)open. The popup is cached, so keying
+   *  the consumed-guard on this nonce lets a repeat trigger re-fire. */
   autoActionNonce?: number
-  /** Slice of the popup's global-settings snapshot consumed by the
-   *  Storage tab. Optional so non-popup hosts (e.g. drawer chrome)
-   *  can omit it and the Storage tab silently empties out — they
-   *  don't have a way to mutate global settings anyway. */
   globalSettingsSnapshot?: StorageSnapshot
-  /** Live operation status for an in-flight or recently-completed
-   *  background op on this install (cross-instance update etc.).
-   *  When set and the active tab is `'update'`, the Update tab body
-   *  is replaced with an inline progress / result view. */
+  /** When set and the active tab is `'update'`, the Update tab body is
+   *  replaced with an inline progress / result view. */
   activeOperation?: ActiveOperation | null
-  /** Install attached to the host window that opened this picker (the
-   *  picker's `snapshot.activeInstallationId`). Used to decide whether
-   *  the footer primary action should restart in-place (running in THIS
-   *  window) or focus/switch to the install's already-open window
-   *  (running in ANOTHER window). Null on install-less (dashboard) hosts
-   *  — there's no in-place session to restart, so a running install is
-   *  always "switch to its window". */
+  /** Install attached to the host window. Decides whether the footer
+   *  primary action restarts in-place (this window) or focuses the
+   *  install's already-open window (another window). */
   activeInstallationId?: string | null
 }
 
@@ -94,27 +71,13 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<{
   'show-progress': [opts: ShowProgressOpts]
-  /** Action's `result.navigate === 'list'` — install was removed. The
-   *  host should close itself and tear down the comfy window. */
+  /** Install was removed; host should close and tear down the window. */
   'navigate-list': []
-  /** Composable requested host dismissal (currently fires alongside
-   *  `navigate-list` so the host can animate out before navigation). */
   'request-close': []
-  /** Footer primary CTA — host decides whether to call its bridge's
-   *  `pickInstall` (Open / Switch case) or `restartInstall` (Restart
-   *  case) so the same native-confirm flow runs whether the affordance
-   *  is clicked from the compact row or the expanded view's footer.
-   *
-   *  The boolean is `restartInPlace`: true ONLY when the install is
-   *  running in the host window that owns this picker, where the action
-   *  genuinely stops + relaunches the session in place. When the install
-   *  is running in a DIFFERENT window (issue #749 — Cloud + local both
-   *  open), this is false so the host routes to `pickInstall`, whose
-   *  focus-existing short-circuit raises the already-open window instead
-   *  of restarting it. */
+  /** Footer primary CTA. `restartInPlace` is true only when the install
+   *  runs in this host window; false when it runs in a different window
+   *  so the host routes to `pickInstall` and raises the existing one. */
   'primary-action': [restartInPlace: boolean]
-  /** Inline progress CTA events — forwarded up to the host which owns
-   *  the bridge methods for cancel / retry / dismiss. */
   'op-cancel': []
   'op-retry': []
   'op-dismiss': []
@@ -165,24 +128,10 @@ const {
   onClose: () => emit('request-close')
 })
 
-// `autoAction` consumption — fires the named action once per prop
-// transition, after sections have loaded for the current install.
-// Used by dashboard kebab `Copy Installation` / `Untrack` (and the
-// existing `Migrate to Standalone` / `Delete` routes) which open the
-// picker in expanded mode with an `autoAction` seed so the source-
-// action def's confirm/prompt/disk-check chain actually fires —
-// otherwise the picker would just open with the user staring at a
-// settings tab.
-//
-// Guards:
-//   - keyed on `autoAction` + the picker's `autoActionNonce` (not the
-//     install id) so re-mounts / section reloads on the same trigger
-//     don't double-fire, AND a repeat trigger of the SAME action still
-//     re-fires (the picker popup is cached, so the value alone doesn't
-//     transition — the nonce bumps on each explicit re-open). Picking a
-//     different install while the key sticks around can't auto-run a
-//     destructive op on the new install (re-checked after the tick).
-//   - reset when the key transitions, so the next trigger can fire.
+// Fires the named action once per prop transition, after sections load.
+// Keyed on `autoAction` + `autoActionNonce` (not install id) so reloads
+// on the same trigger don't double-fire while a repeat of the same
+// action still re-fires.
 const autoActionKey = computed<string | null>(() =>
   props.autoAction ? `${props.autoAction}#${props.autoActionNonce ?? 0}` : null
 )
@@ -197,20 +146,16 @@ watch(
     () => sectionsFresh.value
   ],
   async ([key, installId, isFresh]) => {
-    // `isFresh` guards against acting on a previous install's
-    // stale payload — sections are no longer blanked on switch
-    // (#782), so we must wait until the new install's sections
-    // have actually landed before resolving an autoAction id
-    // against them.
+    // `isFresh` guards against acting on a previous install's stale
+    // payload — sections are no longer blanked on switch.
     if (!installId || !key || !isFresh) return
     if (consumedAutoActionKey.value === key) return
     const autoAction = props.autoAction
     if (!autoAction) return
 
-    // Mirror `DetailModal`'s channel-card-aware resolution so that
-    // nested per-channel actions (`update-comfyui`, `copy-update`,
-    // `switch-channel`) target the install's currently-selected
-    // channel rather than an arbitrary other channel's same-id action.
+    // Channel-card-aware resolution so nested per-channel actions target
+    // the install's currently-selected channel, not another channel's
+    // same-id action.
     const channelField = sections.value
       .flatMap((s) => s.fields ?? [])
       .find((f) => f.editType === 'channel-cards')
@@ -221,11 +166,8 @@ watch(
     consumedAutoActionKey.value = key
     await nextTick()
 
-    // Re-check the install after the tick — selection can change in
-    // the meantime (the popup is one mount across install switches),
-    // and `runAction` reads the current installation at call time. A
-    // stale invocation would auto-fire a destructive op against the
-    // wrong install.
+    // Re-check the install after the tick — selection can change and a
+    // stale invocation would fire a destructive op against the wrong one.
     if (props.installation?.id !== installId) return
 
     void runAction(action)
@@ -233,34 +175,17 @@ watch(
   { immediate: true }
 )
 
-// Auto-refresh stale channel-cards when the Update tab opens. The
-// release cache persists to disk forever and only refreshes on
-// explicit "Check for Update" clicks, post-update-comfyui, or install
-// creation — without this watcher, a user who opens the picker days
-// or weeks after install sees a snapshot of release data from the
-// last manual check. Fires `check-update` (cheap GitHub tag fetch,
-// deduped main-side by `MIN_RECHECK_INTERVAL = 10s` inside the release
-// cache) whenever:
-//
-//   - the active tab is `'update'`,
-//   - the sections payload has a channel-cards field,
-//   - and the currently-selected option's `data.checkedAt` is missing
-//     or older than `STALE_CHANNEL_CARD_MS`.
-//
-// Per-(install, channel) dedupe via `refreshedChannelKeys` so tab
-// flips don't spam IPCs. Main's `getOrFetch(..., force=true)` short-
-// circuits on the 10s window so even a stuck renderer can't push more
-// than 6 fetches/minute/channel.
+// Auto-refresh stale channel-cards when the Update tab opens, so a user
+// who opens the picker long after install doesn't see release data from
+// the last manual check. Per-(install, channel) dedupe via
+// `refreshedChannelKeys`; main short-circuits on a 10s window.
 const refreshedChannelKeys = new Set<string>()
 watch(
   [() => activeTab.value, () => props.installation?.id ?? null, () => sectionsFresh.value],
   ([tab, installId, isFresh]) => {
-    // `isFresh` is critical: sections are no longer blanked on
-    // install switch (#782), so without this guard the watcher would
-    // walk the previous install's stale sections, find a
-    // `check-update` action, and fire it against the NEW install —
-    // which on Cloud / remote URL installs returns
-    // `Action "check-update" not yet implemented.` (alert modal).
+    // `isFresh` is critical: without it the watcher would walk the
+    // previous install's stale sections and fire `check-update` against
+    // the new install, which errors on Cloud / remote URL installs.
     if (tab !== 'update' || !installId || !isFresh) return
 
     const channelField = sections.value
@@ -271,10 +196,9 @@ watch(
     const currentChannel = typeof channelField.value === 'string' ? channelField.value : null
     if (!currentChannel) return
 
-    // Look up the canonical action def from sections so we inherit
-    // whatever `enabled` / disabledMessage / future fields main attaches
-    // (today: `enabled: installed`). Bail if main isn't exposing the
-    // action for this install (e.g. uninstalled / cloud).
+    // Look up the canonical action def from sections to inherit whatever
+    // `enabled` / disabledMessage main attaches. Bail if main isn't
+    // exposing the action for this install.
     const checkAction = sections.value
       .flatMap((s) => s.actions ?? [])
       .find((a) => a.id === 'check-update')
@@ -284,15 +208,8 @@ watch(
     if (refreshedChannelKeys.has(dedupeKey)) return
     refreshedChannelKeys.add(dedupeKey)
 
-    // `check-update` has no `showProgress` / confirm / prompt; it runs
-    // inline via `useComfyUISettings.runAction` step 10. A successful
-    // result returns `navigate: 'detail'` → section reload → fresh
-    // `checkedAt` bubbles through this watcher (dedupe set prevents
-    // re-fire on the same install+channel).
-    //
-    // `silent: true` — this is the automatic on-tab-open refresh, not a
-    // user click, so it must not pop the "you're up to date" alert that a
-    // manual check does.
+    // `silent: true` — automatic on-tab-open refresh, not a user click,
+    // so it must not pop the "you're up to date" alert a manual check does.
     void runAction({ ...checkAction, data: { ...checkAction.data, silent: true } })
   },
   { immediate: true }
@@ -303,9 +220,7 @@ interface TabDef {
   sectionTab: SectionTab
   label: string
   icon: typeof SlidersHorizontal
-  /** Optional richer hover copy for the tab strip. Most tabs just echo
-   *  their label; concept-heavy tabs (e.g. Snapshots) explain the term
-   *  to new users instead. Falls back to `label` when unset. */
+  /** Richer hover copy; falls back to `label` when unset. */
   tooltip?: string
 }
 
@@ -343,11 +258,8 @@ const ALL_TABS: TabDef[] = [
   }
 ]
 const tabs = computed<TabDef[]>(() => {
-  // Cloud (and other url-backed remotes) run no local process, so the
-  // `config` tab carries no real startup args — just output/storage +
-  // browser-cache settings. Relabel it "Storage" there so the tab name
-  // matches its contents. Cloud emits no separate `storage` section, so
-  // this can't collide with a real Storage tab.
+  // Cloud runs no local process, so the `config` tab carries no real
+  // startup args — relabel it "Storage" to match its contents.
   const isCloud = installation.value?.sourceCategory === 'cloud'
   return ALL_TABS.filter((tab) => sectionsForTab(tab.sectionTab).value.length > 0).map((tab) =>
     isCloud && tab.key === 'config'
@@ -361,15 +273,9 @@ const showUpdateBadge = computed(() => {
   return inst?.statusTag?.style === 'update' || inst?.status === 'update-available'
 })
 
-// If the currently selected tab disappeared (e.g. swapping a local
-// install for a cloud one while open), fall back to the requested
-// `initialTab` if it's now available, otherwise the first surviving
-// tab. This matters at first mount: sections load async, so the
-// initial `tabs` list is empty and the requested tab (e.g.
-// `'snapshots'` from a kebab deep link) isn't yet present. When the
-// sections land, prefer the requested tab over `next[0]` so deep
-// links honour the caller's intent instead of always falling back to
-// Config.
+// If the selected tab disappeared, fall back to the requested
+// `initialTab` if now available, else the first surviving tab. Prefer
+// the requested tab over `next[0]` so deep links honour caller intent.
 watch(tabs, (next) => {
   if (next.length === 0) return
   if (next.some((tab) => tab.key === activeTab.value)) return
@@ -389,15 +295,9 @@ const storageSections = computed(() => sectionsForTab('storage').value)
 const rootRef = useTemplateRef<HTMLElement>('root')
 const tabsRef = useTemplateRef<HTMLElement>('tabs')
 
-// Tab tooltips echo the visible tab label, which adds nothing when the
-// label is on-screen — and the bottom-anchored popover overlaps the
-// content below (#713). The strip only ever hides labels in its narrow
-// container state: at `< 520px` inactive tabs collapse to icon-only
-// (see the `@container settings-tabs` rule below), where the tooltip is
-// the only thing exposing their label. So we mirror that breakpoint in
-// JS via a ResizeObserver and only keep the tooltip alive for a tab
-// whose label is actually hidden — the active tab always keeps its
-// label, so its tooltip stays suppressed in every state.
+// Tooltips that echo the visible label add nothing, so only keep them
+// alive for tabs whose label is hidden. Mirror the `< 520px` collapse
+// breakpoint (see `@container settings-tabs` below) via a ResizeObserver.
 const TAB_COLLAPSE_PX = 520
 const tabsCollapsed = ref(false)
 let tabsObserver: ResizeObserver | undefined
@@ -418,8 +318,6 @@ onUnmounted(() => {
   tabsObserver = undefined
 })
 
-/** A tab's label is hidden — so its tooltip carries real info — only
- *  when the strip is collapsed and the tab isn't the active one. */
 function isTabLabelHidden(key: ComfyUISettingsTab): boolean {
   return tabsCollapsed.value && activeTab.value !== key
 }
@@ -440,9 +338,6 @@ function handleTabKeydown(event: KeyboardEvent, index: number): void {
   }
 }
 
-// Footer "More" dropdown state. The menu component owns its own
-// outside-click + ESC handlers and emits `close` when the user dismisses
-// it that way.
 const moreMenuOpen = ref(false)
 function toggleMoreMenu(): void {
   moreMenuOpen.value = !moreMenuOpen.value
@@ -451,14 +346,10 @@ function closeMoreMenu(): void {
   moreMenuOpen.value = false
 }
 
-// Drawer sub-page state. When set, the body swaps to the dedicated
-// sub-page (e.g. the args builder) instead of the tab list. Tab switch
-// also resets the sub-page so the args editor never orphans over a
-// different tab's content.
+// When set, the body swaps to the dedicated sub-page instead of the
+// tab list. Tab switch resets it so the args editor never orphans.
 type SubPage = 'args' | null
 const subPage = ref<SubPage>(null)
-// Direction of the sub-page transition. Push = forward (slide in from
-// right). Pop = back (slide out to right).
 const subPageTransition = ref<'subpage-push' | 'subpage-pop'>('subpage-push')
 function openArgsPage(): void {
   subPageTransition.value = 'subpage-push'
@@ -469,19 +360,12 @@ function closeSubPage(): void {
   subPage.value = null
 }
 
-// Tab-swap transition direction. Forward = the user moved right
-// along the tab strip (Config → Status → Update → Snapshots),
-// backward = the user moved left. Reuses the existing
-// `subpage-push` / `subpage-pop` keyframes so all main-pane motion
-// in this component speaks one language. We compare tab *indices*
-// from the visible `tabs` list (not the static ALL_TABS order)
-// because cloud installs hide Update + Snapshots — swapping
-// Config ↔ Status on a cloud install should still feel right.
+// Tab-swap transition direction. Compares tab indices from the visible
+// `tabs` list (not static ALL_TABS) because cloud installs hide tabs.
 const tabTransition = ref<'subpage-push' | 'subpage-pop'>('subpage-push')
 
 function selectTab(key: ComfyUISettingsTab): void {
-  // Locked while an op is in flight — only the active tab (hosting the
-  // loader) stays interactable. Guards stray programmatic switches.
+  // Locked while an op is in flight — only the active tab stays live.
   if (opInflight.value && key !== activeTab.value) return
   if (subPage.value !== null) subPageTransition.value = 'subpage-pop'
   if (key !== activeTab.value) {
@@ -496,13 +380,8 @@ function selectTab(key: ComfyUISettingsTab): void {
   subPage.value = null
 }
 
-// Reset the sub-page + close the More menu when the install changes —
-// re-mounting between installs starts fresh. Also force the inner
-// tab-swap transition into "push" direction so every install switch
-// reads as a forward motion cue regardless of where we last came
-// from (the keyed panes below include the install id, so the
-// transition is guaranteed to fire even when the active tab key
-// itself doesn't change).
+// Reset sub-page + close the More menu when the install changes, and
+// force the tab-swap into "push" so every switch reads as forward motion.
 watch(
   () => props.installation?.id ?? null,
   () => {
@@ -512,12 +391,8 @@ watch(
   }
 )
 
-// Identity used to key the inner tab panes so that switching between
-// installs — even while staying on the same tab — remounts the pane
-// and fires the `tabTransition` animation. Without this the keys
-// would be tab-stable (e.g. `tab-status`) and Vue would reuse the
-// same vnode across installs, suppressing the motion cue users
-// rely on to see "something changed".
+// Keys the inner tab panes so switching installs (even on the same tab)
+// remounts the pane and fires the `tabTransition` animation.
 const paneInstallKey = computed(() => props.installation?.id ?? 'none')
 
 const argsField = computed<DetailField | null>(() => {
@@ -547,25 +422,15 @@ function handleSnapshotsRefresh(): void {
   void reload()
 }
 
-/** Footer primary CTA — host-agnostic. The host (picker) receives
- *  `primary-action` with `restartInPlace` and dispatches its own bridge
- *  call: `restartInstall` when restarting in place, `pickInstall`
- *  otherwise. This keeps the same native-confirm flow across surfaces.
- *
- *  Running-state derives from `useInstallCta`, the single source of
- *  truth for the Start / Restart / Switch decision (issue #755). */
 const isRunningInThisWindow = installCta.runningInThisWindow
 
 const hasPendingRestart = computed(
   () => isRunningInThisWindow.value && pendingRestartFieldIds.value.size > 0
 )
 
-// Cloud capacity-protection switch (PostHog `desktop-cloud-capacity`).
-// When the selected install is cloud and capacity is `disabled`, swap
-// the CTA copy to "Unavailable" and disable the button so users get an
-// obvious signal that the click won't go anywhere — the parent already
-// no-ops the action via `confirmEntry()`; this is the UX surface for
-// that gate.
+// Cloud capacity-protection switch. When cloud capacity is `disabled`,
+// disable the CTA so the click visibly goes nowhere (parent already
+// no-ops it).
 const cloudCapacity = useCloudCapacity()
 const isCloudCapacityBlocked = computed(
   () =>
@@ -585,12 +450,9 @@ const primaryActionLabel = computed(() => {
 
 function handlePrimaryAction(): void {
   if (!installation.value) return
-  // Only restart in place when running in THIS window; running-elsewhere
-  // and not-running both route to pickInstall (focus existing / launch).
   emit('primary-action', installCta.restartInPlace.value)
 }
 
-// Inline-progress state derived from the `activeOperation` prop.
 const opInflight  = computed(() => props.activeOperation != null && !props.activeOperation.done)
 const opSuccess   = computed(() => props.activeOperation?.done === true && props.activeOperation.ok === true)
 const opError     = computed(() => props.activeOperation?.done === true && props.activeOperation.ok === false && props.activeOperation.error !== 'Cancelled.')
@@ -618,7 +480,6 @@ const opSuccessLabel = computed(() => {
   return op ? operationSuccessLabel(op, t) : ''
 })
 
-// Network speed label — only shown when a real speed value exists.
 function formatSpeed(bps: number): string {
   if (bps >= 1_000_000) return `${(bps / 1_000_000).toFixed(1)} MB/s`
   if (bps >= 1_000)     return `${Math.round(bps / 1_000)} KB/s`
@@ -629,10 +490,8 @@ const opSpeedLabel = computed(() => {
   return (spd != null && spd > 0) ? formatSpeed(spd) : null
 })
 
-// Show overlay whenever an op is present, except when the Snapshots
-// tab is active and the op is a snapshot-restore — that case has its
-// own richer timeline rail inside SnapshotsView, so the generic overlay
-// would double up.
+// Show overlay whenever an op is present, except snapshot-restore on
+// the Snapshots tab, which has its own timeline rail in SnapshotsView.
 const showOpOverlay = computed(() => {
   const op = props.activeOperation
   if (!op) return false
@@ -640,10 +499,8 @@ const showOpOverlay = computed(() => {
   return true
 })
 
-// Block footer while in-flight.
 const opBlocksFooter = computed(() => opInflight.value)
 
-// Auto-dismiss countdown on success (3 → 2 → 1 → dismiss).
 const successCountdown = ref(0)
 let countdownTimer: ReturnType<typeof setInterval> | null = null
 
@@ -657,11 +514,9 @@ function clearCountdown(): void {
 
 watch(opSuccess, (yes) => {
   if (!yes) { clearCountdown(); return }
-  // Reload sections immediately so installed version + update badge
-  // reflect the new state as soon as the overlay dismisses.
+  // Reload so installed version + update badge reflect the new state.
   void reload()
-  // Clear the channel-check dedup key so the auto-refresh watcher
-  // can re-fire check-update after the overlay goes away.
+  // Clear the dedup key so the auto-refresh watcher can re-fire.
   const installId = props.installation?.id
   if (installId) {
     for (const key of Array.from(refreshedChannelKeys)) {
@@ -678,9 +533,7 @@ watch(opSuccess, (yes) => {
   }, 1000)
 })
 
-// Close the More menu if it's open when an op begins — otherwise it
-// becomes an island of clickable rows on a footer button that's about
-// to gray out.
+// Close the More menu when an op begins, before its footer button greys out.
 watch(opInflight, (yes) => {
   if (yes && moreMenuOpen.value) closeMoreMenu()
 })
@@ -688,8 +541,7 @@ watch(opInflight, (yes) => {
 onUnmounted(clearCountdown)
 
 defineExpose({
-  /** Host can force-focus the active tab — drawer uses this when it
-   *  opens so initial focus lands inside the body. */
+  /** Host can force-focus the active tab so initial focus lands in the body. */
   focusActiveTab(): void {
     const firstTab = rootRef.value?.querySelector<HTMLButtonElement>('.settings-v2-tab.is-active')
     firstTab?.focus()
@@ -772,10 +624,8 @@ defineExpose({
           :data-testid="TID.pickerSettingsSections"
           :data-install-id="installation?.id"
         >
-          <!-- Cloud capacity banner. Always-visible explanation of the
-               disabled state so the user understands why the Start
-               button is greyed (the tooltip is hover-only and reads
-               as "broken" otherwise). -->
+          <!-- Always-visible explanation of why the Start button is
+               greyed (the tooltip is hover-only). -->
           <div
             v-if="isCloudCapacityBlocked"
             class="cloud-capacity-banner"
@@ -787,8 +637,6 @@ defineExpose({
               <p class="cloud-capacity-banner-hint">{{ $t('cloud.capacityDisabledHint') }}</p>
             </div>
           </div>
-          <!-- Inner tab-swap transition. Wrapped in a single-root
-               `<div>` because `<Transition>` requires one child. -->
           <Transition :name="tabTransition" mode="out-in">
             <div
               v-if="activeTab === 'snapshots' && installation"
@@ -822,10 +670,8 @@ defineExpose({
               :key="`tab-storage-${paneInstallKey}`"
               class="settings-v2-tab-pane"
             >
-              <!-- Lazy-mounted via `v-else-if` so picker opens that
-                   never visit Storage don't render the global model-
-                   dir UI. Snapshot is owned by the popup root and
-                   threaded through here as a prop. -->
+              <!-- Lazy-mounted via `v-else-if` so picker opens that never
+                   visit Storage skip rendering the global model-dir UI. -->
               <StoragePane
                 :installation="installation"
                 :snapshot="globalSettingsSnapshot"
@@ -837,14 +683,9 @@ defineExpose({
               />
             </div>
             <div v-else :key="`tab-${activeTab}-${paneInstallKey}`" class="settings-v2-tab-pane">
-              <!-- Inline progress overlay: shown when an active operation
-                   is tracked for this install and the Update tab is open.
-                   The SettingsSectionList fades out; the progress view
-                   fades in within the same content area. -->
               <Transition name="op-overlay" mode="out-in">
                 <div v-if="showOpOverlay" key="op-overlay" class="op-overlay">
 
-                  <!-- In-flight -->
                   <template v-if="opInflight">
                     <p class="op-title">{{ opTitleLabel }}</p>
                     <p class="op-name">{{ installation?.name }}</p>
@@ -882,7 +723,6 @@ defineExpose({
                     </button>
                   </template>
 
-                  <!-- Success -->
                   <template v-else-if="opSuccess">
                     <div class="op-icon op-icon--success">
                       <CheckCircle :size="32" />
@@ -894,7 +734,6 @@ defineExpose({
                     </p>
                   </template>
 
-                  <!-- Error -->
                   <template v-else-if="opError">
                     <div class="op-icon op-icon--error">
                       <XCircle :size="32" />
@@ -911,7 +750,6 @@ defineExpose({
                     </div>
                   </template>
 
-                  <!-- Cancelled -->
                   <template v-else-if="opCancelled">
                     <p class="op-title op-title--muted">{{ t('instancePicker.progressCancelled') }}</p>
                     <button type="button" class="op-ghost-btn" @click="emit('op-dismiss')">
@@ -1003,16 +841,14 @@ defineExpose({
   container-name: settings-tabs;
 }
 
-/* Narrow right-pane: inactive tabs collapse to icon-only, active tab
-   keeps its label so "you are here" stays obvious. Tooltip exposes the
-   label on hover/focus for the collapsed tabs. */
+/* Narrow right-pane: inactive tabs collapse to icon-only; the active
+   tab keeps its label. */
 @container settings-tabs (max-width: 520px) {
   .settings-v2-tab:not(.is-active) {
     padding: 6px 8px;
     gap: 0;
   }
-  /* Collapse to icon-only: hide the label but keep the icon wrap (which
-     carries the overlapped update dot). */
+  /* Hide the label but keep the icon wrap (carries the update dot). */
   .settings-v2-tab:not(.is-active) > span:not(.settings-v2-tab-icon-wrap) {
     display: none;
   }
@@ -1059,8 +895,7 @@ defineExpose({
   background: var(--neutral-800);
 }
 
-/* Locked while an instance op is in flight — only the active tab stays
-   live, every other tab greys out and stops responding to pointer. */
+/* Locked while an instance op is in flight — only the active tab stays live. */
 .settings-v2-tab.is-locked {
   opacity: 0.4;
   cursor: not-allowed;
@@ -1083,11 +918,7 @@ defineExpose({
   opacity: 0.85;
 }
 
-/* Update-available dot, overlapped on the bottom-right of the Update tab
-   icon — same corner + chrome as the IPP instance-row dots (running /
-   update / op): a small orange dot with a ring in the surface colour so
-   it reads as a badge on the icon rather than floating text after the
-   label. */
+/* Update-available dot overlapped on the bottom-right of the Update tab icon. */
 .settings-v2-tab-badge {
   position: absolute;
   bottom: -1px;
@@ -1128,22 +959,15 @@ defineExpose({
   flex: 1 1 auto;
 }
 
-/* Stale state during a picker-row switch: the previous install's
- * sections are still painted while the new install's
- * `get-detail-sections` IPC is in flight (#782). Block pointer
- * interactions so a click in that brief window can't act on a field
- * or button defined by the previous install's payload. No visual
- * change — adding opacity/grayscale here would itself read as a
- * flicker, which is exactly the regression this work fixes. */
+/* During a picker-row switch the previous install's sections stay
+ * painted while the new install's IPC is in flight. Block pointer
+ * interactions so a click can't act on the stale payload. */
 .settings-v2-body-root.is-stale {
   pointer-events: none;
 }
 
-/* Inner tab-swap wrapper. Mirrors `.settings-v2-body-root`'s flex
- * column so the wrapped `SettingsSectionList` fragment renders as
- * stacked sections exactly as it did before. Width: 100% so the
- * leaving pane's translateX doesn't squeeze. `flex: 1` propagates
- * the body height down to the op-overlay so it can center. */
+/* Inner tab-swap wrapper. Width 100% so the leaving pane's translateX
+ * doesn't squeeze; `flex: 1` propagates height so the op-overlay centers. */
 .settings-v2-tab-pane {
   display: flex;
   flex-direction: column;
@@ -1162,12 +986,8 @@ defineExpose({
   color: var(--danger);
 }
 
-/* ── Inline operation overlay ──────────────────────────────────── */
-/* The overlay lives inside .settings-v2-tab-pane which is a flex
- * column child of .settings-v2-body-root → .settings-v2-body.
- * `flex: 1 1 auto` makes it stretch to consume all leftover height
- * in the scroll container so `justify-content: center` actually
- * centers — without this the pane is only as tall as its content. */
+/* `flex: 1 1 auto` stretches the overlay to consume leftover scroll-
+ * container height so `justify-content: center` actually centers. */
 .op-overlay {
   display: flex;
   flex-direction: column;
@@ -1182,7 +1002,6 @@ defineExpose({
   box-sizing: border-box;
 }
 
-/* Status icon */
 .op-icon {
   display: flex;
   align-items: center;
@@ -1192,7 +1011,6 @@ defineExpose({
 .op-icon--success { color: var(--brand-success, #27ae60); }
 .op-icon--error   { color: var(--brand-error,   #e74c3c); }
 
-/* Title — big, clear action label */
 .op-title {
   font-size: 15px;
   font-weight: 600;
@@ -1203,7 +1021,6 @@ defineExpose({
 .op-title--error { color: var(--brand-error, #e74c3c); }
 .op-title--muted { color: var(--text-muted, var(--neutral-100)); }
 
-/* Install name — secondary line under the title */
 .op-name {
   font-size: 12px;
   color: var(--text-muted, var(--neutral-100));
@@ -1216,7 +1033,6 @@ defineExpose({
 }
 .op-name--error { color: var(--brand-error, #e74c3c); opacity: 0.8; }
 
-/* Progress bar */
 .op-bar-wrap {
   width: 100%;
   max-width: 260px;
@@ -1280,7 +1096,6 @@ defineExpose({
   100% { transform: translateX(280%); }
 }
 
-/* Countdown under success title */
 .op-countdown {
   font-size: 11px;
   color: var(--text-muted, var(--neutral-100));
@@ -1288,7 +1103,6 @@ defineExpose({
   margin: 0;
 }
 
-/* Error / cancelled action row */
 .op-actions {
   display: flex;
   flex-direction: column;
@@ -1297,7 +1111,6 @@ defineExpose({
   margin-top: 4px;
 }
 
-/* Buttons */
 .op-primary-btn {
   height: 32px;
   padding: 0 18px;
@@ -1326,7 +1139,6 @@ defineExpose({
 }
 .op-ghost-btn:hover { color: var(--text); border-color: var(--text-muted); }
 
-/* Fade transition between sections ↔ progress overlay */
 .op-overlay-enter-active,
 .op-overlay-leave-active {
   transition: opacity 200ms ease, transform 200ms ease;
@@ -1348,8 +1160,6 @@ defineExpose({
   background: var(--modal-surface-bg);
 }
 
-/* Transient inline status (e.g. "you're up to date"). Sits on the left
-   of the footer and fades in/out instead of interrupting with a modal. */
 .settings-v2-notice {
   margin-right: auto;
   font-size: 13px;
@@ -1365,10 +1175,8 @@ defineExpose({
   opacity: 0;
 }
 
-/* Pin both footer buttons to the same 32px height as the left
- * footer's "+ New Instance" so the two footer bands stack visually
- * aligned — global `button` rule defaults to ~38px, which would push
- * the right footer taller than the left. */
+/* Pin footer buttons to 32px to match the left footer's "+ New Instance"
+ * (global `button` defaults to ~38px). */
 .settings-v2-relaunch {
   flex: 0 1 auto;
   min-width: 200px;
@@ -1383,11 +1191,7 @@ defineExpose({
     color 160ms ease;
 }
 
-/* Pending-restart promotion. Brand yellow takes over the button so
- * the resolution point lights up against the dark modal surface —
- * no extra chrome, no ring, just a hard semantic swap. Same action
- * (still routes through Restart), the colour just says "now is the
- * moment". Dark text required: yellow is too light for white. */
+/* Pending-restart promotion. Dark text required: yellow is too light for white. */
 .settings-v2-relaunch.is-pending-restart,
 .settings-v2-relaunch.is-pending-restart:hover {
   background: var(--neutral-50);
@@ -1409,11 +1213,8 @@ defineExpose({
   font-size: 12px;
   font-weight: 500;
   line-height: 16px;
-  /* Matches the picker's "+ New Instance" left-footer button so the
-   * two footer affordances read as a pair. Tokenised — the 10% white
-   * overlay lives in `--chooser-surface-border-hover` (yes, the name
-   * is "border" but the value is the canonical 10% white we want
-   * here too; no new token needed). */
+  /* `--chooser-surface-border-hover` is the canonical 10% white (named
+   * "border" but reused here intentionally). */
   background: var(--chooser-surface-border-hover);
   border: none;
   color: var(--neutral-100);
@@ -1431,9 +1232,8 @@ defineExpose({
   color: var(--text);
 }
 
-/* Cloud capacity banner — always-visible explainer for the disabled
- * state. Sits at the top of the settings body so users see WHY the
- * Start button is greyed (the title tooltip is hover-only). */
+/* Always-visible explainer for the disabled state (the title tooltip
+ * is hover-only). */
 .cloud-capacity-banner {
   display: flex;
   align-items: flex-start;

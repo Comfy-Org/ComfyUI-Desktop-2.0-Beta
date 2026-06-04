@@ -15,43 +15,21 @@ import TooltipWrap from '../../components/TooltipWrap.vue'
 import type { ActionDef, DetailField, DetailSection } from '../../types/ipc'
 
 /**
- * Shared section + field renderer used by both the unified Settings
- * drawer (`ComfyUISettingsPanel.vue`) and the instance-picker popover's
- * right-pane Settings accordion (`InstancePickerView.vue`). Owns the
- * collapse state per section title, but is otherwise pure presentation
- * — the host wires updateField / runAction / openArgsPage handlers so
- * the same DOM serves both the panel's `window.api`-backed handlers
- * AND the popup's bridge-backed handlers without either surface
- * importing the other's IPC layer.
- *
- * Status-tab styling (label-over-value, no input chrome, hairline
- * dividers between rows) is enabled via the `readonly` prop —
- * mirrors the drawer's `activeTab === 'status'` modifier without
- * forking the template.
+ * Shared section + field renderer for both the Settings drawer and the instance-picker's Settings accordion.
+ * Pure presentation; the host wires the handlers so the same DOM serves panel (`window.api`) and popup (bridge) without either importing the other's IPC.
  */
 
 interface Props {
   sections: DetailSection[]
-  /** Status-tab styling: hairline dividers + label-over-value layout
-   *  (no input chrome). Equivalent to the drawer's
-   *  `is-readonly-list` section modifier. */
+  /** Status-tab styling: hairline dividers + label-over-value, no input chrome. */
   readonly?: boolean
-  /** Installation context for fields that need to hit install-scoped
-   *  IPCs (e.g. ArgsBuilderField loads the arg schema via
-   *  `getComfyArgs(id)`). Optional so call sites without a current
-   *  install degrade gracefully. */
+  /** Installation context for install-scoped IPCs (e.g. ArgsBuilderField's `getComfyArgs(id)`). */
   installationId?: string
-  /** Inline-action busy set from the host's `useComfyUISettings` —
-   *  drives the per-button spinner + disabled state so quick
-   *  actions like Check-for-Update feel acknowledged. */
+  /** Inline-action busy set driving per-button spinner/disabled state. */
   runningActionIds?: Set<string>
-  /** Field ids edited while the install is running that need a
-   *  process restart to take effect. Renders a small tag next to the
-   *  field label so users can spot which specific edits are pending. */
+  /** Field ids edited while running that need a restart; renders a tag next to the label. */
   pendingRestartFieldIds?: Set<string>
-  /** Per-field transient error messages from failed
-   *  `updateInstallation` IPCs. Renders a red inline pill next to
-   *  the field label so the user knows the change didn't land. */
+  /** Per-field error messages from failed `updateInstallation` IPCs; renders a red inline pill. */
   fieldErrorMessages?: Map<string, string>
 }
 
@@ -63,9 +41,7 @@ const props = withDefaults(defineProps<Props>(), {
   fieldErrorMessages: () => new Map<string, string>()
 })
 
-// Wrap the Set in a computed so each `.has()` call tracks a reactive
-// dep on the prop — bare-function access on a destructured prop inside
-// a template attribute binding can miss the dep otherwise.
+// Wrap in a computed so each `.has()` tracks a reactive dep (bare access on a destructured prop can miss it).
 const runningIdsSet = computed(() => props.runningActionIds ?? new Set<string>())
 function isActionRunning(actionId: string): boolean {
   return runningIdsSet.value.has(actionId)
@@ -93,10 +69,7 @@ function asString(v: DetailField['value']): string {
   return typeof v === 'string' ? v : v == null ? '' : String(v)
 }
 
-/** Per-title collapse state. Sections opt into collapsibility by
- *  carrying a `section.collapsed` boolean in their payload; that
- *  initial value pre-seeds this set on first render. Only titled
- *  sections are collapsible (the title is the click target). */
+// Per-title collapse state; only titled sections (with a `section.collapsed` seed) are collapsible.
 const collapsedTitles = ref(new Set<string>())
 
 watch(
@@ -452,10 +425,7 @@ function fieldOwnsLabel(field: DetailField): boolean {
   transform: rotate(90deg);
 }
 
-/* Collapse the body: hide every direct child of the section EXCEPT
- * the title button (which the user clicks to toggle). Description and
- * the items/fields/actions blocks share this rule so the entire
- * section body disappears in one go. */
+/* Collapse the body: hide every direct child except the title (the toggle target). */
 .settings-v2-section.is-collapsed > *:not(.settings-v2-section-title) {
   display: none;
 }
@@ -507,10 +477,7 @@ function fieldOwnsLabel(field: DetailField): boolean {
   gap: 10px;
 }
 
-/* Inline explanation rendered beneath the control for fields whose
- * effect isn't self-evident from the label (e.g. the Chinese mirrors
- * toggle lists which hosts it swaps). Mirrors the env-vars notice
- * styling so both inline-info surfaces read as one family. */
+/* Inline explanation beneath the control for fields whose effect isn't self-evident. */
 .settings-v2-field-description {
   display: flex;
   align-items: flex-start;
@@ -527,12 +494,7 @@ function fieldOwnsLabel(field: DetailField): boolean {
   color: var(--info, var(--neutral-100));
 }
 
-/* Dependent (nested) fields are revealed by the toggle directly above
- * them — e.g. "Use shared output directory" only appears once
- * "Auto-download outputs" is on, and the output-path picker only once
- * that's off. Pull them up tight to their parent (cancelling most of the
- * section's 16px row gap) and indent behind a hairline rail so the chain
- * reads as one dependent group instead of equally-weighted rows. */
+/* Nested fields pull up tight to their parent and indent behind a hairline rail so the chain reads as one dependent group. */
 .settings-v2-field.is-nested {
   margin-top: -8px;
   padding-left: 14px;
@@ -572,11 +534,7 @@ function fieldOwnsLabel(field: DetailField): boolean {
   white-space: nowrap;
 }
 
-/* Failed-write inline pill. Same shape as the restart tag (so the
- * label row stays calm when one swaps in for the other) but in the
- * danger ramp so the user immediately reads "rejected" not "pending".
- * Clamped to a max-width with ellipsis — IPC errors can be long; the
- * full message lives in the `title` tooltip. */
+/* Failed-write pill: restart-tag shape in the danger ramp. Clamped with ellipsis; full message in the `title` tooltip. */
 .settings-v2-field-error-tag {
   flex: 0 0 auto;
   margin-left: 6px;

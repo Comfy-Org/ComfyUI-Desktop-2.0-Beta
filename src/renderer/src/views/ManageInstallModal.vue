@@ -6,31 +6,17 @@ import DetailModal from './DetailModal.vue'
 import type { Installation, ShowProgressOpts } from '../types/ipc'
 
 /**
- * Per-install management modal. Opens centered from the four dashboard /
- * chooser entry-points (chooser-card kebab "Manage…", install-pill kebab,
- * `comfy://install-update/<id>` deep link, `comfy://open-settings`
- * deep link). Carries the per-install body (DetailModal in `embedded`
- * mode); global settings and directories/downloads live in the
- * title-popup, not here.
- *
- * Chrome is delegated to the shared `BaseModal` primitive: Teleport,
- * fade transition, focus capture+restore, body scroll lock, ESC dismiss,
- * backdrop dismiss, and the close affordance all come from there. We
- * only own the size + the embedded body's padding gutter.
- *
- * The in-app title-bar Settings icon (running ComfyUI window) is a
- * separate surface — see `ComfyUISettingsPanel.vue`.
+ * Per-install management modal carrying the per-install body (DetailModal in `embedded` mode); chrome comes from `BaseModal`.
+ * The running-window title-bar Settings icon is a separate surface (`ComfyUISettingsPanel.vue`).
  */
 
 type DetailTab = 'status' | 'update' | 'snapshots' | 'settings'
 
 interface Props {
   installation: Installation | null
-  /** Tab to land on. `'settings'` here is DetailModal's launch-settings
-   *  tab (not "global settings"). Default `'status'`. */
+  /** Tab to land on. `'settings'` here is DetailModal's launch-settings tab, not global settings. */
   initialTab?: DetailTab
-  /** Pre-arm an action ID to auto-fire on mount — used by chooser-card
-   *  update / migrate pills so the user lands directly on the action. */
+  /** Pre-arm an action ID to auto-fire on mount (chooser-card update / migrate pills). */
   autoAction?: string | null
 }
 
@@ -48,9 +34,7 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 
-// `BaseModal` owns `open` as a one-way prop; flip it on installation
-// presence so the modal unmounts cleanly when the host clears the
-// overlay payload (e.g. install removed via DetailModal's delete flow).
+// Flip `open` on installation presence so the modal unmounts when the host clears the overlay payload.
 const open = computed(() => props.installation !== null)
 
 function handleClose() {
@@ -78,10 +62,7 @@ function handleUpdateInstallation(inst: Installation) {
     content-class="manage-install-modal-content"
     @close="handleClose"
   >
-    <!-- DetailModal's embedded body owns its full internal layout
-         (title row, tab strip, scrollable body, pinned action bar).
-         The 20px gutter wrapper gives the bottom action bar's negative
-         `margin: 0 -20px` a body edge to align with. -->
+    <!-- The 20px gutter wrapper gives DetailModal's action bar (`margin: 0 -20px`) a body edge to align with. -->
     <div v-if="installation" class="manage-install-body">
       <DetailModal
         :installation="installation"
@@ -97,17 +78,12 @@ function handleUpdateInstallation(inst: Installation) {
 </template>
 
 <style scoped>
-/* BaseModal's `.base-modal-body` adds 16px/24px padding by default; the
- * embedded DetailModal already paints to the edges, so we zero it out
- * via `:deep()` on the consumer's `content-class`. */
+/* Zero BaseModal's default body padding — the embedded DetailModal paints to the edges. */
 :deep(.manage-install-modal-content) .base-modal-body {
   padding: 0;
 }
 
-/* 20px gutter — DetailModal's pinned action bar uses `margin: 0 -20px`
- * to span the full width, so this padding is load-bearing. The column
- * itself stays `overflow: hidden` so the embedded `.view-scroll` is
- * the only scrollable surface. */
+/* 20px gutter is load-bearing: DetailModal's action bar uses `margin: 0 -20px` to span full width. */
 .manage-install-body {
   display: flex;
   flex-direction: column;

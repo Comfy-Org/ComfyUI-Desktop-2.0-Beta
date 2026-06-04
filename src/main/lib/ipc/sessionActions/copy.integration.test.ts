@@ -1,21 +1,8 @@
 // @vitest-environment node
-/**
- * Integration test: `release-update` success path through `handleReleaseUpdate`.
- *
- * A real Playwright @lifecycle exercise of this flow is infeasible — the
- * action downloads a multi-GB standalone archive and then bootstraps a
- * Python venv. We pin the handler boundary instead: stub `source.install`
- * + `source.postInstall` so the test stays fast (the destination tree
- * is materialized inline), then let `migrate-from` run real against a
- * seeded source ComfyUI tree.
- *
- * Asserts the three properties Issue #591 cares about for this path:
- * - a new installations entry is created with `copyReason: 'release-update'`
- * - customNodes / models / input / output files end up on the destination
- * - the result returns `newInstallationId` for the renderer hand-off
- *
- * Closest reference for the mock layout: `src/main/sources/standalone/actions.integration.test.ts`.
- */
+// Integration test for the release-update success path. Stubs source.install /
+// postInstall (a real download + venv bootstrap is infeasible) and runs
+// migrate-from against a seeded source tree, asserting the new release-update
+// entry, file migration, and newInstallationId hand-off.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
@@ -23,11 +10,8 @@ import path from 'path'
 import { EventEmitter } from 'events'
 import type { InstallationRecord } from '../../../installations'
 
-// ── In-memory installations store, shared with the mocked module ──
 const installationsStore = new Map<string, InstallationRecord>()
 let idCounter = 0
-
-// ── Mocks (must be declared before importing the SUT) ──
 
 vi.mock('electron', () => ({
   app: {
@@ -88,8 +72,7 @@ vi.mock('../../../installations', () => ({
   uniqueName: (baseName: string, _existing: InstallationRecord[]) => baseName,
 }))
 
-// Heavy / unrelated subsystems pulled in transitively by shared.ts /
-// the standalone source registration. We don't exercise any of them.
+// Heavy subsystems pulled in transitively; unexercised here.
 vi.mock('../../snapshots', () => ({
   saveSnapshot: vi.fn(async () => 'noop.json'),
   getSnapshotCount: vi.fn(async () => 0),
@@ -99,7 +82,6 @@ vi.mock('../../../lib/pip', () => ({
   installFilteredRequirements: vi.fn(async () => 0),
 }))
 
-// ── Import the SUT and the source plugin we monkey-patch ──
 import { handleReleaseUpdate } from './copy'
 import { standalone } from '../../../sources/standalone'
 import * as settingsMock from '../../../settings'
@@ -150,11 +132,8 @@ describe('handleReleaseUpdate (release-update success path)', () => {
     fs.mkdirSync(srcRoot, { recursive: true })
     seedSource(srcRoot)
 
-    // The new install defaults to `useSharedModels: true` /
-    // `useSharedInputOutput: true` (buildInstallation doesn't set them),
-    // so migrate-from routes models/input/output to the shared dirs
-    // returned by `settings.get`. Wire those to per-test tmp dirs so the
-    // assertions can read them back deterministically.
+    // The new install defaults to shared models/input/output, so migrate-from
+    // routes them to settings.get's dirs; point those at per-test tmp dirs.
     sharedModelsDir = path.join(tmpRoot, 'shared-models')
     sharedInputDir = path.join(tmpRoot, 'shared-input')
     sharedOutputDir = path.join(tmpRoot, 'shared-output')
@@ -178,10 +157,7 @@ describe('handleReleaseUpdate (release-update success path)', () => {
     }
     installationsStore.set(src.id, src)
 
-    // Replace the heavy install / postInstall hooks with no-ops. The
-    // destination directory is created by `handleReleaseUpdate` itself
-    // before calling install; mergeDirFlat creates the inner ComfyUI
-    // subtree on demand, so neither stub has to lay down any files.
+    // No-op the heavy hooks; handleReleaseUpdate + mergeDirFlat create the dirs.
     standalone.install = (async () => {}) as typeof standalone.install
     standalone.postInstall = (async () => {}) as typeof standalone.postInstall
   })

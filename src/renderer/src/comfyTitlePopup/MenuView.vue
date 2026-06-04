@@ -3,17 +3,11 @@ import { Check } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 
 interface MenuItem {
-  /** Item id — main routes by this. */
   id?: string
-  /** Visible label. English fallback when `labelKey` is set. */
+  /** English fallback when `labelKey` is set. */
   label?: string
-  /** Optional vue-i18n key. Translated against the popup renderer's
-   *  shared en catalog (`lib/i18nMessages.ts`). Falls back to
-   *  `label` when the key isn't in the catalog. */
   labelKey?: string
-  /** Renders a checkmark glyph on the left when true. */
   checked?: boolean
-  /** Marks a separator row instead of an interactive item. */
   kind?: 'separator'
 }
 
@@ -27,9 +21,6 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 
-/** Resolved label — translates when the item carries a `labelKey`,
- *  otherwise renders the raw `label` (e.g. dynamic labels like
- *  "Reset Zoom (120%)" that main composes inline). */
 function labelFor(item: MenuItem): string {
   if (item.labelKey) return t(item.labelKey, item.label ?? '')
   return item.label ?? ''

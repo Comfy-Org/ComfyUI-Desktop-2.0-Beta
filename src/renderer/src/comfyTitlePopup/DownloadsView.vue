@@ -17,26 +17,9 @@ import { revealInFolderLabel } from '../composables/usePlatform'
 const { t } = useI18n()
 
 /**
- * Live downloads tray view.
- *
- * Stateless — receives the latest `DownloadsState` snapshot as a prop
- * from `TitlePopupApp` (which owns the long-lived
- * `comfy-titlepopup:downloads-changed` subscription so the initial
- * push on a fresh `'downloads'` open lands even before this component
- * mounts). Per-entry actions are dispatched back via
- * `comfy-titlepopup:downloads-action`.
- *
- * Active and terminal entries are rendered in a single
- * insertion-ordered list (sorted by `createdAt`) so a download that
- * transitions active → cancelled / completed stays in its original
- * slot rather than jumping to the bottom of a separate "recent"
- * bucket.
- *
- * The popup webContents is a transient view with its own preload — no
- * Pinia store and no `vue-i18n` here. The tsconfig.web slice can't see
- * the preload's TypeScript directly, so the entry / state / action
- * shapes are mirrored inline (kept in sync with
- * `comfyTitlePopupPreload.ts`).
+ * Live downloads tray view. Stateless; `TitlePopupApp` owns the subscription and passes
+ * the `DownloadsState` as a prop, and per-entry actions dispatch back over IPC. Entry /
+ * state / action shapes are mirrored inline from `comfyTitlePopupPreload.ts`.
  */
 
 interface DownloadEntry {
@@ -88,12 +71,8 @@ function isTerminal(d: DownloadEntry): boolean {
   return TERMINAL_STATUSES.has(d.status)
 }
 
-/** Combined list ordered newest-first by `createdAt` — both active
- *  and terminal entries share one slot so a download that transitions
- *  active → cancelled / completed stays in place rather than jumping
- *  between buckets. The active/recent split survives only because
- *  that's the shape main pushes over the IPC; on screen the most
- *  recently kicked-off download surfaces at the top of the list. */
+/** Combined list newest-first by `createdAt` so a download staying in place across
+ *  active → terminal isn't split across the IPC's active/recent buckets. */
 const orderedEntries = computed<DownloadEntry[]>(() =>
   [...props.state.active, ...props.state.recent].sort(
     (a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0)
@@ -120,18 +99,10 @@ function retry(url: string): void {
   bridge?.downloadsAction({ action: 'retry', url })
 }
 function viewAllDownloads(): void {
-  // Opens the brand-redesigned `DownloadsModal` on the host's panel
-  // view instead of deep-linking to the Settings → Downloads tab.
-  // Browser-style surface designed for monitoring multi-GB checkpoint
-  // downloads.
   bridge?.openDownloadsModal()
 }
 
-/** Right-edge X dispatches the contextually correct action: for an
- *  in-flight entry it cancels the download (replacing the old explicit
- *  Cancel button), for a terminal entry it removes the row from the
- *  list. Functions identical to the prior actions row — only the
- *  affordance moved into the title row per the redesign. */
+/** Right-edge X cancels an in-flight entry or removes a terminal row. */
 function handleClose(d: DownloadEntry): void {
   if (isTerminal(d)) dismiss(d.url)
   else cancel(d.url)
@@ -141,12 +112,7 @@ function closeLabel(d: DownloadEntry): string {
   return isTerminal(d) ? t('downloadsPopup.remove') : t('downloadsPopup.cancel')
 }
 
-/** Subtitle under the filename. Surfaces the full bytes/speed/ETA
- *  breakdown (`statusLine`) for active rows so users tracking large
- *  model downloads (10–40 GB checkpoints) see the same information a
- *  browser tray would — without leaving the app. Terminal rows still
- *  collapse to "Show in Finder" when a save path is known so the row
- *  reads as a single click affordance. */
+/** Subtitle: full bytes/speed/ETA for active rows; "Show in Finder" for terminal rows with a path. */
 function subtitle(d: DownloadEntry): string {
   if (d.status === 'downloading' || d.status === 'pending') {
     return statusLine(d)
@@ -163,9 +129,7 @@ function subtitle(d: DownloadEntry): string {
   return statusLine(d)
 }
 
-/** Whole-row click — completed entries with a save path open the file
- *  location, matching the design's removal of the explicit
- *  "Show in folder" button. Other statuses are not clickable. */
+/** Whole-row click opens the file location for completed entries with a save path. */
 function handleRowClick(d: DownloadEntry, event: MouseEvent): void {
   if ((event.target as HTMLElement).closest('.downloads-item-close, .downloads-item-retry')) return
   if (d.status === 'completed' && d.savePath) showInFolder(d.url, d.savePath)
@@ -175,17 +139,11 @@ function isRowClickable(d: DownloadEntry): boolean {
   return d.status === 'completed' && !!d.savePath
 }
 
-/** Inline progress-fill background — only meaningful for active
- *  downloads. The card itself reads as the progress bar (gradient stop
- *  at the progress%); pending/idle states fall back to the solid card
- *  background via CSS class. */
+/** Inline progress-fill gradient where the card itself reads as the progress bar. */
 function progressStyle(d: DownloadEntry): Record<string, string> | undefined {
   if (d.status !== 'downloading' && d.status !== 'pending') return undefined
   const pct = d.status === 'pending' ? 0 : Math.max(0, Math.min(1, d.progress)) * 100
-  // Two-stop gradient with a ~1% transition so the leading edge reads
-  // as a crisp line — matches the Figma spec `0% / 54% / 54.91%`.
-  // At 100% the gradient collapses to a solid card, so a completed
-  // row keeps its filled appearance with no special-case.
+  // ~1% transition so the leading edge reads as a crisp line; collapses to solid at 100%.
   const next = Math.min(100, pct + 0.91)
   return {
     background: `linear-gradient(90deg, var(--downloads-card) 0%, var(--downloads-card) ${pct}%, var(--downloads-bar-rest) ${next}%)`
@@ -282,10 +240,7 @@ function progressStyle(d: DownloadEntry): Record<string, string> | undefined {
 
 <style scoped>
 .downloads {
-  /* Local design tokens — kept here (not in main.css) because they're
-   * only consumed by this view. Sourced from the Figma spec; gradient
-   * rest stop is the one non-ramp value (sits between --neutral-700
-   * and --neutral-800). */
+  /* Local design tokens, only consumed by this view. */
   --downloads-card: #322c3d;
   --downloads-bar-rest: #2a2332;
   --downloads-border: rgba(255, 255, 255, 0.1);
@@ -324,9 +279,7 @@ function progressStyle(d: DownloadEntry): Record<string, string> | undefined {
   font-size: 12px;
 }
 
-/* The popup view's outer height is bounded by main (DOWNLOADS_POPUP_MAX_HEIGHT_PX);
-   the list itself flexes to fill what's left after the head + footer
-   and scrolls internally so a long history doesn't stretch the popup. */
+/* The list flexes to fill below the head/footer and scrolls internally. */
 .downloads-list {
   list-style: none;
   margin: 0;

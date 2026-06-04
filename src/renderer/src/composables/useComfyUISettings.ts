@@ -42,49 +42,15 @@ import {
   runSelectChain
 } from './actionShoppingList'
 
-/**
- * Backing state + IPC plumbing for the brand-redesigned Settings drawer
- * (`ComfyUISettingsPanel.vue`). Extracted into a composable so the
- * component stays UI-only — same convention as the title-bar
- * `useTitleBarMenus` / `usePanelOverlays` split.
- *
- * All four tabs source from `getDetailSections()` — the same payload
- * `DetailModal` reads — and writes through `update-installation` /
- * `runAction`. Disk Usage is a separate `get-disk-space` call merged
- * into the Status tab as a synthetic row.
- *
- * Action handling mirrors `DetailModal.runAction` exactly:
- *   1. Busy-only guard via useActionGuard (in-progress op cancel-confirm)
- *   2. `migrate-to-standalone` special case → useMigrateAction
- *   3. willStopRunning augment for REQUIRES_STOPPED while running —
- *      prepends the stop-warning sentence to confirm / prompt messages
- *      so the user knows the running ComfyUI will be stopped to proceed
- *   4. fieldSelects chain → modal.select per fieldSelect
- *   5. select chain → modal.select (e.g. installations)
- *   6. prompt chain → modal.prompt
- *   7. confirm chain → modal.confirm or modal.confirmWithOptions
- *   8. disk-space check for copy / copy-update / release-update
- *   9. showProgress → opts.onShowProgress with self-stopping apiCall +
- *      in-place relaunch for update-comfyui / snapshot-restore
- *  10. inline → window.api.runAction (also self-stops when needed)
- */
+// Backing state + IPC plumbing for the Settings drawer. All tabs source
+// from `getDetailSections()` and write through `update-installation` /
+// `runAction`; the action chain mirrors `DetailModal.runAction`.
 
 export interface UseComfyUISettingsOpts {
-  /** Accept any reactive source — `Ref`, `ComputedRef`, or getter — so
-   *  callers can pass `toRef(props, 'installation')` directly. */
   installation: MaybeRefOrGetter<Installation | null>
-  /** Fires when an action requests a ProgressModal — the host
-   *  (`PanelApp.vue`) already owns the modal and consumes this shape
-   *  via `usePanelOverlays.handleShowProgress`. */
   onShowProgress: (opts: ShowProgressOpts) => void
-  /** Fired when an action's `result.navigate === 'list'` — the install
-   *  was removed (delete / untrack). The drawer host should close the
-   *  drawer and tear down the comfy window — mirrors DetailModal's
-   *  `emit('navigate-list')`. */
+  /** Install was removed (delete/untrack); host closes the drawer + window. */
   onNavigateList?: () => void
-  /** Fired alongside `onNavigateList` so the drawer can animate its
-   *  own dismissal before the host completes the navigation — mirrors
-   *  DetailModal's `emit('close')`. */
   onClose?: () => void
 }
 
@@ -94,78 +60,44 @@ export interface UseComfyUISettingsApi {
   loading: Ref<boolean>
   error: Ref<string | null>
 
-  /** True when the currently-painted `sections` / `diskSpace` /
-   *  `installSize` payload belongs to the currently-selected install.
-   *  Lags briefly during a picker row switch — the previous install's
-   *  payload stays painted until the new install's IPC resolves so
-   *  the right pane doesn't flash "Loading…" (#782). Hosts gate
-   *  per-install action invocations on this (footer More menu, body
-   *  pointer-events) so a click during the stale window can't run
-   *  an action defined by the previous install's payload. */
+  /** True when the painted payload belongs to the selected install. Lags
+   *  during a picker switch (prior payload stays painted to avoid a
+   *  "Loading…" flash); hosts gate per-install actions on this. */
   sectionsFresh: ComputedRef<boolean>
 
-  /** Transient, non-blocking status line (e.g. a manual "Check for
-   *  update" that found nothing). Set with an auto-clear timer; the host
-   *  renders it inline and fades it out rather than blocking on a modal. */
+  /** Transient, non-blocking inline status line, auto-cleared. */
   notice: Ref<string | null>
 
-  /** Refresh sections + disk usage for the current installation. */
   reload: () => Promise<void>
 
-  /** Per-section refresh (parity with legacy DetailModal). Splices
-   *  only the named section in-place — leaves the other sections'
-   *  Vue subtrees intact, so collapse state and internal scrolls
-   *  survive the refresh. Falls back to full `reload()` when the
-   *  title is missing or no longer in the new payload. */
+  /** Splices only the named section in-place (preserving other subtrees);
+   *  falls back to full `reload()` when the title isn't in the new payload. */
   refreshSection: (sectionTitle: string | undefined) => Promise<void>
 
-  /** Push a single field mutation through `update-installation` and
-   *  reload sections so the UI tracks main-side defaults / clamping. */
   updateField: (field: DetailField, value: unknown) => Promise<void>
 
-  /** Field ids edited while the install is running that carry
-   *  `requiresRestart` AND whose current value differs from the
-   *  value the running process was launched with. Drives the
-   *  per-field "Restart to apply" pill and the footer button's
-   *  yellow promotion. State is held per-install internally so
-   *  switching the picker selection doesn't drop the marker. */
+  /** Running-install field ids edited away from their launched value;
+   *  drives the "Restart to apply" pill. Held per-install. */
   pendingRestartFieldIds: ComputedRef<Set<string>>
 
-  /** Transient error messages for the currently-selected install,
-   *  keyed by field id. Populated when `updateField`'s IPC rejects
-   *  or times out — the field's display is rolled back and a red
-   *  inline pill surfaces the message. Auto-clears after a short
-   *  timer or on the next edit of the same field. */
+  /** Per-install field error messages from failed `updateField` IPCs. */
   fieldErrorMessages: ComputedRef<Map<string, string>>
 
-  /** Commit a new display name for the selected install (inline hero
-   *  edit). Resolves `true` when committed, `false` on no-op / rejection
-   *  (duplicate name → alert). */
+  /** Commit a new name. True on commit, false on no-op / rejection. */
   renameInstallation: (newName: string) => Promise<boolean>
 
-  /** Run an action coming off a `DetailSection.actions[]` entry. */
   runAction: (action: ActionDef) => Promise<void>
 
-  /** Action ids currently in-flight on the inline path (no
-   *  `showProgress` — those route to ProgressModal instead). Drives the
-   *  per-button spinner + disabled state so clicks feel acknowledged. */
+  /** Inline-path action ids in flight; drives per-button spinners. */
   runningActionIds: Ref<Set<string>>
 
-  /** Visible sections for a given tab (filtered by `section.tab`). */
   sectionsForTab: (tab: SectionTab) => ComputedRef<DetailSection[]>
 
-  /** Synthetic Status-tab row carrying the disk-usage reading. The
-   *  status section payload doesn't include this — it lives on its own
-   *  IPC — so the component renders it alongside the regular items. */
+  /** Synthetic Disk-Usage row (sourced from a separate IPC). */
   diskUsageItem: ComputedRef<{ label: string; value: string } | null>
 
-  /** Install-level actions (`pinBottom` section from main). */
   pinBottomSection: ComputedRef<DetailSection | null>
 
-  /** `pinBottomSection.actions` with the renderer-side Launch→Restart
-   *  swap applied — when the install is running, `'launch'` becomes
-   *  `'restart'` (confirm + stop→launch chain). Mirrors DetailModal's
-   *  `bottomActions` computed exactly. */
   pinBottomActions: ComputedRef<ActionDef[]>
 }
 
@@ -191,17 +123,11 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
 
   const sections = ref<DetailSection[]>([])
   const diskSpace = ref<DiskSpaceInfo | null>(null)
-  /** Install's own on-disk footprint in bytes. Fetched via
-   *  `getInstallationSize` which walks the directory tree, so it
-   *  lands after the initial render and is `null` until then. Drives
-   *  the Status tab's Disk Usage row — `total - free` would be the
-   *  whole volume's used space, which is not what users want here. */
+  // Install's own on-disk footprint (a directory-tree walk), null until it
+  // lands. Used instead of volume `total - free`, which is whole-disk usage.
   const installSize = ref<number | null>(null)
   const loading = ref(false)
   const error = ref<string | null>(null)
-  // Transient, non-blocking status line (e.g. a manual "Check for update"
-  // that found nothing). Rendered inline by the host and auto-cleared, so
-  // it never interrupts the user the way a modal alert would.
   const notice = ref<string | null>(null)
   let noticeTimer: ReturnType<typeof setTimeout> | null = null
   const NOTICE_TTL_MS = 4000
@@ -213,59 +139,32 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
       noticeTimer = null
     }, NOTICE_TTL_MS)
   }
-  // Inline-action busy state. Replaced (not mutated) on each add/delete
-  // so Vue's shallow reactivity on Set tracks the change.
+  // Replaced (not mutated) so Vue's shallow Set reactivity tracks changes.
   const runningActionIds = ref<Set<string>>(new Set())
-  // Restart-required dirty tracking — per install, keyed by field id,
-  // value is the "running baseline" (the value the running process was
-  // launched with). A field is dirty iff its current value differs
-  // from this baseline; reverting to the baseline drops the entry.
-  // Keyed by install id (not the picker's current selection) so
-  // toggling the picker row doesn't lose state for the install the
-  // user actually edited.
+  // Restart-required dirty tracking, keyed by install id then field id; the
+  // value is the launched baseline. Reverting to it drops the entry.
+  // Per-install keying survives picker toggles.
   const restartBaselines = ref<Map<string, Map<string, unknown>>>(new Map())
-  // Transient error messages for failed `updateInstallation` IPCs.
-  // Same per-install keying as restartBaselines so each install's
-  // surface state is independent.
+  // Per-install field error messages, same keying as restartBaselines.
   const errorMessages = ref<Map<string, Map<string, string>>>(new Map())
-  // 4-second auto-clear timers for inline error pills, keyed by
-  // `installId:fieldId`. Cleared on re-edit or on watcher teardown.
+  // Auto-clear timers for error pills, keyed by `installId:fieldId`.
   const errorClearTimers = new Map<string, ReturnType<typeof setTimeout>>()
-  // Optimistic-update timeout: roll back if main hasn't responded
-  // within 5s. Settings writes are local IPC + a JSON merge — if
-  // they take this long, something is genuinely wrong.
+  // Optimistic-write rollback deadline; a local IPC + JSON merge shouldn't take this long.
   const UPDATE_TIMEOUT_MS = 5000
-  // Inline error pill auto-clear window. Long enough to read, short
-  // enough not to nag.
   const ERROR_TAG_TTL_MS = 4000
-  /** Last install id `loadAll` was called with — used by
-   *  `refreshSection` to drop late same-install splices after a switch. */
+  // Last id `loadAll` ran with; lets `refreshSection` drop late splices after a switch.
   let lastLoadedId: string | null = null
-  /** Install id whose payload currently sits in `sections` /
-   *  `diskSpace` / `installSize`. Tracks "what's painted" rather
-   *  than "what we asked for"; backs the public `sectionsFresh`
-   *  computed below. */
+  // Id of the install whose payload is currently painted; backs `sectionsFresh`.
   const sectionsPayloadId = ref<string | null>(null)
-  /** Monotonically increasing request id. Each `loadAll` /
-   *  `refreshSection` call captures the next value and only writes
-   *  results back into the refs if it is still the latest in-flight
-   *  request. Prevents A→B→A clicks from letting B's late response
-   *  overwrite A's pane. */
+  // Request id: each load captures the next value and only writes back if
+  // still latest, so an A→B→A late response can't overwrite the pane.
   let requestSeq = 0
 
   async function loadAll(installationId: string, installPath: string): Promise<void> {
-    // We deliberately do NOT blank `sections` / `diskSpace` /
-    // `installSize` here on install switch. Blanking caused a visible
-    // "Loading…" flash for the (very brief) IPC window on every row
-    // click in the instance picker (#782). Keeping the previous
-    // payload in place trades the flicker for a soft swap when the
-    // new payload lands. The new install's identity is the prop
-    // already; only the body has to await, and the crossfade on the
-    // host (`ComfyUISettingsContent.vue`, keyed on install id) makes
-    // the transition read as intentional. `sectionsInstallationId`
-    // below still reflects the previous install until the new payload
-    // resolves, so hosts can gate per-install action invocations on
-    // freshness (the footer More menu does this).
+    // Deliberately don't blank sections on switch: blanking flashed
+    // "Loading…" on every picker click. The prior payload stays painted
+    // (host crossfades by install id) and `sectionsPayloadId` lags so hosts
+    // can gate on freshness until the new payload lands.
     lastLoadedId = installationId
     loading.value = true
     error.value = null
@@ -285,8 +184,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     } finally {
       if (seq === requestSeq) loading.value = false
     }
-    // Install-footprint scan runs after the main load so it can't
-    // block the initial render. Drops in once it lands.
+    // Footprint scan runs after the main load so it can't block first render.
     void window.api
       .getInstallationSize(installationId)
       .then((r) => {
@@ -307,18 +205,14 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
       installSize.value = null
       sectionsPayloadId.value = null
       lastLoadedId = null
-      // Bump the sequence so any in-flight loadAll for a previous
-      // install can't write into our now-cleared refs.
+      // Bump the sequence so an in-flight loadAll can't write into our refs.
       requestSeq++
       return
     }
     await loadAll(inst.id, inst.installPath ?? '')
   }
 
-  /** Per-section refresh (parity with legacy DetailModal). Fetches
-   *  the full sections payload but only splices the matching title
-   *  in-place — leaves the other sections' Vue subtrees intact, which
-   *  preserves things like collapse state and any internal scroll. */
+  // Splices only the matching section in-place to preserve other subtrees.
   async function refreshSection(sectionTitle: string | undefined): Promise<void> {
     if (!sectionTitle) {
       await reload()
@@ -330,14 +224,11 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     const seq = ++requestSeq
     try {
       const fresh = await window.api.getDetailSections(targetId)
-      // Drop the result if the install changed or a newer request
-      // beat us in flight — prevents A→B→A from letting B's late
-      // response splice into A's pane.
+      // Drop stale/out-of-order results so they can't splice into the wrong pane.
       if (seq !== requestSeq || lastLoadedId !== targetId) return
       const updated = fresh.find((s) => s.title === sectionTitle)
       if (!updated) {
-        // Title disappeared from the new payload — main mutated the
-        // section list, so fall back to a full replace to stay coherent.
+        // Title gone from the new payload; full replace to stay coherent.
         sections.value = fresh
         return
       }
@@ -353,11 +244,8 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     }
   }
 
-  /** Field-value equality for the restart-required set. Primitives
-   *  compare by `===`; `envVars` is a flat `Record<string, string>` so
-   *  a key-count + key-by-key walk is enough (no nested objects exist
-   *  in the schema today). Falls back to JSON for any other object
-   *  shape that might appear later. */
+  // Field-value equality for restart tracking; `===` for primitives, a flat
+  // key-by-key walk for objects like `envVars`.
   function restartFieldsEqual(a: unknown, b: unknown): boolean {
     if (a === b) return true
     if (a == null || b == null) return false
@@ -373,10 +261,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     return true
   }
 
-  /** Race a promise against a wall-clock deadline. Resolves with the
-   *  promise's value on success; throws an Error tagged with
-   *  `isTimeout = true` on deadline. The losing branch's eventual
-   *  settlement is ignored — callers have already rolled back. */
+  // Races a promise against a deadline; throws an `isTimeout`-tagged Error on it.
   function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
     let timer: ReturnType<typeof setTimeout> | undefined
     const timeout = new Promise<T>((_, reject) => {
@@ -391,11 +276,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     })
   }
 
-  /** Locate a field by id inside the current sections, mutating
-   *  helpers operate via this. Returns the field reference so callers
-   *  can write `field.value` in place — Vue's deep reactivity picks
-   *  up the nested write because `sections` is a `ref` over an array
-   *  of plain objects. */
+  // Returns the live field ref so callers can mutate `field.value` in place.
   function findFieldInSections(fieldId: string): DetailField | null {
     for (const s of sections.value) {
       const f = s.fields?.find((x) => x.id === fieldId)
@@ -462,18 +343,13 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     if (!inst) return
     const installId = inst.id
 
-    // Capture the value the running process currently has — this is
-    // both the baseline for dirty-tracking and the rollback target.
+    // Prior value: both the dirty-tracking baseline and the rollback target.
     const liveField = findFieldInSections(field.id)
     const priorValue = liveField ? liveField.value : (field.value as unknown)
-    // Optimistic write — splice the new value into sections in place
-    // so the dropdown / toggle re-renders on the same frame as the
-    // click. `reload()` or `refreshSection()` below reconciles with
-    // any main-side normalization.
+    // Optimistic write so the control re-renders this frame; reconciled below.
     if (liveField) liveField.value = value as DetailField['value']
 
-    // Re-edit clears any prior error pill for this field — the user
-    // moved on, the stale message would be noise.
+    // Re-editing clears the prior error pill.
     clearFieldError(installId, field.id)
 
     try {
@@ -482,11 +358,9 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
         UPDATE_TIMEOUT_MS
       )
     } catch (err: unknown) {
-      // Roll back the optimistic write.
       const live = findFieldInSections(field.id)
       if (live) live.value = priorValue as DetailField['value']
-      // Failed writes never engage the restart-required state — main
-      // didn't accept the value, so there's nothing to apply.
+      // A rejected write never engages the restart-required state.
       clearRestartDirty(installId, field.id)
       const isTimeout = (err as { isTimeout?: boolean })?.isTimeout === true
       const message = isTimeout
@@ -497,8 +371,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
       setFieldError(installId, field.id, message)
       return
     }
-    // Restart-required dirty tracking — only after the IPC succeeded.
-    // Reverting to the running baseline drops the entry.
+    // Restart-required dirty tracking, only after a successful IPC.
     if (field.requiresRestart && sessionStore.isRunning(installId)) {
       const baseline = restartBaselines.value.get(installId)?.get(field.id) ?? priorValue
       if (restartFieldsEqual(value, baseline)) {
@@ -512,11 +385,8 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
       value_kind: field.editType || 'text',
       bool_value: typeof value === 'boolean' ? value : undefined
     })
-    // Parity with legacy DetailSection: a field can declare an
-    // `onChangeAction` to fire automatically after its value changes
-    // (e.g. switching update channel triggers `check-update` so the
-    // preview metadata refreshes without an extra click). Surface
-    // failures via modal so the user can react.
+    // A field can declare an `onChangeAction` to fire after its value changes
+    // (e.g. switching channel triggers `check-update`).
     if (field.onChangeAction) {
       try {
         await window.api.runAction(inst.id, field.onChangeAction)
@@ -527,10 +397,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
         })
       }
     }
-    // When a field opts into `refreshSection`, splice only that
-    // section instead of replacing the whole array — preserves Vue
-    // subtrees and collapse state for sections the user wasn't
-    // touching.
+    // `refreshSection` splices only that section to preserve other subtrees.
     if (field.refreshSection) {
       const owningSection = sections.value.find((s) => s.fields?.some((f) => f.id === field.id))
       await refreshSection(owningSection?.title)
@@ -539,16 +406,8 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     }
   }
 
-  /** Commit a new display name for the selected install. Shared by the
-   *  About-tab inline hero edit; the footer "More → Rename" path runs
-   *  through `runAction` instead, but both reconcile via
-   *  `update-installation` → `'changed'` → store refetch. The IPC handler
-   *  owns the duplicate-name guard — a rejection surfaces here as an alert
-   *  and the `installation` prop stays put.
-   *
-   *  Resolves `true` when the name was committed, `false` on a no-op
-   *  (empty / unchanged) or a rejection (duplicate). The hero uses this to
-   *  revert its optimistic text only when the write didn't land. */
+  // The IPC handler owns the duplicate-name guard; a rejection alerts here.
+  // True on commit, false on no-op (empty/unchanged) or rejection.
   async function renameInstallation(newName: string): Promise<boolean> {
     const inst = toValue(opts.installation)
     if (!inst) return false
@@ -567,10 +426,8 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     const inst = toValue(opts.installation)
     if (!inst) return
 
-    // Share — export the latest snapshot via the OS save dialog. It's a
-    // renderer-side IPC (export + native dialog), not a source action, so
-    // intercept it before the source-action dispatch chain below. A cancel
-    // is a silent no-op; only the genuine failures get an alert.
+    // Share is a renderer-side IPC (export + native dialog), not a source
+    // action, so intercept it before the dispatch chain. Cancel is a no-op.
     if (action.id === 'share') {
       const result = await shareLatestSnapshot(inst.id)
       if (!result.ok) {
@@ -587,12 +444,8 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
 
     const telemetryContext = { action_id: action.id }
 
-    // 1. Busy-only guard. migrate-to-standalone manages its own busy
-    //    check + UI via useMigrateAction below, so skip both this
-    //    pre-flight and the step-3 message augment for it. The apiCall
-    //    self-stop still applies — migrate is REQUIRES_STOPPED and the
-    //    source session must be torn down before the backend handler
-    //    runs.
+    // 1. Busy-only guard. migrate-to-standalone owns its own busy check + UI,
+    //    so skip this pre-flight and the step-3 augment (its apiCall still self-stops).
     const ownsPreflight = action.id === 'migrate-to-standalone'
     const requiresStoppedGuard = REQUIRES_STOPPED.has(action.id)
     const wasRunning = sessionStore.isRunning(inst.id)
@@ -603,9 +456,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
 
     let mutableAction: ActionDef = { ...action }
 
-    // 2. migrate-to-standalone — dedicated brand takeover registered by
-    //    PanelApp via `registerMigrateTakeover`. Returns the form data
-    //    (checkbox values, etc.) which we merge into the action data.
+    // 2. migrate-to-standalone uses its own takeover; merge its form data.
     if (mutableAction.id === 'migrate-to-standalone') {
       const migrateResult = await confirmMigration(inst, mutableAction.confirm)
       if (!migrateResult) return
@@ -615,12 +466,8 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
       }
     }
 
-    // 3. Stop-warning augment. No per-action confirm/prompt copy
-    //    mentions the stop today, and the standalone stop-confirm modal
-    //    was removed, so prepend the sentence to whatever the action
-    //    already says (or use it standalone if the action has neither).
-    //    Skipped for migrate-to-standalone — useMigrateAction handles
-    //    its own confirm surface (modal OR brand takeover).
+    // 3. Stop-warning augment: prepend the stop sentence to the action's copy
+    //    (or use it standalone). Skipped for migrate, which owns its surface.
     if (requiresStoppedGuard && wasRunning && !ownsPreflight) {
       mutableAction = augmentActionWithStopWarning(
         mutableAction,
@@ -628,15 +475,10 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
       )
     }
 
-    // 4-8. Shopping-list chain steps — fieldSelects → select → prompt
-    //      → confirm → disk-check. Each helper drives a modal when the
-    //      action carries the corresponding chain, returns the merged
-    //      action on success, or null on cancel / failure. The confirm
-    //      step skips migrate-to-standalone, which owns its confirm
-    //      surface (modal OR brand takeover) up in step #2.
-    //      fieldSelects / select / prompt route through `dialogs.*`
-    //      (BaseModal-shell primitives); confirm + disk-check stay on
-    //      `useModal` for `confirmWithOptions` parity.
+    // 4-8. Shopping-list chain: fieldSelects → select → prompt → confirm →
+    //      disk-check. Each returns the merged action or null on cancel.
+    //      Confirm skips migrate (handled in step 2); confirm + disk-check
+    //      stay on `useModal` for `confirmWithOptions` parity.
     const afterFieldSelects = await runFieldSelectsChain(mutableAction, dialogs, t)
     if (!afterFieldSelects) return
     mutableAction = afterFieldSelects
@@ -657,12 +499,9 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
 
     if (!(await runDiskSpaceCheck(mutableAction, inst, modal, t, null, dialogs))) return
 
-    // 9. showProgress — emit show-progress for the host's ProgressModal.
-    //    The synthetic `restart` id maps to stop → wait → launch so the
-    //    user sees one continuous "Restarting ComfyUI" progress view.
-    //    REQUIRES_STOPPED ops against a running install wrap the
-    //    apiCall to stop ComfyUI → wait → run the op, and append a
-    //    relaunch when the action is in IN_PLACE_RELAUNCH.
+    // 9. showProgress: the synthetic `restart` id maps to stop → wait → launch.
+    //    REQUIRES_STOPPED ops against a running install wrap apiCall to
+    //    stop → wait → run, and append a relaunch for IN_PLACE_RELAUNCH.
     if (mutableAction.showProgress) {
       const rawTitle = (mutableAction.progressTitle || mutableAction.label).replace(
         /\{(\w+)\}/g,
@@ -701,9 +540,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
         cancellable: !!mutableAction.cancellable,
         returnTo: 'detail',
         triggersInstanceStart: mutableAction.id === 'launch' || isRestart || wantsRelaunch,
-        // Synthetic `restart` id (stop → wait → launch) reads as a launch
-        // op to the brand caption pipeline, mirroring its
-        // triggersInstanceStart flag.
+        // The synthetic `restart` reads as a launch to the caption pipeline.
         opKind: isRestart ? 'launch' : progressOpKindForActionId(mutableAction.id),
         destroysInstance: destroysInstanceForActionId(mutableAction.id),
         actionId: mutableAction.id,
@@ -712,15 +549,11 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
       return
     }
 
-    // 10. Inline invoke + result navigation. Self-stop wrap mirrors the
-    //     showProgress path so inline REQUIRES_STOPPED actions don't
-    //     race the backend's running-check on a running install.
+    // 10. Inline invoke. Self-stops too, so a running install's backend
+    //     check can't race the stop.
     runningActionIds.value = new Set(runningActionIds.value).add(mutableAction.id)
-    // Track when the spinner went up so we can floor its lifetime in
-    // the finally. Sub-frame backend responses (rate-limit cache hits,
-    // already-up-to-date short-circuits, dev-mode no-ops) would
-    // otherwise hide the spinner inside one frame and the click would
-    // read as a no-op. See `MIN_BUSY_FEEDBACK_MS` in `lib/uiTiming.ts`.
+    // Floor the spinner's lifetime so a sub-frame backend response doesn't
+    // hide it and read as a no-op (see MIN_BUSY_FEEDBACK_MS in uiTiming.ts).
     const busyStartedAt = Date.now()
     try {
       emitTelemetryAction('comfy.desktop.action.invoked', telemetryContext)
@@ -729,9 +562,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
       }
       const result = await window.api.runAction(inst.id, mutableAction.id, mutableAction.data)
       if (result.running) {
-        // Backend race — apiCall self-stop should have prevented this,
-        // but if a launch slipped in between the stop and the action
-        // invocation, surface the busy guard so the user can retry.
+        // Backend race: a launch slipped in after the stop; surface the guard.
         await actionGuard.checkBeforeAction(inst.id, mutableAction.label)
         return
       }
@@ -745,11 +576,8 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
         opts.onNavigateList?.()
       } else if (result.navigate === 'detail') {
         await reload()
-        // An action can both reload the detail view AND carry a message
-        // (e.g. a manual "Check for update" that found nothing — it
-        // refreshes the "last checked" stamp and reports being up to
-        // date). Surface it as a transient inline notice, not a modal:
-        // it's confirmation of a no-op, not something to interrupt for.
+        // A reload can also carry a message (e.g. "already up to date");
+        // surface it as a transient notice, not an interrupting modal.
         if (result.message) {
           flashNotice(result.message)
         }
@@ -777,8 +605,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
   }
 
   function sectionsForTab(tab: SectionTab): ComputedRef<DetailSection[]> {
-    // `pinBottom` sections live in the drawer footer, not the tab body —
-    // mirror DetailModal.vue's split (`mainSections` vs `bottomSection`).
+    // `pinBottom` sections live in the footer, not the tab body.
     return computed(() => sections.value.filter((s) => s.tab === tab && !s.pinBottom))
   }
 
@@ -786,10 +613,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     () => sections.value.find((s) => s.pinBottom) ?? null
   )
 
-  // Launch→Restart synthetic swap, mirrored from DetailModal.vue's
-  // `bottomActions`. Source action definitions stay single-purpose
-  // (`launch`); `runAction` picks the synthetic `'restart'` id up and
-  // routes through stopComfyUI → wait → launch.
+  // Footer actions, minus launch/restart (the primary CTA owns those).
   const pinBottomActions = computed<ActionDef[]>(() => {
     const acts = (pinBottomSection.value?.actions ?? []).filter(
       (a) => a.id !== 'launch' && a.id !== 'restart'
@@ -800,20 +624,14 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
   })
 
   const diskUsageItem = computed<{ label: string; value: string } | null>(() => {
-    // Prefer the install's own footprint (`getInstallationSize` walks
-    // the install directory). The whole-volume `total - free` calc the
-    // old version used was the disk's used space, not the install's,
-    // which made the row read as "free space" semantics on a near-full
-    // drive.
+    // Prefer the install's own footprint; volume `total - free` is whole-disk usage.
     if (installSize.value !== null) {
       return {
         label: t('comfyUISettings.diskUsage', 'Disk Usage'),
         value: formatBytes(installSize.value)
       }
     }
-    // While the directory scan is still in flight, fall back to a
-    // "—" placeholder so the row is present (otherwise it pops in
-    // mid-render). `diskSpace` being null also gets us here.
+    // Placeholder while the scan is in flight so the row doesn't pop in.
     if (!diskSpace.value) return null
     return {
       label: t('comfyUISettings.diskUsage', 'Disk Usage'),
@@ -821,10 +639,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     }
   })
 
-  // Pending restart fields surfaced to the host — derived from the
-  // per-install baseline map for the currently-selected install. State
-  // for OTHER installs stays in the map untouched, so toggling the
-  // picker row never wipes the user's work-in-progress.
+  // Derived from the per-install baseline map for the selected install.
   const pendingRestartFieldIds = computed<Set<string>>(() => {
     const inst = toValue(opts.installation)
     if (!inst) return new Set()
@@ -846,18 +661,10 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     { immediate: true }
   )
 
-  // Background enrichment in the main process (release-cache.enrichCommitsAhead)
-  // fires this event when it actually writes a new `commitsAhead` value, so the
-  // open settings pane can upgrade the "Latest from GitHub" card from
-  // `tag (sha)` to `tag + N commits (sha)` in place — without the section IPC
-  // having to await git fetches.
-  //
-  // We use `reload()` instead of `refreshSection('update')` because
-  // `refreshSection` keys on the section's (locale-dependent) title rather
-  // than a stable identifier. `reload()` is race-safe via `requestSeq`, and
-  // its only added cost over a targeted refresh is the warm-cache disk-space
-  // call (sub-ms after the first open) — sections themselves are an in-memory
-  // build on the main side.
+  // Main fires this when background enrichment writes a new commitsAhead, so
+  // the open pane can upgrade its release card in place. Uses `reload()`
+  // (race-safe via requestSeq) rather than refreshSection, which keys on a
+  // locale-dependent title.
   const offReleaseEnriched = window.api.onReleaseCacheEnriched?.(() => {
     if (toValue(opts.installation)) void reload()
   })
@@ -866,9 +673,8 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     if (noticeTimer) clearTimeout(noticeTimer)
   })
 
-  // Drop the per-install dirty + error entries the moment that install
-  // stops — a stopped install picks up new values on next launch, so
-  // there is nothing left to apply or surface.
+  // Drop the per-install dirty + error entries when the install stops; it
+  // picks up new values on next launch, so nothing is left to apply.
   watch(
     () => {
       const inst = toValue(opts.installation)

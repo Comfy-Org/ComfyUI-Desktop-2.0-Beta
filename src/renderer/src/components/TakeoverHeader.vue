@@ -1,16 +1,5 @@
 <script setup lang="ts">
-/**
- * Phase 3 §19 — shared grand title + subtitle for the Tier 3
- * takeover modals (InstallWizardModal, TrackModal, LoadSnapshotModal,
- * QuickInstallModal, FirstUseTakeover). Sits at the top of each
- * takeover's `.view-modal-header` and survives across internal steps
- * (e.g. InstallWizardModal's per-step `stepTitle` reads as a sub-section
- * heading inside the body now, not the page heading).
- *
- * The component owns title + subtitle markup only — the close button
- * stays in the host modal's existing `.view-modal-header` row so each
- * modal keeps control of its own dismiss behaviour.
- */
+// Shared grand title + subtitle for the Tier 3 takeover modals.
 defineProps<{
   title: string
   subtitle?: string
@@ -29,10 +18,6 @@ defineProps<{
   display: flex;
   flex-direction: column;
   gap: 4px;
-  /* Sit at the top of `.view-modal-header` next to the close button.
-     The host modal's `.view-modal-header` already provides the
-     padding gutter — we only need the internal title / subtitle
-     spacing here. */
   flex: 1 1 auto;
   min-width: 0;
 }

@@ -30,11 +30,8 @@ function restoreGitHubUrl(url: string): string {
   return `https://github.com/Comfy-Org/${match[1]}.git`
 }
 
-/**
- * Ensure the git remote "origin" uses the correct URL based on the mirror
- * setting. Reads and updates `.git/config` directly so it works even when
- * system git is unavailable (pygit2-only environments).
- */
+// Set origin's URL per the mirror setting, editing .git/config directly so it
+// works even without system git (pygit2-only environments).
 export async function ensureRemoteUrl(repoPath: string, enabled: boolean): Promise<void> {
   try {
     const gitDir = resolveGitDir(repoPath)

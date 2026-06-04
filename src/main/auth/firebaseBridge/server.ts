@@ -36,12 +36,8 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   })
 }
 
-/**
- * Result handed to the orchestrator when the OAuth dance lands at our
- * loopback callback and the Firebase exchange succeeds. `user` is the
- * JSON shape Firebase JS SDK persists in IndexedDB at
- * `firebase:authUser:<apiKey>:[DEFAULT]`.
- */
+/** Result handed to the orchestrator once the Firebase exchange succeeds.
+ *  `user` is the JSON shape Firebase JS SDK persists in IndexedDB. */
 export interface SignInResult {
   user: Record<string, unknown>
   apiKey: string
@@ -57,12 +53,9 @@ export interface BridgeHandle {
 }
 
 /**
- * Fixed loopback port for the OAuth callback. The Firebase Google
- * OAuth client has `http://localhost:9876` registered as an authorized
- * redirect URI — Google's policy for Web OAuth clients is exact-match
- * (port included), so we have to commit to a specific port. 9876 is
- * outside the well-known ephemeral range used by browsers / system
- * tools, so collision risk is low in practice.
+ * Fixed loopback port for the OAuth callback. Google's Web OAuth clients
+ * require exact-match redirect URIs (port included), so `localhost:9876` is
+ * registered as an authorized redirect and we must commit to this port.
  */
 export const BRIDGE_PORT = 9876
 
@@ -76,27 +69,10 @@ export interface StartBridgeOpts {
 }
 
 /**
- * Start the loopback bridge. Binds `127.0.0.1:<port>` (default 9876,
- * RFC 8252 §7 compliant loopback) and advertises the URL as
- * `http://localhost:<port>` — Firebase's Google OAuth client requires
- * the redirect URI to match exactly, so the fixed port is registered
- * in Google Cloud Console alongside the Firebase auth handler URIs.
- *
- * Flow:
- *   GET /         (no query)              → call Firebase createAuthUri,
- *                                            stash sessionId in closure,
- *                                            HTTP 302 to the IdP authorize
- *                                            URL. No client-side JS needed.
- *   GET /?code=…&state=…                 → IdP callback. Call Firebase
- *                                            signInWithIdp to exchange the
- *                                            code for Firebase tokens,
- *                                            build the persisted-user JSON,
- *                                            resolve signInPromise, serve
- *                                            the "Signed in" HTML.
- *   GET /?error=…                        → IdP denied / user cancelled.
- *                                            Reject signInPromise and serve
- *                                            the error HTML.
- *   anything else                        → 404.
+ * Start the loopback bridge, binding `127.0.0.1:<port>` and advertising
+ * `http://localhost:<port>`. Routes: `GET /` initiates (302 to IdP or serves
+ * the popup-bridge HTML), `GET /?code&state` completes the Google exchange,
+ * `GET /?error` handles denial, `POST /callback` takes the GitHub payload.
  */
 export function startBridgeServer(opts: StartBridgeOpts): Promise<BridgeHandle> {
   const { env, providerId, timeoutMs = 5 * 60_000, port = BRIDGE_PORT } = opts
@@ -117,16 +93,13 @@ export function startBridgeServer(opts: StartBridgeOpts): Promise<BridgeHandle> 
     const close = (): void => {
       if (server) {
         try {
-          // closeAllConnections() force-terminates any keep-alive sockets
-          // browsers may have established — without it, the browser would
-          // happily reuse a pinned TCP connection to a "closed" server on
-          // the next localhost:9876 fetch, routing requests into the OLD
-          // closure (with the OLD providerId, OLD signInPromise, etc.).
-          // close() alone only stops accepting new connections.
+          // Force-terminate keep-alive sockets too; otherwise the browser
+          // could reuse a pinned connection into this stale closure (wrong
+          // providerId / signInPromise) on the next localhost:9876 fetch.
           server.closeAllConnections?.()
           server.close()
         } catch {
-          // ignore — best-effort shutdown
+          // best-effort shutdown
         }
         server = null
       }
@@ -153,10 +126,8 @@ export function startBridgeServer(opts: StartBridgeOpts): Promise<BridgeHandle> 
     }, timeoutMs)
 
     server = createServer((req, res) => {
-      // Disable HTTP keep-alive so the bridge never holds onto sockets
-      // across the singleton-driven server swap. Browsers would
-      // otherwise reuse a connection pinned to a previous bridge's
-      // closure (with the wrong providerId / dead server reference).
+      // Disable keep-alive so the bridge never holds sockets across the
+      // singleton server swap (a reused connection would hit the old closure).
       res.setHeader('Connection', 'close')
       void handleRequest(req, res).catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : String(err)
@@ -170,8 +141,7 @@ export function startBridgeServer(opts: StartBridgeOpts): Promise<BridgeHandle> 
     })
 
     async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
-      // Belt-and-braces: only honour requests on the loopback socket.
-      // The bind itself enforces this; this is a defence-in-depth check.
+      // Defence-in-depth: only honour requests on the loopback socket.
       const remoteHost = req.socket.remoteAddress ?? ''
       const isLoopback =
         remoteHost === '127.0.0.1' || remoteHost === '::1' || remoteHost === '::ffff:127.0.0.1'
@@ -193,10 +163,8 @@ export function startBridgeServer(opts: StartBridgeOpts): Promise<BridgeHandle> 
         return
       }
 
-      // Popup-bridge callback (GitHub flow only): the in-browser
-      // Firebase SDK POSTs `auth.currentUser.toJSON()` here after a
-      // successful signInWithPopup. We forward it to the orchestrator
-      // for IndexedDB injection.
+      // Popup-bridge callback (GitHub only): the in-browser SDK POSTs
+      // `auth.currentUser.toJSON()` here after a successful signInWithPopup.
       if (req.method === 'POST' && path === '/callback') {
         if (providerId !== 'github.com') {
           res.statusCode = 404
@@ -237,19 +205,14 @@ export function startBridgeServer(opts: StartBridgeOpts): Promise<BridgeHandle> 
       const code = params.get('code')
       const state = params.get('state')
 
-      // Raw-OAuth callback arm — only relevant for Google (we drove the
-      // OAuth dance server-side via createAuthUri). For GitHub the
-      // bridge page handles the credential client-side (popup or
-      // Firebase JS SDK's redirect-fallback), so we fall through to
-      // serve the bridge HTML again on code+state arrival.
+      // Raw-OAuth callback arm — Google only (GitHub handles the credential
+      // client-side, so it falls through to re-serve the bridge HTML).
       if (code && state && providerId === 'google.com') {
         if (!sessionId) {
-          // Should not happen — would mean a callback arrived without
-          // a prior GET / on this server instance.
           throw new Error('Callback arrived before initiator')
         }
-        // Reconstruct the full URL the IdP redirected to; signInWithIdp
-        // parses query params from this string the same way the JS SDK does.
+        // Reconstruct the full redirected URL; signInWithIdp parses its query
+        // params the same way the JS SDK does.
         const requestUri = `http://localhost:${(server!.address() as AddressInfo).port}${url}`
         const idpResponse = await signInWithIdpExchange(
           firebaseConfig.apiKey,
@@ -266,18 +229,9 @@ export function startBridgeServer(opts: StartBridgeOpts): Promise<BridgeHandle> 
         return
       }
 
-      // Initiator arm — first GET / with no callback params. Two flows:
-      //
-      //   Google: 302 to Google's OAuth URL (raw-OAuth zero-click flow).
-      //           Requires `http://localhost:<port>/` to be on the
-      //           Firebase Google OAuth client's authorized redirect
-      //           URIs (one-time Google Cloud Console setup).
-      //
-      //   GitHub: serve the popup-bridge HTML which initialises Firebase
-      //           JS SDK and runs signInWithPopup. Used because GitHub
-      //           OAuth Apps only allow a single Authorization Callback
-      //           URL (already reserved for web sign-in), so the loopback
-      //           redirect URI can't be added.
+      // Initiator arm — first GET / with no callback params. Google gets a
+      // 302 to its OAuth URL; GitHub gets the popup-bridge HTML (its OAuth
+      // Apps allow only one callback URL, so the loopback redirect can't be added).
       if (providerId === 'google.com') {
         const continueUri = `http://localhost:${(server!.address() as AddressInfo).port}/`
         const authResp = await createOauthAuthUri(firebaseConfig.apiKey, providerId, continueUri)

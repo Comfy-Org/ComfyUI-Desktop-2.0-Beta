@@ -25,9 +25,7 @@ beforeEach(() => {
       getPath: () => userDataPath,
     },
   }))
-  // dataDir() falls through to userData on non-Linux. Force win32 so the
-  // XDG branches in src/main/lib/paths.ts don't kick in even on a Linux
-  // CI runner.
+  // Force win32 so the XDG branches in paths.ts don't kick in on a Linux runner.
   vi.stubGlobal('process', {
     ...process,
     platform: 'win32',
@@ -93,8 +91,8 @@ describe('installations.markLaunched', () => {
     const entry = await installations.add({
       name: 'No Category',
       installPath: path.join(tmpRoot, 'no-cat'),
-      // 'mystery' isn't recognised by resolveCategory, so the resolver
-      // returns undefined and only the global timestamp should be stamped.
+      // Unrecognised source → resolver returns undefined → only the global
+      // timestamp is stamped.
       sourceId: 'mystery',
       status: 'installed',
     })
@@ -167,16 +165,11 @@ describe('installations.markLaunched', () => {
 })
 
 describe('installations.add (id uniqueness)', () => {
-  // Regression — `inst-${Date.now()}` collided whenever two `add()` calls
-  // landed in the same millisecond (CI / fast hardware), aliasing distinct
-  // records under the same id and breaking everything keyed by id
-  // (`getRecent`, `update`, `markLaunched`, …). The fix uses a per-process
-  // counter when the wall clock hasn't ticked between calls.
+  // `inst-${Date.now()}` collided for same-millisecond `add()` calls, aliasing
+  // records under one id; the fix appends a per-process counter.
   it('produces a distinct id for each add(), even back-to-back inside the same millisecond', async () => {
     const installations = await loadInstallations()
-    // Pin Date.now to the same value across all 5 add() calls so we
-    // exercise the same-ms collision path deterministically rather than
-    // relying on a fast machine to repro it.
+    // Pin Date.now so all 5 add() calls hit the same-ms collision path.
     const fixed = 1_700_000_000_000
     vi.spyOn(Date, 'now').mockReturnValue(fixed)
     const records = []
@@ -241,8 +234,7 @@ describe('installations.getRecent', () => {
 
 describe('installations.load (useSharedPaths → useSharedModels/useSharedInputOutput migration)', () => {
   function writeRawInstallations(records: Record<string, unknown>[]): string {
-    // On win32, `dataDir()` resolves to the Electron `userData` path
-    // directly — no `data/` subdir.
+    // On win32 `dataDir()` is the Electron userData path directly (no `data/`).
     fs.mkdirSync(userDataPath, { recursive: true })
     const file = path.join(userDataPath, 'installations.json')
     fs.writeFileSync(file, JSON.stringify(records))
@@ -270,10 +262,8 @@ describe('installations.load (useSharedPaths → useSharedModels/useSharedInputO
   })
 
   it('translates legacy useSharedPaths: false → useSharedModels: true, useSharedInputOutput: false', async () => {
-    // Users who set `useSharedPaths: false` almost certainly meant to
-    // isolate the workspace, not lose visibility of their model library.
-    // The migration always forces `useSharedModels: true` regardless of
-    // the legacy value.
+    // The migration forces `useSharedModels: true` regardless of the legacy
+    // value (isolating paths meant input/output, not the model library).
     writeRawInstallations([
       {
         id: 'legacy-off',
@@ -445,9 +435,8 @@ describe('installations.getRecentByCategory', () => {
 
   it('ignores installs in other categories even when their per-category map mentions ours', async () => {
     const installations = await loadInstallations()
-    // Pathological: a cloud install whose per-category map happens to include
-    // a `local` key (e.g. left over from a category change). The category
-    // resolver says it's a 'cloud' install, so it must be filtered out.
+    // A cloud install whose per-category map has a stray `local` key must still
+    // be filtered out, since the resolver says it's 'cloud'.
     await installations.add({
       name: 'Stray Cloud',
       installPath: path.join(tmpRoot, 'stray'),

@@ -1,14 +1,7 @@
 /**
- * Desktop (v1) source plugin — **legacy, migration-only**.
- *
- * This plugin exists solely to let users who installed ComfyUI via the
- * original Electron-based "ComfyUI Desktop" (v1) launch that installation
- * from the new Launcher and migrate it to a standalone install.  It is
- * hidden from the source picker (`hidden: true`) and no new installations
- * can be created through it.
- *
- * Once the v1 user-base has fully migrated to standalone, this file can
- * be removed along with `desktopDetect.ts` and `desktopAdopt.ts`.
+ * Desktop (v1) source plugin: legacy, migration-only. Lets users launch their
+ * original "ComfyUI Desktop" (v1) install and migrate it to standalone. Hidden from
+ * the picker; no new installs can be created through it.
  */
 import fs from 'fs'
 import path from 'path'
@@ -42,11 +35,8 @@ export const desktop: SourcePlugin = {
   buildInstallation(): Record<string, unknown> {
     return {
       launchMode: 'external',
-      // Legacy v1 desktop runs out-of-process via the legacy .exe; v2's
-      // shared model/input/output injection bypass (`skipSharedPaths` on
-      // the launch command below) is the real opt-out, but persisting
-      // both flags as `false` keeps the record's intent obvious if the
-      // user ever inspects the JSON.
+      // `skipSharedPaths` on the launch command is the real opt-out; these flags are
+      // persisted as `false` only to keep the record's intent obvious in the JSON.
       useSharedModels: false,
       useSharedInputOutput: false,
     }

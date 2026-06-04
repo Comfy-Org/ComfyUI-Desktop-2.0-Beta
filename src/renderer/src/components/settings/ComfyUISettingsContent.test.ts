@@ -8,18 +8,10 @@ import type { Installation } from '../../types/ipc'
 import { useSessionStore } from '../../stores/sessionStore'
 
 /**
- * Component tests for the picker / drawer's per-install settings body.
- *
- * Locks three pieces of behaviour:
- *   1. Overlay title branches on `actionData.isDowngrade` for `update-comfyui`
- *      — "Downgrading…" vs "Updating…", with matching success copy.
- *   2. The overlay is NOT shown for `snapshot-restore` (gated to the
- *      update tab) — snapshot ops route to the SnapshotsView card instead.
- *   3. Footer "More" button disables on opInflight and the open menu
- *      auto-closes when an op begins.
- *
- * Heavy children + the IPC-tied `useComfyUISettings` composable are
- * stubbed so the test focuses on the bits this component owns.
+ * Tests for the picker/drawer's per-install settings body. Locks: (1) overlay
+ * title branches on `isDowngrade` for `update-comfyui`; (2) no overlay for
+ * `snapshot-restore`; (3) footer "More" disables on opInflight and auto-closes.
+ * Heavy children + `useComfyUISettings` are stubbed.
  */
 
 const messages = {
@@ -75,25 +67,19 @@ function createTestI18n() {
   return createI18n({ legacy: false, locale: 'en', messages })
 }
 
-// --- Mocks ------------------------------------------------------------
-
 const useComfyUISettingsState = {
   pinBottomActions: ref<{ id: string; label: string }[]>([{ id: 'untrack', label: 'Forget' }]),
   sections: ref<unknown[]>([{ tab: 'update', fields: [] }, { tab: 'status', fields: [] }, { tab: 'snapshots' }]),
   loading: ref(false),
   error: ref<null>(null),
-  // Default to fresh — most tests don't care about freshness gating
-  // and want the host to render in its normal state. The "switch
-  // staleness" tests override this with `false` to exercise the
-  // `.is-stale` / More-menu gates.
+  // Default fresh; the "switch staleness" tests override to false.
   sectionsFresh: ref<boolean>(true),
   runningActionIds: ref<Set<string>>(new Set()),
   pendingRestartFieldIds: ref<Set<string>>(new Set()),
   fieldErrorMessages: ref<Record<string, string>>({}),
   diskUsageItem: ref(null),
-  // Stable spies so the stale-watcher tests can assert that the
-  // channel-refresh watcher (#782) doesn't auto-fire actions
-  // against the wrong install's payload.
+  // Stable spy so stale-watcher tests can assert the channel-refresh watcher
+  // doesn't auto-fire against the wrong install's payload.
   runActionStub: vi.fn(),
 }
 vi.mock('../../composables/useComfyUISettings', () => ({
@@ -101,9 +87,7 @@ vi.mock('../../composables/useComfyUISettings', () => ({
     ...useComfyUISettingsState,
     updateField: vi.fn(),
     runAction: useComfyUISettingsState.runActionStub,
-    // Real composable returns ComputedRef<DetailSection[]>; mirror that
-    // so the host's `.value.length` reads work without surfacing the
-    // composable's tab-filtering implementation here.
+    // Mirror the real ComputedRef<DetailSection[]> so `.value.length` reads work.
     sectionsForTab: (tab: string) => computed(() => {
       const hasTab = useComfyUISettingsState.sections.value.some(
         (s) => (s as { tab?: string }).tab === tab
@@ -114,7 +98,7 @@ vi.mock('../../composables/useComfyUISettings', () => ({
   }),
 }))
 
-// Stub heavy children — we only care about their host wiring.
+// Stub heavy children — only their host wiring matters.
 vi.mock('../../views/comfyUISettings/SnapshotsView.vue', () => ({
   default: {
     name: 'SnapshotsView',
@@ -141,8 +125,6 @@ vi.mock('../../views/comfyUISettings/MoreMenu.vue', () => ({
   },
 }))
 
-// --- Mount helper -----------------------------------------------------
-
 const SAMPLE_INSTALL: Installation = {
   id: 'inst-1',
   name: 'My Install',
@@ -154,9 +136,7 @@ const SAMPLE_INSTALL: Installation = {
 
 async function mountContent(props: Record<string, unknown> = {}): Promise<VueWrapper> {
   const { default: ComfyUISettingsContent } = await import('./ComfyUISettingsContent.vue')
-  // Reuse the active pinia (set in beforeEach) so tests that seed the
-  // session store via `useSessionStore()` share the same instance the
-  // mounted component reads.
+  // Reuse the active pinia so session-store seeding shares the mounted instance.
   const pinia = getActivePinia() ?? createPinia()
   const wrapper = mount(ComfyUISettingsContent, {
     props: {
@@ -170,8 +150,6 @@ async function mountContent(props: Record<string, unknown> = {}): Promise<VueWra
   await flushPromises()
   return wrapper
 }
-
-// --- Tests ------------------------------------------------------------
 
 describe('ComfyUISettingsContent', () => {
   beforeEach(() => {
@@ -221,7 +199,6 @@ describe('ComfyUISettingsContent', () => {
           percent: 100, status: 'Complete', cancellable: false, title: '',
         },
       })
-      // The op-overlay's success branch picks `opSuccessLabel`.
       expect(w.find('.op-title').text()).toBe('Downgrade complete')
     })
 
@@ -249,9 +226,8 @@ describe('ComfyUISettingsContent', () => {
           percent: 30, status: 'Loading snapshot…', cancellable: true, title: '',
         },
       })
-      // Snapshot-restore on the snapshots tab is rendered by
-      // SnapshotsView's own timeline rail — the generic overlay must
-      // stay hidden to avoid double-rendering progress UI.
+      // On the snapshots tab SnapshotsView renders its own rail, so the generic
+      // overlay must stay hidden to avoid double progress UI.
       expect(w.find('.op-overlay').exists()).toBe(false)
     })
 
@@ -270,9 +246,6 @@ describe('ComfyUISettingsContent', () => {
     })
 
     it('renders the overlay on the Update tab when a copy op is in flight', async () => {
-      // Copy is initiated from the picker's Update tab, so this is the
-      // common case. Pre-fix, only `update-comfyui` would have rendered
-      // a meaningful label here; we now show "Copying…".
       const w = await mountContent({
         initialTab: 'update',
         activeOperation: {
@@ -402,9 +375,8 @@ describe('ComfyUISettingsContent', () => {
     const SNAPSHOTS_TOOLTIP =
       'A saved point-in-time state of an installation (versions + custom nodes) you can restore later.'
 
-    /** Tooltips for tabs that only echo their label (no explicit concept
-     *  copy). The Snapshots tab carries a real concept tooltip and is
-     *  exempt from the "disabled at full width" rule. */
+    /** Disabled flags for tabs that only echo their label (excludes Snapshots,
+     *  which carries a real concept tooltip). */
     function labelEchoDisabledFlags(w: VueWrapper): boolean[] {
       return w
         .findAllComponents({ name: 'Tooltip' })
@@ -427,13 +399,11 @@ describe('ComfyUISettingsContent', () => {
         w
           .findAllComponents({ name: 'Tooltip' })
           .find((tt) => tt.props('text') === SNAPSHOTS_TOOLTIP)
-      // Full width — an echo tab would be suppressed here, but the concept
-      // tooltip stays live because it adds info beyond the label.
+      // Full width: the concept tooltip stays live (adds info beyond the label).
       roHandles.forEach((h) => h.fire(900))
       await nextTick()
       expect(snapshotTip()?.props('disabled')).toBe(false)
-      // Collapsed — still live (and it's the active tab, which would also
-      // suppress a pure echo).
+      // Collapsed: still live.
       roHandles.forEach((h) => h.fire(300))
       await nextTick()
       expect(snapshotTip()?.props('disabled')).toBe(false)
@@ -444,22 +414,17 @@ describe('ComfyUISettingsContent', () => {
       roHandles.forEach((h) => h.fire(300))
       await nextTick()
       const tooltips = w.findAllComponents({ name: 'Tooltip' })
-      // Active tab (Update) keeps its label → tooltip stays disabled.
+      // Active tab keeps its label → tooltip disabled.
       const updateTip = tooltips.find((tt) => tt.props('text') === 'Update')
       expect(updateTip?.props('disabled')).toBe(true)
-      // A collapsed, inactive tab hides its label → tooltip is live.
+      // Collapsed inactive tab hides its label → tooltip live.
       const statusTip = tooltips.find((tt) => tt.props('text') === 'About')
       expect(statusTip?.props('disabled')).toBe(false)
     })
   })
 
-  // Issue #749 — the footer primary CTA must distinguish an install
-  // running in THIS window (Restart, in place) from one running in a
-  // DIFFERENT window (Switch → focus that window) from one not running
-  // (Open → launch). Pre-fix the label was "Restart" whenever a session
-  // existed anywhere, so switching between an already-open Cloud and
-  // local window was mislabeled and broke (it restarted instead of
-  // focusing the other window).
+  // The footer CTA distinguishes running in THIS window (Restart) from a
+  // DIFFERENT window (Switch → focus it) from not running (Start).
   describe('footer primary action — running scope (issue #749)', () => {
     function markRunning(installId: string): void {
       const store = useSessionStore()
@@ -486,19 +451,16 @@ describe('ComfyUISettingsContent', () => {
     })
 
     it('labels "Switch" and emits restartInPlace=false when running in ANOTHER window', async () => {
-      // The host window is attached to a different install ('other'),
-      // while the selected install ('inst-1') is running elsewhere.
+      // Host attached to 'other'; selected 'inst-1' runs elsewhere.
       markRunning('inst-1')
       const w = await mountContent({ activeInstallationId: 'other' })
       expect(w.find('.settings-v2-relaunch').text()).toBe('Switch')
       await w.find('.settings-v2-relaunch').trigger('click')
-      // restartInPlace=false → host routes to pickInstall (focus existing).
       expect(w.emitted('primary-action')).toEqual([[false]])
     })
 
     it('treats a running install as "Switch" on an install-less (dashboard) host', async () => {
-      // No activeInstallationId → there is no in-place session to restart,
-      // so a running install always reads as "switch to its window".
+      // No activeInstallationId → no in-place session to restart, so always Switch.
       markRunning('inst-1')
       const w = await mountContent({ activeInstallationId: null })
       expect(w.find('.settings-v2-relaunch').text()).toBe('Switch')
@@ -507,38 +469,26 @@ describe('ComfyUISettingsContent', () => {
     })
   })
 
-  // Issue #782 — clicking a row in the central pill drawer used to
-  // flash "Loading…" while the new install's `get-detail-sections`
-  // IPC was in flight. The composable no longer blanks `sections` on
-  // switch; this component must (a) keep the body painted, (b) mark
-  // the body root `.is-stale` so a click in the brief window doesn't
-  // run against the previous install's payload, and (c) disable the
-  // footer More menu until the new payload lands.
+  // On an install switch the body must (a) stay painted, (b) mark `.is-stale` so
+  // a click doesn't run against the previous payload, and (c) disable the More
+  // menu until the new payload lands.
   describe('switch staleness (#782)', () => {
     function setStale(value: boolean): void {
-      // `sectionsFresh = false` mirrors the real composable's state
-      // between an install switch and the new IPC resolving.
       useComfyUISettingsState.sectionsFresh.value = !value
     }
 
     it('does NOT show the "Loading…" placeholder when sections are still painted (fresh OR stale)', async () => {
       setStale(true)
-      // `loading: true` simulates the in-flight switch window. The
-      // placeholder must NOT appear because the previous payload's
-      // visibleSections.length > 0 — that is the whole point of the
-      // #782 fix.
+      // No placeholder while the previous payload is still painted.
       useComfyUISettingsState.loading.value = true
       const w = await mountContent()
       expect(w.find('[data-testid="picker-settings-loading"]').exists()).toBe(false)
-      // The settings body root is still rendered so the user keeps
-      // seeing recognizable content during the IPC.
       expect(w.find('[data-testid="picker-settings-sections"]').exists()).toBe(true)
       useComfyUISettingsState.loading.value = false
     })
 
     it('still shows the "Loading…" placeholder on a true first load (no prior sections)', async () => {
-      // First mount with no payload yet: blank sections + loading.
-      // This is the only case where the placeholder is legitimate.
+      // First load with no prior payload is the only legitimate placeholder case.
       const priorSections = useComfyUISettingsState.sections.value
       useComfyUISettingsState.sections.value = []
       useComfyUISettingsState.loading.value = true
@@ -569,17 +519,10 @@ describe('ComfyUISettingsContent', () => {
     })
 
     it('does NOT auto-fire `check-update` against the new install while sections are still stale', async () => {
-      // Regression for an "Action 'check-update' not yet implemented."
-      // alert that appeared when switching from a local install to
-      // Cloud. The channel-cards-refresh watcher used to walk
-      // `sections.value` whenever `sectionsLen > 0`; with #782 keeping
-      // the previous install's sections painted across switches, that
-      // walked the wrong install's payload and fired the action
-      // against Cloud, which has no `check-update` handler.
+      // The channel-refresh watcher must not walk the prior install's stale
+      // sections and fire `check-update` against Cloud (which has no handler).
       const priorSections = useComfyUISettingsState.sections.value
-      // Seed STALE sections that contain a channel-cards field AND a
-      // `check-update` action — what would still be painted from a
-      // prior local install when the user has just clicked Cloud.
+      // Stale sections from a prior local install, still painted after clicking Cloud.
       useComfyUISettingsState.sections.value = [
         {
           tab: 'update',
@@ -598,13 +541,9 @@ describe('ComfyUISettingsContent', () => {
     })
   })
 
-  // Switching between installs in the central pill drawer should always
-  // give the user a visible motion cue — even when the same tab exists
-  // on both installs (e.g. Status → Status). The inner `<Transition>`
-  // only fires when its child key changes, so we key each pane by the
-  // install id; this test pins that contract by asserting the active
-  // pane's DOM element is replaced on install switch (which is exactly
-  // what makes the `tabTransition` animation fire).
+  // Each pane is keyed by install id so `<Transition>` fires on install switch
+  // even when the same tab persists; pinned by asserting the pane element is
+  // replaced.
   describe('install-switch transition cue', () => {
     it('remounts the inner tab pane when the installation changes (same tab)', async () => {
       const w = await mountContent({ initialTab: 'status' })

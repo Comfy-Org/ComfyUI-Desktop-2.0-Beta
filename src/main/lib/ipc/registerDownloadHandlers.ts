@@ -41,9 +41,7 @@ export function registerDownloadHandlers(): void {
 
   ipcMain.handle('model-download-retry', (_event, { url }: { url: string }) => retryDownload(url))
 
-  // Seed the renderer-side store with active entries plus the recent
-  // terminal buffer so the Settings tab + popup history are non-empty
-  // on first paint after a window opens mid-flow.
+  // Seed the renderer store with active + recent downloads on first paint.
   ipcMain.handle('model-download-list', () => getAllDownloads())
 
   ipcMain.handle('show-download-in-folder', (_event, { savePath }: { savePath: string }) => {

@@ -1,9 +1,6 @@
 <script setup lang="ts">
-// Intentionally NOT a variant of `components/ChoiceCard.vue`:
-// ChoiceCard is an onboarding takeover primitive (tagline band, large
-// type, optional radio + glow + arrow). This is a compact list-row
-// link with a trailing star badge — overlapping a `variant="link"` on
-// ChoiceCard would null out half its surface and fork typography.
+// Intentionally NOT a variant of ChoiceCard.vue (an onboarding takeover
+// primitive); reusing it here would fork its typography and surface.
 import { computed } from 'vue'
 import { ExternalLink, Github, Star } from 'lucide-vue-next'
 
