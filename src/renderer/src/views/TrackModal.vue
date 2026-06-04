@@ -32,33 +32,9 @@ let returnFocusTo: HTMLElement | null = null
 
 const saveDisabled = computed(() => !trackPath.value || !selectedProbe.value)
 
-/** Path most recently probed — guards the input watcher from re-probing
- *  a value that `handleBrowse` (or a prior debounce) already handled. */
-let lastProbedPath = ''
 /** Generation counter — bumped on every probe so stale async responses
  *  from an earlier path are discarded once the field changes again. */
 let probeGeneration = 0
-let probeDebounce: ReturnType<typeof setTimeout> | null = null
-
-/** Re-probe whenever the path field changes, not just via Browse. Typing
- *  or pasting a directory now triggers detection so a valid existing
- *  install enables the "Track install" button. Debounced to avoid
- *  probing on every keystroke; trimmed so trailing whitespace from a
- *  paste doesn't read as a distinct path. */
-watch(trackPath, (newPath) => {
-  const trimmed = newPath.trim()
-  if (trimmed === lastProbedPath) return
-  if (probeDebounce) clearTimeout(probeDebounce)
-  if (!trimmed) {
-    lastProbedPath = ''
-    probeResults.value = []
-    selectedProbe.value = null
-    return
-  }
-  probeDebounce = setTimeout(() => {
-    void probe(trimmed)
-  }, 300)
-})
 
 function onKeydown(e: KeyboardEvent): void {
   if (e.key === 'Escape' && isOpen.value) emit('close')
@@ -82,21 +58,22 @@ watch(isOpen, async (open) => {
 
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', onKeydown)
-  if (probeDebounce) clearTimeout(probeDebounce)
   if (returnFocusTo && document.contains(returnFocusTo)) returnFocusTo.focus()
   returnFocusTo = null
 })
 
 function open(): void {
-  if (probeDebounce) clearTimeout(probeDebounce)
-  probeDebounce = null
-  lastProbedPath = ''
+  // Bump so any probe still in flight from a previous session is
+  // discarded by `probe()`'s generation check and can't populate the
+  // freshly-reset state.
+  probeGeneration++
   trackPath.value = ''
   trackName.value = ''
   probeResults.value = []
   selectedProbe.value = null
   venvOverride.value = null
   suggestedName.value = ''
+  probing.value = false
   isOpen.value = true
   void window.api
     .getUniqueName('ComfyUI')
@@ -116,7 +93,6 @@ async function handleBrowse(): Promise<void> {
 
 async function probe(dirPath: string): Promise<void> {
   const generation = ++probeGeneration
-  lastProbedPath = dirPath.trim()
   probing.value = true
   selectedProbe.value = null
   probeResults.value = []
@@ -261,8 +237,9 @@ defineExpose({ open })
                 <HardDrive :size="14" aria-hidden="true" />
                 <input
                   id="track-path"
-                  v-model="trackPath"
+                  :value="trackPath"
                   type="text"
+                  readonly
                   :placeholder="$t('track.selectDir')"
                 />
               </div>
