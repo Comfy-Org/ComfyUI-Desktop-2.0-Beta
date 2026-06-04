@@ -35,10 +35,48 @@ const UV_BINARY = {
   'linux-x64': 'bin/uv',
 }
 
+// MUI2 installer artwork that scripts/installer.nsh references via
+// `${BUILD_RESOURCES_DIR}\<name>.bmp`. Local electron-builder builds work
+// because electron-builder.yml sets `directories.buildResources: resources`,
+// so BUILD_RESOURCES_DIR resolves to ./resources/ and finds the files there.
+// ToDesktop bypasses electron-builder.yml entirely and uses its own
+// `<workingDir>/build/` for BUILD_RESOURCES_DIR (see the build log:
+// `BUILD_RESOURCES_DIR=...\todesktop\<id>\build`), so MUI_HEADERIMAGE_INIT
+// fails at NSIS compile time with "no files found." Stage the BMPs into
+// ToDesktop's build dir from the unpacked source archive so the macro
+// resolves. No-op on macOS / Linux (the windows installer.nsh include is
+// only consumed by the win NSIS target).
+const INSTALLER_ART = ['installerHeader.bmp', 'installerSidebar.bmp', 'uninstallerSidebar.bmp']
+
 module.exports = async ({ appDir, platform, arch }) => {
   const { execSync } = await import('node:child_process')
   const fs = await import('node:fs')
   const path = await import('node:path')
+
+  // Stage installer BMPs FIRST so a bootstrap-python skip / failure doesn't
+  // mask the windows installer issue. Only runs when there's something to
+  // copy AND we're on a windows build.
+  if (platform === 'windows') {
+    // Hook contract: appDir = <workingDir>/app-wrapper/app (see the comment
+    // on the bootstrap-python outDir below). build/ sits at workingDir level.
+    const buildDir = path.join(appDir, '..', '..', 'build')
+    fs.mkdirSync(buildDir, { recursive: true })
+    for (const name of INSTALLER_ART) {
+      const src = path.join(appDir, 'resources', name)
+      const dst = path.join(buildDir, name)
+      if (!fs.existsSync(src)) {
+        // Fail loudly. A silent skip here is what shipped the broken build —
+        // NSIS compile-time errors look unrelated to a beforeBuild no-op.
+        throw new Error(
+          `[todesktop:beforeBuild] Missing installer artwork: ${src}. ` +
+          `scripts/installer.nsh references this via \${BUILD_RESOURCES_DIR}\\${name}; ` +
+          `without it, MUI_HEADERIMAGE_INIT fails the windows build at NSIS compile time.`
+        )
+      }
+      fs.copyFileSync(src, dst)
+      console.log(`[todesktop:beforeBuild] Staged ${name} -> ${dst}`)
+    }
+  }
 
   const key = `${platform}-${arch}`
   const bootstrapPlatform = PLATFORM_MAP[key]
