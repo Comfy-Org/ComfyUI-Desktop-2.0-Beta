@@ -26,6 +26,7 @@ import { rotateLogFiles, getLogDir } from '../../logRotation'
 import { createExecutionTap } from '../../executionTap'
 import { clearCrash, recordCrash } from '../../crashBuffer'
 import * as telemetry from '../../telemetry'
+import { ensureManagerMirrorConfig } from '../../managerConfig'
 import type { WriteStream } from 'fs'
 
 // Feature flags injected on every spawned ComfyUI, gated by the running
@@ -115,6 +116,17 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
       } catch {
         // Schema not available — pass args as-is.
       }
+    }
+  }
+
+  if (!launchCmd.remote && settings.get('useChineseMirrors') === true) {
+    try {
+      await ensureManagerMirrorConfig(inst.installPath)
+    } catch (err) {
+      console.warn('Failed to seed ComfyUI-Manager mirror config:', err)
+      telemetry.capture('comfy.desktop.manager.mirror_seed_failed', {
+        error_message: String(err).slice(0, 200),
+      })
     }
   }
 
