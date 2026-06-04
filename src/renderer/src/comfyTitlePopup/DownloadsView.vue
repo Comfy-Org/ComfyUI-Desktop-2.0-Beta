@@ -13,6 +13,7 @@ import {
 } from 'lucide-vue-next'
 import { fileLabel, statusKindClass, statusLine } from '../lib/downloadFormatters'
 import { revealInFolderLabel } from '../composables/usePlatform'
+import DownloadThumbnail from '../components/DownloadThumbnail.vue'
 
 const { t } = useI18n()
 
@@ -35,6 +36,7 @@ interface DownloadEntry {
   status: 'pending' | 'downloading' | 'paused' | 'completed' | 'error' | 'cancelled'
   error?: string
   createdAt?: number
+  isImage?: boolean
 }
 
 interface DownloadsState {
@@ -58,6 +60,7 @@ interface PopupBridge {
   downloadsAction(action: DownloadAction): void
   openSettingsTab(tab: PopupSettingsTab): void
   openDownloadsModal(): void
+  getDownloadThumbnail(savePath: string): Promise<string | null>
 }
 
 const bridge = (window as unknown as { __comfyTitlePopup?: PopupBridge }).__comfyTitlePopup
@@ -69,6 +72,15 @@ const TERMINAL_STATUSES = new Set<DownloadEntry['status']>(['completed', 'error'
 
 function isTerminal(d: DownloadEntry): boolean {
   return TERMINAL_STATUSES.has(d.status)
+}
+
+const fetchThumbnail = (savePath: string): Promise<string | null> =>
+  bridge?.getDownloadThumbnail(savePath) ?? Promise.resolve(null)
+
+/** A completed image asset reserves the enlarged rounded preview box (the
+ *  thumbnail itself may still fail to load, falling back to the status icon). */
+function isCompletedImage(download: DownloadEntry): boolean {
+  return download.isImage === true && download.status === 'completed'
 }
 
 /** Combined list newest-first by `createdAt` so a download staying in place across
@@ -180,15 +192,19 @@ function progressStyle(d: DownloadEntry): Record<string, string> | undefined {
         :style="progressStyle(d)"
         @click="(e) => handleRowClick(d, e)"
       >
-        <span class="downloads-item-icon">
-          <CircleCheck v-if="d.status === 'completed'" :size="16" class="ok" />
-          <CircleAlert
-            v-else-if="d.status === 'error' || d.status === 'cancelled'"
-            :size="16"
-            class="bad"
-          />
-          <PauseCircle v-else-if="d.status === 'paused'" :size="16" />
-          <LoaderCircle v-else :size="16" class="spin" />
+        <span class="downloads-item-icon" :class="{ 'is-image': isCompletedImage(d) }">
+          <DownloadThumbnail :entry="d" :fetcher="fetchThumbnail">
+            <template #fallback>
+              <CircleCheck v-if="d.status === 'completed'" :size="16" class="ok" />
+              <CircleAlert
+                v-else-if="d.status === 'error' || d.status === 'cancelled'"
+                :size="16"
+                class="bad"
+              />
+              <PauseCircle v-else-if="d.status === 'paused'" :size="16" />
+              <LoaderCircle v-else :size="16" class="spin" />
+            </template>
+          </DownloadThumbnail>
         </span>
         <div class="downloads-item-text">
           <span class="downloads-item-name" :title="fileLabel(d)">{{ fileLabel(d) }}</span>
@@ -330,6 +346,18 @@ function progressStyle(d: DownloadEntry): Record<string, string> | undefined {
   color: var(--downloads-text);
   margin-top: 2px;
   align-self: flex-start;
+}
+/* A completed image asset grows the leading box into a rounded preview; the
+ * status-icon fallback (file moved/deleted) centers in the same box. */
+.downloads-item-icon.is-image {
+  flex-basis: 36px;
+  width: 36px;
+  height: 36px;
+  margin-top: 0;
+  align-self: center;
+  border-radius: 6px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--downloads-bar-rest) 60%, transparent);
 }
 .downloads-item-icon .ok {
   color: var(--downloads-text);

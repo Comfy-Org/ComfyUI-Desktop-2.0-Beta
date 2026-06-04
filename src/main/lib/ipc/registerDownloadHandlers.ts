@@ -5,6 +5,7 @@ import {
   clearFinishedDownloads,
   dismissRecentDownload,
   getAllDownloads,
+  getDownloadThumbnail,
   pauseModelDownload,
   resumeModelDownload,
   retryDownload,
@@ -49,4 +50,11 @@ export function registerDownloadHandlers(): void {
       shell.showItemInFolder(path.resolve(savePath))
     }
   })
+
+  // Lazy preview thumbnail for a completed image download; null for non-images
+  // or unreadable files. Reachable from the panel (`window.api`) and the
+  // title-bar popup (`ipcRenderer.invoke`) alike.
+  ipcMain.handle('download-thumbnail', (_event, { savePath }: { savePath: string }) =>
+    getDownloadThumbnail(savePath),
+  )
 }

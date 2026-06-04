@@ -88,3 +88,66 @@ export function statusKindClass(d: Pick<DownloadFormatInput, 'status'>): string 
       return 'is-active'
   }
 }
+
+/** Human-readable relative time from a wall-clock ms timestamp. `now` is
+ *  injectable so callers can drive a ticking clock for live re-rendering. */
+export function relativeTime(timestampMs: number | undefined, now = Date.now()): string {
+  if (!timestampMs) return ''
+  const delta = Math.max(0, now - timestampMs)
+  const secs = Math.floor(delta / 1000)
+  if (secs < 60) return 'Just now'
+  const mins = Math.floor(secs / 60)
+  if (mins < 60) return `${mins}m ago`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  return `${days}d ago`
+}
+
+export interface ModalFormatInput extends DownloadFormatInput {
+  createdAt?: number
+  totalBytes?: number
+}
+
+/** Rich subtitle for the Downloads Modal: progress details for active, size + time for terminal.
+ *  `now` is injectable so the relative-time portion can re-render against a ticking clock. */
+export function modalSubtitle(d: ModalFormatInput, now = Date.now()): string {
+  const pct = Math.round(d.progress * 100)
+  switch (d.status) {
+    case 'pending':
+      return 'Waiting…'
+    case 'downloading': {
+      const parts: string[] = []
+      if (d.totalBytes && d.totalBytes > 0 && d.receivedBytes != null) {
+        parts.push(`${formatBytes(d.receivedBytes)} / ${formatBytes(d.totalBytes)}`)
+      }
+      if (d.speedBytesPerSec && d.speedBytesPerSec > 0) {
+        parts.push(formatSpeed(d.speedBytesPerSec))
+      }
+      if (d.etaSeconds != null && d.etaSeconds > 0 && isFinite(d.etaSeconds)) {
+        parts.push(`~${formatEta(d.etaSeconds)} left`)
+      }
+      return parts.join(' · ') || `${pct}%`
+    }
+    case 'paused': {
+      const parts = [`Paused at ${pct}%`]
+      if (d.totalBytes && d.totalBytes > 0 && d.receivedBytes != null) {
+        parts.push(`${formatBytes(d.receivedBytes)} / ${formatBytes(d.totalBytes)}`)
+      }
+      return parts.join(' · ')
+    }
+    case 'completed': {
+      const parts: string[] = []
+      if (d.totalBytes) parts.push(formatBytes(d.totalBytes))
+      const ago = relativeTime(d.createdAt, now)
+      if (ago) parts.push(ago)
+      return parts.join(' · ') || 'Completed'
+    }
+    case 'error':
+      return d.error || 'Download failed'
+    case 'cancelled':
+      return 'Cancelled'
+    default:
+      return ''
+  }
+}

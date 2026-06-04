@@ -12,6 +12,7 @@ export interface ComfyDownloadProgress {
   etaSeconds?: number
   status: 'pending' | 'downloading' | 'paused' | 'completed' | 'error' | 'cancelled'
   error?: string
+  isImage?: boolean
 }
 
 contextBridge.exposeInMainWorld('__comfyDesktop2', {
