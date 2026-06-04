@@ -419,14 +419,61 @@ describe('deriveLaunchArgs', () => {
 })
 
 describe('computeModelsDirsToCarry', () => {
-  it('adds basePath/models plus extra YAML mounts and dedupes against existing', () => {
-    const basePath = '/data/ComfyUI'
-    const yaml = `c1:\n  base_path: /data/ComfyUI\nc2:\n  base_path: /extra/A1111\n`
-    const existing = [path.resolve('/data/ComfyUI')]
+  let tmpRoot: string
+  beforeEach(() => {
+    tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'carryModelsDirs-'))
+  })
+  afterEach(() => {
+    fs.rmSync(tmpRoot, { recursive: true, force: true })
+  })
+
+  it('always carries basePath/models even when the folder is absent (legacy install root is trusted)', () => {
+    const basePath = path.join(tmpRoot, 'ComfyUI-legacy')
+    const result = computeModelsDirsToCarry(basePath, null, [])
+    expect(result).toEqual([path.resolve(path.join(basePath, 'models'))])
+  })
+
+  it('carries <yamlBase>/models for YAML entries whose /models subfolder exists; skips others', () => {
+    const basePath = path.join(tmpRoot, 'primary')
+    const siblingComfy = path.join(tmpRoot, 'sibling-comfy')
+    const a1111 = path.join(tmpRoot, 'a1111')
+    fs.mkdirSync(path.join(siblingComfy, 'models'), { recursive: true })
+    fs.mkdirSync(path.join(a1111, 'models', 'Stable-diffusion'), { recursive: true })
+    const yamlOnlyA1111Layout = path.join(tmpRoot, 'something-else')
+    fs.mkdirSync(yamlOnlyA1111Layout) // exists, but no /models subfolder
+    const yaml =
+      `comfyui_sibling:\n  base_path: ${siblingComfy}\n` +
+      `a1111:\n  base_path: ${a1111}\n` +
+      `weird:\n  base_path: ${yamlOnlyA1111Layout}\n`
+    const result = computeModelsDirsToCarry(basePath, yaml, [])
+    expect(result).toContain(path.resolve(path.join(basePath, 'models')))
+    expect(result).toContain(path.resolve(path.join(siblingComfy, 'models')))
+    expect(result).toContain(path.resolve(path.join(a1111, 'models')))
+    expect(result).not.toContain(path.resolve(path.join(yamlOnlyA1111Layout, 'models')))
+    // Never the bare base_path.
+    expect(result).not.toContain(path.resolve(siblingComfy))
+    expect(result).not.toContain(path.resolve(a1111))
+  })
+
+  it('dedupes against the caller existing list', () => {
+    const basePath = path.join(tmpRoot, 'primary')
+    const sibling = path.join(tmpRoot, 'sibling')
+    fs.mkdirSync(path.join(sibling, 'models'), { recursive: true })
+    const existing = [path.resolve(path.join(basePath, 'models'))]
+    const yaml = `s:\n  base_path: ${sibling}\n`
     const result = computeModelsDirsToCarry(basePath, yaml, existing)
-    expect(result).toContain(path.resolve('/data/ComfyUI/models'))
-    expect(result).toContain(path.resolve('/extra/A1111'))
-    expect(result).not.toContain(path.resolve('/data/ComfyUI'))
+    expect(result).toEqual([path.resolve(path.join(sibling, 'models'))])
+  })
+
+  it('skips a YAML base_path that exists as a file (not a directory)', () => {
+    const basePath = path.join(tmpRoot, 'primary')
+    const yamlBase = path.join(tmpRoot, 'has-models-file')
+    fs.mkdirSync(yamlBase, { recursive: true })
+    // create `models` as a file, not a directory
+    fs.writeFileSync(path.join(yamlBase, 'models'), 'not a dir')
+    const yaml = `s:\n  base_path: ${yamlBase}\n`
+    const result = computeModelsDirsToCarry(basePath, yaml, [])
+    expect(result).not.toContain(path.resolve(path.join(yamlBase, 'models')))
   })
 })
 
@@ -505,8 +552,16 @@ describe('adoptDesktopInstall', () => {
     }
   })
 
-  it('merges modelsDirs from extra_models_config.yaml and basePath/models', async () => {
-    const yaml = `comfyui_desktop:\n  base_path: /shared/A\n  is_default: true\nA1111:\n  base_path: /shared/B\n`
+  it('merges modelsDirs: basePath/models always + <yamlBase>/models when present, never the bare base_path', async () => {
+    // Sibling install exists with a `/models` folder; "missing" install has no `/models`.
+    const tmpYamlRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'adopt-yaml-roots-'))
+    const sibling = path.join(tmpYamlRoot, 'sibling-comfy')
+    const missingModels = path.join(tmpYamlRoot, 'no-models')
+    fs.mkdirSync(path.join(sibling, 'models'), { recursive: true })
+    fs.mkdirSync(missingModels, { recursive: true })
+    const yaml =
+      `comfyui_sibling:\n  base_path: ${sibling}\n  is_default: true\n` +
+      `weird:\n  base_path: ${missingModels}\n`
     const legacy = buildFakeLegacy({
       configFiles: {
         'comfy.settings.json': '{}',
@@ -524,12 +579,15 @@ describe('adoptDesktopInstall', () => {
       expect(finalDirs).toEqual(
         expect.arrayContaining([
           path.resolve(path.join(legacy.basePath, 'models')),
-          path.resolve('/shared/A'),
-          path.resolve('/shared/B')
+          path.resolve(path.join(sibling, 'models'))
         ])
       )
+      expect(finalDirs).not.toContain(path.resolve(sibling))
+      expect(finalDirs).not.toContain(path.resolve(missingModels))
+      expect(finalDirs).not.toContain(path.resolve(path.join(missingModels, 'models')))
     } finally {
       legacy.cleanup()
+      fs.rmSync(tmpYamlRoot, { recursive: true, force: true })
     }
   })
 

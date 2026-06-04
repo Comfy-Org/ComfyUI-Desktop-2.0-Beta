@@ -379,19 +379,25 @@ function readLegacyAppVersion(executablePath: string | null): string | null {
 }
 
 /**
- * Compute the cross-install model dirs to register in `settings.modelsDirs`
- * for the adopted record. Dedupes against the caller's existing list.
+ * Cross-install model dirs to register in `settings.modelsDirs` for the
+ * adopted record. Always carries `<basePath>/models`; for each YAML
+ * `base_path:`, carries `<base_path>/models` only when it exists as a
+ * directory (handles ComfyUI-style siblings, silently skips other tools).
+ * The bare base_path is never carried — it points at a tool root whose
+ * models live one level deeper. Dedupes against `existing`.
  */
 export function computeModelsDirsToCarry(
   basePath: string,
   extraYamlContent: string | null,
   existing: string[]
 ): string[] {
-  const candidates: string[] = []
-  candidates.push(path.join(basePath, 'models'))
+  const candidates: string[] = [path.join(basePath, 'models')]
   if (extraYamlContent) {
-    for (const dir of parseExtraModelsYaml(extraYamlContent)) {
-      candidates.push(dir)
+    for (const yamlBase of parseExtraModelsYaml(extraYamlContent)) {
+      const probe = path.join(yamlBase, 'models')
+      if (fs.statSync(probe, { throwIfNoEntry: false })?.isDirectory()) {
+        candidates.push(probe)
+      }
     }
   }
   const seen = new Set(existing.map((d) => path.resolve(d)))
@@ -672,9 +678,11 @@ interface CarryReport {
  * so built-in defaults don't masquerade as user choices.
  *
  * Carries:
- *   - `modelsDirs`           ← `<basePath>/models` + every `base_path`
- *                              from `extra_models_config.yaml`
- *                              (always appended; never blocked).
+ *   - `modelsDirs`           ← `<basePath>/models` + `<yamlBase>/models`
+ *                              for every `base_path` in
+ *                              `extra_models_config.yaml` whose
+ *                              `/models` subfolder actually exists
+ *                              (ComfyUI-style siblings). Always appended.
  *   - `telemetryEnabled`     ← `Comfy-Desktop.SendStatistics`
  *   - `autoInstallUpdates`   ← force `true`. Adoption ships as an
  *                              in-place app update of Legacy Desktop;
