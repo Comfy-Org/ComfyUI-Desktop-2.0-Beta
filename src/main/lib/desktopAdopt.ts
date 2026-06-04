@@ -634,10 +634,19 @@ async function sourceComfyUI(
     }
   }
   const url = getComfyUIRemoteUrl(settings.get('useChineseMirrors') === true)
+  // Raw `git clone` output is just "Receiving objects: 50% (50/100)" lines
+  // with no preamble that this is a multi-hundred-MB download from GitHub.
+  // Frame the operation so the user knows what those object counts mean
+  // and roughly how long to wait.
+  tools.sendOutput(
+    `Pre-swap copy not available; downloading ComfyUI source from ${url} …\n` +
+      `This is a one-time download and can take a few minutes on a slow connection.\n`
+  )
   const cloneResult = await deps.cloneSourceFromGit(url, destDir, tools.sendOutput, tools.signal)
   if (!cloneResult.ok) {
     return { mode: 'failed', message: cloneResult.message }
   }
+  tools.sendOutput(`ComfyUI source download complete.\n`)
   return { mode: 'git-clone-fallback' }
 }
 
@@ -1230,7 +1239,11 @@ async function updateComfyToStable(
     )
     return { tag: null }
   }
-  tools.sendOutput(`Checking out latest stable ComfyUI tag (${tag})…\n`)
+  // `gitCheckoutCommit` may transparently `git fetch --unshallow` if the
+  // tag isn't already local — that surfaces as a wall of "Receiving
+  // objects: …" lines with no preamble. Frame it so the user can tell
+  // network activity here is the ComfyUI update, not random churn.
+  tools.sendOutput(`Updating ComfyUI source to latest stable tag (${tag})…\n`)
   try {
     const result = await gitCheckoutCommit(destSource, tag, tools.sendOutput, tools.signal)
     if (result.exitCode !== 0) {
@@ -1240,6 +1253,7 @@ async function updateComfyToStable(
       )
       return { tag: null }
     }
+    tools.sendOutput(`ComfyUI source now at ${tag}.\n`)
   } catch (err) {
     tools.sendOutput(`Warning: ComfyUI checkout threw: ${(err as Error).message}\n`)
     return { tag: null }
