@@ -514,6 +514,9 @@ export interface ModelDownloadProgress {
    *  bottom when they leave the in-flight bucket. Optional only for
    *  back-compat with snapshots that predate the field. */
   createdAt?: number
+  /** Set on a completed asset download whose file is an image, so the surface
+   *  knows to lazily request a thumbnail via `getDownloadThumbnail`. */
+  isImage?: boolean
 }
 
 // --- Track types ---
@@ -1198,6 +1201,9 @@ export interface ElectronApi {
    *  params were evicted from the recent buffer. */
   retryModelDownload(url: string): Promise<boolean>
   showDownloadInFolder(savePath: string): Promise<void>
+  /** Downscaled `data:` URL preview of a completed image download, or null for
+   *  non-images / unreadable files. */
+  getDownloadThumbnail(savePath: string): Promise<string | null>
 
   // Event listeners (return unsubscribe functions)
   onInstallProgress(callback: (data: ProgressData) => void): Unsubscribe
