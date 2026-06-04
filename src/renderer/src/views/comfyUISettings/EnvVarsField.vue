@@ -65,11 +65,7 @@ watch(
     const dict =
       val && typeof val === 'object' && !Array.isArray(val) ? (val as Record<string, string>) : {}
     const serverRows: Row[] = Object.entries(dict).map(([key, value]) => ({ key, value }))
-    // Preserve any in-progress rows whose key is still empty — the
-    // server can't have seen them yet (emitUpdate filters out keyless
-    // rows), so an incoming snapshot that "doesn't mention them" must
-    // not evict them. Previously, typing a value before a key would
-    // round-trip an empty dict and the watch would wipe the row.
+    // Keep keyless in-progress rows; the server never saw them (emitUpdate filters them out), so a snapshot can't evict them.
     const localPartial = rows.value.filter((r) => !r.key.trim())
     rows.value = [...serverRows, ...localPartial]
   },

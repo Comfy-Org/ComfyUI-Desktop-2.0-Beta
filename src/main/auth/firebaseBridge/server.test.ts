@@ -25,10 +25,9 @@ describe('startBridgeServer', () => {
 
   it('serves the error page when the IdP redirects with ?error=...', async () => {
     const handle = await startBridgeServer({ env: 'prod', providerId: 'google.com', port: 0 })
-    // Attach the rejection handler BEFORE triggering the error fetch.
-    // The ?error= branch rejects signInPromise synchronously while
-    // handling the request; if no handler is attached yet, Vitest flags
-    // it as an unhandled rejection and fails the whole run.
+    // Attach the rejection handler before the error fetch: the ?error= branch
+    // rejects signInPromise synchronously, which Vitest would otherwise flag
+    // as an unhandled rejection.
     const rejected = expect(handle.signInPromise).rejects.toThrow(/IdP error/)
     try {
       const res = await fetch(
@@ -82,10 +81,8 @@ describe('startBridgeServer', () => {
   })
 
   it('exports the fixed port (9876) used by the Google OAuth client allowlist', () => {
-    // Asserting the constant rather than binding — the actual port may
-    // be held by a parallel dev process or another test instance, but
-    // the contract with the Firebase Google OAuth client redirect-URI
-    // allowlist is the constant.
+    // Assert the constant, not a live bind — the contract with the Google
+    // OAuth client's redirect-URI allowlist is the constant itself.
     expect(BRIDGE_PORT).toBe(9876)
   })
 })

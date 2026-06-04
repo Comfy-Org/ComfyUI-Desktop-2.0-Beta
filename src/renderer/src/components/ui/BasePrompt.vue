@@ -5,16 +5,8 @@ import { linkify, handleModalLinkClick } from '../../lib/modalLinkify'
 import { TID } from '../../../../shared/testIds'
 import type { ModalDetailGroup } from '../../types/ipc'
 
-/**
- * Prompt primitive — title, message, single text input, Cancel +
- * primary action. Composes `BaseModal` for the shell (teleport,
- * overlay, focus capture, scroll lock, ESC, a11y). Use for any
- * "name this thing" affordance previously routed through
- * `useModal().prompt()`.
- *
- * Two-way `open` via `v-model:open` so the call site doesn't have to
- * juggle local ref + listener.
- */
+// Prompt primitive (title, message, text input, Cancel + primary) built on
+// BaseModal. Two-way `open` via `v-model:open`.
 
 interface Props {
   open: boolean
@@ -24,13 +16,10 @@ interface Props {
   defaultValue?: string
   confirmLabel?: string
   cancelLabel?: string
-  /** Inline-label above the text field. Defaults to i18n `common.name`. */
   inputLabel?: string
-  /** When truthy, empty submissions show an inline error. A string
-   *  value overrides the default error copy. */
+  /** Truthy requires a non-empty value; a string overrides the error copy. */
   required?: boolean | string
-  /** Optional recessed sub-blocks rendered below the message (e.g.
-   *  release notes for the Copy and Update prompt). */
+  /** Recessed sub-blocks below the message (e.g. release notes). */
   messageDetails?: ModalDetailGroup[]
   size?: 'sm' | 'md' | 'lg' | 'xl'
   dismissOnEscape?: boolean

@@ -3,19 +3,6 @@ import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import BaseModal from './BaseModal.vue'
 
-/**
- * The reusable modal primitive consolidates several behaviors that the
- * older bespoke modals (TermsModal, WhyTryCloudModal, ModalDialog,
- * Modal.vue) each re-implemented inconsistently:
- *   - `role="dialog"` + `aria-modal="true"` are always present
- *   - one of `aria-label` / `aria-labelledby` always names the dialog
- *   - ESC and backdrop click emit `close` (each gated by its dismiss prop)
- *   - body scroll is locked while open and restored on close
- *
- * These tests pin those contracts so a future drive-by edit can't
- * silently drop one without a test going red.
- */
-
 const i18n = createI18n({
   legacy: false,
   locale: 'en',
@@ -24,11 +11,9 @@ const i18n = createI18n({
   fallbackWarn: false,
 })
 
-// Tracks every wrapper a test mounts so `afterEach` can tear them down
-// — `useModalOverlay`'s `document.keydown` listener leaks across the
-// jsdom environment otherwise, and the leaked handler's
-// `stopImmediatePropagation()` would block later ESC tests from
-// reaching their own modal's handler.
+// Tracked so `afterEach` can tear them down — otherwise a leaked
+// `document.keydown` listener's `stopImmediatePropagation()` would block
+// later ESC tests.
 const wrappers: VueWrapper[] = []
 
 function mountModal(props: Record<string, unknown> = {}) {
@@ -41,8 +26,7 @@ function mountModal(props: Record<string, unknown> = {}) {
     slots: { default: '<p class="body-content">Hello</p>' },
     global: {
       plugins: [i18n],
-      // Stub `<Teleport to="body">` so the panel renders inside the
-      // wrapper for assertions.
+      // Stub `<Teleport>` so the panel renders inside the wrapper for assertions.
       stubs: { Teleport: { template: '<div><slot /></div>' } },
     },
   })

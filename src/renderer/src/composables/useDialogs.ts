@@ -2,29 +2,10 @@ import { reactive, readonly } from 'vue'
 import type { ModalDetailGroup, SnapshotDiffResult } from '../types/ipc'
 import type { ActionSheetItem } from '../components/ui/BaseActionSheet.vue'
 
-/**
- * Promise-based driver for the BaseModal-shell primitives
- * (`BasePrompt`, `BaseActionSheet`, `BaseAlert`). Mirrors the shape
- * of `useModal()` so action chains can `await dialogs.prompt({...})` /
- * `await dialogs.confirm({...})` / `await dialogs.alert({...})` /
- * `await dialogs.actionSheet({...})` without juggling local refs.
- *
- * Rendered by the singleton `DialogHost.vue`, mounted next to
- * `<ModalDialog />` in `PanelApp.vue` + `TitlePopupApp.vue`.
- *
- * `confirm` resolves to a string union — `'primary' | 'secondary' |
- * false` — so a single resolved value covers all three outcomes
- * (primary, optional secondary, cancel/ESC/backdrop). Cleaner than
- * juggling a boolean plus an extra callback when the dialog has two
- * non-cancel actions (e.g. "Launch" + "Close & Launch").
- *
- * Why parallel to `useModal()` rather than replacing it: the legacy
- * `ModalDialog.vue` host still owns `confirmWithOptions` and rich
- * confirms with `snapshotPreview` / `variantCards` / `updateConfirm`
- * mutation (migrate flow). Those keep working unchanged on `useModal`
- * until they get their own primitives. `useModal` is kept as
- * reference, untouched.
- */
+// Promise-based driver for the BaseModal-shell primitives, rendered by the
+// singleton DialogHost.vue. Mirrors `useModal()`; `confirm` resolves to
+// `'primary' | 'secondary' | false`. Runs parallel to `useModal`, which still
+// owns confirmWithOptions and the rich migrate-flow confirms.
 
 export interface PromptOpts {
   title: string
@@ -62,31 +43,16 @@ export interface ConfirmOpts {
   message?: string
   confirmLabel?: string
   cancelLabel?: string
-  /** Tone for the primary action. Default `'primary'`. */
   tone?: 'primary' | 'danger'
-  /** Optional secondary action sitting between Cancel and Primary.
-   *  When `secondaryLabel` is set, the footer renders the secondary
-   *  button. Pair with `showCloseIcon: true` when you want the
-   *  secondary to replace Cancel in the footer (header ✕ carries
-   *  the dismiss affordance instead). */
+  /** Middle action between Cancel and Primary. */
   secondaryLabel?: string
   secondaryTone?: 'primary' | 'danger' | 'default'
-  /** Render Cancel in the footer. Default `true`. Set `false` when
-   *  the footer holds two non-cancel actions and `showCloseIcon`
-   *  carries the dismiss affordance. */
   showCancel?: boolean
-  /** Render the header ✕ icon as the dismiss affordance. Use when
-   *  the footer is full of action buttons. Mutually exclusive with
-   *  `showCancel`. Default `false`. */
+  /** Header ✕ dismiss affordance; mutually exclusive with `showCancel`. */
   showCloseIcon?: boolean
-  /** Recessed sub-blocks (release notes, change summaries). Gives
-   *  rich confirms (e.g. Restore Snapshot) parity with the legacy
-   *  `useModal.confirm` `messageDetails` field. */
+  /** Recessed sub-blocks (release notes, change summaries). */
   messageDetails?: ModalDetailGroup[]
-  /** Snapshot diff rendered as a collapsible SnapshotDiffView below the
-   *  message (restore-confirm flow). Reuses the same component the
-   *  Snapshots tab uses so the "what restoring changes" preview is
-   *  identical in both places. */
+  /** Collapsible snapshot diff below the message (restore-confirm flow). */
   restoreDiff?: SnapshotDiffResult | null
 }
 
@@ -204,13 +170,8 @@ function settle(value: unknown): void {
   if (resolve) resolve(value)
 }
 
-/** Cancel value per dialog kind. The four `dialogs.*` methods promise
- *  different shapes (`Promise<string | null>` for prompt/actionSheet,
- *  `Promise<void>` for alert, `Promise<ConfirmResult>` for confirm).
- *  A single shared `cancel()` that always resolved `false` would lie
- *  about prompt/actionSheet's return type and cause callers checking
- *  `=== null` to fall through. Resolve the right falsy value for the
- *  current kind. */
+// Cancel resolves a kind-specific falsy value (null / undefined / false), so
+// callers checking one shape don't fall through on another.
 function cancelValueForKind(kind: DialogKind): unknown {
   switch (kind) {
     case 'prompt':
@@ -283,10 +244,6 @@ export function useDialogs() {
     return new Promise((resolve) => {
       if (state.resolve) state.resolve(cancelValueForKind(state.kind))
       const hasSecondary = !!opts.secondaryLabel
-      // Default: show Cancel unless caller explicitly hides it. When
-      // caller hides Cancel and wants a dismiss path, they pass
-      // showCloseIcon: true. We don't auto-flip these — leaving it
-      // explicit catches mis-wired call sites in code review.
       state.confirm = {
         title: opts.title,
         message: opts.message ?? '',
@@ -312,20 +269,11 @@ export function useDialogs() {
     actionSheet,
     alert,
     confirm,
-    /** Host calls this when the user submits a prompt value. */
     submitPrompt: (value: string) => settle(value),
-    /** Host calls this when the user picks an action-sheet item. */
     selectActionSheet: (value: string) => settle(value),
-    /** Host calls this when the alert OK button fires (resolves void). */
     acknowledgeAlert: () => settle(undefined),
-    /** Host calls this when the confirm primary action fires. */
     confirmPrimary: () => settle('primary' satisfies ConfirmResult),
-    /** Host calls this when the confirm secondary action fires. */
     confirmSecondary: () => settle('secondary' satisfies ConfirmResult),
-    /** Host calls this on cancel / ESC / backdrop / close icon.
-     *  Resolves the in-flight promise with the kind-appropriate
-     *  falsy value (`null` for prompt/actionSheet, `undefined` for
-     *  alert, `false` for confirm). */
     cancel: () => settle(cancelValueForKind(state.kind))
   }
 }

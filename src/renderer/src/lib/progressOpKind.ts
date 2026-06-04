@@ -23,9 +23,7 @@ export function progressOpKindForActionId(actionId: string): ProgressOpKind {
   }
 }
 
-/** Whether the action id removes the install from the registry on
- *  success. Drives the `destroysInstance` carve-out on ShowProgressOpts
- *  (see the field doc for the full behaviour). */
+/** Whether the action removes the install from the registry on success. */
 export function destroysInstanceForActionId(actionId: string): boolean {
   return actionId === 'delete'
 }

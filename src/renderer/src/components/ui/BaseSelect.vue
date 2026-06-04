@@ -2,15 +2,8 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { Check, ChevronDown } from 'lucide-vue-next'
 
-/**
- * Custom select primitive. Replaces the native <select> with a shadcn-
- * style trigger + popover listbox so the open state matches our drawer
- * tokens (hover, focus ring, animations).
- *
- * Popover is teleported to <body> because settings drawer hosts have
- * overflow:hidden and would clip an absolutely-positioned panel —
- * same constraint as the overlay-panel pattern used by the drawer itself.
- */
+// Custom select primitive: trigger + popover listbox, teleported to <body>
+// so a drawer host's overflow:hidden can't clip it.
 
 export interface BaseSelectOption {
   value: string

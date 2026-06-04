@@ -1,8 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
-// `./launch` transitively imports `../shared`, which loads electron at
-// module init. Stub the surface those imports touch so the unit test
-// can run without a real Electron runtime.
+// Stub the electron surface ../shared touches so the test needs no runtime.
 vi.mock('electron', () => ({
   app: {
     isPackaged: false,
@@ -37,15 +35,11 @@ describe('isCrashedExit', () => {
   })
 
   it('treats both code and signal present (signal-with-code path) as crashed', () => {
-    // POSIX kill paths can deliver both a non-zero code and the signal
-    // name. Either arm of the predicate flips it to crashed.
     expect(isCrashedExit(137, 'SIGKILL')).toBe(true)
   })
 
   it('treats Windows TerminateProcess (numeric code, null signal) as crashed', () => {
-    // Task Manager "End Process" reports the large unsigned exit code
-    // Windows uses for forcible termination. Signal is always null on
-    // Windows — Node maps TerminateProcess to a code only.
+    // Windows force-kill reports a large unsigned code; signal is always null.
     expect(isCrashedExit(4294967295, null)).toBe(true)
     expect(isCrashedExit(0xc0000005, null)).toBe(true)
   })

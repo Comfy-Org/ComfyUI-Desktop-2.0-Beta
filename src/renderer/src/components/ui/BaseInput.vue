@@ -9,8 +9,7 @@ interface Props {
   readonly?: boolean
   invalid?: boolean
   type?: string
-  // Number-input hints. Only meaningful when `type === 'number'`; the
-  // browser handles clamp + step UI from these.
+  // Only meaningful when `type === 'number'`.
   min?: number
   max?: number
   step?: number
@@ -149,9 +148,7 @@ function onChange(event: Event): void {
   padding-right: 6px;
 }
 
-/* Style icon-buttons placed in the trailing/leading slot to feel
- * native to the input chrome — small square hit area, muted icon,
- * accent on hover/focus. Consumers can opt out with their own class. */
+/* Make icon-buttons in the leading/trailing slots feel native to the input. */
 .ui-input-trailing :deep(button),
 .ui-input-leading :deep(button) {
   display: inline-flex;

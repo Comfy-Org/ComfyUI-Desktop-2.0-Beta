@@ -19,7 +19,6 @@ function triggerLabel(trigger: string): string {
 </script>
 
 <template>
-  <!-- Source info -->
   <div class="ls-section">
     <div class="ls-field">
       <span class="ls-label">{{ t('list.snapshotSourceName') }}</span>
@@ -31,7 +30,6 @@ function triggerLabel(trigger: string): string {
     </div>
   </div>
 
-  <!-- Snapshot timeline -->
   <div class="ls-section">
     <div class="ls-section-title">{{ t('list.snapshotTimeline') }}</div>
     <div class="ls-timeline">
@@ -48,7 +46,6 @@ function triggerLabel(trigger: string): string {
     </div>
   </div>
 
-  <!-- Newest snapshot detail -->
   <div class="ls-section">
     <div class="ls-section-title">{{ t('list.snapshotNewestDetail') }}</div>
 
@@ -71,7 +68,6 @@ function triggerLabel(trigger: string): string {
       </div>
     </div>
 
-    <!-- Custom nodes -->
     <div class="ls-subsection">
       <div class="ls-subsection-title" @click="nodesExpanded = !nodesExpanded">
         <span>{{ t('snapshots.customNodes') }} ({{ preview.newestSnapshot.customNodes.length }})</span>
@@ -90,7 +86,6 @@ function triggerLabel(trigger: string): string {
       </template>
     </div>
 
-    <!-- Pip packages -->
     <div class="ls-subsection">
       <div class="ls-subsection-title" @click="pipExpanded = !pipExpanded">
         <span>{{ t('snapshots.pipPackages') }} ({{ preview.newestSnapshot.pipPackageCount }})</span>

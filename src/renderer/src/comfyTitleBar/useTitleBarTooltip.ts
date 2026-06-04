@@ -18,62 +18,35 @@ interface UseTitleBarTooltipOpts {
 }
 
 interface TitleBarTooltipApi {
-  /** Title-bar control attribute bag.  Cocoa's native HTML `title`
-   *  tooltip occasionally fires for sibling-view buttons even though
-   *  it's documented as unreliable; when it does, the user gets two
-   *  bubbles at once (the native one plus our custom popup). Keep
-   *  them mutually exclusive at the source by emitting `title` only
-   *  off-mac and `data-title-tooltip` only on mac. `aria-label` is
-   *  unconditional so screen readers see the same string regardless
-   *  of platform — pass `ariaLabel` separately when the visible label
-   *  and the tooltip copy intentionally differ. */
+  /** Control attribute bag. Emits `title` off-mac and `data-title-tooltip` on
+   *  mac so the native and custom tooltips stay mutually exclusive (Cocoa
+   *  occasionally fires `title` for sibling-view buttons). `aria-label` is
+   *  unconditional. */
   tooltipAttrs: (text: string, ariaLabel?: string) => Record<string, string>
-  /** Pointermove handler — drives the macOS tooltip dispatcher. */
   handleTooltipPointer: (event: PointerEvent) => void
-  /** Hide any in-flight tooltip and cancel a pending show timer. */
   hideTip: () => void
 }
 
 /**
- * Issue #514 — macOS hover-tooltip plumbing.
- *
- * On macOS the native HTML `title` tooltip does not reliably fire for
- * controls inside a sibling chrome `WebContentsView` that isn't the
- * focused web contents (Electron + Cocoa quirk). The title bar always
- * sits in such a view, so on macOS we route hover through main, which
- * positions a cached `WebContentsView` popup attached to the host
- * window — that popup escapes the title-bar view's 37px clip. On
- * Windows / Linux the native `title` attribute renders Chromium's own
- * tooltip widget reliably; the JS handlers here are no-ops in that
- * case so we don't end up with two tooltips.
- *
- * Implementation is delegated: a single `pointermove` / `pointerleave`
- * pair on the header root finds the closest `[data-title-tooltip]`
- * ancestor and fires `showTip` / `hideTip`. New tooltipped elements
- * just need the data attribute — no per-element wiring.
+ * macOS hover-tooltip plumbing. The native `title` tooltip doesn't reliably
+ * fire for controls in an unfocused sibling chrome WebContentsView, so on macOS
+ * we route hover through main, which positions a popup that escapes the title
+ * bar's clip. Win/Linux use the native `title`; the JS handlers no-op there.
+ * Delegated: a single pointer pair finds the closest `[data-title-tooltip]`
+ * ancestor, so new tooltipped elements just need the data attribute.
  */
 export function useTitleBarTooltip(opts: UseTitleBarTooltipOpts): TitleBarTooltipApi {
-  /** Initial show delay (ms). Matches the cadence of native HTML
-   *  tooltips on macOS / Win so a quick fly-by across the title bar
-   *  doesn't flash bubbles. */
   const TOOLTIP_SHOW_DELAY_MS = 400
-  /** Hover-handoff window (ms). If a tooltip was visible up to this
-   *  long ago, the next hover over a different tooltipped element shows
-   *  immediately — same convention as native macOS / browser tooltips,
-   *  where the first hover earns the wait but subsequent ones in a
-   *  scanning gesture feel snappy. */
+  /** If a tooltip was visible this recently, the next hover shows immediately so
+   *  scanning across the bar feels snappy (matches native behaviour). */
   const TOOLTIP_HANDOFF_WINDOW_MS = 1500
 
   let tooltipShowTimer: number | null = null
-  /** Text of the tooltip the renderer most recently asked main to show
-   *  (or queue). `null` while nothing is pending or visible. */
+  /** Text the renderer most recently asked main to show/queue; `null` when idle. */
   let activeTooltipText: string | null = null
-  /** True between `bridge.showTooltip()` and the corresponding
-   *  `bridge.hideTooltip()` — i.e., a tooltip is currently visible. The
-   *  pending-but-not-yet-shown state has this `false`. */
+  /** True while a tooltip is visible (false in the pending-but-not-shown state). */
   let isTooltipVisible = false
-  /** `performance.now()` timestamp of the most recent
-   *  `bridge.hideTooltip()`. Drives the hover-handoff fast path. */
+  /** `performance.now()` of the most recent hide; drives the handoff fast path. */
   let lastHiddenAt = -Infinity
 
   function tooltipAttrs(text: string, ariaLabel?: string): Record<string, string> {
@@ -134,15 +107,11 @@ export function useTitleBarTooltip(opts: UseTitleBarTooltipOpts): TitleBarToolti
       return
     }
     if (found.text === activeTooltipText) {
-      // Same trigger as before — no work needed. (Either we're still
-      // waiting on the show timer, or the tooltip is already visible;
-      // either way we don't reset state mid-hover.)
+      // Same trigger — don't reset state mid-hover.
       return
     }
-    // Different (or first) tooltipped target. Hide any in-flight tooltip
-    // and queue the new one. If we were just showing a tooltip moments
-    // ago (hover-handoff), skip the show delay so scanning across the
-    // title bar feels instant — matches native macOS behaviour.
+    // New target: hide any in-flight tooltip and queue the new one, skipping the
+    // show delay on a hover-handoff.
     const handoff =
       isTooltipVisible || performance.now() - lastHiddenAt < TOOLTIP_HANDOFF_WINDOW_MS
     hideTip()

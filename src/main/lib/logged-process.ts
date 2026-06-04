@@ -7,10 +7,7 @@ export interface LoggedProcessResult {
   signal: string | null
 }
 
-/**
- * Spawn a process with stdout/stderr streaming to a callback, capturing
- * full output for error reporting.
- */
+/** Spawn a process, streaming stdout/stderr to a callback while capturing full output. */
 export function runLoggedProcess(
   cmd: string,
   args: string[],
@@ -49,10 +46,7 @@ export function runLoggedProcess(
   })
 }
 
-/**
- * Format a process failure into a user-facing error message.
- * Uses the last 20 lines of stderr/stdout as detail.
- */
+/** Format a process failure into a user-facing error message (last 20 lines of stderr/stdout). */
 export function formatProcessError(
   prefix: string,
   result: LoggedProcessResult,

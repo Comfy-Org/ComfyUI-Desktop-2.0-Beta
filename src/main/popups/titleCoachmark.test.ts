@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
-// titleCoachmark imports `ipcMain` at module load; the pure helpers under
-// test never touch it, but the module needs electron present to import.
+// Module loads electron at import even though the pure helpers under test never use it.
 vi.mock('electron', () => ({
   app: {
     isPackaged: false,
@@ -38,7 +37,6 @@ describe('buildCoachmarkConfig', () => {
     expect(cfg.body).toBe('Click here to switch instances.')
     expect(cfg.dismissLabel).toBe('Got it')
     expect(cfg.configToken).toBe('cm-1')
-    // Brand-accented theme distinct from the neutral hover tooltip.
     expect(cfg.theme.accent).toMatch(/^#/)
   })
 })
@@ -52,13 +50,10 @@ describe('positionCoachmark', () => {
       bubble: { width: 260, height: 72 },
       parentBounds
     })
-    // Card horizontally centered on the pill center (600), view grown by
-    // the shadow gutter on each side.
     const pillCenter = 600
     const viewWidth = 260 + COACHMARK_SHADOW_GUTTER * 2
     expect(bounds.width).toBe(viewWidth)
     expect(bounds.x).toBe(Math.round(pillCenter - viewWidth / 2))
-    // Below the pill bottom plus the gap, lifted by the top gutter.
     expect(bounds.y).toBe(Math.round(36 + COACHMARK_VERTICAL_GAP - COACHMARK_SHADOW_GUTTER / 2))
   })
 

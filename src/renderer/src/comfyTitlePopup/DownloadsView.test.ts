@@ -51,14 +51,9 @@ function installMockBridge(platform: string = 'darwin'): MockBridgeState {
 const EMPTY_STATE: MockDownloadsState = { active: [], recent: [] }
 
 /**
- * The redesigned popover collapses the per-row action button cluster
- * (Pause / Resume / Cancel / Show-in-folder) into:
- *  - a single right-edge X (cancel for active rows; dismiss for terminal)
- *  - a row-click affordance that opens the save location on completed rows
- *
- * Pause / Resume are dropped from the UI (the bridge handlers stay in
- * the component, commented out — redesign skips them, easy to restore).
- * Tests reflect the new affordances; the bridge IPC shapes are unchanged.
+ * The redesigned popover collapses per-row actions into a right-edge X
+ * (cancel/dismiss) plus a row-click that opens the save location on completed
+ * rows. Pause/Resume are dropped from the UI. Bridge IPC shapes are unchanged.
  */
 
 describe('comfyTitlePopup/DownloadsView', () => {
@@ -104,9 +99,7 @@ describe('comfyTitlePopup/DownloadsView', () => {
     expect(item.find('.downloads-item-name').text()).toBe(
       'models/checkpoints / a.bin',
     )
-    // Drives the "zero reason to prefer the browser" requirement —
-    // for a 40 GB checkpoint download the user has to see all four
-    // facets without leaving the tray.
+    // All four facets (size / percent / speed / ETA) show without leaving the tray.
     const sub = item.find('.downloads-item-sub').text()
     expect(sub).toContain('4.0 MB / 9.5 MB')
     expect(sub).toContain('42%')
@@ -136,8 +129,6 @@ describe('comfyTitlePopup/DownloadsView', () => {
     const item = wrapper.find('.downloads-item.is-paused')
     expect(item.exists()).toBe(true)
     const sub = item.find('.downloads-item-sub').text()
-    // Prefix is the i18n "Pause" label; suffix is the shared
-    // statusLine() output for paused state ("Paused at 10%").
     expect(sub).toContain('Pause')
     expect(sub).toContain('10%')
   })
@@ -278,9 +269,7 @@ describe('comfyTitlePopup/DownloadsView', () => {
     expect(wrapper.find('.downloads-link').text()).toBe('View All Downloads')
     await wrapper.find('.downloads-link').trigger('click')
     expect(bridgeState.openDownloadsModalCalls).toBe(1)
-    // The old `openSettingsTab('downloads')` route is no longer the
-    // primary destination — the new modal is. Settings tab is still
-    // reachable directly through the Settings entry-point.
+    // The modal, not `openSettingsTab('downloads')`, is now the destination.
     expect(bridgeState.openSettingsTabCalls).toEqual([])
   })
 })

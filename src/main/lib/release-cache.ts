@@ -1,12 +1,7 @@
 /**
- * Shared release info cache.
- *
- * Stores the latest release metadata (latestTag, releaseName, releaseNotes, etc.)
- * keyed by remote identity (repo + channel), so multiple installations pointing at
- * the same upstream share a single check result.
- *
- * The cache is kept in memory for fast synchronous reads (getDetailSections,
- * getStatusTag) and persisted to release-cache.json asynchronously.
+ * Shared release-info cache keyed by remote identity (repo + channel), so installations
+ * pointing at the same upstream share one check result. In-memory for fast synchronous reads,
+ * persisted to release-cache.json.
  */
 
 import path from 'path'
@@ -30,13 +25,9 @@ export interface ReleaseCacheEntry {
   commitSha?: string
   baseTag?: string
   commitsAhead?: number
-  /** Wall-clock timestamp of the most recent `enrichCommitsAhead` settle
-   *  (success or failure) for this entry. Lets the renderer drop the
-   *  "Computing commits ahead…" hint as soon as enrichment gives up
-   *  instead of waiting for the safety-net timer, and prevents the hint
-   *  from re-appearing on every picker reopen when the underlying state
-   *  is structurally broken (e.g. no `baseTag` recoverable). Cleared
-   *  implicitly whenever `buildCacheEntry` writes a fresh entry. */
+  /** Timestamp of the most recent `enrichCommitsAhead` settle (success or failure), so the
+   *  renderer can drop the "Computing commits ahead…" hint when enrichment gives up and not
+   *  re-show it on every picker reopen for a structurally-broken entry. */
   lastEnrichAttemptAt?: number
   [key: string]: unknown
 }
@@ -66,11 +57,8 @@ function _persist(): void {
   }
 }
 
-/**
- * Test-only: force every cached entry's `checkedAt` to `maxCheckedAt` so the
- * renderer-side stale-cache watcher fires on next picker open. Only invoked
- * via `__e2e.ageReleaseCache` when `process.env['E2E'] === '1'`.
- */
+/** Test-only: force every entry's `checkedAt` to `maxCheckedAt` so the stale-cache watcher
+ *  fires on next picker open. Called only via `__e2e.ageReleaseCache`. */
 export function _test_ageEntries(maxCheckedAt: number): void {
   _ensureLoaded()
   for (const key of Object.keys(_entries)) {
@@ -80,47 +68,32 @@ export function _test_ageEntries(maxCheckedAt: number): void {
   _persist()
 }
 
-/**
- * Build a cache key from a remote identity.
- * Today: "github:Comfy-Org/ComfyUI:stable"
- * Future: could include branch/ref overrides per installation.
- */
+/** Build a cache key, e.g. "github:Comfy-Org/ComfyUI:stable". */
 export function makeKey(repo: string, channel: string): string {
   return `github:${repo}:${channel}`
 }
 
-/**
- * Get cached release info (synchronous — reads from memory).
- * Returns the entry object or null.
- */
+/** Synchronous cached read from memory; null if absent. */
 export function get(repo: string, channel: string): ReleaseCacheEntry | null {
   _ensureLoaded()
   return _entries[makeKey(repo, channel)] ?? null
 }
 
-/**
- * Store release info and persist to disk.
- */
 export function set(repo: string, channel: string, entry: ReleaseCacheEntry): void {
   _ensureLoaded()
   _entries[makeKey(repo, channel)] = entry
   _persist()
 }
 
-// Single-flight deduplication: key -> Promise
 const _inFlight: Map<string, Promise<ReleaseCacheEntry | null>> = new Map()
 
-// Minimum interval between forced refetches for the same key (in ms).
-// Prevents spamming the GitHub API and triggering secondary rate limits.
+// Min interval between forced refetches for the same key, to avoid GitHub rate limits.
 const MIN_RECHECK_INTERVAL = 10_000
 
 /**
  * Fetch release info, deduplicating concurrent calls for the same key.
- * @param repo - e.g. "Comfy-Org/ComfyUI"
- * @param channel - "stable" or "latest"
- * @param fetchFn - async () => entry (calls the GitHub API)
+ * @param fetchFn - calls the GitHub API
  * @param force - bypass cache
- * @returns the release entry
  */
 export async function getOrFetch(
   repo: string,
@@ -138,7 +111,6 @@ export async function getOrFetch(
     return cached
   }
 
-  // Single-flight: if another call is already fetching this key, wait for it
   if (_inFlight.has(key)) {
     return _inFlight.get(key)!
   }
@@ -162,10 +134,7 @@ export async function getOrFetch(
   return promise
 }
 
-/**
- * Build effective update info by merging the shared release cache (remote info)
- * with per-installation state (installedTag).
- */
+/** Merge the shared release cache (remote info) with per-installation state (installedTag). */
 export function getEffectiveInfo(
   repo: string,
   channel: string,
@@ -186,10 +155,7 @@ export function getEffectiveInfo(
   return { ...cached, installedTag }
 }
 
-/**
- * Build a cache entry from the raw release object returned by fetchLatestRelease.
- * Shared by all callers (auto-check, manual check-update, cross-channel prefetch).
- */
+/** Build a cache entry from the raw release object returned by fetchLatestRelease. */
 export function buildCacheEntry(release: Record<string, unknown>): ReleaseCacheEntry {
   const commitSha = release.commitSha as string | undefined
   const baseTag = release.baseTag as string | undefined
@@ -210,10 +176,7 @@ export function buildCacheEntry(release: Record<string, unknown>): ReleaseCacheE
   }
 }
 
-/**
- * Shared check-update action handler. Fetches the latest release info into the
- * cache and persists the per-installation installedTag.
- */
+/** Shared check-update handler: fetch latest release into the cache, persist installedTag. */
 export async function checkForUpdate(
   repo: string,
   channel: string,
@@ -251,29 +214,16 @@ export async function checkForUpdate(
   return { ok: true, navigate: 'detail' }
 }
 
-/**
- * Inflight dedupe for `enrichCommitsAhead`. Keyed by `repo::comfyuiDir` so
- * rapid install switches in the picker can't fan out N parallel `git fetch`
- * processes against the same checkout — concurrent callers share the same
- * promise. Cleared on settle.
- */
+/** Inflight dedupe for `enrichCommitsAhead`, keyed by `repo::comfyuiDir` so rapid picker
+ *  switches don't fan out N parallel `git fetch` against one checkout. Cleared on settle. */
 const _enrichInflight = new Map<string, Promise<void>>()
 
-/** Minimum interval between *failed* enrichment retries for the same
- *  cache entry.  The inflight dedupe already coalesces concurrent
- *  callers, but each picker reopen and each auto-check tick fires a
- *  fresh `enrichCommitsAhead` call after the previous one has settled.
- *  Without this throttle a structurally broken entry (no recoverable
- *  `baseTag`, persistent rev-list failure) would re-run the full
- *  recovery + fetch chain on every reopen for no gain.  30s is short
- *  enough to recover quickly when the user comes back online, long
- *  enough that rapid picker toggling doesn't spam git. */
+/** Min interval between FAILED enrichment retries for the same entry, so a structurally
+ *  broken entry doesn't re-run the full recovery+fetch chain on every picker reopen. */
 const ENRICH_RETRY_THROTTLE_MS = 30_000
 
-/** Listeners notified when `enrichCommitsAhead` actually writes a new
- *  `commitsAhead` value into the cache (not on no-op short-circuits). The
- *  IPC layer wires a broadcast here so renderers can refresh affected
- *  sections in place — see `wireReleaseCacheBroadcast` callers. */
+/** Listeners notified when `enrichCommitsAhead` writes a new `commitsAhead` (not on no-op
+ *  short-circuits), so renderers can refresh affected sections in place. */
 const _enrichedListeners = new Set<(repo: string) => void>()
 
 export function onEnriched(cb: (repo: string) => void): () => void {
@@ -282,15 +232,9 @@ export function onEnriched(cb: (repo: string) => void): () => void {
 }
 
 /**
- * Enrich the "latest" channel cache entry with locally-computed commitsAhead.
- * ls-remote cannot compute this, so we resolve it from a local git repo.
- * No-op if commitsAhead is already set or the entry lacks the required fields.
- * Concurrent calls for the same `(repo, comfyuiDir)` share one in-flight promise.
- *
- * Always stamps `lastEnrichAttemptAt` and fires `onEnriched` on settle —
- * success or failure — so the renderer can drop the "Computing commits
- * ahead…" hint as soon as we give up, rather than waiting for the
- * safety-net timer.
+ * Enrich the "latest" channel entry with locally-computed commitsAhead (ls-remote can't
+ * compute this). No-op if already set or the entry lacks required fields. Always stamps
+ * `lastEnrichAttemptAt` and fires `onEnriched` on settle so the renderer can drop its spinner.
  */
 export async function enrichCommitsAhead(repo: string, comfyuiDir: string): Promise<void> {
   const key = `${repo}::${comfyuiDir}`
@@ -301,32 +245,21 @@ export async function enrichCommitsAhead(repo: string, comfyuiDir: string): Prom
     const entry = get(repo, 'latest')
     if (!entry?.commitSha || entry.commitsAhead !== undefined) return
     if (!fs.existsSync(path.join(comfyuiDir, '.git'))) return
-    // Retry throttle: a recent failed attempt (`lastEnrichAttemptAt`
-    // set but `commitsAhead` still undefined) means the recovery /
-    // count chain just ran and produced nothing.  Don't re-run it on
-    // every picker reopen — the underlying state is unlikely to change
-    // in the next few seconds, and we already broadcast a settle so
-    // the renderer dropped its spinner.
+    // Skip if a recent attempt just failed; the state won't change in the next few seconds
+    // and the renderer already dropped its spinner on the prior settle.
     if (entry.lastEnrichAttemptAt !== undefined
       && Date.now() - entry.lastEnrichAttemptAt < ENRICH_RETRY_THROTTLE_MS) return
 
-    // Recover a missing baseTag before bailing.  When
-    // `fetchLatestRelease('latest')` runs while `getLatestStableTag`
-    // is failing (offline / mirror flap / pygit2 not yet configured
-    // at boot), the cached entry is persisted with `commitSha` but no
-    // `baseTag` — and without it the rev-list range below has no
-    // anchor to count from.  Try the network tag refresh first; if
-    // that still fails, derive a tag from the local clone so the
-    // user isn't stranded with "Computing commits ahead…" forever.
+    // Recover a missing baseTag (entries persisted with commitSha but no baseTag when
+    // getLatestStableTag was failing) since the rev-list range needs an anchor. Try a network
+    // tag refresh, then a local-clone derivation, so the user isn't stranded forever.
     let baseTag = entry.baseTag
     if (!baseTag) {
       const refreshed = await getLatestStableTag({ refresh: true }).catch(() => null)
       if (refreshed) baseTag = refreshed
     }
     if (!baseTag) {
-      // Local fallback: ensure tags are present, then describe the
-      // target commit's nearest ancestor tag.  Cheap when tags are
-      // already there, single fetch when they aren't.
+      // Local fallback: ensure tags exist, then describe the commit's nearest ancestor tag.
       await fetchTags(comfyuiDir)
       const local = await findNearestTag(comfyuiDir, entry.commitSha).catch(() => undefined)
       if (local) baseTag = local
@@ -336,9 +269,7 @@ export async function enrichCommitsAhead(repo: string, comfyuiDir: string): Prom
       return
     }
 
-    // Persist the recovered baseTag so future enrichments (and the
-    // channel-cards `enriching` guard) see the actual structural state
-    // instead of having to recover it again.
+    // Persist the recovered baseTag so future enrichments don't recover it again.
     if (entry.baseTag !== baseTag) {
       const current = get(repo, 'latest')
       if (current && current.commitSha === entry.commitSha) {
@@ -346,16 +277,12 @@ export async function enrichCommitsAhead(repo: string, comfyuiDir: string): Prom
       }
     }
 
-    // Fast path: when the base tag and target commit are already in the
-    // local clone (the common case for an up-to-date install), count
-    // locally and skip the network entirely. Only fall back to the slow
-    // `git fetch --unshallow` + single-commit fetch when the objects are
-    // missing (shallow clone, or master has advanced past what we have).
+    // Fast path: count locally when base tag + target commit are already present (common for
+    // up-to-date installs); fall back to a fetch only when the objects are missing.
     let ahead = await countCommitsAhead(comfyuiDir, baseTag, entry.commitSha)
     if (ahead === undefined) {
       await fetchTags(comfyuiDir)
-      // The commit SHA may not exist locally (e.g. Stable install on a tag).
-      // Fetch it explicitly so rev-list can resolve the range.
+      // The commit SHA may not exist locally; fetch it so rev-list can resolve the range.
       await fetchCommitSha(comfyuiDir, entry.commitSha)
       ahead = await countCommitsAhead(comfyuiDir, baseTag, entry.commitSha)
     }
@@ -382,10 +309,8 @@ export async function enrichCommitsAhead(repo: string, comfyuiDir: string): Prom
   return run
 }
 
-/** Stamp a failed enrichment attempt so the renderer can stop showing
- *  the spinner.  Skips the write (and broadcast) if the cache entry has
- *  been swapped out from under us — that means another flow already
- *  refreshed and any state we'd write is stale. */
+/** Stamp a failed enrichment so the renderer drops the spinner. Skips the write if the entry
+ *  was swapped out from under us (another flow refreshed; our state would be stale). */
 function _stampEnrichAttempt(repo: string, commitSha: string): void {
   const current = get(repo, 'latest')
   if (!current || current.commitSha !== commitSha) return
@@ -398,28 +323,22 @@ function _notifyEnriched(repo: string): void {
     try {
       cb(repo)
     } catch (err) {
-      // Listener errors must not break enrichment (the cache is already
-      // updated at this point), but log so a misbehaving subscriber is
-      // visible during development.
+      // Listener errors must not break enrichment (cache is already updated); log them.
       console.warn('[release-cache] onEnriched listener threw:', err)
     }
   }
 }
 
-/**
- * Determine if an update is available for the given channel, using local data only.
- * Handles cross-channel switches (e.g. last update was on "latest" but viewing "stable").
- */
+/** Whether an update is available for the channel, using local data only. Handles
+ *  cross-channel switches (e.g. last update on "latest" but viewing "stable"). */
 export function isUpdateAvailable(
   installation: Record<string, unknown>,
   channel: string,
   info: ReleaseCacheEntry | null
 ): boolean {
   if (!info || !info.latestTag) return false
-  // Structural check: if we have comfyVersion and are viewing stable,
-  // any commits ahead means the installed version is newer than stable.
-  // When commitsAhead is undefined (API failure), we know the commit differs
-  // from the tag, so conservatively report an update is available.
+  // On stable: any commits ahead means installed is newer than stable. When commitsAhead is
+  // undefined (API failure) but the commit differs, conservatively report an update.
   const cv = installation.comfyVersion as ComfyVersion | undefined
   if (cv && channel === 'stable' && cv.commitsAhead !== undefined && cv.commitsAhead > 0) return true
   if (cv && channel === 'stable' && cv.commitsAhead === undefined && cv.baseTag) return true
@@ -431,7 +350,6 @@ export function isUpdateAvailable(
     | undefined
   const lastUpdateChannel = lastRollback?.channel as string | undefined
   if (lastUpdateChannel && lastUpdateChannel !== channel) {
-    // Structural: compare commit SHA against latest
     if (cv && info.commitSha && cv.commit === info.commitSha) return false
     const postHead = (lastRollback?.postUpdateHead as string | undefined) || ''
     const shortHead = postHead.slice(0, 7)
@@ -440,12 +358,12 @@ export function isUpdateAvailable(
     if (shortHead && (shortHead === info.latestTag || info.releaseName?.includes(shortHead))) return false
     return true
   }
-  // Direct commit SHA comparison — most reliable for the "latest" channel
-  // where latestTag is a short SHA and releaseName depends on enrichment timing.
+  // Most reliable for "latest", where latestTag is a short SHA and releaseName depends on
+  // enrichment timing.
   if (cv && info.commitSha && cv.commit === info.commitSha) return false
 
-  // Raw tag/sha mismatch (also check releaseName since the latest channel uses a SHA as latestTag).
-  // Skip if installedTag is 'unknown' (brand-new install before first update).
+  // Raw tag/sha mismatch (releaseName too, since latest uses a SHA as latestTag). Skip when
+  // installedTag is 'unknown' (brand-new install before first update).
   if (info.installedTag && info.installedTag !== 'unknown' && info.installedTag !== info.latestTag && info.installedTag !== info.releaseName) return true
   return false
 }

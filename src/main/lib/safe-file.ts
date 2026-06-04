@@ -11,15 +11,8 @@
 import fs from 'fs'
 import path from 'path'
 
-// ---------------------------------------------------------------------------
-// Synchronous
-// ---------------------------------------------------------------------------
-
-/**
- * Atomically write `data` to `filePath`.
- * When `backup` is true (default for important state), the current file is
- * copied to `filePath.bak` before being replaced.
- */
+/** Atomically write `data` to `filePath`. With `backup`, copy the current file to
+ *  `filePath.bak` before replacing. */
 export function writeFileSafe(filePath: string, data: string, backup: boolean = false): void {
   const tmpPath = filePath + '.tmp'
   const bakPath = filePath + '.bak'
@@ -36,11 +29,8 @@ export function writeFileSafe(filePath: string, data: string, backup: boolean = 
   }
 }
 
-/**
- * Read `filePath`, falling back to `filePath.bak` if the primary is missing
- * or unreadable. If the backup is used, it is automatically restored as the
- * primary file.
- */
+/** Read `filePath`, falling back to (and restoring) `filePath.bak` if the primary is
+ *  missing or unreadable. */
 export function readFileSafe(filePath: string): string | null {
   const bakPath = filePath + '.bak'
   try {
@@ -58,10 +48,6 @@ export function readFileSafe(filePath: string): string | null {
 
   return null
 }
-
-// ---------------------------------------------------------------------------
-// Async
-// ---------------------------------------------------------------------------
 
 export async function writeFileSafeAsync(filePath: string, data: string, backup: boolean = false): Promise<void> {
   const tmpPath = filePath + '.tmp'

@@ -2,12 +2,8 @@ import { describe, it, expect } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import InfoTooltip from './InfoTooltip.vue'
 
-/**
- * `InfoTooltip` composes the shared `Tooltip` primitive around the
- * lucide `CircleHelp` icon. These tests pin the trigger surface +
- * forwarding behavior — primitive-level placement / flip / arrow
- * concerns belong in `ui/Tooltip.test.ts`.
- */
+// Pins the trigger surface + forwarding; placement/flip/arrow concerns
+// belong in ui/Tooltip.test.ts.
 describe('InfoTooltip', () => {
   it('renders the icon', () => {
     const wrapper = mount(InfoTooltip, { props: { text: 'tip' } })
@@ -58,8 +54,7 @@ describe('InfoTooltip', () => {
     await wrapper.find('.tooltip-wrap').trigger('mouseenter')
     await flushPromises()
     const bubble = document.querySelector('.tooltip-bubble')
-    // jsdom returns zero-sized rects, so the placement resolver may flip
-    // to whichever axis has more room — assert one of the valid sides.
+    // jsdom returns zero-sized rects, so the resolver may flip; accept any side.
     expect(bubble?.getAttribute('data-side')).toMatch(/^(top|bottom|left|right)$/)
     wrapper.unmount()
   })

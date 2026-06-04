@@ -1,23 +1,6 @@
-/**
- * Dev-only keyboard shortcuts for driving title-bar pill state without
- * a real updater event or a real install-update probe. Registered only
- * when `!app.isPackaged` (see `index.ts whenReady`).
- *
- * Mirrors the state-mutation helpers `e2eHooks.ts` already wraps for
- * Playwright, but bound to user-facing accelerators so the redesigned
- * pill chrome can be inspected by eye on a running dev build.
- *
- *   - `Ctrl/Cmd+Alt+U` cycles the app-update pill through
- *     `null → available → downloading → ready → null`.
- *   - `Ctrl/Cmd+Alt+I` toggles the install-update override (global) on
- *     and off, then re-broadcasts to every install-backed host so the
- *     pill repaints immediately.
- *
- * Uses `globalShortcut` so the accelerator fires regardless of which
- * window has focus inside the launcher — only registered on dev
- * builds, so the system-wide registration is bounded to developer
- * machines that intentionally run unpackaged.
- */
+// Dev-only (!app.isPackaged) keyboard shortcuts for driving title-bar pill
+// state by eye: Cmd+Alt+U cycles the app-update pill, Cmd+Alt+I toggles the
+// install-update override. globalShortcut fires regardless of focused window.
 import { globalShortcut, type WebContentsView } from 'electron'
 import {
   _test_setUpdateState,
@@ -35,11 +18,7 @@ const INSTALL_UPDATE_ACCELERATOR = 'CommandOrControl+Alt+I'
 
 const DEV_FAKE_VERSION = '99.0.0-dev'
 
-/**
- * Pure cycle for the app-update pill — exported for unit tests so the
- * sequence stays pinned even if the accelerator hookup is refactored.
- * Mirrors the four states `useUpdatePills` knows how to render.
- */
+// Pure cycle for the app-update pill, exported so unit tests pin the sequence.
 export function cycleAppUpdateState(current: AppUpdateState): AppUpdateState {
   switch (current.kind) {
     case null:
@@ -54,9 +33,7 @@ export function cycleAppUpdateState(current: AppUpdateState): AppUpdateState {
 }
 
 interface DevShortcutsDeps {
-  /** Same install-update probe `host/createHostWindow.ts` calls when a
-   *  title-bar mounts. Passed in as a dependency to avoid pulling this
-   *  module into the `main/index.ts` import graph. */
+  // Injected to avoid pulling this module into the main/index.ts import graph.
   computeInstallUpdateAvailable: (
     installationId: string,
   ) => Promise<{ available: boolean; version?: string }>

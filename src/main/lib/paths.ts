@@ -53,11 +53,8 @@ export function defaultInstallDir(): string {
   return path.join(app.getPath("home"), "ComfyUI-Installs");
 }
 
-/**
- * Migrate a file or directory from an old location to a new one.
- * Only migrates if the old path exists and the new path does not.
- * Uses copy+delete instead of rename to handle cross-filesystem moves.
- */
+/** Migrate a file/dir to a new location (only if old exists and new doesn't). Uses
+ *  copy+delete, not rename, to handle cross-filesystem moves. */
 function migrateIfNeeded(oldPath: string, newPath: string): void {
   try {
     if (fs.existsSync(oldPath) && !fs.existsSync(newPath)) {
@@ -75,46 +72,36 @@ function migrateIfNeeded(oldPath: string, newPath: string): void {
   }
 }
 
-/**
- * Run all XDG migrations on Linux. Call once at startup.
- * Moves files from the old ~/.config/comfyui-desktop-2 location to proper XDG dirs.
- */
+/** Run all XDG migrations on Linux, once at startup, moving files from the old
+ *  ~/.config/comfyui-desktop-2 location to proper XDG dirs. */
 export function migrateXdgPaths(): void {
   if (!isLinux) return;
   const oldBase = app.getPath("userData"); // ~/.config/comfyui-desktop-2
 
-  // Cache: download-cache → XDG_CACHE_HOME
   migrateIfNeeded(
     path.join(oldBase, "download-cache"),
     path.join(cacheDir(), "download-cache")
   );
 
-  // Data: installations.json → XDG_DATA_HOME
   migrateIfNeeded(
     path.join(oldBase, "installations.json"),
     path.join(dataDir(), "installations.json")
   );
 
-  // Data: shared_model_paths.yaml → XDG_DATA_HOME
   migrateIfNeeded(
     path.join(oldBase, "shared_model_paths.yaml"),
     path.join(dataDir(), "shared_model_paths.yaml")
   );
 
-  // State: port-locks → XDG_STATE_HOME
   migrateIfNeeded(
     path.join(oldBase, "port-locks"),
     path.join(stateDir(), "port-locks")
   );
 
-  // Fix stale cacheDir in settings.json if it still points to the old default
   migrateCacheDirSetting(oldBase);
 }
 
-/**
- * If settings.json has a cacheDir pointing to the old default location,
- * remove it so the new XDG default takes effect.
- */
+/** Drop a settings.json cacheDir that still points at the old default so the XDG default applies. */
 function migrateCacheDirSetting(oldBase: string): void {
   const settingsPath = path.join(configDir(), "settings.json");
   try {
@@ -134,18 +121,12 @@ export function homeDir(): string {
   return app.getPath("home");
 }
 
-/**
- * Sanitize a name for use as a directory component by replacing
- * filesystem-unsafe characters with underscores.
- */
+/** Replace filesystem-unsafe characters with underscores for a directory component. */
 export function sanitizeDirName(name: string): string {
   return name.replace(/[<>:"/\\|?*]+/g, '_').trim() || 'ComfyUI'
 }
 
-/**
- * Allocate a unique directory path under `parentDir` by appending
- * a numeric suffix when a path already exists on disk.
- */
+/** Allocate a unique dir under `parentDir`, appending a numeric suffix on collision. */
 export function allocateUniqueDir(parentDir: string, dirName: string): string {
   let candidate = path.join(parentDir, dirName)
   let suffix = 1

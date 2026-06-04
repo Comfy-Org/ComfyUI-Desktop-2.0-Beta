@@ -24,7 +24,6 @@ const hasChoices = computed(() => !!props.arg.choices && props.arg.choices.lengt
 
 <template>
   <div class="args-row">
-    <!-- Boolean toggle -->
     <template v-if="props.arg.type === 'boolean'">
       <label class="args-check-row">
         <input type="checkbox" :checked="props.active" @change="emit('toggleBoolean', props.arg.name, props.arg)">
@@ -33,7 +32,6 @@ const hasChoices = computed(() => !!props.arg.choices && props.arg.choices.lengt
       </label>
     </template>
 
-    <!-- Optional-value: toggle + optional text inline -->
     <template v-else-if="props.arg.type === 'optional-value'">
       <div class="args-inline-row">
         <label class="args-check-row">
@@ -64,7 +62,6 @@ const hasChoices = computed(() => !!props.arg.choices && props.arg.choices.lengt
       </div>
     </template>
 
-    <!-- Value type -->
     <template v-else>
       <div class="args-inline-row">
         <span class="args-name">{{ props.arg.flag }}</span>

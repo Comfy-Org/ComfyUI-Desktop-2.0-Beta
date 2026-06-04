@@ -4,15 +4,9 @@ import { createI18n } from 'vue-i18n'
 import ArgsBuilderPage from './ArgsBuilderPage.vue'
 import type { ComfyArgDef } from '../../types/ipc'
 
-/**
- * Pins the deselectable "Choose one" contract that regressed when the
- * helper was rebuilt with native radio inputs (radios can't deselect,
- * forcing users to hand-edit the raw textbox to clear an exclusive
- * group). The cluster now renders as a BaseSelect with a synthetic
- * "None" option — these tests cover the round-trip the radio version
- * couldn't: pick → clear → re-pick, with siblings cleaned up each time.
- */
-
+// Pins the deselectable "Choose one" contract: the exclusive group
+// renders as a BaseSelect with a synthetic "None" option so it can clear,
+// covering pick → clear → re-pick with siblings cleaned up each time.
 const i18n = createI18n({
   legacy: false,
   locale: 'en',
@@ -57,10 +51,8 @@ const SCHEMA: ComfyArgDef[] = [
 ]
 
 function stubElectronApi(): void {
-  // Attach to the real window so jsdom's removeEventListener / etc.
-  // stay intact — `vi.stubGlobal('window', ...)` swaps the whole object
-  // and breaks teardown for components that bind window listeners
-  // (BaseSelect listens for resize + scroll).
+  // Attach to the real window so jsdom listeners survive teardown
+  // (swapping the whole window object breaks BaseSelect's resize/scroll cleanup).
   ;(window as unknown as { api: unknown }).api = {
     getComfyArgs: vi.fn().mockResolvedValue({ args: SCHEMA }),
   }

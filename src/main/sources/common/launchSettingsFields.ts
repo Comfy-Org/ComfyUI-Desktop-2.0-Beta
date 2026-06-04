@@ -10,21 +10,10 @@ export interface LaunchSettingsOptions {
 }
 
 /**
- * Per-install storage toggles + per-install input/output path fields,
- * rendered in the picker's Storage tab next to the global model-directory
- * UI. Emitted by sources that participate in shared storage (desktop /
- * portable); git-source installs omit these entirely.
- *
- * Two independent toggles:
- *  - `useSharedModels` — gates `--extra-model-paths-config` injection.
- *    Defaults to `true`. Off is intentionally rare (the renderer surfaces
- *    an inline warning) because most users want their model library
- *    visible to every install.
- *  - `useSharedInputOutput` — gates `--input-directory` /
- *    `--output-directory` injection from the global shared dirs. When
- *    off, the per-install `inputDir` / `outputDir` fields below are used
- *    instead, defaulting to ComfyUI's own `<installPath>/{input,output}`
- *    when also unset.
+ * Per-install storage toggles + input/output path fields for the picker's Storage tab.
+ * `useSharedModels` gates `--extra-model-paths-config`; `useSharedInputOutput` gates
+ * `--input-directory` / `--output-directory`, falling back to the per-install fields
+ * below (then `<installPath>/{input,output}`) when off. Shared-storage sources only.
  */
 export function buildStorageFields(installation: InstallationRecord): Record<string, unknown>[] {
   const useSharedModels = (installation.useSharedModels as boolean | undefined) !== false
@@ -42,10 +31,8 @@ export function buildStorageFields(installation: InstallationRecord): Record<str
       editable: true, editType: 'boolean', tooltip: t('tooltips.useSharedInputOutput'),
       requiresRestart: true,
     },
-    // Per-install input/output paths — only meaningful when
-    // `useSharedInputOutput === false`. StoragePane.vue filters them
-    // out of the rendered field list while the toggle is on, so they
-    // don't clutter the common case.
+    // Per-install paths, only meaningful when `useSharedInputOutput === false`;
+    // StoragePane.vue hides them while the toggle is on.
     {
       id: 'inputDir', label: t('common.perInstallInputDir'),
       value: (installation.inputDir as string | undefined) ?? '',

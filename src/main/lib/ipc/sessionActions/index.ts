@@ -15,8 +15,7 @@ export { handleLaunch } from './launch'
 export { handleDelegateToSource } from './delegate'
 export { withAbortableSessionAction } from './withAbortable'
 
-/** Session-level action ids handled by `dispatchSessionAction` directly.
- *  Anything outside this set is delegated to the install's source plugin. */
+// Action ids handled directly here; anything else delegates to the source plugin.
 const SESSION_ACTION_IDS = [
   'remove',
   'rename',
@@ -37,10 +36,7 @@ function isSessionActionId(id: string): id is SessionActionId {
   return SESSION_ACTION_ID_SET.has(id)
 }
 
-/** Internal: session-only switch. Exhaustive over `SessionActionId` so
- *  adding a new id to the union produces a TS error here until a `case`
- *  is added. The outer `dispatchSessionAction` routes any non-session id
- *  to `handleDelegateToSource`. */
+// Exhaustive over SessionActionId so a new union member fails to compile here.
 function dispatchToSessionHandler(
   ctx: ActionContext,
   actionId: SessionActionId,
@@ -62,13 +58,8 @@ function dispatchToSessionHandler(
   }
 }
 
-/** Single dispatch point shared by the `run-action` IPC handler and the
- *  picker's `pickerRunBackgroundOp` path. Session-level action ids
- *  (`copy`, `copy-update`, `delete`, `release-update`, etc.) MUST land
- *  here rather than going straight to `handleDelegateToSource` — those
- *  ids live in the session-handler switch below, not in any individual
- *  source's `handleAction`. Source-specific ids (`update-comfyui`,
- *  `snapshot-restore`, …) fall through to the source. */
+// Single dispatch point for run-action and the picker's background-op path:
+// session ids route to the switch above, everything else to the source.
 export async function dispatchSessionAction(
   ctx: ActionContext,
   actionId: string,

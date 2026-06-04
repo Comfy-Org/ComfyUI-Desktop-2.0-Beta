@@ -19,9 +19,7 @@ const benefits = computed<string[]>(() => {
 const overlayRef = ref<HTMLDivElement | null>(null)
 const closeBtnRef = ref<HTMLButtonElement | null>(null)
 const mouseDownOnOverlay = ref(false)
-/** Element that owned focus before the modal opened. Captured on mount
- *  so close (any path: ESC, ✕, overlay click, parent v-if flip) can
- *  restore focus to the original trigger. */
+// Element focused before open; restored on close to return focus to the trigger.
 let returnFocusTo: HTMLElement | null = null
 
 function onOverlayMouseDown(e: MouseEvent) {

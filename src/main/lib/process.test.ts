@@ -59,7 +59,6 @@ describe('findAvailablePort', () => {
 
   it('skips a port that is actually in use', async () => {
     const base = 49500
-    // Bind a port to simulate it being in use
     const server = net.createServer()
     await new Promise<void>((resolve) => {
       server.listen(base, '127.0.0.1', () => resolve())

@@ -8,9 +8,7 @@ vi.mock('vue-i18n', () => ({
   }),
 }))
 
-// Wrap the session-state in a shallowRef so the `set*` helpers can
-// trigger the composable's computed properties on real session-store
-// mutations, not on incidental dep churn from the test.
+// A shallowRef version lets `set*` retrigger the composable's computeds.
 const sessionState = vi.hoisted(() => ({
   running: new Set<string>(),
   launching: new Set<string>(),
@@ -27,8 +25,7 @@ const sessionStoreVersion = shallowRef(0)
 vi.mock('../stores/sessionStore', () => ({
   useSessionStore: () => ({
     isRunning: (id: string) => {
-      // Touch the version ref so the computed re-runs when `set*`
-      // triggers it.
+      // Touch the version ref so the computed re-runs on `set*`.
       void sessionStoreVersion.value
       return sessionState.running.has(id)
     },
@@ -52,10 +49,6 @@ beforeEach(() => {
 })
 
 describe('useInstallCta', () => {
-  // Centralizes the primary-CTA decision so the picker rows and the
-  // settings footer can't drift apart (issue #755). Three states:
-  // Start / Restart (here) / Switch (elsewhere).
-
   it('returns Start when the install is not running anywhere', () => {
     const cta = useInstallCta(ref(installation('inst-A')), {
       activeInstallationId: ref<string | null>(null),
@@ -92,8 +85,6 @@ describe('useInstallCta', () => {
   })
 
   it('returns Switch for a running install on an install-less (dashboard) host', () => {
-    // Dashboard host has no active install, so any running install reads
-    // as "switch to its own window".
     sessionState.running.add('inst-A')
     const cta = useInstallCta(ref(installation('inst-A')), {
       activeInstallationId: ref<string | null>(null),
@@ -119,11 +110,7 @@ describe('useInstallCta', () => {
     const active = ref<string | null>('inst-A')
     const cta = useInstallCta(inst, { activeInstallationId: active })
     expect(cta.label.value).toBe('Restart')
-    // Real driver: a session-store push from main flips
-    // `sessionStore.isRunning(id)` to false. `setRunning` triggers the
-    // mocked store's version ref so the composable's `runningAnywhere`
-    // computed re-runs — this is what proves the composable subscribes
-    // to the session store, not to an incidental ref the test held.
+    // Proves the composable subscribes to the session store, not a test-held ref.
     setRunning(new Set<string>())
     expect(cta.label.value).toBe('Start')
   })
@@ -134,18 +121,13 @@ describe('useInstallCta', () => {
     const active = ref<string | null>('inst-A')
     const cta = useInstallCta(inst, { activeInstallationId: active })
     expect(cta.label.value).toBe('Restart')
-    // Host window detached → activeInstallationId clears, the running
-    // install now reads as "running elsewhere".
+    // Detaching clears activeInstallationId, so it now reads as running elsewhere.
     active.value = null
     expect(cta.label.value).toBe('Switch')
   })
 
-  // Launching state — the install has been attached to a window but
-  // `instance-started` has not yet fired (port not bound). The CTA
-  // must already read as "session attached" or the user sees a Start
-  // button in the very window the launch is happening in, and other
-  // windows see a Start button that the main-side single-attach guard
-  // would just reject.
+  // Launching counts as an attached session, so the launching window reads
+  // Restart (not Start) before `instance-started` fires.
   it('returns Restart when the install is LAUNCHING in this host window', () => {
     setLaunching(new Set<string>(['inst-A']))
     const cta = useInstallCta(ref(installation('inst-A')), {
@@ -170,9 +152,7 @@ describe('useInstallCta', () => {
   })
 
   it('keeps Restart across the launching → running handoff in the same window', () => {
-    // `instance-launching` arrives first → composable should already
-    // read Restart. Then `instance-started` arrives (launching clears,
-    // running sets) — same label, no flicker through Start.
+    // launching → running must stay Restart with no flicker through Start.
     setLaunching(new Set<string>(['inst-A']))
     const cta = useInstallCta(ref(installation('inst-A')), {
       activeInstallationId: ref<string | null>('inst-A'),

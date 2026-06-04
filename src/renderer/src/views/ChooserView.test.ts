@@ -47,10 +47,7 @@ interface MockApi {
   onInstallationsVersionsUpdated: ReturnType<typeof vi.fn>
   getSetting: ReturnType<typeof vi.fn>
   runAction: ReturnType<typeof vi.fn>
-  // progressStore subscribes to onErrorDetail at construction time, so
-  // the mock has to expose at least the listener-registration shape it
-  // expects. ChooserView reads progressStore.getProgressInfo() per
-  // tile to drive in-flight-progress affordances.
+  // progressStore subscribes to onErrorDetail at construction time.
   onErrorDetail: ReturnType<typeof vi.fn>
 }
 
@@ -124,9 +121,7 @@ describe('ChooserView', () => {
     const wrapper = mountChooser()
     await flushPromises()
     await wrapper.find('.chooser-tile-cloud').trigger('click')
-    // `pickInstall` is async (capacity gate awaits `confirmEntry`); the
-    // emit happens after the next tick, so drain pending microtasks
-    // before asserting.
+    // `pickInstall` is async (capacity gate), so drain microtasks first.
     await flushPromises()
     const events = wrapper.emitted('pick')
     expect(events).toBeDefined()
@@ -154,10 +149,7 @@ describe('ChooserView', () => {
   })
 
   it('emits pick when an install tile is single-clicked', async () => {
-    // Single-click on the tile body launches via pickInstall — the
-    // same gesture the Cloud tile uses, so behaviour can't drift
-    // between the two surfaces. Manage / Update / Migrate / Open
-    // Folder / Delete all live behind the kebab (⋮) menu.
+    // Tile-body click launches via pickInstall; the rest live behind the kebab.
     installMockApi([
       makeInstall({ id: 'a', name: 'Alpha', status: 'installed' }),
     ])
@@ -173,9 +165,8 @@ describe('ChooserView', () => {
   })
 
   it('does not render per-state launch CTAs — only the Close-instance CTA when running', async () => {
-    // Per-state CTAs (Play / Show Window / View Progress) collapsed
-    // into the body click handler; only a "Close instance" CTA
-    // remains, and only while the install is running / stopping.
+    // Per-state CTAs collapsed into the body click handler; only a
+    // "Close instance" CTA remains, and only while running / stopping.
     installMockApi([
       makeInstall({ id: 'a', name: 'Alpha', status: 'installed' }),
     ])
@@ -189,9 +180,7 @@ describe('ChooserView', () => {
   })
 
   it('does not emit pick when the kebab button is clicked — only the menu opens', async () => {
-    // The kebab (⋮) action menu sits in the top-right of every
-    // install tile. Its click handler stop-propagates so neither
-    // the tile-level Manage open nor the launch fast-path fires.
+    // The kebab's click handler stop-propagates so the tile click doesn't fire.
     installMockApi([
       makeInstall({ id: 'a', name: 'Alpha' }),
     ])
@@ -212,13 +201,8 @@ describe('ChooserView', () => {
     const wrapper = mountChooser()
     await flushPromises()
 
-    // Activate the Remote filter — only the remote install should remain
-    // among the install tiles. New Install stays visible; Cloud is hidden
-    // when filtering to a non-cloud category.
-    //
-    // The filter UI is hidden in the brand redesign but the underlying
-    // `activeFilter` state + visibleInstalls switch are preserved, so
-    // we drive it through the vm directly.
+    // The filter UI is hidden in the redesign but `activeFilter` is
+    // preserved, so drive it through the vm directly.
     ;(wrapper.vm as unknown as { activeFilter: string }).activeFilter = 'remote'
     await flushPromises()
 
@@ -231,10 +215,7 @@ describe('ChooserView', () => {
   })
 
   it('groups Legacy Desktop installs under the Local filter', async () => {
-    // The dedicated Desktop filter chip is gone; Legacy Desktop installs
-    // (sourceCategory === 'desktop') continue to surface alongside
-    // Standalone Local installs under the Local chip rather than vanishing
-    // from the filtered view.
+    // Legacy Desktop installs surface under the Local chip, not a dedicated one.
     installMockApi([
       makeInstall({ id: 'l', name: 'LocalThing', sourceCategory: 'local' }),
       makeInstall({ id: 'd', name: 'LegacyDesktopThing', sourceCategory: 'desktop' }),
@@ -258,17 +239,14 @@ describe('ChooserView', () => {
   })
 
   it('has no Desktop entry in the filter state', async () => {
-    // The category-filter UI is hidden in the brand redesign; this test
-    // is preserved as a guard on the underlying state model — Legacy
-    // Desktop installs map to the 'local' filter, not a dedicated key.
+    // Guards the state model: Legacy Desktop maps to 'local', not a dedicated key.
     installMockApi([])
     const wrapper = mountChooser()
     await flushPromises()
     type FilterKey = 'all' | 'local' | 'cloud' | 'remote'
     const validKeys: FilterKey[] = ['all', 'local', 'cloud', 'remote']
     expect(validKeys).not.toContain('desktop' as FilterKey)
-    // Also confirms activeFilter ref is reachable from vm so the other
-    // filter-driven tests in this file stay valid.
+    // Confirms activeFilter is reachable from vm for the other filter tests.
     expect((wrapper.vm as unknown as { activeFilter: FilterKey }).activeFilter).toBe('all')
   })
 })

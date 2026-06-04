@@ -12,18 +12,9 @@ interface AdoptConfirmOptions {
   confirmLabel?: string
 }
 
-/**
- * Composable for the Legacy Desktop → Desktop 2.0 in-place adoption
- * confirm. Adoption reuses the legacy data folder, Python env, and models
- * verbatim — there's no snapshot to preview, no variant to pick, and no
- * pip-sync toggle. The UI is therefore a plain confirm (modal or brand
- * takeover) listing what will be reused in place; main returns the
- * freshly-adopted installation id.
- *
- * Lives in its own composable so {@link useMigrateAction} stays a single
- * standalone-migration code path; {@link useMigrateAction.confirmMigration}
- * delegates here when the install is a legacy desktop source.
- */
+// Legacy Desktop → Desktop 2.0 in-place adoption confirm. A plain confirm
+// listing what will be reused; separate from useMigrateAction, which
+// delegates here for legacy desktop sources.
 export function useAdoptAction(opts?: { surface?: 'modal' | 'takeover' }) {
   const { t } = useI18n()
   const modal = useModal()
@@ -31,11 +22,8 @@ export function useAdoptAction(opts?: { surface?: 'modal' | 'takeover' }) {
   const sessionStore = useSessionStore()
   const surface: 'modal' | 'takeover' = opts?.surface ?? 'modal'
 
-  /**
-   * Run the adoption confirmation flow for a desktop-source installation.
-   * Returns `true` if the user confirmed, `false` if cancelled, and
-   * `null` if the action guard blocked entry (another op is in flight).
-   */
+  // Returns true if confirmed, false if cancelled, null if the action guard
+  // blocked entry (another op in flight).
   async function confirmAdoption(
     installation: Installation,
     confirm?: AdoptConfirmOptions,

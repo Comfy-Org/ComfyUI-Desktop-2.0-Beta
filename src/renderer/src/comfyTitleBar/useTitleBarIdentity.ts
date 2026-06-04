@@ -24,9 +24,7 @@ interface TitleBarIdentityBridge {
 
 interface UseTitleBarIdentityOpts {
   bridge: TitleBarIdentityBridge | undefined
-  /** Set on construction from `bridge.getInstallationId()`; the icon is
-   *  suppressed and the center pill reads as the static identity label
-   *  when this is true. */
+  /** When true, the icon is suppressed and the pill reads as a static label. */
   isInstallLess: Ref<boolean>
 }
 
@@ -39,56 +37,24 @@ interface TitleBarIdentityApi {
   firstUseMode: Ref<FirstUseMode>
   isPreviewMode: Ref<boolean>
   isConsentLockdown: ComputedRef<boolean>
-  /**
-   * True during first-use takeover steps (consent + post-consent). The
-   * pill, trailing pills, and feedback button are hidden; the waffle
-   * is hidden on `consent-lockdown` and surfaces only "Skip Onboarding"
-   * on `post-consent`.
-   */
+  /** True during first-use takeover; pill / trailing pills / feedback hidden. */
   isFirstUseLockdown: ComputedRef<boolean>
-  /**
-   * True while a ProgressModal takeover (install / update / migrate /
-   * snapshot / launch) is mounted. The user keeps full title-bar access
-   * so they can open the picker, switch windows, send feedback, or
-   * quit cleanly while the op runs. Drives no current chrome-hide
-   * gate — exposed so callers can react to the lockdown without
-   * grafting onto `isChromeLocked`.
-   */
+  /** True during a ProgressModal takeover; the title bar stays fully usable. */
   isLoadingLockdown: ComputedRef<boolean>
-  /**
-   * Legacy union flag — true for every non-`'none'` mode. Retained for
-   * the `is-consent-lockdown` CSS class hook on the title-bar root.
-   * New chrome gates should reach for `isFirstUseLockdown` /
-   * `isLoadingLockdown` so first-use lockdown (hide everything) stays
-   * distinct from loading lockdown (keep everything live).
-   */
+  /** Legacy union flag (true for any non-`'none'` mode), kept for the CSS class hook.
+   *  New gates should use `isFirstUseLockdown` / `isLoadingLockdown`. */
   isChromeLocked: ComputedRef<boolean>
   installTypeMeta: ComputedRef<InstallTypeMeta>
   installTypeLabel: ComputedRef<string>
   showInstallTypeIcon: ComputedRef<boolean>
-  /** True only on the bare dashboard (install-less host, not previewing
-   *  an install) — the one place the pill leads with the Comfy brand
-   *  mark. On an actual instance the pill leads with that install's
-   *  source/type icon instead, so the Comfy logo isn't repeated on
-   *  every window. */
+  /** True only on the bare dashboard, where the pill leads with the Comfy brand mark. */
   showBrandMark: ComputedRef<boolean>
   isLight: ComputedRef<boolean>
 }
 
 /**
- * Title-bar identity / theme / lifecycle state pushed by main.
- *
- * Owns:
- *   - Install identity (`installLabel`, `sourceCategory`) and the
- *     derived install-type icon metadata that sits next to the
- *     center pill.
- *   - Theme colours pushed by main on theme change; `isLight` is the
- *     luminance test that drives the lighter hover / chrome treatment.
- *   - Fullscreen flag (used by the host CSS).
- *   - First-use takeover step (`firstUseMode`); `isConsentLockdown`
- *     hides the waffle menu so the user has to either accept consent
- *     or close the window via OS chrome — there's no in-app affordance
- *     that drops them past the T&C without a recorded answer.
+ * Title-bar identity / theme / lifecycle state pushed by main: install identity + icon,
+ * theme colours (`isLight` drives lighter chrome), fullscreen, and first-use step.
  */
 export function useTitleBarIdentity(opts: UseTitleBarIdentityOpts): TitleBarIdentityApi {
   const { t } = useI18n()
@@ -99,12 +65,8 @@ export function useTitleBarIdentity(opts: UseTitleBarIdentityOpts): TitleBarIden
   const themeText = ref<string | null>(null)
   const isFullscreen = ref(false)
   const firstUseMode = ref<FirstUseMode>('none')
-  /** Mirrors `entry.previewMode` on main — `true` while an in-progress
-   *  install identity preview is active on a chooser host. The title
-   *  bar treats a preview as identity-equivalent to a real attach for
-   *  install-less-suppressed chrome (e.g. the install-type icon) so
-   *  the user sees the chosen install's identity, not the bare chooser
-   *  host, while the op runs. */
+  /** `true` during an install-identity preview on a chooser host; treated as
+   *  identity-equivalent to a real attach for install-less-suppressed chrome. */
   const isPreviewMode = ref(false)
 
   const isConsentLockdown = computed(() => firstUseMode.value === 'consent-lockdown')
@@ -118,11 +80,7 @@ export function useTitleBarIdentity(opts: UseTitleBarIdentityOpts): TitleBarIden
     t(installTypeMeta.value.labelKey, t('installType.unknown')),
   )
 
-  /** Suppressed on install-less host windows so the static identity
-   *  label reads bare — except when an install identity preview is
-   *  active, in which case the icon shows alongside the previewed
-   *  install name so the chrome reads as the install's identity for
-   *  the duration of the op. */
+  /** Suppressed on install-less hosts unless an install-identity preview is active. */
   const showInstallTypeIcon = computed(
     () =>
       (!opts.isInstallLess.value || isPreviewMode.value) && sourceCategory.value !== null,
@@ -130,12 +88,8 @@ export function useTitleBarIdentity(opts: UseTitleBarIdentityOpts): TitleBarIden
 
   const showBrandMark = computed(() => opts.isInstallLess.value && !isPreviewMode.value)
 
-  /** Body luminance test — drives is-light styling (lighter hover state).
-   *  Locked to `false` for now: the title bar surface is hard-coded to the
-   *  dark token (`--titlebar-bg: var(--neutral-800)`) in both themes, so the light
-   *  hover variants would produce light chrome on a dark bar.
-   *  TODO(titlebar-light-theme): restore the luminance branch below when
-   *  every title-bar surface is theme-aware. */
+  /** Locked to `false`: the title-bar surface is the dark token in both themes, so
+   *  light hover variants would produce light chrome on a dark bar. */
   const isLight = computed(() => false)
   // Original luminance test, kept inline for the restoration.
   // const isLight = computed(() => {

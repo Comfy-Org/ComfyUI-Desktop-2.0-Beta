@@ -5,7 +5,7 @@ type Unsubscribe = () => void
 export function useElectronApi() {
   const cleanups: Unsubscribe[] = []
 
-  // Only set up auto-cleanup if called within a component setup context
+  // Auto-cleanup only inside a component setup context.
   if (getCurrentInstance()) {
     onUnmounted(() => {
       for (const fn of cleanups) fn()
@@ -13,10 +13,7 @@ export function useElectronApi() {
     })
   }
 
-  /**
-   * Subscribe to an IPC event with automatic cleanup on component unmount.
-   * Usage: listen(api.onInstanceStarted, (data) => { ... })
-   */
+  // Subscribe to an IPC event with automatic cleanup on unmount.
   function listen<T>(
     subscribe: (callback: (data: T) => void) => Unsubscribe,
     callback: (data: T) => void

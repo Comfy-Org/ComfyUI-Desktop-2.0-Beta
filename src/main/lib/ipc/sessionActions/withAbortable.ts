@@ -2,18 +2,9 @@ import { _operationAborts, MSG_CANCELLED } from '../shared'
 import type { ActionContext, ActionResult } from './types'
 
 /**
- * Shared lifecycle wrapper for session-action handlers that need an
- * AbortController registered in `_operationAborts`. Centralizes the
- * preconditions, controller registration, map cleanup, and the
- * `aborted` → `{ cancelled: true, message: MSG_CANCELLED }` mapping
- * so the writer string and the renderer's match string can't drift.
- *
- * Inner handlers receive a live `AbortSignal` plus the original ctx
- * and just return their success `ActionResult` (or throw on failure).
- * Rollback that must run on any error (e.g. release-update install
- * cleanup, delete marker restore) lives inside the inner function's
- * own try/catch — re-throw after cleanup so this wrapper maps the
- * error correctly.
+ * Lifecycle wrapper for session-action handlers needing an AbortController
+ * registered in `_operationAborts`. Inner handlers must re-throw after their
+ * own rollback so this wrapper maps the error correctly.
  */
 export async function withAbortableSessionAction(
   ctx: ActionContext,

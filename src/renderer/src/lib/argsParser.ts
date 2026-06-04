@@ -1,29 +1,15 @@
 import type { ComfyArgDef } from '../types/ipc'
 
-/**
- * Pure parser/serializer for ComfyUI launch-argument strings, used by
- * the brand-redesigned `ArgsBuilderPage.vue` (drawer v2). Same algorithm
- * the legacy `ArgsBuilder.vue` runs inline — extracted here so the new
- * component can stay UI-only without duplicating ~80 lines of token /
- * parse / serialize logic.
- *
- * The legacy file keeps its own inline copy; we don't touch it. When
- * the legacy modal is deleted post-migration, that inline copy goes
- * with it; this module remains as the single source.
- */
+// Pure parser/serializer for ComfyUI launch-argument strings.
 
 export interface ParsedArgs {
-  /** Schema-known flags, keyed by arg name (no `--` prefix). Value is
-   *  the raw string after `=` or the following whitespace-token (empty
-   *  for booleans). */
+  /** Schema-known flags keyed by arg name (no `--` prefix); value is empty for booleans. */
   known: Map<string, string>
-  /** Tokens we didn't recognize against the schema — preserved verbatim
-   *  so unknown / typo'd flags round-trip without data loss. */
+  /** Unrecognized tokens, preserved verbatim so they round-trip without data loss. */
   extra: string[]
 }
 
-/** Shell-style tokenizer: splits on whitespace, respects single/double
- *  quotes. Same behavior as the legacy `tokenize` in ArgsBuilder.vue. */
+/** Shell-style tokenizer: splits on whitespace, respects single/double quotes. */
 export function tokenize(raw: string): string[] {
   const tokens: string[] = []
   let current = ''
@@ -51,9 +37,7 @@ export function tokenize(raw: string): string[] {
   return tokens
 }
 
-/** Parse a raw launch-args string against the given schema. Splits into
- *  `known` (schema-matched flags with their values) + `extra` (unknown
- *  tokens preserved verbatim). */
+/** Parse a raw launch-args string against the schema into `known` + `extra`. */
 export function parseArgs(raw: string, schema: ComfyArgDef[]): ParsedArgs {
   const tokens = tokenize(raw)
   const schemaMap = new Map(schema.map((a) => [a.name, a]))
@@ -104,8 +88,7 @@ export function parseArgs(raw: string, schema: ComfyArgDef[]): ParsedArgs {
   return { known, extra }
 }
 
-/** Render a parsed args struct back to a shell string. Quotes values
- *  that contain whitespace so the result round-trips through tokenize. */
+/** Render parsed args back to a shell string, quoting values with whitespace so they round-trip. */
 export function serialize(known: Map<string, string>, extra: string[]): string {
   const parts: string[] = []
   for (const [name, value] of known) {

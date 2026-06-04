@@ -120,7 +120,6 @@ describe('useListAction — desktop launch interceptor', () => {
 
     expect(mockModalConfirm).not.toHaveBeenCalled()
     expect(showProgress).toHaveBeenCalledOnce()
-    // Normal launch path emits a runAction(inst.id, 'launch') in its apiCall.
     const opts = showProgress.mock.calls[0]![0] as { apiCall: () => Promise<unknown> }
     void opts.apiCall()
     expect(mockRunAction).toHaveBeenCalledWith('inst-1', 'launch')

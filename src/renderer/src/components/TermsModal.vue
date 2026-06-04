@@ -7,15 +7,7 @@ import { LEGAL_DOCS, type LegalDocId } from '../lib/legalDocs'
 
 const props = withDefaults(
   defineProps<{
-    /** Parent-controlled visibility. Bound through to BaseModal so its
-     *  focus capture / restore lifecycle fires on the open→close edge —
-     *  hardcoding `:open="true"` here would freeze that watcher and
-     *  keyboard focus would never return to the trigger. */
     open?: boolean
-    /** Which legal document to render. The consent screen passes
-     *  'eula' for the EULA-and-ToS checkbox link and 'privacy' for
-     *  the analytics-consent link. Defaults to privacy so existing
-     *  call sites keep working. */
     doc?: LegalDocId
   }>(),
   { open: true, doc: 'privacy' },
@@ -28,8 +20,6 @@ const emit = defineEmits<{
 const { t } = useI18n()
 
 const policy = computed(() => LEGAL_DOCS[props.doc] ?? LEGAL_DOCS.privacy)
-/** i18n key for the modal title, picked per doc so screen readers and
- *  the visible heading both reflect what the user is actually viewing. */
 const titleKey = computed(() => {
   switch (props.doc) {
     case 'eula':
@@ -84,9 +74,6 @@ const titleKey = computed(() => {
 </template>
 
 <style scoped>
-/* Pin the panel to the bespoke 720px width (between BaseModal's md/lg
- * defaults of 640/800) and let the header's title + meta strip drive
- * its own padding instead of BaseModal's narrower defaults. */
 :deep(.base-modal-panel.terms-content) {
   width: min(100%, 720px);
 }

@@ -26,19 +26,9 @@ const { t } = useI18n()
 const revealLabel = computed(() => revealInFolderLabel(window.api?.platform))
 
 /**
- * "View All Downloads" — the brand-redesigned, full surface that the
- * title-bar popup's footer link opens. Mirrors the Settings tab's data
- * model and actions (status filter, full status line, save path,
- * pause/resume/cancel/show-in-folder/dismiss, clear-finished) but
- * presents them on the reusable `BaseModal` primitive with brand chrome.
- *
- * Sized for huge files (~40 GB checkpoints): every active row shows
- * `received / total · % · speed · ETA` continuously so the user has no
- * reason to leave the desktop app for a browser download tray.
- *
- * Backed by the same `useDownloadStore` the popup + Settings tab read
- * from — dismissals and clear-finished round-trip through main so all
- * three surfaces stay in lockstep.
+ * "View All Downloads" — the full surface the popup's footer link opens. Mirrors
+ * the Settings tab's data model and actions on `BaseModal`. Backed by the same
+ * `useDownloadStore`, so all three surfaces stay in lockstep.
  */
 
 const props = defineProps<{ open: boolean }>()
@@ -54,11 +44,8 @@ onMounted(() => {
 })
 
 const ordered = computed<ModelDownloadProgress[]>(() =>
-  // Newest-first by `createdAt` so the most recently kicked-off
-  // download surfaces at the top and finished ones drift down. A row
-  // that transitions active → cancelled / completed keeps its slot
-  // rather than jumping buckets (`createdAt` is stamped by main on
-  // first sight and preserved across status updates).
+  // Newest-first by `createdAt` (stamped by main on first sight, preserved
+  // across status updates) so a finishing row keeps its slot.
   [...store.downloads.values()].sort(
     (a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0),
   ),
@@ -90,16 +77,12 @@ const filtered = computed<ModelDownloadProgress[]>(() => {
   }
 })
 
-/** Append total size to `'completed'` rows (the long-form variant the
- *  Settings tab also opts into) — opt into the shared formatter rather
- *  than re-implementing the switch. */
+/** Append total size to `'completed'` rows via the shared formatter. */
 function statusLine(d: ModelDownloadProgress): string {
   return formatStatusLine(d, { completedShowsSize: true })
 }
 
-/** Every IPC call wrapped — rejections from main shouldn't escape into
- *  unhandled-promise warnings. The store doesn't block on success, so
- *  logging is the right failure mode here. */
+/** Wrap IPC calls so rejections don't surface as unhandled-promise warnings. */
 async function safe(call: Promise<unknown>): Promise<void> {
   try {
     await call
@@ -127,11 +110,8 @@ function showInFolder(savePath: string | undefined): void {
 function dismissOne(url: string): void {
   store.dismiss(url)
 }
-/**
- * Smart filter visibility: only render pills for buckets that have data,
- * and only render the bar at all when ≥ 2 buckets are non-empty (a lone
- * bucket *is* the list — no filtering needed).
- */
+/** Render filter pills only for non-empty buckets, and only when ≥ 2 are
+ *  non-empty (a lone bucket IS the list). */
 const visibleFilters = computed<{ key: StatusFilter; label: string }[]>(() => {
   const present: { key: StatusFilter; label: string }[] = []
   if (activeCount.value > 0) {
@@ -311,9 +291,8 @@ function isTerminal(status: ModelDownloadStatus): boolean {
   color: var(--neutral-100);
 }
 
-/* `.filter-pill` / `.filter-pill-group` are global (assets/main.css)
- * and shared with ChooserView + the Settings tab. The local
- * `.dlm-filter-chip` class is a test-selector hook only. */
+/* `.filter-pill*` are global (assets/main.css); `.dlm-filter-chip` is a
+ * test-selector hook only. */
 .dlm-filterbar {
   position: sticky;
   top: 0;
@@ -429,9 +408,8 @@ function isTerminal(status: ModelDownloadStatus): boolean {
   transition: width 0.3s ease;
 }
 .dlm-bar-fill.indeterminate {
-  /* Subtle barber-pole until main reports a real progress tick. Same
-   * device the Settings tab uses so the empty-bar moment doesn't read
-   * as "stuck". */
+  /* Barber-pole until main reports a real progress tick (empty bar reads as
+   * "stuck" otherwise). */
   background: repeating-linear-gradient(
     90deg,
     var(--accent, #60a5fa),
@@ -450,8 +428,7 @@ function isTerminal(status: ModelDownloadStatus): boolean {
   gap: 6px;
   margin-top: 2px;
 }
-/* Terminal rows with no per-row action collapse silently — the title-row
- * X handled the Remove affordance. */
+/* Collapse the action row when empty (the title-row X handles Remove). */
 .dlm-item-actions:empty {
   display: none;
 }
@@ -482,11 +459,8 @@ function isTerminal(status: ModelDownloadStatus): boolean {
 }
 </style>
 
-<!-- Non-scoped: while the host is in overlay-panel mode the page behind
-     the modal is the live ComfyUI canvas (PanelApp toggles
-     `body.panel-overlay-mode` with a transparent background). The
-     default BaseModal scrim (70% neutral-800) crushes that canvas
-     visually; soften it to a light tint and lean on the blur prop. -->
+<!-- Non-scoped: in overlay-panel mode the page behind the modal is the live
+     ComfyUI canvas, which the default scrim crushes; soften it and lean on blur. -->
 <style>
 body.panel-overlay-mode .base-modal-overlay {
   background: color-mix(in oklab, var(--neutral-900) 28%, transparent);

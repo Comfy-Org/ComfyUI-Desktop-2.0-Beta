@@ -1,8 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-// `./basic` imports `../shared`, which loads electron + the real install
-// store at module init. Stub the surface `handleRename` actually touches so
-// the unit test runs without a real Electron runtime or datastore.
+// Stub the ../shared surface handleRename touches so the test needs no
+// Electron runtime or datastore.
 const hasNameConflict = vi.fn<(id: string, name: string) => Promise<boolean>>()
 const update = vi.fn<(id: string, data: Record<string, unknown>) => Promise<unknown>>()
 

@@ -1,18 +1,4 @@
-/**
- * Shared formatting + status-class helpers for the model-download UIs.
- *
- * Both the title-bar popup `DownloadsView` (transient, no Pinia / no
- * vue-i18n) and the Settings tab `DownloadsView` (full renderer) call
- * these. The popup's tsconfig slice can't reach the renderer's view
- * layer directly, but it CAN import from `src/renderer/src/lib`, so
- * this is the de-duplication seam.
- *
- * Keep these pure — no Pinia, no IPC, no DOM. The function inputs are
- * the minimal shape both surfaces share (URL + filename + progress +
- * the in-flight byte / speed / ETA + status), expressed as a
- * structural type so the popup's locally-mirrored `DownloadEntry` and
- * the renderer's `ModelDownloadProgress` both fit.
- */
+// Shared, pure formatting + status-class helpers for the model-download UIs (popup + Settings tab).
 
 export interface DownloadFormatInput {
   filename: string
@@ -50,10 +36,7 @@ export function formatEta(seconds: number): string {
   return `${h}h ${m}m`
 }
 
-/** Single-line status summary suitable for the compact popup row.
- *  The Settings tab uses the same string for the in-flight states and
- *  appends the total size to the `'completed'` line — pass
- *  `{ completedShowsSize: true }` to opt into that variant. */
+/** Single-line status summary; pass `completedShowsSize` to append total size to the completed line. */
 export function statusLine(
   d: DownloadFormatInput,
   opts: { completedShowsSize?: boolean } = {},

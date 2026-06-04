@@ -7,10 +7,8 @@ import { formatNodeVersion } from '../lib/snapshots'
 
 const props = defineProps<{
   diff: SnapshotDiffResult
-  /** When true, the Custom Nodes + Pip Packages sections collapse to a
-   *  count header (default collapsed). Used in tight surfaces like the
-   *  restore-confirm modal, where a large diff would otherwise overflow.
-   *  The ComfyUI version + channel lines stay inline (they're one-liners). */
+  /** Collapse the Custom Nodes + Pip Packages sections to count headers, for
+   *  tight surfaces where a large diff would overflow. */
   collapsible?: boolean
 }>()
 
@@ -32,7 +30,6 @@ function formatVersion(v: { formattedVersion: string }): string {
 </script>
 
 <template>
-  <!-- ComfyUI version change -->
   <div v-if="diff.comfyuiChanged && diff.comfyui" class="diff-section">
     <div class="diff-section-title">{{ t('snapshots.comfyuiVersion') }}</div>
     <div class="diff-line diff-changed">
@@ -40,7 +37,6 @@ function formatVersion(v: { formattedVersion: string }): string {
     </div>
   </div>
 
-  <!-- Update channel change -->
   <div v-if="diff.updateChannelChanged && diff.updateChannel" class="diff-section">
     <div class="diff-section-title">{{ t('snapshots.updateChannel') }}</div>
     <div class="diff-line diff-changed">
@@ -48,7 +44,6 @@ function formatVersion(v: { formattedVersion: string }): string {
     </div>
   </div>
 
-  <!-- Node changes -->
   <div v-if="nodeChangeCount > 0" class="diff-section">
     <div
       class="diff-section-title"
@@ -76,7 +71,6 @@ function formatVersion(v: { formattedVersion: string }): string {
     </div>
   </div>
 
-  <!-- Pip changes -->
   <div v-if="pipChangeCount > 0" class="diff-section">
     <div
       class="diff-section-title"
@@ -116,8 +110,7 @@ function formatVersion(v: { formattedVersion: string }): string {
   letter-spacing: 0.04em;
   margin-bottom: 4px;
 }
-/* Collapsible variant (restore-confirm modal): the title becomes a click
- * target with a chevron; the section body shows on expand. */
+/* Collapsible variant: the title becomes a click target with a chevron. */
 .diff-section-title.is-toggle {
   display: flex;
   align-items: center;
@@ -153,10 +146,8 @@ function formatVersion(v: { formattedVersion: string }): string {
   color: var(--text);
 }
 
-/* +/−/~ prefixes already encode add/remove/change — color is just a
- * second-order hint, so keep it muted. `changed` stays neutral on
- * purpose: it's by far the most common line and shouldn't out-shout
- * the actual additions/removals. */
+/* The +/−/~ prefixes already encode the change, so color stays a muted
+ * hint; `changed` is neutral as it's the most common line. */
 .diff-added {
   color: color-mix(in oklab, var(--success) 60%, var(--text));
 }

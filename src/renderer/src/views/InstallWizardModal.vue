@@ -31,17 +31,13 @@ const emit = defineEmits<{
   close: []
   'show-progress': [opts: ShowProgressOpts]
   'navigate-list': []
-  /** Emitted from the Configure footer's Back link when this overlay was
-   *  opened by the first-use chain (`cameFromLocalBranch === true`).
-   *  Host returns the user to the FirstUseTakeover localBranch step. */
+  /** Configure footer's Back link when opened by the first-use chain; host returns to the FirstUseTakeover localBranch step. */
   'back-to-local-branch': []
 }>()
 
 const props = withDefaults(
   defineProps<{
-    /** Hide the "Back to Dashboard" chevron — used when the wizard is
-     *  chained from the first-use takeover, where returning to the
-     *  dashboard would defeat the obfuscated bootstrap background. */
+    /** Hide the "Back to Dashboard" chevron when chained from the first-use takeover. */
     hideBackToDashboard?: boolean
   }>(),
   { hideBackToDashboard: false }
@@ -54,11 +50,7 @@ const sources = ref<Source[]>([])
 const currentSource = ref<Source | null>(null)
 const selections = ref<Record<string, FieldOption>>({})
 const instName = ref('')
-/** Live-suggested default the placeholder reads. Computed in `open()` so
- *  it reflects existing install names (`ComfyUI` → `ComfyUI (2)` if the
- *  first is taken). When the user leaves the field blank, `handleSave`'s
- *  fallback produces the same value — so the placeholder is truthful,
- *  not aspirational. */
+/** Placeholder's suggested default (`ComfyUI` → `ComfyUI (2)` if taken). `handleSave`'s blank-field fallback produces the same value, so it's truthful. */
 const suggestedName = ref('')
 const instPath = ref('')
 const defaultInstPath = ref('')
@@ -95,26 +87,10 @@ const estimatedInstallSize = computed(() => {
   return downloadBytes > 0 ? Math.ceil(downloadBytes * 2.25) : 0
 })
 
-/**
- * Brand-wrapped single-screen Configure flow.
- *
- * This is now the only path — every entry point (dashboard tile,
- * Cloud empty-state, title-bar picker, file-menu, first-use chain)
- * renders here. The install-method picker lives inside the Advanced
- * disclosure, so switching sources (Standalone ↔ Remote Connection
- * ↔ …) doesn't toggle chrome. `hideBackToDashboard` is independent:
- * it only controls whether the top-left "Back to Dashboard" chevron
- * is visible (hidden during the first-use chain, visible for all
- * other entries).
- */
-
 const advancedOpen = ref(false)
 const advancedRef = ref<HTMLElement | null>(null)
 
-/** Auto-scroll Advanced into the visible part of the card body when it
- *  opens — Apple HIG action-sheet behavior. `block: 'nearest'` is a
- *  no-op when the section is already fully visible, so the view doesn't
- *  yank on tall screens. */
+// Scroll Advanced into view on open. `block: 'nearest'` no-ops when already visible so the view doesn't yank on tall screens.
 watch(advancedOpen, async (open) => {
   if (!open) return
   await nextTick()
@@ -131,23 +107,17 @@ watch(instPath, (newPath) => {
   fetchDiskSpace(newPath)
 })
 
-/** Generation counter — incremented on each open/source change to discard stale responses */
+/** Bumped on each open/source change to discard stale responses. */
 let loadGeneration = 0
 
-/** Whitespace-only instance name is rejected: it produces a name made
- *  of nothing but spaces. A truly-blank field is allowed — `handleSave`
- *  falls back to the suggested default — so the error only fires once
- *  the user has typed something that trims to empty. */
+// Reject whitespace-only names; a truly-blank field is allowed (falls back to the suggested default).
 const nameError = computed(() =>
   instName.value.length > 0 && instName.value.trim().length === 0
     ? t('newInstall.nameWhitespace')
     : ''
 )
 
-/** Renderer-side sanity check for the Remote Connection / Cloud URL
- *  field. Mirrors main's `parseUrl`: a scheme-less value is tried as
- *  `http://<value>` and must yield a hostname. Keeps the bad-URL guard
- *  in the form instead of failing silently at connect time. */
+// Mirrors main's `parseUrl`: a scheme-less value is tried as `http://<value>` and must yield a hostname.
 function isValidConnectionUrl(raw: string): boolean {
   const trimmed = raw.trim()
   if (!trimmed) return false
@@ -159,10 +129,7 @@ function isValidConnectionUrl(raw: string): boolean {
   }
 }
 
-/** Inline error for the editable connection URL (`url` text field on
- *  Remote Connection / Cloud sources). Empty/whitespace or an
- *  unparseable value both surface the same hint. Scoped to `id === 'url'`
- *  so other text fields (e.g. git's repo) keep their own error flow. */
+// Inline error for the `url` field on Remote Connection / Cloud sources; scoped to `id === 'url'` so other text fields keep their own flow.
 const urlFieldError = computed(() => {
   const source = currentSource.value
   if (!source) return ''
@@ -172,11 +139,7 @@ const urlFieldError = computed(() => {
   return isValidConnectionUrl(value) ? '' : t('newInstall.urlInvalid')
 })
 
-/** Single-screen guardrail gate. Continue must respect every check
- *  the user can interact with on the Configure surface. `skipInstall`
- *  sources (Remote Connection) have no install path, so the path-issue
- *  guard doesn't apply to them. The instance-name and connection-URL
- *  validity guards apply to every source. */
+// Continue gate. `skipInstall` sources (Remote Connection) have no install path, so the path-issue guard is skipped for them.
 const canContinue = computed(() => {
   if (!currentSource.value) return false
   if (nameError.value || urlFieldError.value) return false
@@ -184,7 +147,7 @@ const canContinue = computed(() => {
   return !saveDisabled.value && pathIssues.value.length === 0
 })
 
-/** Deep-strip Vue reactive proxies for safe IPC serialization */
+/** Deep-strip Vue reactive proxies for safe IPC serialization. */
 function rawSelections(): Record<string, FieldOption> {
   const raw = toRaw(selections.value)
   const result: Record<string, FieldOption> = {}
@@ -236,10 +199,7 @@ onBeforeUnmount(() => {
 })
 
 interface OpenOpts {
-  /** Set by the host when this overlay is opened by the first-use chain
-   *  from the localBranch → Start Fresh path. Surfaces a Back link in
-   *  the Configure footer that returns the user to the localBranch
-   *  sub-step instead of closing the takeover. */
+  /** Set when opened via the first-use localBranch → Start Fresh path; surfaces a Back link that returns to localBranch instead of closing. */
   cameFromLocalBranch?: boolean
 }
 
@@ -276,9 +236,7 @@ async function open(opts: OpenOpts = {}): Promise<void> {
     defaultInstPath.value = installDir ?? ''
     instPath.value = defaultInstPath.value
 
-    // Pre-select Standalone so Configure opens with the recommended
-    // method already in place. Remote / other sources are reachable
-    // via the Advanced disclosure's method-picker chips.
+    // Pre-select Standalone (the recommended method); other sources are reachable via the Advanced method-picker chips.
     hardwareValidation = await window.api.validateHardware()
     const standalone = sources.value.find((s) => s.id === 'standalone')
     if (standalone && hardwareValidation.supported) {
@@ -604,12 +562,7 @@ async function handleSave(): Promise<void> {
     return
   }
   if (result.entry) {
-    // Hand off to the progress overlay WITHOUT first emitting `close`.
-    // The host's overlay slot silently swaps Tier 3 takeover → progress
-    // (or takeover-update when first-use is chaining), which unmounts
-    // this wizard. Emitting `close` first would dismiss the overlay
-    // before the swap and briefly reveal the dashboard underneath —
-    // exactly the flash the first-use happy path must avoid.
+    // Hand off WITHOUT emitting `close` first: the host swaps the overlay in place; closing first would flash the dashboard underneath.
     emit('show-progress', {
       installationId: result.entry.id,
       title: `${t('newInstall.installing')} — ${name}`,
@@ -678,10 +631,7 @@ defineExpose({ open })
             </div>
           </div>
 
-          <!-- GPU + Install Location stay visible across sources but
-               are disabled in Remote Connection mode (no local hardware
-               or filesystem path). Hover surfaces a tooltip explaining
-               why. -->
+          <!-- GPU + Install Location stay visible but are disabled in Remote Connection mode (no local hardware / path). -->
           <TooltipWrap
             class="config-field-wrap"
             side="bottom"
@@ -933,8 +883,7 @@ defineExpose({ open })
 
 .config-card {
   width: 100%;
-  /* Size to content. Capped at shell height so the card doesn't run
-   * off the viewport when Advanced expands — body picks up scroll then. */
+  /* Capped at shell height so the card doesn't overflow the viewport when Advanced expands; body scrolls instead. */
   max-height: 100%;
   display: flex;
   flex-direction: column;
@@ -947,11 +896,7 @@ defineExpose({ open })
 }
 
 .config-card__body {
-  /* Card sizes to content by default (no empty band when Advanced is
-   * closed). When Advanced opens and the card would exceed the shell
-   * cap (`.config-card { max-height: 100% }`), the cap kicks in and
-   * `flex: 1 1 auto` lets THIS body absorb the leftover space while
-   * scrolling internally — keeps the title's vertical center stable. */
+  /* `flex: 1 1 auto` lets this body absorb leftover space and scroll internally once the card hits the shell cap, keeping the title centered. */
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
@@ -959,9 +904,7 @@ defineExpose({ open })
   display: flex;
   flex-direction: column;
   gap: 18px;
-  /* Hide scrollbar to prevent layout shift when content overflows
-   * (Advanced expanding past viewport). Brand chrome stays clean —
-   * scroll affordance lives in the interaction itself. */
+  /* Hide scrollbar to prevent layout shift when content overflows. */
   scrollbar-width: none;
 }
 .config-card__body::-webkit-scrollbar {
@@ -1018,9 +961,7 @@ defineExpose({ open })
   color: var(--neutral-200);
 }
 
-/* Source-text input inside Advanced (Remote Connection's URL field,
- * etc.) — the .brand-input wrapper takes the row's flex 1 so the input
- * and any sibling action button line up on the same row. */
+/* Takes the row's flex 1 so the input and any sibling action button line up. */
 .config-source-text {
   flex: 1 1 auto;
   min-width: 0;
@@ -1030,11 +971,7 @@ defineExpose({ open })
   padding: 8px 12px;
   cursor: default;
 }
-/* The detected GPU is fixed to the host hardware and cannot be changed, so
- * present it as a static read-only value: strip the .brand-input hover
- * affordance (border/background shift) that otherwise implies it's editable
- * like the surrounding name/path inputs. Mirrors the muted read-only
- * treatment used for the same value in QuickInstallModal (.detected-hardware). */
+/* Detected GPU is read-only; strip the hover affordance that would imply it's editable. */
 .config-select--readonly:hover {
   border-color: var(--brand-surface-border);
   background: var(--brand-surface-bg);
@@ -1131,9 +1068,7 @@ defineExpose({ open })
   transform: translateY(0);
 }
 
-/* Install-method chips — compact pill picker living inside Advanced
- * so the user can swap source (Standalone ↔ Remote Connection) without
- * leaving the brand chrome. Selected state picks up the accent color. */
+/* Install-method chips: pill picker inside Advanced for swapping source without leaving the brand chrome. */
 .config-method-row {
   display: flex;
   flex-wrap: wrap;

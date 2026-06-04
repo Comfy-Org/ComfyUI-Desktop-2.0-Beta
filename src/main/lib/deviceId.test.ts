@@ -4,10 +4,8 @@ import os from 'os'
 import path from 'path'
 import { createHash } from 'crypto'
 
-// Per-test temp dir. `configDir()` resolves via paths.ts which on Linux
-// bypasses Electron and reads XDG_CONFIG_HOME directly — that broke CI
-// when we only mocked `electron.app.getPath`. Mock paths.ts directly so
-// the test path is consistent across platforms.
+// Mock paths.ts directly: configDir() reads XDG_CONFIG_HOME on Linux, bypassing
+// the electron.app.getPath mock and breaking CI.
 let testUserData = ''
 
 vi.mock('./paths', () => ({
@@ -22,7 +20,6 @@ vi.mock('electron', () => ({
   }
 }))
 
-// Mock systeminformation `si.system()` so we can drive the machine_id branch.
 let mockSystemUuid: string | undefined = 'aabbccdd-eeff-0011-2233-445566778899'
 
 vi.mock('systeminformation', () => ({
@@ -43,10 +40,8 @@ describe('deviceId', () => {
   let mod: typeof DeviceIdModule
 
   beforeEach(async () => {
-    // Fresh temp dir per test; assign before importing the module under test.
     testUserData = fs.mkdtempSync(path.join(os.tmpdir(), 'deviceid-test-'))
     mockSystemUuid = 'aabbccdd-eeff-0011-2233-445566778899'
-    // Re-import so module-level state is fresh each test.
     vi.resetModules()
     mod = await import('./deviceId')
     mod._resetForTest()
@@ -103,7 +98,7 @@ describe('deviceId', () => {
     it('does NOT re-fire the migration if the guard file is present', async () => {
       const legacyUuid = 'f47ac10b-58cc-4372-a567-0e02b2c3d479'
       fs.writeFileSync(path.join(testUserData, 'device-id.txt'), legacyUuid)
-      // Pretend a prior boot already issued the alias.
+      // Prior boot already issued the alias.
       fs.writeFileSync(
         path.join(testUserData, 'identity-migration-completed'),
         new Date().toISOString()
@@ -114,14 +109,13 @@ describe('deviceId', () => {
 
       // The id still gets corrected (guard only suppresses the alias).
       const expected = expectedIdFor('aabbccdd-eeff-0011-2233-445566778899')
+
       expect(mod.getDeviceId()).toBe(expected)
     })
   })
 
   describe('initDeviceId — existing file is a different hash', () => {
     it('updates silently with no legacyId (treats as salt rotation or cross-machine copy)', async () => {
-      // 64-char hex that is not the value we'd compute. Could happen if the
-      // salt was changed or the file was copied from a different machine.
       const otherHash = 'a'.repeat(64)
       fs.writeFileSync(path.join(testUserData, 'device-id.txt'), otherHash)
 
@@ -139,7 +133,6 @@ describe('deviceId', () => {
       const { legacyId } = await mod.initDeviceId()
       expect(legacyId).toBeNull()
       expect(mod.getIdClass()).toBe('random_fallback')
-      // The id is still a 64-char hex (sha256 of the random fallback machine id).
       expect(mod.getDeviceId()).toMatch(/^[0-9a-f]{64}$/i)
     })
 

@@ -1,27 +1,13 @@
 <script setup lang="ts">
-/**
- * Small icon button that copies its `value` (or the result of `getValue()`)
- * to the clipboard via `navigator.clipboard.writeText`. The icon swaps from
- * Copy → Check for ~1.6 s after a successful copy, then resets.
- *
- * Used inline next to selectable text blocks (error messages, terminal
- * tails, captions) so users can grab the text without manual select +
- * keyboard copy — important for the share-this-error-to-Google /
- * paste-into-issue-thread flow.
- *
- * Either pass `value` directly, or pass `getValue` for lazily-resolved
- * strings (e.g. a `computed` whose unwrap shouldn't happen until click).
- */
+// Icon button that copies `value` (or `getValue()`) to the clipboard,
+// swapping Copy → Check briefly on success. Use `getValue` for lazy strings.
 import { ref, computed, onBeforeUnmount } from 'vue'
 import { Copy, Check } from 'lucide-vue-next'
 
 interface Props {
   value?: string
   getValue?: () => string
-  /** Icon size in px. Defaults to 14 — matches the adjacent caption /
-   *  log-toggle icon weight used elsewhere on the brand loader. */
   size?: number
-  /** Optional aria-label override. Defaults to "Copy to clipboard". */
   ariaLabel?: string
 }
 
@@ -55,10 +41,8 @@ async function handleClick(): Promise<void> {
       resetTimer = null
     }, COPIED_RESET_MS)
   } catch {
-    // Clipboard permissions denied or write failed. Stay silent — the
-    // text is still selectable, so the user can fall back to manual
-    // keyboard copy. Surfacing an error toast here would be noisier
-    // than the failure warrants.
+    // Stay silent on clipboard failure: the text is still selectable for
+    // manual copy, so a toast would be noisier than the failure warrants.
   }
 }
 

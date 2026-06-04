@@ -8,11 +8,7 @@ import {
   normaliseFirstUseMode,
 } from './firstUseMode'
 
-// Pins the chrome-lockdown taxonomy so the title-bar gates can't
-// silently regress. The whole point of the split between first-use
-// lockdown (hide chrome) and loading lockdown (keep chrome live) is
-// that flipping one bucket should not bleed into the other, so the
-// table-driven tests assert every mode explicitly.
+// Pins the chrome-lockdown taxonomy: first-use lockdown (hide chrome) and loading lockdown (keep chrome live) must not bleed into each other.
 
 const ALL_MODES: FirstUseMode[] = [
   'none',

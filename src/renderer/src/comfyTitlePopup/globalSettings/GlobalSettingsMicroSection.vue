@@ -1,9 +1,6 @@
 <script setup lang="ts">
-// Intentionally NOT a variant of `components/DetailSection.vue`:
-// DetailSection is the legacy install-scoped detail surface (channel
-// cards, items, fields, args/env editors, IPC writes) and is marked
-// `TODO(stale-old-modal)` for deletion. Coupling the new global-
-// settings UI to it would block that removal.
+// Intentionally NOT a variant of DetailSection.vue, which is slated for
+// deletion; coupling the new global-settings UI to it would block that.
 import InfoTooltip from '../../components/InfoTooltip.vue'
 
 defineProps<{
@@ -43,11 +40,8 @@ defineProps<{
   color: var(--text-muted);
 }
 
-/* The title text alone is dimmed (matches the muted section-header
- * treatment), but the optional InfoTooltip stays at full opacity so
- * the `?` reads at the same visibility as other help icons in the
- * panel — otherwise we'd compound the title's dim with InfoTooltip's
- * own 0.6 baseline and the icon would nearly vanish. */
+/* Dim the title text only, not the InfoTooltip: stacking this dim on the
+ * tooltip's own 0.6 baseline would nearly hide the `?` icon. */
 .gs-micro-title > span {
   opacity: 0.55;
 }

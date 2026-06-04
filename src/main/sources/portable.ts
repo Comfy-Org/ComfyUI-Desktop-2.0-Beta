@@ -139,10 +139,8 @@ export const portable: SourcePlugin = {
       },
     ]
 
-    // Updates section
     const channel = (installation.updateChannel as string | undefined) || 'stable'
 
-    // Build per-channel preview info and actions for cards
     const channelDefs: ChannelDef[] = [
       { value: 'stable', label: t('portable.channelStable'), description: t('portable.channelStableDesc'), recommended: true },
       { value: 'latest', label: t('portable.channelLatest'), description: t('portable.channelLatestDesc') },

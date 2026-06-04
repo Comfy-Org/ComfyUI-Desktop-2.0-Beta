@@ -2,21 +2,15 @@
 import { nextTick, onMounted, onUnmounted, ref, useTemplateRef, watch } from 'vue'
 
 /**
- * Title-tooltip popup renderer.
- *
- * Renders the single tooltip bubble shown on hover over title-bar
- * controls. Sized to fit content; reports its rendered dimensions back
- * to main on every config update so main can resize the popup
- * `WebContentsView` to match before flipping it visible.
- *
- * Issue #514 — macOS Chromium does not reliably surface native HTML
- * `title` tooltips for sibling chrome `WebContentsView` instances that
- * aren't the focused view, so we render this popup instead.
+ * Title-tooltip popup renderer. Renders the hover bubble (and onboarding
+ * coachmark) and reports its rendered size to main on each config update so
+ * main resizes the popup view before showing it. Used because macOS doesn't
+ * reliably surface native `title` tooltips for unfocused sibling chrome views.
  */
 
 interface TooltipConfig {
-  /** Absent (or `'tooltip'`) for the plain hover bubble; `'coachmark'`
-   *  for the sticky onboarding card with a beak + accent + dismiss. */
+  /** `'tooltip'` (default) for the hover bubble; `'coachmark'` for the
+   *  onboarding card. */
   variant?: 'tooltip' | 'coachmark'
   /** Hover-bubble body (tooltip variant). */
   text?: string
@@ -48,32 +42,21 @@ const themeBg = ref<string>('#211927')
 const themeText = ref<string>('#ffffff')
 const themeBorder = ref<string>('#38303d')
 const themeAccent = ref<string>('#e3ff3c')
-/** Whitish, semi-transparent hairline for the coachmark card + beak.
- *  Brighter than the neutral tooltip border (`themeBorder`) so the card
- *  reads as a distinct floating surface separated from the ComfyUI
- *  content behind it, not a flush extension of the dark chrome. */
 const coachmarkBorder = 'rgba(255, 255, 255, 0.22)'
-/** Token from the most recently applied config — echoed back to main
- *  in every render-ack so main can discard stale acks. */
+/** Token of the latest config, echoed in every render-ack so main can discard
+ *  stale acks. */
 let currentConfigToken = ''
 
 const bubbleRef = useTemplateRef<HTMLElement>('bubble')
 
 let unsubConfig: (() => void) | undefined
 
-/** Wait for the Inter web font to finish loading before reporting
- *  bubble dimensions. Without this gate the very first show measures
- *  the bubble in the system fallback font (different glyph widths) and
- *  reports a slightly-wrong size; main resizes the view to fit, but
- *  the next paint with the real font then either clips the bubble
- *  (if the real font is wider) or leaves dead space (if it's narrower)
- *  — both surface to users as "the tooltip text size keeps changing".
- *  `document.fonts.ready` resolves once every face used so far has
- *  loaded. */
+/** Wait for the Inter web font before measuring, else the first show measures in
+ *  the fallback font and reports a wrong size, making the bubble visibly
+ *  re-size when the real font paints. */
 async function measureAndAck(): Promise<void> {
-  // Capture the token at call time. If the config changes mid-await
-  // (a new `onConfig` arrives), the stale ack is still safe to ignore
-  // on the main side because the token won't match.
+  // Capture the token now; a config change mid-await produces a stale ack that
+  // main ignores because the token won't match.
   const token = currentConfigToken
   if (document.fonts && typeof document.fonts.ready?.then === 'function') {
     try {
@@ -109,18 +92,11 @@ onMounted(() => {
     themeText.value = cfg.theme.text
     themeBorder.value = cfg.theme.border
     if (cfg.theme.accent) themeAccent.value = cfg.theme.accent
-    // Ack after Vue has flushed the DOM update *and* the browser has
-    // painted with the actual web font. Main keeps the popup view
-    // hidden until this ack arrives so the user never sees the
-    // previous tooltip's text on a new hover.
     void measureAndAck()
   })
-  // Tell main the renderer is mounted and listening — main flushes any
-  // config that was queued before this point.
   bridge?.ready()
-  // If a font swap happens *after* the initial ack (e.g. Inter loads
-  // mid-session), re-measure once it lands so main can resize the view
-  // to match the new metrics.
+  // Re-measure if Inter loads mid-session (after the initial ack) so main can
+  // resize to the new metrics.
   if (document.fonts && typeof document.fonts.addEventListener === 'function') {
     document.fonts.addEventListener('loadingdone', () => {
       if (text.value) void measureAndAck()
@@ -128,11 +104,8 @@ onMounted(() => {
   }
 })
 
-// Re-measure any time the rendered text changes for any reason other
-// than a config push (defensive; the config-push path already calls
-// measureAndAck). Keeping the watch here makes the renderer robust to
-// hot-module reload during dev and to future code that might mutate
-// `text` without going through `onConfig`.
+// Defensive re-measure if rendered text changes outside the config push (HMR,
+// future mutations that bypass `onConfig`).
 watch([text, cmTitle, cmBody], () => { void measureAndAck() })
 
 function onDismiss(): void {
@@ -145,8 +118,6 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <!-- Coachmark variant: sticky onboarding card with an upward beak,
-       brand-accent title, body copy, and a dismiss button. -->
   <div
     v-if="variant === 'coachmark'"
     ref="bubble"
@@ -169,7 +140,6 @@ onUnmounted(() => {
       </button>
     </div>
   </div>
-  <!-- Hover-tooltip variant: the plain content-sized bubble. -->
   <span
     v-else
     ref="bubble"
@@ -193,22 +163,15 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
-/* Center the bubble inside the popup view's bounds. Main sizes the
-   view to `bubbleSize + 2 * SHADOW_GUTTER` (horizontal) and centers
-   the view on the trigger, so flex-centering the bubble aligns its
-   visual center with the trigger center. The bottom gutter is
-   asymmetric (only top has gap, bottom is shadow-only) so the bubble
-   is anchored to the top of the view. */
+/* Center the bubble horizontally; anchor it to the top (asymmetric gutter). */
 :global(body) {
   display: flex;
   align-items: flex-start;
   justify-content: center;
 }
 
-/* The bubble shrink-wraps its text so we can measure it and resize the
-   popup view accordingly. Visual chrome matches the in-renderer
-   `.info-tooltip-bubble` style used elsewhere (InfoTooltip / TooltipWrap)
-   so this popup looks identical to the panel-side tooltips. */
+/* Shrink-wraps its text so main can measure and resize the view. Chrome matches
+   the panel-side `.info-tooltip-bubble` so the popup looks identical. */
 .bubble {
   display: inline-block;
   width: max-content;
@@ -226,10 +189,7 @@ onUnmounted(() => {
   box-sizing: border-box;
 }
 
-/* Coachmark card — sticky onboarding hint. Wider than the tooltip,
-   interactive (dismiss button), with an upward beak that visually ties
-   it to the pill above. The view bounds are sized from this element's
-   measured rect (render-ack), so it shrink-wraps its content. */
+/* Coachmark card — sticky onboarding hint, sized from its measured rect. */
 .coachmark {
   position: relative;
   display: block;
@@ -239,9 +199,6 @@ onUnmounted(() => {
   padding: 12px 14px;
   border-radius: 10px;
   border: 1px solid;
-  /* Whitish hairline (set inline) + a soft inner highlight + a drop
-     shadow, so the card floats clearly above the ComfyUI content behind
-     it rather than blending into the dark canvas. */
   box-shadow:
     inset 0 0 0 1px rgba(255, 255, 255, 0.04),
     0 8px 24px rgba(0, 0, 0, 0.5);
@@ -250,8 +207,7 @@ onUnmounted(() => {
   box-sizing: border-box;
 }
 
-/* Upward-pointing beak centered on the card's top edge. A rotated square
-   sharing the card's bg + border so only the top two edges show. */
+/* Upward beak: a rotated square sharing the card's bg + border. */
 .coachmark-beak {
   position: absolute;
   top: -6px;
