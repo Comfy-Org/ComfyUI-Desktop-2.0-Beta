@@ -4,18 +4,10 @@ import { dataDir } from './lib/paths'
 import { readFileSafeAsync, writeFileSafeAsync } from './lib/safe-file'
 import type { ComfyVersion } from './lib/version'
 
-/** Internal main-process event bus for installation lifecycle changes.
- *
- *  Events:
- *  - `'updated'`(record): a successful `update()` / `markLaunched()` —
- *    main/index.ts uses this to refresh ComfyUI window title bars when
- *    an install is renamed (the title-bar WebContents has its own
- *    preload and isn't subscribed to the renderer broadcast).
- *  - `'changed'`(): any mutation that affects the installs list as a
- *    whole (add, remove, update, markLaunched, reorder, ensureExists,
- *    seedDefaults). main/index.ts subscribes once and rebroadcasts as
- *    `installations-changed` to all renderers so stores can refetch
- *    without every IPC handler having to remember to call broadcast. */
+/** Event bus for installation lifecycle changes. `'updated'`(record) fires on
+ *  `update()` / `markLaunched()` (main/index.ts refreshes title bars since the
+ *  title bar isn't on the renderer broadcast); `'changed'`() fires on any
+ *  list-affecting mutation and is rebroadcast as `installations-changed`. */
 export const installationEvents = new EventEmitter()
 
 export interface InstallationRecord {
@@ -29,48 +21,29 @@ export interface InstallationRecord {
   comfyVersion?: ComfyVersion
   /** Epoch ms of the most recent launch, regardless of source category. */
   lastLaunchedAt?: number
-  /** Epoch ms of the most recent launch keyed by the install's source
-   *  category (e.g. 'local' / 'cloud' / 'desktop'). Always written together
-   *  with `lastLaunchedAt` via `markLaunched()` so the two stay consistent. */
+  /** Most-recent launch ms keyed by source category; written together with
+   *  `lastLaunchedAt` via `markLaunched()` so the two stay consistent. */
   lastLaunchedAtByCategory?: Record<string, number>
-  /** When true (default), launch injects `--extra-model-paths-config`
-   *  derived from the global `modelsDirs` setting so this install sees the
-   *  user's shared model library. When false, only this install's
-   *  `<installPath>/models` is visible. Off is intentionally rare. */
+  /** When true (default), launch injects `--extra-model-paths-config` from the
+   *  global `modelsDirs` so this install sees the shared model library. */
   useSharedModels?: boolean
   /** When true (default), launch injects `--input-directory` /
-   *  `--output-directory` from the global `inputDir` / `outputDir`
-   *  settings. When false, launch uses the per-install `inputDir` /
-   *  `outputDir` below if set, otherwise ComfyUI's own
-   *  `<installPath>/{input,output}` defaults. */
+   *  `--output-directory` from the global settings; else uses the per-install
+   *  dirs below or ComfyUI's `<installPath>/{input,output}` defaults. */
   useSharedInputOutput?: boolean
-  /** Per-install input directory, used only when
-   *  `useSharedInputOutput === false`. Adopted-from-legacy installs
-   *  pre-fill this with `<legacyBasePath>/input`. */
+  /** Per-install input dir, used only when `useSharedInputOutput === false`. */
   inputDir?: string
-  /** Per-install output directory, used only when
-   *  `useSharedInputOutput === false`. */
+  /** Per-install output dir, used only when `useSharedInputOutput === false`. */
   outputDir?: string
   [key: string]: unknown
 }
 
 /**
- * One-shot in-memory migration from the legacy `useSharedPaths` boolean
- * to the new `useSharedModels` / `useSharedInputOutput` pair.
- *
- * - `useSharedModels` is always set to `true` regardless of the legacy
- *   value. Users who set `useSharedPaths: false` almost certainly did so
- *   to isolate their workspace (input/output), not to lose visibility of
- *   their global model library. Defaulting models-shared back to on is
- *   the safer intent-preserving choice and matches the new default for
- *   fresh installs.
- * - `useSharedInputOutput` copies whatever the legacy boolean was.
- * - The legacy `useSharedPaths` key is stripped from the returned record
- *   so downstream code can't accidentally read both.
- *
- * Applied on every `load()` so callers always see the new shape; legacy
- * fields on disk get cleaned the next time the record is written via
- * `update()` / `add()`.
+ * In-memory migration of legacy `useSharedPaths` → `useSharedModels` +
+ * `useSharedInputOutput`. `useSharedModels` is forced true (users who isolated
+ * paths almost certainly meant input/output, not their model library);
+ * `useSharedInputOutput` copies the legacy value; the legacy key is stripped.
+ * Applied on every `load()`; disk is cleaned on the next write.
  */
 function migrateRecord(record: InstallationRecord): InstallationRecord {
   if (!('useSharedPaths' in record)) return record
@@ -86,18 +59,10 @@ function migrateRecord(record: InstallationRecord): InstallationRecord {
 const dataPath = path.join(dataDir(), "installations.json")
 
 /**
- * Monotonic install-id generator. The naive `inst-${Date.now()}` form
- * collides whenever two `add()` / `seedDefaults()` calls land in the
- * same millisecond — common on fast hardware (CI runners) and trivially
- * reproducible in tests that issue several `add()` calls back-to-back.
- * The collision yielded duplicate IDs which then aliased records in
- * `getRecent()` / `getRecentByCategory()` (see the flake on installations.test.ts
- * `returns the install with the largest global lastLaunchedAt`).
- *
- * Fix: keep the existing `inst-${ms}` shape for the normal case (so all
- * persisted IDs stay readable and existing data on disk is unchanged)
- * and append an in-process counter only for repeat calls inside the same
- * millisecond. Counter resets on the next millisecond tick.
+ * Monotonic install-id generator. A naive `inst-${Date.now()}` collides when
+ * two `add()` calls land in the same millisecond, aliasing records in
+ * `getRecent()`. Keeps the `inst-${ms}` shape but appends an in-process counter
+ * for repeat calls within the same millisecond; the counter resets each tick.
  */
 let _lastIdMs = 0
 let _idSeq = 0
@@ -141,10 +106,8 @@ export async function list(): Promise<InstallationRecord[]> {
   return load()
 }
 
-/** True when `name` is already taken by an install other than `id`.
- *  The single source of the rename uniqueness rule — shared by the
- *  `update-installation` IPC handler and the `rename` session action so
- *  the check can't drift between the two write paths. */
+/** True when `name` is taken by an install other than `id`. The single source
+ *  of the rename uniqueness rule, shared across both write paths. */
 export async function hasNameConflict(id: string, name: string): Promise<boolean> {
   const all = await load()
   return all.some((i) => i.id !== id && i.name === name)
@@ -236,19 +199,11 @@ export async function ensureExists(sourceId: string, data: Record<string, unknow
 }
 
 /**
- * Stamp `lastLaunchedAt` (global) and — when `resolveCategory` returns a
- * value — `lastLaunchedAtByCategory[category]` on the install in a single
- * atomic write. Goes through the same `installations.json` queue as
- * `update()` and fires the same 'updated' event on `installationEvents`,
- * so existing subscribers (title-bar refresh, etc.) keep working.
- *
- * `resolveCategory` is invoked with the freshly-loaded record under the
- * queue lock — typically `(inst) => sourceMap[inst.sourceId]?.category` —
- * so this module stays free of any source-plugin dependency and the caller
- * doesn't have to pre-fetch the install just to compute its category.
- * Omit it (or have it return undefined) when the category isn't known
- * (e.g. unit tests on installs whose source isn't registered) and only
- * the global timestamp will be touched.
+ * Stamp `lastLaunchedAt` and (when `resolveCategory` returns a value)
+ * `lastLaunchedAtByCategory[category]` in one atomic write, firing the same
+ * 'updated' event as `update()`. `resolveCategory` is passed in (rather than
+ * imported) so this module stays free of the source-plugin layer; omit it to
+ * touch only the global timestamp.
  */
 export async function markLaunched(
   installationId: string,
@@ -299,18 +254,10 @@ export async function getRecent(): Promise<InstallationRecord | null> {
 }
 
 /**
- * Most-recently-launched install whose source category matches `category`.
- *
- * Ranking key per install is
- * `lastLaunchedAtByCategory[category] ?? lastLaunchedAt`, so installs that
- * existed before the per-category field was introduced still participate
- * via their global timestamp until they're launched again (at which point
- * `markLaunched()` populates the category-specific entry).
- *
- * Because `installations.json` doesn't persist `sourceCategory` on the
- * record, the caller passes `resolveCategory` — typically
- * `(inst) => sourceMap[inst.sourceId]?.category` — so this module stays
- * free of any dependency on the source-plugin layer.
+ * Most-recently-launched install matching `category`, ranked by
+ * `lastLaunchedAtByCategory[category] ?? lastLaunchedAt` (so pre-per-category
+ * installs still participate). `resolveCategory` is passed in so this module
+ * stays free of the source-plugin layer.
  */
 export async function getRecentByCategory(
   category: string,

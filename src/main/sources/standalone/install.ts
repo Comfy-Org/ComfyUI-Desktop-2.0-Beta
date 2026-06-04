@@ -17,7 +17,7 @@ import {
   writeComfyEnvironment,
 } from './envPaths'
 import type { InstallationRecord } from '../../installations'
-import type { ComfyVersion } from '../../lib/version'
+import { tagsEqual, type ComfyVersion } from '../../lib/version'
 import type { InstallTools, PostInstallTools } from '../../types/sources'
 
 const BULKY_PREFIXES = ['torch', 'nvidia', 'triton', 'cuda']
@@ -110,10 +110,9 @@ export async function postInstall(installation: InstallationRecord, { sendProgre
   sendProgress('cleanup', { percent: -1, status: t('standalone.cleanupEnvStatus') })
   await stripMasterPackages(installation.installPath)
 
-  // Populate comfyVersion from the extracted git repo so version displays
-  // are correct immediately, without waiting for the first update.
-  // On machines without a global git binary, configure pygit2 using the
-  // just-installed standalone Python so tag resolution works correctly.
+  // Populate comfyVersion now so version displays are correct without waiting
+  // for the first update. Without a global git binary, configure pygit2 against
+  // the just-installed standalone Python so tag resolution works.
   if (!isPygit2Configured() && !await isGitAvailable()) {
     await tryConfigurePygit2Fallback(installation.installPath)
   }
@@ -126,11 +125,10 @@ export async function postInstall(installation: InstallationRecord, { sendProgre
     const ref = installation.version as string | undefined
     const comfyVersion = await resolveLocalVersion(comfyuiDir, headCommit, ref)
     await update({ comfyVersion })
-    // Use updated installation for snapshot so it captures the version
     installation = { ...installation, comfyVersion } as InstallationRecord
   }
 
-  // Capture initial snapshot so the detail view shows "Current" immediately
+  // Capture initial snapshot so the detail view shows "Current" immediately.
   try {
     const filename = await snapshots.saveSnapshot(installation.installPath, installation, 'boot')
     const snapshotCount = await snapshots.getSnapshotCount(installation.installPath)
@@ -139,26 +137,23 @@ export async function postInstall(installation: InstallationRecord, { sendProgre
     console.warn('Initial snapshot failed:', err)
   }
 
-  // Auto-update to latest stable release if the user selected "Latest Stable"
+  // Auto-update to latest stable if the user selected "Latest Stable".
   if (installation.autoUpdateComfyUI && fs.existsSync(path.join(comfyuiDir, '.git'))) {
     if (signal?.aborted) throw new Error('Cancelled')
     sendProgress('update', { percent: -1, status: 'Fetching latest stable version' })
 
     try {
-      // Bypass the in-memory tag cache: it can be poisoned with `null` at
-      // app startup when no git backend is configured (installer ships no
-      // bootstrap-python, no prior installs to lend pygit2, no system git
-      // on PATH). By the time post-install runs, `tryConfigurePygit2Fallback`
-      // above has configured pygit2 against the just-extracted env, so the
-      // refreshed lookup succeeds and the update step actually fires.
+      // Bypass the in-memory tag cache, which can be poisoned with `null` at
+      // startup before any git backend is configured. `tryConfigurePygit2Fallback`
+      // above has since configured pygit2, so the refreshed lookup fires.
       const latestRelease = await fetchLatestRelease('stable', { refresh: true })
       const latestTag = latestRelease?.tag_name as string | undefined
       const current = installation.comfyVersion as ComfyVersion | undefined
-      const onLatestTag = !!latestTag && current?.baseTag === latestTag && current?.commitsAhead === 0
+      const onLatestTag = !!latestTag && tagsEqual(current?.baseTag, latestTag) && current?.commitsAhead === 0
 
       if (!latestTag) {
-        // Don't lie. A network flake here previously masqueraded as "Already up to date,"
-        // which is how first installs were stranding on the bundled v0.20.x.
+        // A network flake must not masquerade as "up to date" — that stranded
+        // first installs on the bundled version.
         sendProgress('update', { percent: 100, status: 'Skipped — could not verify latest version' })
       } else if (onLatestTag) {
         sendProgress('update', { percent: 100, status: 'Already up to date' })
@@ -242,10 +237,9 @@ export async function migrateEnvLayout(
 
   sendProgress?.('migration', { percent: 0, status: 'Migrating environment layout…' })
 
-  // Move envs/default/ → ComfyUI/.venv/
   await fs.promises.rename(legacyEnvDir, venvDir)
 
-  // Fix up pyvenv.cfg home path (old path included envs/default/)
+  // Rewrite the pyvenv.cfg home path (old path included envs/default/).
   const cfgPath = path.join(venvDir, 'pyvenv.cfg')
   if (fs.existsSync(cfgPath)) {
     let content = await fs.promises.readFile(cfgPath, 'utf-8')
@@ -254,7 +248,7 @@ export async function migrateEnvLayout(
     await fs.promises.writeFile(cfgPath, content, 'utf-8')
   }
 
-  // Fix up shebangs on unix
+  // Rewrite shebangs on unix.
   if (process.platform !== 'win32') {
     const binDir = path.join(venvDir, 'bin')
     if (fs.existsSync(binDir)) {
@@ -274,13 +268,12 @@ export async function migrateEnvLayout(
     }
   }
 
-  // On macOS, re-codesign moved binaries
+  // Re-codesign moved binaries on macOS.
   if (process.platform === 'darwin') {
     sendProgress?.('migration', { percent: 50, status: 'Codesigning migrated binaries…' })
     await codesignBinaries(venvDir)
   }
 
-  // Remove empty envs/ directory
   const envsDir = path.join(installPath, 'envs')
   try {
     const remaining = await fs.promises.readdir(envsDir)
@@ -289,7 +282,6 @@ export async function migrateEnvLayout(
     }
   } catch {}
 
-  // Clean up stale metadata fields
   await update({ activeEnv: undefined, envMethods: undefined, needsEnvMigration: undefined })
 
   sendProgress?.('migration', { percent: 100, status: 'Migration complete' })

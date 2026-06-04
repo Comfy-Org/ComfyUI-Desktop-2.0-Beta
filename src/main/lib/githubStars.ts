@@ -1,13 +1,5 @@
-/**
- * Fetches the stargazer count for a GitHub repo via the unauthenticated
- * REST API and caches it in-memory for the lifetime of the main process
- * (24h soft TTL). Unauthenticated rate limit is 60 req/hr per IP — the
- * cache makes that effectively free.
- *
- * Returns `null` on any failure (network, non-2xx, parse error, timeout)
- * so callers can hide the chip rather than render a broken placeholder.
- */
-
+// Stargazer count via the unauthenticated GitHub REST API, cached in-memory
+// (24h TTL) to stay under the 60 req/hr limit. null on any failure.
 interface CacheEntry {
   count: number
   fetchedAt: number
@@ -18,11 +10,20 @@ const FETCH_TIMEOUT_MS = 6000
 
 const cache = new Map<string, CacheEntry>()
 
-export async function getGithubStarCount(repo: string): Promise<number | null> {
+// Synchronous, network-free read of the cached count. Returns null when the
+// entry is missing or stale, so callers can open instantly off the cache and
+// warm it in the background via getGithubStarCount().
+export function getCachedGithubStarCount(repo: string): number | null {
   const cached = cache.get(repo)
   if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
     return cached.count
   }
+  return null
+}
+
+export async function getGithubStarCount(repo: string): Promise<number | null> {
+  const fresh = getCachedGithubStarCount(repo)
+  if (fresh != null) return fresh
 
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)

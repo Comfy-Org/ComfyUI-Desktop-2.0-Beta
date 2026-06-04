@@ -1,10 +1,6 @@
-/** Terminal state rendered by ProgressModal on success when the caller
- *  opts in (mutating, non-launch ops where the user might NOT want to
- *  open the app right away). Generic shape — new flows mint a new
- *  factory below; ProgressModal itself stays untouched. */
+/** Terminal state rendered by ProgressModal on success when the caller opts in. */
 export interface SuccessTerminal {
-  /** Optional headline. ProgressModal falls back to "{op title} complete"
-   *  when omitted. */
+  /** Optional headline; ProgressModal falls back to "{op title} complete" when omitted. */
   title?: string
   actions: SuccessTerminalAction[]
 }
@@ -15,19 +11,11 @@ export interface SuccessTerminalAction {
   variant: 'primary' | 'ghost'
 }
 
-/** Stable ids for the picker's "what next?" choice. Consumers
- *  (panel-side overlay handler) switch on these to wire the actual
- *  behaviour — `openInstallWindow` for `open-instance`,
- *  `return-to-dashboard` activation for `go-dashboard`. Exported as
- *  constants so renames flow through type-checking. */
+// Stable ids the panel-side overlay handler switches on; exported so renames flow through type-checking.
 export const SUCCESS_ACTION_GO_DASHBOARD = 'go-dashboard'
 export const SUCCESS_ACTION_OPEN_INSTANCE = 'open-instance'
 
-/** Picker-flow preset: after a mutating non-launch op finishes
- *  successfully, ask the user whether they want to return to the
- *  dashboard or open the just-touched instance. Order is intentional —
- *  "Open Instance" is the primary CTA on the right (matches the picker
- *  footer's primary-action placement). */
+/** Picker-flow preset: on success, offer return-to-dashboard or open-the-instance. */
 export function successTerminalGoDashboardOrOpen(opts: {
   title?: string
   dashboardLabel: string

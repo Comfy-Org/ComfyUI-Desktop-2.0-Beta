@@ -1,8 +1,6 @@
 type Translator = (key: string, params?: Record<string, unknown>) => string
 
-/** Localised relative-time string from epoch ms (e.g. "5 minutes ago").
- *  Falls back to absolute date for stamps older than 30 days or in the
- *  future (clock skew, bad input) — relative phrasing would lie. */
+/** Localised relative-time string from epoch ms, falling back to absolute date past 30 days or in the future. */
 export function formatRelativeFromMs(ms: number, t: Translator): string {
   if (!Number.isFinite(ms)) return ''
   const diff = Date.now() - ms

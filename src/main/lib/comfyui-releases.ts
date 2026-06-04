@@ -4,11 +4,8 @@ import * as settings from '../settings'
 
 const REPO = 'Comfy-Org/ComfyUI'
 
-/**
- * Short-lived cache for the latest stable tag, keyed by remote URL.
- * Avoids repeated `git ls-remote` calls when the renderer hits the
- * release dropdown, update checks, etc. in close succession.
- */
+/** Short-lived cache for the latest stable tag, keyed by remote URL, to avoid
+ *  repeated `git ls-remote` calls in close succession. */
 const SUCCESS_TTL_MS = 10 * 60 * 1000
 const FAILURE_TTL_MS = 30_000
 interface CacheEntry {
@@ -23,18 +20,10 @@ function _getRemoteUrl(): string {
 }
 
 /**
- * Resolve the latest stable ComfyUI tag (e.g. `v1.19.5`) via
- * `git ls-remote --tags` (Git protocol) — no GitHub REST API calls,
- * works against both github.com and gitcode.com.
- *
- * Successful results are cached in-memory for {@link SUCCESS_TTL_MS};
- * failures use the much shorter {@link FAILURE_TTL_MS} so a flapping
- * remote isn't pounded on but recovers quickly.  Concurrent callers
- * share a single in-flight request per remote URL.  Returns `null`
- * (never throws) on failure so callers can degrade gracefully when
- * offline or pygit2 is not configured.
- *
- * Set `refresh: true` to bypass the cache.
+ * Resolve the latest stable ComfyUI tag via `git ls-remote --tags` (no REST
+ * API; works against github.com and gitcode.com). Concurrent callers share one
+ * in-flight request per remote. Returns `null` (never throws) on failure.
+ * `refresh: true` bypasses the cache.
  */
 export async function getLatestStableTag(opts?: { refresh?: boolean }): Promise<string | null> {
   const url = _getRemoteUrl()
@@ -48,13 +37,9 @@ export async function getLatestStableTag(opts?: { refresh?: boolean }): Promise<
   const promise = (async () => {
     try {
       const tag = (await lsRemoteLatestTag(url)) ?? null
-      // A `null` tag here means the lookup resolved without throwing but
-      // produced no value — almost always because no git backend was
-      // configured at the time of the call (no bootstrap-python in the
-      // installer + no prior installs + no system git). Treat it as a
-      // failure: caching it for SUCCESS_TTL_MS (10 min) silently stranded
-      // new standalone installs on the bundled ComfyUI version because the
-      // post-install update step would read the poisoned cache and skip.
+      // A `null` tag means no git backend was configured; cache it as a failure
+      // (short TTL) rather than poisoning SUCCESS_TTL_MS, which would strand new
+      // standalone installs on the bundled version.
       const ttl = tag === null ? FAILURE_TTL_MS : SUCCESS_TTL_MS
       _latestTagCache.set(url, { tag, expiresAt: Date.now() + ttl })
       return tag

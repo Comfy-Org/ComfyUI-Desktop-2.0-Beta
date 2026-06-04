@@ -1,11 +1,5 @@
 <script setup lang="ts">
-// TODO(stale-old-modal): delete after Settings drawer (v2,
-// ComfyUISettingsPanel) reaches functional parity and ships everywhere.
-// TODO(brand-cleanup): superseded by ComfyUISettingsPanel + useComfyUISettings
-// for the Status / Update / Snapshots / Settings tab surface. This file
-// still backs the hamburger → Settings → ComfyUI Settings flow during
-// the v2 coexistence window. Remove (or split: keep the Directories /
-// Downloads halves) once ComfyUISettingsPanel reaches parity.
+// TODO(stale-old-modal): superseded by ComfyUISettingsPanel; still backs the hamburger → Settings → ComfyUI Settings flow. Remove once that reaches parity.
 import { ref, computed, watch, nextTick, toRaw } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useModal } from '../composables/useModal'
@@ -48,15 +42,9 @@ interface Props {
   installation: Installation | null
   initialTab?: string
   autoAction?: string | null
-  /** When true, render as a Tier 1 manage overlay (Modal-wrapped, dim
-   *  backdrop, no Esc/click-outside dismiss). When false (default),
-   *  render inline as the install-settings panel body. */
+  /** True renders as a Tier 1 manage overlay; false (default) renders inline as the install-settings panel body. */
   asModal?: boolean
-  /** When true, render bare (no ModalShell wrapper, no close button)
-   *  for mounting inside a parent modal that owns the chrome — e.g.
-   *  ManageInstallModal. The contenteditable install name renders as
-   *  the first row of the bare panel; everything else (tabs, scroll
-   *  body, action bar) follows unchanged. */
+  /** True renders bare (no wrapper / close button) for mounting inside a parent modal that owns the chrome (ManageInstallModal). */
   embedded?: boolean
 }
 
@@ -81,12 +69,7 @@ const sessionStore = useSessionStore()
 const actionGuard = useActionGuard()
 const { confirmMigration } = useMigrateAction()
 
-/** Header X close. Always emits `close` — the parent decides what to
- *  do (the chooser-host overlay slot calls `closeOverlay`; the
- *  install-settings panel body asks main to reset the host window's
- *  panel-history stack via `closeCurrentPanel`). Phase 3 §17 dropped
- *  the `inline` prop now that DetailModal renders one way and the
- *  parent owns the close behaviour. */
+// Always emits `close`; the parent decides what to do.
 function handleHeaderClose(): void {
   emit('close')
 }
@@ -126,14 +109,7 @@ const mainSections = computed(() =>
 )
 const bottomSection = computed(() => sections.value.find((s) => s.pinBottom) ?? null)
 
-/** Phase 3 §9 — When the install is already running, the primary
- *  "Launch" action becomes "Restart": hollow-blue (`accent`) styling
- *  to telegraph that it asks for confirmation before doing anything,
- *  and a stop-then-launch chain instead of a bare launch. We rewrite
- *  the action object in the renderer (synthetic id `restart`) so the
- *  source-side action definition stays single-purpose; `runAction`
- *  picks the synthetic id up and routes it through stopComfyUI →
- *  launch. */
+// When the install is running, "Launch" becomes a synthetic `restart` action (`accent`, confirm-gated); `runAction` routes it through stopComfyUI → launch.
 const bottomActions = computed<ActionDef[]>(() => {
   const acts = bottomSection.value?.actions ?? []
   if (!props.installation) return acts
@@ -176,15 +152,7 @@ async function fetchInstallationSize(installationId: string): Promise<void> {
   }
 }
 
-// Deep-link tab override — the title-bar install-update pill (and
-// chooser-card Update / Migrate pills) re-open the modal with a
-// non-default `initialTab` even when the same installation is
-// already in view. The installation watcher below treats those
-// re-opens as "not a new installation" so it skips the activeTab
-// reset; this watcher fills the gap and snaps the inner tab to the
-// requested one (when sections are already loaded — first-mount
-// alignment is still owned by the installation watcher's
-// `isNewInstallation` branch).
+// Snaps the inner tab when a deep-link re-opens the same install with a new `initialTab` (the installation watcher treats that as not-new and skips the reset). First-mount alignment stays with that watcher.
 watch(
   () => props.initialTab,
   (next, prev) => {
@@ -237,14 +205,7 @@ watch(
         window.api.cancelInstallationSize()
       }
 
-      // Auto-trigger an action if requested (e.g. from migrate pill or
-      // title-bar install-update pill click). Walks both
-      // `section.actions[]` AND nested `field.options[].data.actions[]`
-      // — the latter is where channel-card actions (`update-comfyui`,
-      // `copy-update`, `switch-channel`) live, so a search of only
-      // `section.actions` would silently no-op the install-update pill
-      // (regression for #582). Prefers the action on the install's
-      // currently-selected channel when present.
+      // Auto-trigger a requested action. Must walk nested `field.options[].data.actions[]` too (where channel-card actions live), else the install-update pill no-ops. Prefers the selected channel's action.
       if (props.autoAction && !autoActionRun.value) {
         autoActionRun.value = true
         const actionId = props.autoAction
@@ -345,11 +306,7 @@ async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Prom
     ui_surface: 'detail'
   }
 
-  // Busy-only guard. migrate-to-standalone manages its own busy check
-  // + confirm UI via useMigrateAction below, so skip both pre-flights
-  // for it. The apiCall self-stop still applies — migrate is
-  // REQUIRES_STOPPED and the session must be torn down before the
-  // backend handler runs.
+  // migrate-to-standalone owns its busy check + confirm via useMigrateAction, so skip both pre-flights (the apiCall self-stop still applies).
   const ownsPreflight = action.id === 'migrate-to-standalone'
   const requiresStoppedGuard = REQUIRES_STOPPED.has(action.id)
   const wasRunning = sessionStore.isRunning(instId)
@@ -367,9 +324,7 @@ async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Prom
     )
   }
 
-  // Shopping-list chain steps — fieldSelects → select → prompt →
-  // (migrate-to-standalone takeover) → confirm → disk-check. Each
-  // helper short-circuits the runAction when the user cancels.
+  // Chain: fieldSelects → select → prompt → (migrate takeover) → confirm → disk-check. Each helper short-circuits on cancel.
   const afterFieldSelects = await runFieldSelectsChain(mutableAction, modal, t)
   if (!afterFieldSelects) return
   mutableAction = afterFieldSelects
@@ -382,10 +337,7 @@ async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Prom
   if (!afterPrompt) return
   mutableAction = afterPrompt
 
-  // Migration preview — delegates to useMigrateAction composable.
-  // Lives between prompt and confirm so the takeover surface owns the
-  // confirm UX for migrate-to-standalone (the helper short-circuits
-  // the confirm chain below for that action id).
+  // Migration preview sits between prompt and confirm so the takeover owns the confirm UX (and short-circuits the confirm chain below).
   if (mutableAction.id === 'migrate-to-standalone') {
     const migrateResult = await confirmMigration(props.installation, mutableAction.confirm)
     if (!migrateResult) return
@@ -401,15 +353,10 @@ async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Prom
     mutableAction = afterConfirm
   }
 
-  // Disk-space sanity check. DetailModal pre-loads `installationSize`
-  // via watcher so the chain helper can skip the IPC round-trip when
-  // the cached value is fresh; pass `null` to signal "use the cache"
-  // when the loader is still running so the helper falls back to a
-  // synchronous re-fetch.
+  // Pass the cached size when fresh; `null` while loading tells the helper to re-fetch synchronously.
   const cachedSize = installationSizeLoading.value ? null : installationSize.value
   if (!(await runDiskSpaceCheck(mutableAction, props.installation, modal, t, cachedSize))) return
 
-  // showProgress
   if (mutableAction.showProgress) {
     const instName = props.installation.name
     const rawTitle = (mutableAction.progressTitle || mutableAction.label).replace(
@@ -421,9 +368,7 @@ async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Prom
       action_id: mutableAction.id,
       ...telemetryContext
     })
-    // Synthetic 'restart' action: chain stopComfyUI → launch in a
-    // single ProgressModal so the user sees one continuous
-    // "Restarting ComfyUI" view rather than two flashes.
+    // Synthetic 'restart': chain stopComfyUI → launch in one ProgressModal so the user sees one continuous view.
     const isRestart = mutableAction.id === 'restart'
     const needsSelfStop = wasRunning && requiresStoppedGuard && !isRestart
     const wantsRelaunch = needsSelfStop && IN_PLACE_RELAUNCH.has(mutableAction.id)
@@ -452,10 +397,7 @@ async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Prom
               mutableAction.id,
               mutableAction.data ? toRaw(mutableAction.data) : undefined
             )
-    // Tag launch / restart so PanelApp's handleShowProgress installs
-    // the chooser-host close-on-instance-started subscription. Without
-    // this, launches kicked off from this Tier-1 modal would leave the
-    // dashboard window open next to the new comfy window.
+    // Tag launch/restart so PanelApp installs the close-on-instance-started subscription, else the dashboard lingers beside the new comfy window.
     const triggersInstanceStart = mutableAction.id === 'launch' || isRestart || wantsRelaunch
     emit('show-progress', {
       installationId: instId,
@@ -471,7 +413,6 @@ async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Prom
     return
   }
 
-  // Inline action with loading state
   let savedLabel: string | undefined
   if (btn) {
     savedLabel = btn.textContent || ''
@@ -641,10 +582,7 @@ function navigateToInstallation(installationId: string): void {
     </div>
   </ModalShell>
 
-  <!-- Embedded mount: bare panel body for ManageInstallModal. No
-       ModalShell, no close button — the parent owns the chrome.
-       Editable install name sits at the top of the body; tabs /
-       scroll / action-bar follow as in the wrapped mount. -->
+  <!-- Embedded mount: bare panel body for ManageInstallModal; the parent owns the chrome. -->
   <div v-else-if="installation" class="detail-embedded">
     <div class="detail-embedded-title">
       <div

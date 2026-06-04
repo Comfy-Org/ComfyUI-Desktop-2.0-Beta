@@ -88,9 +88,7 @@ function installMockApi(overrides: Partial<MockApi> = {}): MockApi {
   return api
 }
 
-// Stub BrandTakeoverLayout to skip its Teleport-to-body + focus-trap so
-// the BrandFinishedSurface tree renders inline and assertions against it
-// don't have to chase the teleported root.
+// Stub BrandTakeoverLayout to skip its Teleport-to-body so assertions render inline.
 const brandTakeoverStub = {
   name: 'BrandTakeoverLayout',
   template: '<div class="brand-takeover-stub"><slot /><slot name="footer" /></div>',
@@ -99,9 +97,7 @@ const brandTakeoverStub = {
 function mountView(installationId = 'inst-1', installation: Installation | null = SAMPLE_INSTALL) {
   return mount(ComfyLifecycleView, {
     props: { installationId, installation },
-    // No createPinia() here — beforeEach installs the active pinia via
-    // setActivePinia so beforeEach mutations (e.g. ready = true) land on
-    // the same instance the component sees via useSessionStore().
+    // No createPinia() here — beforeEach's setActivePinia must own the instance so its mutations land.
     global: {
       plugins: [createTestI18n()],
       stubs: { BrandTakeoverLayout: brandTakeoverStub },
@@ -113,18 +109,13 @@ describe('ComfyLifecycleView', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     installMockApi()
-    // The view gates on sessionStore.ready to avoid flashing the stopped
-    // surface before hydration. Production flips it after init() — tests
-    // bypass init() so flip it manually to opt into rendering.
+    // The view gates on sessionStore.ready; tests bypass init() so flip it manually.
     useSessionStore().ready = true
   })
 
   it('renders nothing in the default (no-error, not-running) state — the host ComfyUI view covers the panel', async () => {
     const wrapper = mountView()
     await flushPromises()
-    // No error, no in-flight op, hydrated — the view stays out of the
-    // way. The crashed surface only shows when sessionStore actually
-    // has an error recorded for this install.
     expect(wrapper.find('.brand-progress__banner').exists()).toBe(false)
     expect(wrapper.find('.lifecycle-placeholder').exists()).toBe(false)
   })
@@ -134,8 +125,6 @@ describe('ComfyLifecycleView', () => {
     const sessionStore = useSessionStore()
     sessionStore.launchingInstances.set('inst-1', { installationName: 'My Local Install' })
     await flushPromises()
-    // ProgressModal owns the full launching takeover; the lifecycle
-    // view renders only the small inline placeholder as a safety-net.
     expect(wrapper.text()).toContain('Starting ComfyUI')
     expect(wrapper.find('.lifecycle-placeholder').exists()).toBe(true)
     expect(wrapper.find('button.brand-primary').exists()).toBe(false)
@@ -187,7 +176,6 @@ describe('ComfyLifecycleView', () => {
     })
     await flushPromises()
     expect(wrapper.text()).toContain('The ComfyUI process exited.')
-    // Generic fallback must not invent a code or signal.
     expect(wrapper.text()).not.toContain('exit code')
     expect(wrapper.text()).not.toContain('terminated by')
   })
@@ -218,7 +206,6 @@ describe('ComfyLifecycleView', () => {
     expect(logs.exists()).toBe(true)
     expect(logs.text()).toContain('ImportError: No module named')
     expect(logs.text()).toContain('main.py:42')
-    // The accordion toggle button uses the shared "View logs" label.
     expect(wrapper.text()).toContain('View logs')
   })
 
@@ -257,8 +244,6 @@ describe('ComfyLifecycleView', () => {
     await flushPromises()
     expect(wrapper.find('.brand-progress__logs').exists()).toBe(false)
     expect(wrapper.find('.brand-progress__logs-toggle').exists()).toBe(false)
-    // The logs hint would otherwise point at an accordion that isn't
-    // even mounted — keep the message clean.
     expect(wrapper.text()).not.toContain('See the logs for details.')
   })
 
@@ -311,7 +296,7 @@ describe('ComfyLifecycleView', () => {
     })
 
     const wrapper = mountView()
-    // The live IPC handler in sessionStore wins over the on-mount fetch.
+    // The live IPC handler wins over the on-mount fetch.
     const sessionStore = useSessionStore()
     sessionStore.errorInstances.set('inst-1', {
       installationName: 'My Local Install',
@@ -330,8 +315,7 @@ describe('ComfyLifecycleView', () => {
 
     expect(api.getLastCrashError).toHaveBeenCalledWith('inst-1')
     const stored = sessionStore.errorInstances.get('inst-1')
-    // Live event payload (the freshest) is preserved — the buffer fetch is a
-    // best-effort backfill and must not clobber a populated entry.
+    // The best-effort buffer fetch must not clobber the fresher live event.
     expect(stored?.lastStderr).toBe('live event stderr')
     expect(stored?.exitCode).toBe(137)
     expect(wrapper.find('.brand-progress__logs').text()).toContain('live event stderr')
@@ -381,7 +365,6 @@ describe('ComfyLifecycleView', () => {
     expect(payload.title).toContain('My Local Install')
     expect(payload.cancellable).toBe(true)
 
-    // The apiCall should hit window.api.runAction with the 'launch' action.
     await payload.apiCall()
     const api = (window as unknown as { api: MockApi }).api
     expect(api.runAction).toHaveBeenCalledWith('inst-1', 'launch')
@@ -395,16 +378,13 @@ describe('ComfyLifecycleView', () => {
       exitCode: 1,
     })
     await flushPromises()
-    // Crashed-state actions live in the hero-stack error-actions row,
-    // not the footer-bar — matches ProgressModal's error finished state.
     const errorActions = wrapper.find('.brand-progress__error-actions')
     expect(errorActions.exists()).toBe(true)
     const buttons = errorActions.findAll('button')
     const back = buttons.find((b) => b.text().includes('Back'))
     expect(back?.exists()).toBe(true)
     expect(back!.classes()).toContain('brand-ghost')
-    // Back sits on the left, Restart on the right — same pairing as
-    // ProgressModal's Back / Reboot CTAs.
+    // Back on the left, Restart on the right.
     expect(buttons[0]!.text()).toContain('Back')
     expect(buttons[1]!.text()).toContain('Restart')
     await back!.trigger('click')

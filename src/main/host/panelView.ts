@@ -20,14 +20,9 @@ import {
 import type { BodyMode, ComfyPanelKey, ComfyWindowEntry } from './registry'
 
 /**
- * Lazily create the panel WebContentsView for a comfy window. Adds it as a
- * sibling of comfyView, registers it for broadcasts, and loads panel.html
- * with the installation context as URL parameters.
- *
- * The URL params are only an initial hint — `did-finish-load` always re-pushes
- * the current `activePanel` so a user who clicks Install Settings then
- * Launcher Settings before the first load completes still ends up on the
- * latter. This guards against the mid-load race.
+ * Lazily create the panel WebContentsView for a comfy window. The URL params are only an
+ * initial hint; `did-finish-load` always re-pushes the current `activePanel` to guard
+ * against a mid-load race where the user clicks between buttons before the first load ends.
  */
 export function ensurePanelView(
   windowKey: number,
@@ -40,31 +35,20 @@ export function ensurePanelView(
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      // sandbox: false — preload/index.js imports the shared
-      // src/preload/api.ts chunk, same as the title-bar preload.
-      // Sandboxed preloads can't require() relative chunks, so leaving
-      // sandbox on would silently break window.api in the panel and
-      // take renderer-side telemetry with it. See issue #521 for the
-      // build-time inlining plugin that will let us turn sandbox back on.
+      // preload/index.js imports the shared window.api chunk; a sandboxed preload can't
+      // require() relative chunks, which would break window.api in the panel.
       sandbox: false,
-      // Reuse the launcher preload — panel UI uses window.api like the main launcher window.
       preload: path.join(__dirname, '../preload/index.js'),
-      // Default session (no partition) — keeps the panel isolated from the
-      // ComfyUI frontend's storage even though it runs in the same window.
+      // Default session (no partition) keeps the panel isolated from ComfyUI's storage.
     },
   })
-  // Chooser/lifecycle paint `var(--bg)` in the renderer; use an opaque
-  // launcher-surface colour during load so the host window doesn't read
-  // as empty black while panel.html boots. Overlay modes (settings-v2)
-  // need transparency to composite the live comfyView through.
   const chooserPanelBg = (): string => {
     const overlay = titleBarOverlayForTheme(resolveTheme() === 'dark')
     return overlay.color ?? TITLEBAR_BG
   }
-  // `chooser` and `new-install` are full-screen launcher flows (not
-  // overlays over the comfy view), so paint them opaque during load to
-  // avoid a black flash. Overlay modes (settings-v2) stay transparent so
-  // the live comfy view composites through.
+  // `chooser` and `new-install` are full-screen flows, so paint them opaque during load to
+  // avoid a black flash; overlay modes stay transparent so the live comfy view composites
+  // through.
   panelView.setBackgroundColor(
     initialPanel === 'chooser' || initialPanel === 'new-install' ? chooserPanelBg() : '#00000000',
   )
@@ -73,16 +57,11 @@ export function ensurePanelView(
   panelView.setBounds({ x: 0, y: TITLEBAR_HEIGHT + 1, width: 0, height: 0 })
   panelView.setVisible(false)
 
-  // Push the *latest* body mode (may differ from initialPanel if the user
-  // clicked between buttons during the first load, or the running state
-  // changed) and steal focus if the window is focused.
+  // Push the latest body mode (may differ from initialPanel) and steal focus if focused.
   panelView.webContents.once('did-finish-load', () => {
     const latest = comfyWindows.get(windowKey)
     if (!latest || latest.window.isDestroyed() || panelView.webContents.isDestroyed()) return
-    // Backstop reveal — the titleBarView's `dom-ready` listener in
-    // `openChooserHostWindow` usually wins this race well before
-    // panel.html finishes loading. Stays here for the (rare) case
-    // where the titlebar load fails / is delayed past the panel's.
+    // Backstop reveal for the rare case where the titlebar load is delayed past the panel's.
     revealColdStartHostIfPending(windowKey)
     const mode = computeBodyMode(latest)
     if (mode !== 'comfy') {
@@ -91,9 +70,7 @@ export function ensurePanelView(
     }
   })
 
-  // Pass the entry's installationId (which is the empty string for
-  // install-less host windows) to the panel renderer — the Map key is a
-  // numeric windowKey that PanelApp.vue must not see.
+  // Pass installationId ('' for install-less hosts), not the numeric windowKey map key.
   const panelInstallationId = entry.installationId ?? ''
   const firstUseCompleted = getSetting('firstUseCompleted') === true
   const panelQuery: Record<string, string> = {
@@ -101,11 +78,8 @@ export function ensurePanelView(
     panel: initialPanel,
     firstUseCompleted: String(firstUseCompleted),
   }
-  // Propagate the E2E env flag to the renderer via the URL query so the
-  // panel's renderer-side test hooks (`__e2eRenderer`) only register
-  // when the runner explicitly opted in. Mirrors the main-side `E2E === '1'`
-  // gating used by `registerE2EHooks()` and the `e2eOverrides.ts`
-  // counters; the renderer can't see `process.env` directly.
+  // Propagate the E2E flag via the URL query (the renderer can't read process.env) so the
+  // renderer-side test hooks only register when the runner opted in.
   if (process.env['E2E'] === '1') {
     panelQuery['e2e'] = '1'
   }
@@ -118,8 +92,7 @@ export function ensurePanelView(
         path.join(__dirname, '../renderer/panel.html'),
         { query: panelQuery },
       )
-  // Loads can reject if the window closes mid-load — swallow to avoid noisy
-  // unhandledRejection forwarding from the main-process error handlers.
+  // Loads can reject if the window closes mid-load; swallow to avoid noisy forwarding.
   void loadPromise.catch(() => {})
 
   _registerExtraBroadcastTarget(panelView.webContents)
@@ -128,15 +101,10 @@ export function ensurePanelView(
 }
 
 /**
- * Tear down the entry's current panelView (if any) so the next
- * `ensurePanelView()` call rebuilds it fresh. Used by the chooser-pick
- * in-place attach path (`onLaunch`) to drop the chooser PanelApp —
- * including any in-flight launch progress overlay it was holding —
- * before the install takes over the host. Without this, the
- * still-mounted chooser panel's overlay state would survive the
- * attach, hidden behind the live comfyView, and a later
- * `consultPanelRendererClose` (window close) would funnel through
- * its cancel-prompt and hang waiting for input the user can't see.
+ * Tear down the entry's current panelView so the next `ensurePanelView()` rebuilds it
+ * fresh. The chooser-pick attach path uses this to drop the chooser PanelApp (and any
+ * in-flight overlay) before the install takes over; otherwise a later close consult would
+ * hang on the hidden panel's cancel-prompt waiting for input the user can't see.
  */
 export function destroyPanelView(entry: ComfyWindowEntry): void {
   if (!entry.panelView) return
@@ -149,13 +117,9 @@ export function destroyPanelView(entry: ComfyWindowEntry): void {
   if (!entry.window.isDestroyed()) {
     try { entry.window.contentView.removeChildView(oldPanel) } catch {}
   }
-  // The reloaded panel renderer starts with no overlay mounted, so any
-  // `firstUseMode` the old renderer pushed (commonly `'loading-lockdown'`
-  // from a ProgressModal that triggered the chooser→install attach) is
-  // stale. Reset to `'none'` and broadcast so the persistent title-bar
-  // WebContentsView paints the full chrome immediately — the new panel
-  // renderer's own initial mount will re-push if onboarding is still
-  // active.
+  // The rebuilt panel starts with no overlay, so any `firstUseMode` the old renderer pushed
+  // is stale. Reset to `'none'` and broadcast so the title bar paints full chrome; the new
+  // renderer re-pushes if onboarding is still active.
   if (entry.firstUseMode !== 'none') {
     entry.firstUseMode = 'none'
     if (!entry.titleBarView.webContents.isDestroyed()) {
@@ -171,8 +135,7 @@ export function focusActiveBody(entry: ComfyWindowEntry): void {
   if (mode === 'comfy') {
     if (!entry.comfyView.webContents.isDestroyed()) entry.comfyView.webContents.focus()
   } else if (entry.panelView && !entry.panelView.webContents.isDestroyed() && !entry.panelView.webContents.isLoadingMainFrame()) {
-    // Panel exists and is loaded — focus immediately. If still loading, the
-    // did-finish-load handler in ensurePanelView will focus it.
+    // If still loading, ensurePanelView's did-finish-load handler focuses it instead.
     entry.panelView.webContents.focus()
   }
 }
@@ -184,8 +147,7 @@ export function setActivePanel(windowKey: number, panel: ComfyPanelKey): void {
 
   entry.activePanel = panel
   const mode = computeBodyMode(entry)
-  // Broadcast every body-mode change to the panel renderer — including
-  // 'comfy'. Without the 'comfy' broadcast the renderer's activePanel ref
+  // Broadcast every body-mode change including 'comfy', else the renderer's activePanel ref
   // goes stale after a drawer close and the next open no-ops.
   if (mode !== 'comfy') {
     ensurePanelView(windowKey, entry, mode)
@@ -193,25 +155,23 @@ export function setActivePanel(windowKey: number, panel: ComfyPanelKey): void {
   forwardToPanelRenderer(entry, 'panel-switch', { panel: mode, installationId: entry.installationId ?? '' })
   entry.layoutViews()
   if (!entry.titleBarView.webContents.isDestroyed()) {
-    // Title bar pill stays on the user-visible key, not 'comfy-lifecycle'.
+    // Pill stays on the user-visible key, not 'comfy-lifecycle'.
     entry.titleBarView.webContents.send('comfy-titlebar:panel-changed', panel)
   }
   focusActiveBody(entry)
 }
 
 /**
- * Re-evaluate the body mode for a comfy window after a session-state
- * transition (instance launched / stopped / crashed) and reflect it in the
- * layout. When the body mode is `'comfy-lifecycle'`, the panelView is created
- * (if needed) and asked to render the lifecycle UI; the title-bar pill stays
- * on `'comfy'` either way.
+ * Re-evaluate the body mode after a session-state transition and reflect it in the layout.
+ * When the mode is `'comfy-lifecycle'`, the panelView renders the lifecycle UI; the pill
+ * stays on `'comfy'` either way.
  */
 export function refreshComfyTabBody(installationId: string): void {
   const entry = getEntryByInstallationId(installationId)
   if (!entry || entry.window.isDestroyed()) return
   if (entry.activePanel !== 'comfy') return
-  // A background op (inline picker update/restore) is managing this install's
-  // lifecycle — don't flash the "not running" screen while it's in-flight.
+  // A background op (inline picker update/restore) is managing this lifecycle; don't flash
+  // the "not running" screen while it's in-flight.
   const bgOp = _activeOperationStatus.get(installationId)
   if (bgOp && !bgOp.done) return
 
@@ -219,18 +179,14 @@ export function refreshComfyTabBody(installationId: string): void {
   if (mode === 'comfy-lifecycle') {
     ensurePanelView(entry.windowKey, entry, 'comfy-lifecycle')
   }
-  // Tell an already-mounted panel renderer about the new body mode so it
-  // unmounts/mounts the lifecycle view in step with main's state.
   forwardToPanelRenderer(entry, 'panel-switch', { panel: mode, installationId })
   entry.layoutViews()
   focusActiveBody(entry)
 }
 
 /**
- * Send a payload to a panelView, deferring until `did-finish-load` if
- * the bundle is still loading. Centralizes the deferral pattern so
- * pill clicks / IPC that land during the lazy first-load aren't
- * silently dropped before the renderer's listener wires up.
+ * Send a payload to a panelView, deferring until `did-finish-load` if the bundle is still
+ * loading, so IPC landing during the lazy first-load isn't dropped before the listener wires up.
  */
 export function sendToPanelDeferred(
   panelView: WebContentsView,
@@ -270,12 +226,8 @@ export function registerPanelViewIpc(): void {
     setActivePanel(found.id, panel)
   })
 
-  // Page-level X close (rendered inside the panel WebContentsView, e.g.
-  // Settings / Directories / Install Settings) — same effect as a pill
-  // click: the body returns to the comfy/chooser root. The panel preload
-  // exposes this as `closeCurrentPanel()`. We resolve the host window via
-  // the panel's WebContents sender; the panelView is lazily created so we
-  // walk every entry instead of caching a separate reverse-map.
+  // Page-level X close inside the panel: same effect as a pill click. Resolve the host via
+  // the panel's WebContents sender (walking entries, since the panelView is lazily created).
   ipcMain.on('comfy-window:close-current-panel', (event) => {
     for (const [id, entry] of comfyWindows) {
       if (entry.panelView?.webContents === event.sender) {

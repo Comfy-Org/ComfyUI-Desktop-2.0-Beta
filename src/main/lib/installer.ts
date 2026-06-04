@@ -31,12 +31,8 @@ interface DownloadFile {
   size: number
 }
 
-// --- Per-cache-path download lock ---
-// Prevents two concurrent installs/migrations from writing to the same cache
-// file simultaneously (e.g. when both target the same release+variant).
-// The second caller waits for the first download to finish, then sees a
-// cache hit and skips the download entirely.
-
+// Per-cache-path lock so concurrent installs don't write the same file; the
+// second caller waits, then hits the cache and skips the download.
 const _downloadLocks = new Map<string, Promise<void>>()
 
 interface DownloadLockOptions {

@@ -12,19 +12,12 @@ const { t } = useI18n()
 
 const { state, close, dismiss } = useModal()
 
-/** Whether the current confirm modal is the Migrate-to-Standalone flow.
- *  `snapshotPreview` is only set by `useMigrateAction`, so its presence
- *  is a reliable cue to swap into the brand layout (counts only, no
- *  device picker, yellow primary CTA — parallel to the Configure
- *  Continue precedent). Other `confirm` callers keep the legacy
- *  modal-box. */
+/** Migrate-to-Standalone flow; `snapshotPreview` is only set by
+ *  useMigrateAction, so its presence reliably cues the brand layout. */
 const isMigrateConfirm = computed(() => state.type === 'confirm' && state.snapshotPreview != null)
 
-/** A confirm is "simple" when it has no extras — no snapshot preview,
- *  no detail groups, no checkboxes, no loading state, no variant cards.
- *  These render through `BaseAlert` (cancel + primary). Rich confirms
- *  (migrate, snapshot preview, multi-line detail confirms) keep the
- *  legacy markup with its scrollable body. */
+/** A confirm with no extras renders through BaseAlert; rich confirms keep
+ *  the legacy markup with its scrollable body. */
 const isSimpleConfirm = computed(
   () =>
     state.type === 'confirm' &&
@@ -36,35 +29,30 @@ const isSimpleConfirm = computed(
     !state.variantLoading
 )
 
-/** True when the current modal is rendered by `BaseAlert` (which owns
- *  its own teleport + overlay). The legacy overlay below must skip in
- *  that case so we don't double-mount a backdrop. */
+/** BaseAlert owns its own teleport + overlay, so the legacy overlay below
+ *  must skip when this is true to avoid double-mounting a backdrop. */
 const usesBaseAlert = computed(() => state.type === 'alert' || isSimpleConfirm.value)
 
 const baseAlertTone = computed<'primary' | 'danger'>(() =>
   state.type === 'confirm' && state.confirmStyle === 'danger' ? 'danger' : 'primary'
 )
 
-/** Alert uses `buttonLabel` (single OK action); simple confirm uses
- *  `confirmLabel` (the primary action like "Delete" / "Switch"). */
+/** Alert uses buttonLabel (single OK); simple confirm uses confirmLabel. */
 const baseAlertButtonLabel = computed(() =>
   state.type === 'alert' ? state.buttonLabel : state.confirmLabel
 )
 
 function onBaseAlertClose(): void {
-  // Alert: resolve void. Simple confirm: resolve `true`.
   if (state.type === 'alert') close(undefined)
   else close(true)
 }
 
 function onBaseAlertCancel(): void {
-  // Only reached for simple confirms (showCancel=true).
   close(false)
 }
 
-/** MigrateConfirmBody emits when a checkbox flips. Mirror the change
- *  back into `state.checkboxes` so `useModal.getLastCheckboxValues()`
- *  picks up the new value at submit time. */
+/** Mirror checkbox flips back into state.checkboxes so
+ *  useModal.getLastCheckboxValues() sees them at submit time. */
 function onMigrateCheckboxToggle(id: string, checked: boolean): void {
   const cb = state.checkboxes.find((c) => c.id === id)
   if (cb) cb.checked = checked
@@ -175,8 +163,8 @@ watch(
 
 function handleKeydown(event: KeyboardEvent): void {
   if (!state.visible) return
-  // BaseAlert owns its own ESC dismissal for alert + simple confirm.
-  // Skip here to avoid double-resolving the promise.
+  // BaseAlert owns ESC dismissal for alert + simple confirm; skip to avoid
+  // double-resolving the promise.
   if (usesBaseAlert.value) return
   if (event.key === 'Escape') {
     dismiss()
@@ -219,14 +207,8 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <!-- Alerts and simple confirms render through the shared `BaseAlert`
-       primitive (compact, role=alertdialog, focus restore, scroll lock,
-       a11y baked in). Rich confirms / prompt / select / options stay in
-       the legacy markup below until each gets its own dedicated
-       primitive — they have substantial bespoke UI (snapshot preview,
-       variant grid, detail groups) that doesn't fit the alert shape.
-       Single <BaseAlert> handles both intents; computed props swap the
-       primary label/tone and toggle Cancel based on `state.type`. -->
+  <!-- Alerts and simple confirms render through BaseAlert; rich confirms /
+       prompt / select / options stay in the legacy markup below. -->
   <BaseAlert
     :open="state.visible && usesBaseAlert"
     :title="state.title"
@@ -249,9 +231,7 @@ onUnmounted(() => {
       @mousedown="handleOverlayMouseDown"
       @click="handleOverlayClick"
     >
-      <!-- Confirm (rich: snapshot preview, variants, details, checkboxes,
-           or loading state). Simple confirms fall through to BaseAlert
-           above. -->
+      <!-- Rich confirm; simple confirms fall through to BaseAlert above. -->
       <div
         v-if="state.type === 'confirm'"
         class="modal-box"
@@ -266,9 +246,8 @@ onUnmounted(() => {
       >
         <div class="modal-title">{{ state.title }}</div>
         <div class="modal-body">
-          <!-- Prompt card hidden when message is empty (the migrate
-               flow doesn't set a message; rendering an empty card
-               leaves a stray box at the top of the modal). -->
+          <!-- Hidden when message is empty (migrate flow sets none) to
+               avoid a stray empty box at the top. -->
           <div
             v-if="state.message"
             class="modal-prompt-card"
@@ -276,20 +255,12 @@ onUnmounted(() => {
             v-html="linkifiedMessage"
           ></div>
 
-          <!-- Loading -->
           <div v-if="state.loading" class="modal-loading">
             <div class="modal-loading-spinner" />
             <span>{{ $t('common.loading') }}</span>
           </div>
 
-          <!-- ──────────────────────────────────────────────────────
-               Migrate-flow brand layout. Lives next to the legacy
-               snapshot-preview / variant-picker / details blocks
-               below so the older code is preserved (commented via
-               v-if="false") for reference. CTO note: drop device
-               picker entirely + collapse Custom Nodes / Pip Packages
-               to counts only.
-               ────────────────────────────────────────────────────── -->
+          <!-- Migrate-flow brand layout (counts only, no device picker). -->
           <template v-if="isMigrateConfirm && !state.loading && state.snapshotPreview">
             <MigrateConfirmBody
               :preview="state.snapshotPreview"
@@ -299,11 +270,7 @@ onUnmounted(() => {
             />
           </template>
 
-          <!-- Legacy snapshot preview (expandables) — preserved but
-               disabled. Rendering is gated on `!isMigrateConfirm` so
-               the brand layout above is the only thing the user sees
-               in the migrate flow today; flip the flag back on if we
-               ever need the detailed view. -->
+          <!-- Detailed snapshot preview; gated off for the migrate flow. -->
           <template v-if="!isMigrateConfirm && !state.loading && state.snapshotPreview">
             <div class="ls-grid">
               <div class="ls-field">
@@ -374,10 +341,8 @@ onUnmounted(() => {
             </div>
           </template>
 
-          <!-- Generic message details + checkboxes (non-migrate
-               confirms). The migrate brand layout above renders its
-               own action list + checkbox row, so skip this when
-               migrate is active to avoid duplication. -->
+          <!-- Generic details + checkboxes; the migrate layout renders its
+               own, so skip when migrate is active. -->
           <template v-if="!isMigrateConfirm">
             <div v-if="state.messageDetails.length" class="modal-details">
               <div v-for="(group, gi) in state.messageDetails" :key="gi" class="modal-detail-group">
@@ -417,7 +382,6 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- ConfirmWithOptions -->
       <div v-else-if="state.type === 'confirmWithOptions'" class="modal-box">
         <div class="modal-title">{{ state.title }}</div>
         <div class="modal-message">{{ state.message }}</div>
@@ -435,7 +399,6 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- Prompt -->
       <div
         v-else-if="state.type === 'prompt'"
         class="modal-box"
@@ -477,7 +440,6 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- Select -->
       <div v-else-if="state.type === 'select'" class="modal-box modal-select-box">
         <div class="modal-title">{{ state.title }}</div>
         <div v-if="state.message" class="modal-message">{{ state.message }}</div>

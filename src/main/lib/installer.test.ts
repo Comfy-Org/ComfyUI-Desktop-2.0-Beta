@@ -2,6 +2,21 @@ import { describe, it, expect, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+
+// `installer.ts` -> `download.ts` -> `../settings` -> `models.ts` -> `paths.ts`
+// pulls in electron's `app.getPath` at module-load time. The download function
+// here is dependency-injected through `ctx`, so none of that code actually
+// runs in this suite — but the import chain still has to resolve, so stub
+// the surface used by `paths.ts`.
+vi.mock('electron', () => ({
+  app: {
+    isPackaged: false,
+    getPath: () => '/tmp',
+    getVersion: () => '0.0.0-test',
+    getLocale: () => 'en',
+  },
+}))
+
 import { downloadAndExtract, downloadAndExtractMulti } from './installer'
 import type { Cache } from './cache'
 import type { DownloadProgress } from './download'
@@ -74,7 +89,6 @@ describe('downloadAndExtract', () => {
     const ctxA = makeCtx({ sendProgress: sendProgressA, download: mockDownload, cache, extract: mockExtract })
     const ctxB = makeCtx({ sendProgress: sendProgressB, download: mockDownload, cache, extract: mockExtract })
 
-    // Fire both concurrently with the same cacheKey + URL
     const [resultA, resultB] = await Promise.all([
       downloadAndExtract('https://example.com/env.7z', destA, 'v1_nvidia', ctxA),
       downloadAndExtract('https://example.com/env.7z', destB, 'v1_nvidia', ctxB),
@@ -83,14 +97,10 @@ describe('downloadAndExtract', () => {
     expect(resultA).toBeUndefined()
     expect(resultB).toBeUndefined()
 
-    // Only ONE actual download should have occurred; the second caller
-    // should have seen a cache hit after the lock was released.
+    // Only one real download; the second caller hits the cache after the lock releases.
     expect(mockDownload).toHaveBeenCalledTimes(1)
-
-    // Both should have called extract (each extracts to its own dest)
     expect(mockExtract).toHaveBeenCalledTimes(2)
 
-    // The second caller should have shown a waiting status, then a cache hit
     const bDownloadCalls = sendProgressB.mock.calls.filter(
       (args) => args[0] === 'download'
     )

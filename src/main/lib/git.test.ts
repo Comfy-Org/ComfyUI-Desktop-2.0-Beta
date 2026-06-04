@@ -206,10 +206,6 @@ describe('countUniqueCommits (system git)', () => {
   })
 })
 
-// ===================================================================
-// System git — spawn-based functions
-// ===================================================================
-
 describe('gitClone (system git)', () => {
   beforeEach(() => { vi.resetAllMocks() })
 
@@ -251,7 +247,6 @@ describe('gitCheckoutCommit (system git)', () => {
     mockSpawn(0)
     const result = await gitCheckoutCommit('/repo', 'abc123', () => {})
     expect(result.exitCode).toBe(0)
-    // First spawn call should be checkout
     expect(mockedSpawn.mock.calls[0]![1]).toEqual(['checkout', 'abc123'])
   })
 
@@ -312,16 +307,9 @@ describe('gitFetchAndCheckout (system git)', () => {
   })
 })
 
-// ===================================================================
-// pygit2 fallback tests
-//
-// When configurePygit2() is called, every function routes through
-// execFile(pythonPath, ['-s', '-u', scriptPath, subcmd, ...]) instead
-// of execFile('git', [...]).  The tests below verify that:
-//   1. The correct subcommand and args are passed to the Python script
-//   2. The output is parsed identically to the system-git path
-// ===================================================================
-
+// After configurePygit2(), every function routes through execFile(python, [script, subcmd,
+// ...]) instead of execFile('git', [...]). These tests verify the subcommand/args and that
+// output parses identically to the system-git path.
 describe('pygit2 fallback', () => {
   beforeEach(() => {
     vi.resetAllMocks()
@@ -539,8 +527,6 @@ describe('pygit2 fallback', () => {
     })
   })
 
-  // --- spawn-based pygit2 functions ---
-
   /** Assert spawn was called with Python + script and extract the subcommand args. */
   function expectPygit2SpawnCall(callIndex = 0): string[] {
     expect(mockedSpawn.mock.calls.length).toBeGreaterThan(callIndex)
@@ -634,10 +620,6 @@ describe('pygit2 fallback', () => {
     })
   })
 })
-
-// ===================================================================
-// pygit2 healthcheck probe + circuit-breaker tests
-// ===================================================================
 
 describe('probePygit2', () => {
   beforeEach(() => { vi.resetAllMocks(); resetPygit2State() })

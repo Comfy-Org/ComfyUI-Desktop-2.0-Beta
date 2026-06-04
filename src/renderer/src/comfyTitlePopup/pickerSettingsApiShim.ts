@@ -1,18 +1,13 @@
 /**
- * Picker popup `window.api` shim.
- *
- * The picker popup has the `comfyTitlePopupPreload` bridge, not `window.api`.
- * To run the per-install settings UI inside it, we install a minimal
- * `window.api` shim that forwards the methods the settings UI actually calls
- * to the popup's `pickerSettings*` bridge. Adding a new call from the settings
- * UI requires: (1) bridge method in `comfyTitlePopupPreload.ts`, (2) main
- * handler in `pickerSettingsHandlers.ts`, (3) entry in `API_MAP` below.
+ * Picker popup `window.api` shim. The popup has the comfyTitlePopupPreload
+ * bridge, not window.api, so this forwards the settings UI's calls to the
+ * popup's `pickerSettings*` bridge. Adding a call needs: bridge method in
+ * comfyTitlePopupPreload.ts, main handler in pickerSettingsHandlers.ts, and
+ * an entry in API_MAP below.
  */
 
 import type { ComfyTitlePopupBridge } from '../../../preload/comfyTitlePopupPreload'
 
-// `window.api.X` → `bridge.pickerSettingsY`. Keep this list aligned with the
-// `pickerSettings*` surface on the bridge — TypeScript catches typos.
 const API_MAP = {
   getDetailSections: 'pickerSettingsGetDetailSections',
   getDiskSpace: 'pickerSettingsGetDiskSpace',
@@ -45,10 +40,8 @@ type ShimApi = {
     ComfyTitlePopupBridge['pickerSettingsBrowseFolder']
   >
   relaunchApp: () => void
-  /** Live-refresh hook for settings views (e.g. SnapshotsView). The popup
-   *  has no `installations-changed` IPC, so map it onto the picker's snapshot
-   *  rebroadcast — which fires whenever the selected install's data (snapshot
-   *  set included) changes — so the Snapshots tab reloads in place. */
+  /** The popup has no installations-changed IPC, so this maps onto the
+   *  picker's snapshot rebroadcast to live-refresh settings views. */
   onInstallationsChanged: (cb: () => void) => () => void
 }
 
@@ -56,8 +49,8 @@ export function installPickerSettingsApiShim(): void {
   const bridge = (window as unknown as { __comfyTitlePopup?: ComfyTitlePopupBridge })
     .__comfyTitlePopup
   if (!bridge) {
-    // No bridge → leave `window.api` undefined so any settings-UI mount fails
-    // with a clear "bridge missing" error rather than silent no-ops.
+    // Leave window.api undefined so a settings-UI mount fails loudly rather
+    // than silently no-opping.
     return
   }
 
@@ -78,9 +71,8 @@ export function installPickerSettingsApiShim(): void {
 }
 
 /**
- * Merge main's i18n catalog (e.g. `actions.restart`, `diskSpace.*`) on top of
- * the popup's static catalog. Idempotent — the caller is expected to cache the
- * returned promise so concurrent expands share one IPC.
+ * Merge main's i18n catalog on top of the popup's static catalog. The caller
+ * should cache the returned promise so concurrent expands share one IPC.
  */
 export async function mergePanelLocaleIntoPopup(
   mergeLocaleMessage: (locale: string, messages: Record<string, unknown>) => void,

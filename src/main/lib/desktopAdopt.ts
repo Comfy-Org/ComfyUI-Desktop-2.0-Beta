@@ -9,7 +9,17 @@ import {
   type DesktopInstallInfo
 } from './desktopDetect'
 import { defaultInstallDir, allocateUniqueDir, sanitizeDirName } from './paths'
-import { gitClone, gitCheckoutCommit } from './git'
+import {
+  gitClone,
+  gitCheckoutCommit,
+  readGitHead,
+  fetchTags,
+  isGitAvailable,
+  isPygit2Configured,
+  tryConfigurePygit2Fallback
+} from './git'
+import { resolveLocalVersion } from './version-resolve'
+import type { ComfyVersion } from './version'
 import { getComfyUIRemoteUrl } from './github-mirror'
 import { getLatestStableTag } from './comfyui-releases'
 import { installFilteredRequirements, runUvPip, getPipIndexArgs } from './pip'
@@ -17,12 +27,20 @@ import * as installations from '../installations'
 import type { InstallationRecord } from '../installations'
 import * as settings from '../settings'
 import * as telemetry from './telemetry'
+import { scrubAll } from '../../shared/piiScrub'
+import * as i18n from './i18n'
 
 const MARKER_FILE = ADOPT_MARKER_FILE
 const STAGED_SOURCE_REL = path.join('legacy-staging', 'comfyui')
 const BACKUP_REL = 'legacy-backup'
 const SNAPSHOTS_REL = '.snapshots'
-const ADOPT_INSTALL_NAME = 'Adopted from Legacy Desktop'
+// Display name for adopted installs. `installations.add()` calls
+// `uniqueName()` so a second adoption (or a coexisting standalone
+// install named "ComfyUI") gets "ComfyUI (1)", "ComfyUI (2)", etc.
+// Keeping the name plain — instead of "Adopted from Legacy Desktop" —
+// matches user expectation that the picker shows their app, not the
+// provenance story.
+const ADOPT_INSTALL_NAME = 'ComfyUI'
 const COMFY_SETTINGS_FILE = 'comfy.settings.json'
 const DESKTOP_CONFIG_FILE = 'config.json'
 const EXTRA_MODELS_YAML = 'extra_models_config.yaml'
@@ -213,7 +231,10 @@ export function parseExtraModelsYaml(content: string): string[] {
  *    when `useSharedModels: true`.
  *  - `front-end-root`, `log-stdout` are v2 plumbing the user can't
  *    meaningfully override.
- *  - `database-url` is v2-specific (legacy SQLite path won't apply).
+ *  - `database-url` is pinned by `standalone.getLaunchCommand` to the
+ *    legacy `user/comfyui.db` so we own it as structural plumbing; the
+ *    user can still override it by re-adding `--database-url` to their
+ *    launchArgs.
  */
 const STRIPPED_LAUNCH_KEYS: ReadonlySet<string> = new Set([
   'extra-model-paths-config',
@@ -359,19 +380,25 @@ function readLegacyAppVersion(executablePath: string | null): string | null {
 }
 
 /**
- * Compute the cross-install model dirs to register in `settings.modelsDirs`
- * for the adopted record. Dedupes against the caller's existing list.
+ * Cross-install model dirs to register in `settings.modelsDirs` for the
+ * adopted record. Always carries `<basePath>/models`; for each YAML
+ * `base_path:`, carries `<base_path>/models` only when it exists as a
+ * directory (handles ComfyUI-style siblings, silently skips other tools).
+ * The bare base_path is never carried — it points at a tool root whose
+ * models live one level deeper. Dedupes against `existing`.
  */
 export function computeModelsDirsToCarry(
   basePath: string,
   extraYamlContent: string | null,
   existing: string[]
 ): string[] {
-  const candidates: string[] = []
-  candidates.push(path.join(basePath, 'models'))
+  const candidates: string[] = [path.join(basePath, 'models')]
   if (extraYamlContent) {
-    for (const dir of parseExtraModelsYaml(extraYamlContent)) {
-      candidates.push(dir)
+    for (const yamlBase of parseExtraModelsYaml(extraYamlContent)) {
+      const probe = path.join(yamlBase, 'models')
+      if (fs.statSync(probe, { throwIfNoEntry: false })?.isDirectory()) {
+        candidates.push(probe)
+      }
     }
   }
   const seen = new Set(existing.map((d) => path.resolve(d)))
@@ -617,10 +644,19 @@ async function sourceComfyUI(
     }
   }
   const url = getComfyUIRemoteUrl(settings.get('useChineseMirrors') === true)
+  // Raw `git clone` output is just "Receiving objects: 50% (50/100)" lines
+  // with no preamble that this is a multi-hundred-MB download from GitHub.
+  // Frame the operation so the user knows what those object counts mean
+  // and roughly how long to wait.
+  tools.sendOutput(
+    `Pre-swap copy not available; downloading ComfyUI source from ${url} …\n` +
+      `This is a one-time download and can take a few minutes on a slow connection.\n`
+  )
   const cloneResult = await deps.cloneSourceFromGit(url, destDir, tools.sendOutput, tools.signal)
   if (!cloneResult.ok) {
     return { mode: 'failed', message: cloneResult.message }
   }
+  tools.sendOutput(`ComfyUI source download complete.\n`)
   return { mode: 'git-clone-fallback' }
 }
 
@@ -643,9 +679,11 @@ interface CarryReport {
  * so built-in defaults don't masquerade as user choices.
  *
  * Carries:
- *   - `modelsDirs`           ← `<basePath>/models` + every `base_path`
- *                              from `extra_models_config.yaml`
- *                              (always appended; never blocked).
+ *   - `modelsDirs`           ← `<basePath>/models` + `<yamlBase>/models`
+ *                              for every `base_path` in
+ *                              `extra_models_config.yaml` whose
+ *                              `/models` subfolder actually exists
+ *                              (ComfyUI-style siblings). Always appended.
  *   - `telemetryEnabled`     ← `Comfy-Desktop.SendStatistics`
  *   - `autoInstallUpdates`   ← force `true`. Adoption ships as an
  *                              in-place app update of Legacy Desktop;
@@ -803,7 +841,10 @@ export async function adoptDesktopInstall(opts: AdoptOptions): Promise<Installat
 
   const info = deps.detectDesktopInstall()
   if (!info) {
-    telemetry.capture('comfy.desktop.adopt.failed', { error_bucket: 'no-legacy-install' })
+    telemetry.capture('comfy.desktop.adopt.failed', {
+      stage: 'detect',
+      error_bucket: 'no-legacy-install'
+    })
     throw new Error('no-legacy-install')
   }
 
@@ -836,14 +877,35 @@ export async function adoptDesktopInstall(opts: AdoptOptions): Promise<Installat
 
   telemetry.capture('comfy.desktop.adopt.started', {})
 
+  // Track the most recently entered phase so adopt.failed can report
+  // *which* step blew up. Without this, every failure surfaces with
+  // stage=null and the only debug signal is the free-text
+  // `error_message`. sendProgress is called at the start of each
+  // runAdoption phase, so the wrapped delegate updates this before the
+  // phase begins running. `init` covers everything that happens before
+  // runAdoption's first sendProgress (`backup`).
+  let currentPhase = 'init'
+  const phaseAwareTools: AdoptTools = {
+    ...tools,
+    sendProgress: (phase, detail) => {
+      currentPhase = phase
+      tools.sendProgress(phase, detail)
+    }
+  }
+
   try {
-    const result = await runAdoption(info, tools, deps)
+    const result = await runAdoption(info, phaseAwareTools, deps)
     return result
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
+    // Scrub before slice so the redacted prefix doesn't get truncated
+    // mid-token. The bucket runs on raw text because its regexes don't
+    // care about user paths and would otherwise miss a legitimate match
+    // hidden inside a `[REDACTED]` substitution.
     telemetry.capture('comfy.desktop.adopt.failed', {
+      stage: currentPhase,
       error_bucket: telemetry.bucketError(message),
-      error_message: message.slice(0, 500)
+      error_message: scrubAll(message).slice(0, 500)
     })
     throw err
   }
@@ -856,6 +918,26 @@ async function runAdoption(
 ): Promise<InstallationRecord> {
   const { sendProgress, sendOutput, signal } = tools
   const timestamp = deps.now().toISOString().replace(/[:.]/g, '-')
+
+  // Register human-readable step labels for the progress UI. Without
+  // this the renderer falls back to displaying the raw phase id
+  // ("source", "venv", …) since the labels are otherwise undefined.
+  sendProgress('steps', {
+    steps: [
+      { phase: 'backup', label: i18n.t('desktop.adoptStepBackup') },
+      ...(process.platform === 'darwin'
+        ? [{ phase: 'tcc', label: i18n.t('desktop.adoptStepTcc') }]
+        : []),
+      { phase: 'venv', label: i18n.t('desktop.adoptStepVenv') },
+      { phase: 'snapshot', label: i18n.t('desktop.adoptStepSnapshot') },
+      { phase: 'allocate', label: i18n.t('desktop.adoptStepAllocate') },
+      { phase: 'source', label: i18n.t('desktop.adoptStepSource') },
+      { phase: 'comfy-update', label: i18n.t('desktop.adoptStepComfyUpdate') },
+      { phase: 'requirements', label: i18n.t('desktop.adoptStepRequirements') },
+      { phase: 'settings', label: i18n.t('desktop.adoptStepSettings') },
+      { phase: 'register', label: i18n.t('desktop.adoptStepRegister') }
+    ]
+  })
 
   sendProgress('backup', { percent: 0 })
   await telemetry.trackedStep('comfy.desktop.adopt.backup', {}, async () => {
@@ -970,6 +1052,34 @@ async function runAdoption(
     }
   )
 
+  // Resolve a real {commit, baseTag, commitsAhead} from the freshly
+  // checked-out source so the release-cache compares the installed
+  // *tag* (e.g. "v0.24.0") against latestTag, not the bare
+  // `__version__` string from comfyui_version.py (e.g. "0.24.0") which
+  // never matches a "v"-prefixed remote tag and so wedges the
+  // installation into a permanent "update available" state.
+  let resolvedComfyVersion: ComfyVersion | undefined
+  if (fs.existsSync(path.join(destSource, '.git'))) {
+    try {
+      if (!isPygit2Configured() && !(await isGitAvailable())) {
+        await tryConfigurePygit2Fallback(installPath)
+      }
+      await fetchTags(destSource)
+      const headCommit = readGitHead(destSource)
+      if (headCommit) {
+        resolvedComfyVersion = await resolveLocalVersion(
+          destSource,
+          headCommit,
+          updateInfo.tag ?? undefined
+        )
+      }
+    } catch (err) {
+      sendOutput(
+        `Warning: could not resolve adopted ComfyUI version: ${(err as Error).message}\n`
+      )
+    }
+  }
+
   sendProgress('requirements', { percent: 0 })
   const reqReport = await telemetry.trackedStep(
     'comfy.desktop.adopt.requirements',
@@ -1044,6 +1154,7 @@ async function runAdoption(
       variant: 'legacy-uv-py312',
       pythonVersion: '3.12',
       ...(comfyVersion ? { version: comfyVersion } : {}),
+      ...(resolvedComfyVersion ? { comfyVersion: resolvedComfyVersion } : {}),
       ...(updateInfo.tag ? { adoptedComfyTagAtMigration: updateInfo.tag } : {}),
       launchArgs: derived.launchArgs,
       launchMode: 'window',
@@ -1164,7 +1275,11 @@ async function updateComfyToStable(
     )
     return { tag: null }
   }
-  tools.sendOutput(`Checking out latest stable ComfyUI tag (${tag})…\n`)
+  // `gitCheckoutCommit` may transparently `git fetch --unshallow` if the
+  // tag isn't already local — that surfaces as a wall of "Receiving
+  // objects: …" lines with no preamble. Frame it so the user can tell
+  // network activity here is the ComfyUI update, not random churn.
+  tools.sendOutput(`Updating ComfyUI source to latest stable tag (${tag})…\n`)
   try {
     const result = await gitCheckoutCommit(destSource, tag, tools.sendOutput, tools.signal)
     if (result.exitCode !== 0) {
@@ -1174,6 +1289,7 @@ async function updateComfyToStable(
       )
       return { tag: null }
     }
+    tools.sendOutput(`ComfyUI source now at ${tag}.\n`)
   } catch (err) {
     tools.sendOutput(`Warning: ComfyUI checkout threw: ${(err as Error).message}\n`)
     return { tag: null }

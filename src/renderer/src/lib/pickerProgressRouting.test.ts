@@ -2,21 +2,6 @@ import { describe, expect, it } from 'vitest'
 import { resolveProgressRouting } from './pickerProgressRouting'
 import type { ShowProgressOpts } from '../types/ipc'
 
-/**
- * Each scenario below names a real bug we hit during the picker-progress
- * implementation. The resolver was reworked multiple times because the
- * original policy keyed on `triggersInstanceStart` (which Update on a
- * running install also sets, as a side-effect of its auto-relaunch
- * step) — the regression cluster below is what catches that mistake
- * if anyone reaches for the same shortcut again.
- *
- * The third routing mode — `'inline-picker'` — was added when the original
- * `'target-host'` approach (opening a new window for B while the user is on A)
- * turned out to be disruptive: it yanked focus away from A, broke the case
- * where C was already open and running, and had no story for "close picker
- * mid-update". The inline path keeps the picker open and streams progress
- * in the right pane, leaving every other window untouched.
- */
 function opts(overrides: Partial<ShowProgressOpts> = {}): ShowProgressOpts {
   return {
     installationId: 'inst-target',
@@ -70,14 +55,8 @@ describe('resolveProgressRouting — successChoice gating', () => {
     expect(r.successChoice).toBe(true)
   })
 
-  // The bug that motivated this whole test file: `useComfyUISettings`
-  // step 9 sets `triggersInstanceStart: true` for an Update against a
-  // running install because the apiCall self-relaunches comfy after
-  // applying the update. An earlier resolver suppressed `successChoice`
-  // on `triggersInstanceStart`, which meant same-instance Update on a
-  // running install lost its terminal-state screen and auto-closed
-  // mid-relaunch — user saw "stuck at 100% then vanishes". The fix
-  // discriminates on `actionId`, not on the auto-relaunch side-effect.
+  // successChoice discriminates on actionId, not triggersInstanceStart, since
+  // Update on a running install sets that flag as an auto-relaunch side-effect.
   it('keeps successChoice for Update on a running install (the auto-relaunch must not suppress)', () => {
     const r = resolveProgressRouting(
       opts({
@@ -128,10 +107,6 @@ describe('resolveProgressRouting — successChoice gating', () => {
 })
 
 describe('resolveProgressRouting — destructive ops', () => {
-  // Spec carve-out: destroying an install we're about to remove must
-  // stay in the current host. Spawning a window for an install that's
-  // about to vanish would race the registry teardown and leave a
-  // ghost.
   it('forces same-host for destructive ops even when picker is on a different host', () => {
     const r = resolveProgressRouting(
       opts({

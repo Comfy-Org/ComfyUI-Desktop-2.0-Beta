@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ChevronDown, Tag, Boxes } from 'lucide-vue-next'
+import { ChevronDown, Tag, Boxes, Package } from 'lucide-vue-next'
 import type { SnapshotSummary } from '../../types/ipc'
 import {
   triggerLabel as _triggerLabel,
@@ -11,27 +11,16 @@ import {
 import BaseAccordion from '../../components/ui/BaseAccordion.vue'
 
 /**
- * Snapshot timeline row. Header line carries the trigger label, an
- * optional "Current" badge, the relative timestamp, and an expand
- * chevron. The body below stays always-visible and surfaces a
- * compact change-summary (chips for diff-vs-previous, then a meta
- * line of `v{comfy} · n nodes · n packages`). All destructive /
- * mutating actions live in the parent's expanded detail panel so
- * the row itself stays single-purpose: a tap target that opens the
- * detail.
+ * Snapshot timeline row: header (trigger label, badge, timestamp, chevron) plus an always-visible change-summary. Destructive actions live in the parent's detail panel.
  */
 
 interface Props {
   snapshot: SnapshotSummary
   expanded: boolean
-  /** First (newest) snapshot in the timeline carries a "Latest" badge. */
+  /** First (newest) snapshot carries a "Latest" badge. */
   isLatest?: boolean
-  /** Resulting ComfyUI version of the PREVIOUS snapshot. When this snapshot
-   *  changed the ComfyUI version, the title pill shows the transition
-   *  (`prev → this`) instead of just the resulting version. */
+  /** Previous snapshot's ComfyUI version; when this snapshot changed it, the title pill shows `prev → this`. */
   previousComfyuiVersion?: string
-  /** Optional `data-testid` for the header toggle — lets the parent
-   *  scope tests to a specific snapshot by filename. */
   toggleTestId?: string
 }
 
@@ -51,9 +40,7 @@ const triggerCopy = computed(() => _triggerLabel(props.snapshot.trigger, t))
 const relativeCopy = computed(() => _formatRelative(props.snapshot.createdAt, t))
 const absoluteCopy = computed(() => formatDate(props.snapshot.createdAt))
 
-/** Trigger tone — `state` (post-update / post-restore) is highlighted
- *  because it marks an actual state transition; everything else stays
- *  neutral so the eye is drawn to meaningful changes first. */
+// `state` (post-update / post-restore) is highlighted as a real transition; everything else stays neutral.
 const triggerTone = computed<'state' | 'neutral'>(() => {
   switch (props.snapshot.trigger) {
     case 'post-update':
@@ -64,10 +51,7 @@ const triggerTone = computed<'state' | 'neutral'>(() => {
   }
 })
 
-/** Node-change deltas vs the previous snapshot — drives the collapsed-header
- *  pills so a snapshot's at-a-glance summary is visible without expanding.
- *  The version pill (resulting ComfyUI version) shows always; node deltas
- *  only when something changed. */
+// Node-change deltas vs the previous snapshot, driving the collapsed-header pills.
 const nodeDelta = computed(() => {
   const d = props.snapshot.diffVsPrevious
   return {
@@ -80,13 +64,20 @@ const hasNodeChanges = computed(
   () => nodeDelta.value.added + nodeDelta.value.removed + nodeDelta.value.changed > 0
 )
 
-/**
- * The pill shown next to the trigger title. One pill, content by context:
- *  - manual snapshots with a label → the label (e.g. "Manual (before-fix)")
- *  - a ComfyUI version change      → the transition "prev → this"
- *  - everything else               → the resulting ComfyUI version
- * Reuses the version-pill chrome in all cases.
- */
+// Pip-package deltas vs the previous snapshot, driving a second collapsed-header pill.
+const pipDelta = computed(() => {
+  const diff = props.snapshot.diffVsPrevious
+  return {
+    added: diff?.pipsAdded ?? 0,
+    removed: diff?.pipsRemoved ?? 0,
+    changed: diff?.pipsChanged ?? 0,
+  }
+})
+const hasPipChanges = computed(
+  () => pipDelta.value.added + pipDelta.value.removed + pipDelta.value.changed > 0
+)
+
+// Title pill: manual label, else a version transition `prev → this`, else the resulting version.
 const isManualWithLabel = computed(
   () => props.snapshot.trigger === 'manual' && !!props.snapshot.label
 )
@@ -103,9 +94,7 @@ const hasTitlePill = computed(() => !!titlePillText.value)
 
 <template>
   <div class="snapshot-row" :class="{ 'is-expanded': expanded }">
-    <!-- Header sits on the timeline rail (no border), aligned with the
-         dot. Trigger label + Current badge on the left, time + chevron
-         on the right. The whole header is the expand toggle. -->
+    <!-- Whole header is the expand toggle. -->
     <button
       type="button"
       class="snapshot-row-head"
@@ -125,12 +114,8 @@ const hasTitlePill = computed(() => !!titlePillText.value)
           <ChevronDown :size="14" class="snapshot-row-chevron" />
         </div>
       </div>
-      <!-- Second row — at-a-glance pills:
-           • version / name pill: ComfyUI version transition
-             ("v0.21.0 → v0.22.3") when it changed, the snapshot's name for
-             manual snapshots, else the resulting version.
-           • node deltas vs the previous snapshot (when any changed). -->
-      <div v-if="hasTitlePill || hasNodeChanges" class="snapshot-row-pills">
+      <!-- At-a-glance pills: version/name pill + node deltas vs previous. -->
+      <div v-if="hasTitlePill || hasNodeChanges || hasPipChanges" class="snapshot-row-pills">
         <span
           v-if="hasTitlePill"
           class="snap-pill snap-pill--version"
@@ -147,15 +132,20 @@ const hasTitlePill = computed(() => !!titlePillText.value)
           <span v-if="nodeDelta.changed" class="snap-delta is-change">~{{ nodeDelta.changed }}</span>
           <span class="snap-pill-label">{{ t('snapshots.nodesLabel', 'nodes') }}</span>
         </span>
+        <span v-if="hasPipChanges" class="snap-pill snap-pill--pkgs">
+          <Package :size="11" aria-hidden="true" />
+          <span v-if="pipDelta.added" class="snap-delta is-add">+{{ pipDelta.added }}</span>
+          <span v-if="pipDelta.removed" class="snap-delta is-remove">−{{ pipDelta.removed }}</span>
+          <span v-if="pipDelta.changed" class="snap-delta is-change">~{{ pipDelta.changed }}</span>
+          <span class="snap-pill-label">{{ t('snapshots.pkgsLabel', 'pkgs') }}</span>
+        </span>
       </div>
     </button>
 
     <!-- Body card animates open/closed via BaseAccordion. -->
     <BaseAccordion :open="expanded">
       <div class="snapshot-row-card">
-        <!-- Composition totals. Version is intentionally omitted — it's
-             already shown in the collapsed-header version pill, so repeating
-             it here read as redundant. -->
+        <!-- Composition totals; version omitted (already in the header pill). -->
         <div class="snapshot-row-meta">
           <span>{{ t('snapshots.nodesCount', { count: snapshot.nodeCount }) }}</span>
           <span class="snapshot-row-meta-dot">·</span>
@@ -176,9 +166,7 @@ const hasTitlePill = computed(() => !!titlePillText.value)
   gap: 8px;
 }
 
-/* Header sits on the rail with no background, no border — it's at the
- * same visual level as the dot on the timeline. The full strip is a
- * click target that resets global button chrome. */
+/* Full strip is the click target; resets global button chrome. */
 .snapshot-row-head {
   display: flex;
   flex-direction: column;
@@ -266,9 +254,7 @@ const hasTitlePill = computed(() => !!titlePillText.value)
   background: var(--brand-surface-bg);
   border: 1px solid var(--chooser-surface-border);
   font-variant-numeric: tabular-nums;
-  /* On the wrapping pills row a wide transition ("v0.21.0 → v0.22.3") or a
-     long manual name wraps to its own line; cap at the row width and ellipsis
-     only in the extreme so it never overflows the popover. */
+  /* Cap at row width and ellipsis only in the extreme so a long pill never overflows the popover. */
   min-width: 0;
   max-width: 100%;
 }

@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
-// shared.ts (transitively imported by registry.ts) loads electron at module
-// load time, so the mock has to be in place before the popup module imports.
+// shared.ts (via registry.ts) loads electron at import, so mock it first.
 vi.mock('electron', () => ({
   app: {
     isPackaged: false,
@@ -17,10 +16,6 @@ vi.mock('electron', () => ({
   nativeTheme: { on: vi.fn(), shouldUseDarkColors: false },
 }))
 
-// comfyDownloadManager wires `downloadEvents.on(...)` at module load only
-// inside the IPC registration helper, so importing it here is safe — the
-// titlePopup module exports `buildTitlePopupMenuItems` / `computePopupHeight`
-// without subscribing to anything.
 import {
   buildInstancePickerSnapshot,
   resolvePickerSelectedInstallId,
@@ -120,11 +115,6 @@ describe('buildTitlePopupMenuItems', () => {
     expect(ids).not.toContain('return-to-dashboard')
   })
 
-  // Unified menu: install-creation entries appear on every host
-  // (#644). The host-type branch lives in the action handler — picking
-  // one from an install-backed host spawns a fresh chooser window
-  // booted into the wizard; picking one from the dashboard takes over
-  // the current window in place.
   it('includes install-creation entries on an install-backed host', () => {
     const items = buildTitlePopupMenuItems(makeEntry({ installationId: 'inst-1' }))
     const ids = items.map((i) => i.id ?? null)
@@ -145,10 +135,6 @@ describe('buildTitlePopupMenuItems', () => {
     expect(quit?.label).toBe('Quit Desktop')
   })
 
-  // Unified canonical order — same item set on every host. Close
-  // Window matches what the native ✕ already does on the dashboard
-  // (close that window, quit naturally if it's the last one), so the
-  // menu and the OS chrome stay consistent.
   it('chooser host matches the canonical order including Close Window', () => {
     const items = buildTitlePopupMenuItems(makeEntry({ installationId: null }))
     const ids = items.map((i) => i.id ?? null).filter((id) => id !== null)
@@ -200,9 +186,6 @@ describe('buildTitlePopupMenuItems', () => {
     expect(resetZoom?.label).toBe('Reset Zoom (144%)')
   })
 
-  // Reset Zoom is now host-type-agnostic — it surfaces wherever the
-  // current comfyView is zoomed, including the instance host's live
-  // ComfyUI view (#644). Ctrl/Cmd+0 still works in parallel.
   it('exposes Reset Zoom on install host when comfy zoom is non-zero', () => {
     const zoomed = buildTitlePopupMenuItems(
       makeEntry({ installationId: 'inst-1', zoomLevel: 2 }),
@@ -236,9 +219,7 @@ describe('buildTitlePopupMenuItems', () => {
     }
   })
 
-  // Loading-lockdown keeps the full menu live so the user can open a
-  // fresh window / picker / settings / feedback or quit cleanly while
-  // a long-running op runs in the background (#653).
+  // Loading-lockdown keeps the full menu live so the user can act while a long op runs.
   it('returns the same item set during loading-lockdown as in normal mode', () => {
     for (const installationId of [null, 'inst-1'] as const) {
       const normal = buildTitlePopupMenuItems(makeEntry({ installationId }))
@@ -251,7 +232,6 @@ describe('buildTitlePopupMenuItems', () => {
 })
 
 describe('decideFlowMenuItemTarget', () => {
-  // Pinned routing rule for #644 — dashboard takeover vs spawn-new-window.
   const flowIds: FlowMenuItemId[] = ['new-install', 'track', 'load-snapshot', 'quick-install']
 
   it.each(flowIds)('dashboard host routes %s to in-place takeover', (id) => {
@@ -300,8 +280,7 @@ describe('resolvePickerSelectedInstallId', () => {
   })
 
   it('defaults to the most-recently-launched install on an install-less host', () => {
-    // Order in the list must NOT decide the default — recency does. Put the
-    // most-recently-launched install ('b') second to prove list order loses.
+    // 'b' (most recent) is second to prove recency, not list order, decides the default.
     const installs = [
       makeInstall({ id: 'a', lastLaunchedAt: 1000 }),
       makeInstall({ id: 'b', lastLaunchedAt: 5000 }),
@@ -316,9 +295,7 @@ describe('resolvePickerSelectedInstallId', () => {
   })
 
   it('does not default to the seeded cloud entry just because it sorts first', () => {
-    // The auto-seeded "Comfy Cloud" install is first in the registry but has
-    // no launch history — a real install must win the default so it stays
-    // fair for users who never open cloud.
+    // The seeded cloud install sorts first but has no launch history; a real install wins.
     const installs = [
       makeInstall({ id: 'cloud', sourceCategory: 'cloud' }),
       makeInstall({ id: 'local-a', sourceCategory: 'local' }),
@@ -422,10 +399,8 @@ describe('buildInstancePickerSnapshot', () => {
   })
 
   it('falls back to previewInstallationId when no real attach yet', () => {
-    // Chooser host that staked an attach claim before the launch
-    // completed: `applyAttachHostPreview` sets previewInstallationId
-    // while installationId is still null. Picker should still treat
-    // this host as "owning" the install.
+    // Chooser host that staked an attach claim pre-launch: previewInstallationId
+    // is set while installationId is still null, but it should still "own" the install.
     const snap = buildInstancePickerSnapshot({
       installs: [makeInstall({ id: 'a' })],
       hostInstallationId: null,
@@ -438,8 +413,7 @@ describe('buildInstancePickerSnapshot', () => {
   })
 
   it('prefers the real hostInstallationId over previewInstallationId', () => {
-    // Once `attachInstall` runs, the real installationId takes over;
-    // a stale preview should never override it.
+    // Once `attachInstall` runs, the real id takes over; a stale preview must not override it.
     const snap = buildInstancePickerSnapshot({
       installs: [makeInstall({ id: 'a' }), makeInstall({ id: 'b' })],
       hostInstallationId: 'a',
@@ -462,11 +436,8 @@ describe('buildInstancePickerSnapshot', () => {
     expect(snap.launchingInstallationIds).toEqual(['a', 'b'])
   })
 
-  // Issue #788: the picker view treats `selectedInstallationId` as
-  // authoritative only when `pickerSelectionEpoch` advances. Live-data
-  // rebroadcasts must forward whatever the entry's current epoch is
-  // (default 0 if never seeded by an open); only `openInstancePickerForHost`
-  // is allowed to bump it.
+  // The picker treats `selectedInstallationId` as authoritative only when
+  // `pickerSelectionEpoch` advances; only `openInstancePickerForHost` bumps it.
   it('defaults pickerSelectionEpoch to 0 when not provided', () => {
     const snap = buildInstancePickerSnapshot({
       installs: [],

@@ -9,12 +9,8 @@ import { buildExportEnvelope } from './snapshots'
 import type { Snapshot, SnapshotExportEnvelope } from './snapshots'
 import * as i18n from './i18n'
 
-/**
- * Check that a path is readable. On macOS, accessing TCC-protected directories
- * (Documents, Desktop, Downloads) triggers a system permission prompt. If the
- * user misses or denies the prompt the OS returns EACCES / EPERM.  We surface
- * a clear, actionable error instead of silently treating the path as missing.
- */
+// On macOS, accessing TCC-protected dirs returns EACCES/EPERM if the user
+// denies the prompt; surface a clear error instead of treating it as missing.
 export function assertReadable(dirPath: string): void {
   try {
     fs.accessSync(dirPath, fs.constants.R_OK)
@@ -27,18 +23,9 @@ export function assertReadable(dirPath: string): void {
   }
 }
 
-/**
- * Marker file written by `adoptLegacyDesktop()` at the legacy basePath after a
- * successful adoption. Shared with `desktopAdopt.ts` (re-exported there as
- * `MARKER_FILE`) so the auto-tracker and the adopter agree on a single name.
- *
- * When present, `detectDesktopInstall()` treats the legacy install as
- * "already migrated" and returns null, which:
- *   - prevents the startup auto-tracker from re-seeding a stale
- *     "ComfyUI Legacy Desktop" card next to the adopted standalone, and
- *   - flips `hasLegacyDesktop` back to false in the first-use detection,
- *     so the Migrate sub-step disappears for a clean post-adoption launch.
- */
+// Marker written at the legacy basePath after a successful adoption; when
+// present, detectDesktopInstall() returns null ("already migrated"). Shared
+// with desktopAdopt.ts (re-exported there as MARKER_FILE).
 export const ADOPT_MARKER_FILE = '.comfyui-desktop-2'
 
 export interface DesktopInstallInfo {
@@ -92,16 +79,14 @@ export function detectDesktopInstall(): DesktopInstallInfo | null {
   }
 
   if (!fs.existsSync(basePath)) {
-    // basePath exists in config but not on disk — check if it's a permission issue
+    // In config but not on disk — distinguish a permission issue.
     assertReadable(path.dirname(basePath))
     return null
   }
   assertReadable(basePath)
 
-  // Adoption marker disqualifies this legacy workspace from auto-tracking —
-  // the adopted standalone record already represents it. Suppress before the
-  // models/user content checks so a half-cleaned legacy directory doesn't
-  // resurrect as a desktop card either.
+  // Adoption marker disqualifies this workspace; check before the models/user
+  // checks so a half-cleaned legacy dir doesn't resurrect as a desktop card.
   if (fs.existsSync(path.join(basePath, ADOPT_MARKER_FILE))) return null
 
   const hasModels = fs.existsSync(path.join(basePath, 'models'))
@@ -165,23 +150,19 @@ export async function pipFreezeDirect(pythonPath: string): Promise<Record<string
   return packages
 }
 
-/**
- * Build a Snapshot from the Legacy Desktop installation's on-disk state.
- * This enables Legacy Desktop → Standalone migration via the snapshot restore pipeline.
- */
+// Build a Snapshot from the Legacy Desktop install's on-disk state for the
+// Legacy → Standalone migration via the snapshot restore pipeline.
 export async function captureDesktopSnapshot(info: DesktopInstallInfo): Promise<Snapshot> {
-  // Legacy Desktop's basePath IS the ComfyUI dir (models/, user/, custom_nodes/ at top level)
+  // Legacy basePath IS the ComfyUI dir (models/, user/, custom_nodes/ at top).
   const customNodes = await scanCustomNodes(info.basePath)
 
-  // Attempt pip freeze against Legacy Desktop's venv
   let pipPackages: Record<string, string> = {}
   const venvPython = getDesktopPythonPath(info.basePath)
   if (venvPython) {
     try {
-      // Use pip directly (no uv in Legacy Desktop installs)
       pipPackages = await pipFreezeDirect(venvPython)
     } catch {
-      // Legacy Desktop venv may not be accessible — nodes will get deps via post-install scripts
+      // Inaccessible venv — nodes get deps via post-install scripts instead.
     }
   }
 
@@ -202,10 +183,7 @@ export async function captureDesktopSnapshot(info: DesktopInstallInfo): Promise<
   }
 }
 
-/**
- * Capture a Legacy Desktop snapshot, wrap it in an export envelope, and write
- * it to a temp file.  Returns the envelope (for preview) and the staged file path.
- */
+// Capture a snapshot, wrap it in an export envelope, write to a temp file.
 export async function stageDesktopSnapshot(
   info: DesktopInstallInfo
 ): Promise<{ envelope: SnapshotExportEnvelope; stagedFile: string }> {

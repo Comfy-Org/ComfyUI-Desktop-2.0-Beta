@@ -1,12 +1,4 @@
-/**
- * Regression tests for `showModelFolderRelaunchPage`.
- *
- * Issue #449: After PR #414 split the comfy window into a parent BrowserWindow
- * plus a child WebContentsView, the splash page was being loaded into the
- * parent's webContents, which is hidden behind the views. The signature must
- * therefore accept a WebContents (the comfyView's), not a BrowserWindow, so
- * the splash actually paints on the visible view.
- */
+// The splash must target the comfyView's WebContents, not the parent BrowserWindow (hidden behind views).
 
 import { describe, it, expect, vi } from 'vitest'
 import * as i18n from './i18n'

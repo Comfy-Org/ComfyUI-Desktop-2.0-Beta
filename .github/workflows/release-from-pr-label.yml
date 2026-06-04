@@ -122,12 +122,17 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.meta.outputs.tag }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
 
+          # Pass the release PR's number so build-release.yml can pull
+          # the PR body as the GitHub Release notes (replaces the
+          # auto-generated PR-titles dump).
           gh workflow run build-release.yml \
             --repo "${GITHUB_REPOSITORY}" \
-            --ref "${TAG}"
+            --ref "${TAG}" \
+            --field pr_number="${PR_NUMBER}"
 
       - name: Print results
         if: steps.version.outputs.changed == 'true'

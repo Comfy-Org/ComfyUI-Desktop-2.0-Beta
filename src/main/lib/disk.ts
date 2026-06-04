@@ -5,15 +5,10 @@ import type { DiskSpaceInfo, PathIssue } from '../../types/ipc'
 import * as settings from '../settings'
 import * as installations from '../installations'
 
-/**
- * Get free and total disk space for the volume containing `targetPath`.
- * Walks up the path tree until it finds an existing directory to stat.
- * Works on Windows, macOS, and Linux via Node's fs.statfs.
- */
+// Free and total disk space for the volume containing `targetPath`.
 export async function getDiskSpace(targetPath: string): Promise<DiskSpaceInfo> {
   let dir = path.resolve(targetPath)
 
-  // Walk up until we find a directory that exists
   while (!fs.existsSync(dir)) {
     const parent = path.dirname(dir)
     if (parent === dir) break
@@ -27,11 +22,8 @@ export async function getDiskSpace(targetPath: string): Promise<DiskSpaceInfo> {
   }
 }
 
-/**
- * Recursively calculate the total size of a directory in bytes.
- * Returns 0 if the directory doesn't exist.
- * Limits concurrency to avoid EMFILE errors on large directory trees.
- */
+// Recursive directory size in bytes (0 if missing); bounded concurrency to
+// avoid EMFILE on large trees.
 export async function getDirectorySize(dirPath: string, signal?: AbortSignal): Promise<number> {
   const MAX_CONCURRENT = 64
   let active = 0
@@ -94,7 +86,7 @@ export async function getDirectorySize(dirPath: string, signal?: AbortSignal): P
 
 function normalizePath(p: string): string {
   const resolved = path.resolve(p)
-  // Case-insensitive on Windows and macOS
+  // Case-insensitive on Windows and macOS.
   return process.platform === 'win32' || process.platform === 'darwin'
     ? resolved.toLowerCase()
     : resolved
@@ -106,11 +98,7 @@ function isPathInside(candidate: string, parent: string): boolean {
   return relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative)
 }
 
-/**
- * Build the set of restricted paths that installations must not be placed inside.
- * Covers the Electron app bundle/install directory and (on Windows) the
- * auto-updater cache directories.
- */
+// Paths installs must not be placed inside (app bundle, updater caches, etc.).
 function getRestrictedPaths(): { path: string; issue: PathIssue }[] {
   const entries: { path: string; issue: PathIssue }[] = []
   const seen = new Set<string>()
@@ -123,10 +111,9 @@ function getRestrictedPaths(): { path: string; issue: PathIssue }[] {
     entries.push({ path: normalized, issue })
   }
 
-  // App install directory
   const exePath = app.getPath('exe')
   if (process.platform === 'darwin') {
-    // Walk up to the .app bundle
+    // Walk up to the .app bundle.
     let current = exePath
     while (current && current !== '/' && !current.endsWith('.app')) {
       const next = path.dirname(current)
@@ -138,27 +125,21 @@ function getRestrictedPaths(): { path: string; issue: PathIssue }[] {
     add('insideAppBundle', path.dirname(exePath))
   }
 
-  // Resources directory (contains app.asar)
   add('insideAppBundle', process.resourcesPath)
-
-  // User data directory (config, databases, etc.)
   add('insideAppBundle', app.getPath('userData'))
 
   if (process.platform === 'win32') {
     const localAppData = process.env.LOCALAPPDATA
     if (localAppData) {
-      // Updater cache directories (wiped on auto-update)
       add('insideAppBundle', path.join(localAppData, 'comfyui-desktop-2-updater'))
       add('insideAppBundle', path.join(localAppData, '@comfyorgcomfyui-desktop-2-updater'))
     }
 
-    // OneDrive (personal, business, and generic env vars)
     add('oneDrive', process.env.OneDrive)
     add('oneDrive', process.env.OneDriveCommercial)
     add('oneDrive', process.env.OneDriveConsumer)
   }
 
-  // Shared models, input, and output directories
   const s = settings.getAll()
   for (const dir of s.modelsDirs) {
     add('insideSharedDir', dir)
@@ -169,10 +150,7 @@ function getRestrictedPaths(): { path: string; issue: PathIssue }[] {
   return entries
 }
 
-/**
- * Check whether a target path is inside a restricted location.
- * Returns the list of issues found, or an empty array if the path is safe.
- */
+// Issues found if `targetPath` is inside a restricted location, else empty.
 export async function validateInstallPath(targetPath: string): Promise<PathIssue[]> {
   const normalized = normalizePath(targetPath)
   const issues: PathIssue[] = []
@@ -185,7 +163,6 @@ export async function validateInstallPath(targetPath: string): Promise<PathIssue
     }
   }
 
-  // Check against existing installation paths
   if (!seen.has('insideExistingInstall')) {
     const existing = await installations.list()
     for (const inst of existing) {

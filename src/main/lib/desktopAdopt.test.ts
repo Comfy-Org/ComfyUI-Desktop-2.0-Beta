@@ -28,9 +28,7 @@ vi.mock('../settings', () => {
       if (value === undefined) delete store[key]
       else store[key] = value
     }),
-    // `has()` mirrors the real implementation's "explicitly persisted"
-    // semantics — built-in defaults must not look like user choices to
-    // the carry logic.
+    // Mirrors the real "explicitly persisted" semantics: defaults aren't user choices.
     has: vi.fn((key: string) => store[key] !== undefined && store[key] !== null),
     getAll: vi.fn(() => ({ ...store })),
     getMirrorConfig: vi.fn(() => ({ pypiMirror: undefined, useChineseMirrors: false })),
@@ -40,10 +38,32 @@ vi.mock('../settings', () => {
 
 // Stub the latest-stable-tag lookup + git checkout so adoption tests
 // don't need network access or a real ComfyUI git tree.
-const { getLatestStableTagMock, gitCheckoutCommitMock } = vi.hoisted(() => ({
+const {
+  getLatestStableTagMock,
+  gitCheckoutCommitMock,
+  readGitHeadMock,
+  fetchTagsMock,
+  isGitAvailableMock,
+  isPygit2ConfiguredMock,
+  tryConfigurePygit2FallbackMock,
+  resolveLocalVersionMock
+} = vi.hoisted(() => ({
   getLatestStableTagMock: vi.fn<() => Promise<string | null>>(),
   gitCheckoutCommitMock:
-    vi.fn<(...args: unknown[]) => Promise<{ exitCode: number; stdout: string; stderr: string }>>()
+    vi.fn<(...args: unknown[]) => Promise<{ exitCode: number; stdout: string; stderr: string }>>(),
+  readGitHeadMock: vi.fn<(repoPath: string) => string | null>(),
+  fetchTagsMock: vi.fn<(repoPath: string) => Promise<boolean>>(),
+  isGitAvailableMock: vi.fn<() => Promise<boolean>>(),
+  isPygit2ConfiguredMock: vi.fn<() => boolean>(),
+  tryConfigurePygit2FallbackMock: vi.fn<(installPath: string) => Promise<boolean>>(),
+  resolveLocalVersionMock:
+    vi.fn<
+      (
+        comfyuiDir: string,
+        commit: string,
+        fallbackTag?: string
+      ) => Promise<{ commit: string; baseTag?: string; commitsAhead?: number } | undefined>
+    >()
 }))
 
 vi.mock('./comfyui-releases', () => ({
@@ -54,9 +74,18 @@ vi.mock('./git', async () => {
   const actual = await vi.importActual<typeof gitModule>('./git')
   return {
     ...actual,
-    gitCheckoutCommit: gitCheckoutCommitMock
+    gitCheckoutCommit: gitCheckoutCommitMock,
+    readGitHead: readGitHeadMock,
+    fetchTags: fetchTagsMock,
+    isGitAvailable: isGitAvailableMock,
+    isPygit2Configured: isPygit2ConfiguredMock,
+    tryConfigurePygit2Fallback: tryConfigurePygit2FallbackMock
   }
 })
+
+vi.mock('./version-resolve', () => ({
+  resolveLocalVersion: resolveLocalVersionMock
+}))
 
 // Stub the pip helpers so adoption tests don't need a real uv binary on disk.
 const { installFilteredRequirementsMock, runUvPipMock } = vi.hoisted(() => ({
@@ -252,11 +281,18 @@ beforeEach(() => {
   vi.clearAllMocks()
   installFilteredRequirementsMock.mockResolvedValue(0)
   runUvPipMock.mockResolvedValue(0)
-  // Adoption's one-shot ComfyUI update path is exercised in dedicated
-  // tests; the default for unrelated tests is "no tag available", which
-  // makes the update step a no-op without polluting the source tree.
+  // Default "no tag available" makes the one-shot update a no-op for unrelated tests.
   getLatestStableTagMock.mockResolvedValue(null)
   gitCheckoutCommitMock.mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' })
+  // Default git helpers to "git is available, no HEAD, no resolved
+  // version" so the comfyVersion-resolution branch is a no-op for
+  // tests that don't opt in. Specific tests override these as needed.
+  readGitHeadMock.mockReturnValue(null)
+  fetchTagsMock.mockResolvedValue(true)
+  isGitAvailableMock.mockResolvedValue(true)
+  isPygit2ConfiguredMock.mockReturnValue(true)
+  tryConfigurePygit2FallbackMock.mockResolvedValue(true)
+  resolveLocalVersionMock.mockResolvedValue(undefined)
 })
 
 afterEach(() => {
@@ -302,9 +338,7 @@ describe('deriveLaunchArgs', () => {
   it('reads Comfy.Server.LaunchArgs (not server_config.*)', () => {
     const { launchArgs } = deriveLaunchArgs({
       'Comfy.Server.LaunchArgs': { listen: '0.0.0.0', port: '7860', lowvram: '' },
-      // server_config.* live in legacy `config.json` and are NEVER read
-      // by adoption — including them here ensures the new parser ignores
-      // them rather than silently picking them up.
+      // server_config.* are never read by adoption; included to confirm the parser ignores them.
       'server_config.listen': '1.2.3.4',
       'server_config.port': 1234
     })
@@ -385,14 +419,61 @@ describe('deriveLaunchArgs', () => {
 })
 
 describe('computeModelsDirsToCarry', () => {
-  it('adds basePath/models plus extra YAML mounts and dedupes against existing', () => {
-    const basePath = '/data/ComfyUI'
-    const yaml = `c1:\n  base_path: /data/ComfyUI\nc2:\n  base_path: /extra/A1111\n`
-    const existing = [path.resolve('/data/ComfyUI')]
+  let tmpRoot: string
+  beforeEach(() => {
+    tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'carryModelsDirs-'))
+  })
+  afterEach(() => {
+    fs.rmSync(tmpRoot, { recursive: true, force: true })
+  })
+
+  it('always carries basePath/models even when the folder is absent (legacy install root is trusted)', () => {
+    const basePath = path.join(tmpRoot, 'ComfyUI-legacy')
+    const result = computeModelsDirsToCarry(basePath, null, [])
+    expect(result).toEqual([path.resolve(path.join(basePath, 'models'))])
+  })
+
+  it('carries <yamlBase>/models for YAML entries whose /models subfolder exists; skips others', () => {
+    const basePath = path.join(tmpRoot, 'primary')
+    const siblingComfy = path.join(tmpRoot, 'sibling-comfy')
+    const a1111 = path.join(tmpRoot, 'a1111')
+    fs.mkdirSync(path.join(siblingComfy, 'models'), { recursive: true })
+    fs.mkdirSync(path.join(a1111, 'models', 'Stable-diffusion'), { recursive: true })
+    const yamlOnlyA1111Layout = path.join(tmpRoot, 'something-else')
+    fs.mkdirSync(yamlOnlyA1111Layout) // exists, but no /models subfolder
+    const yaml =
+      `comfyui_sibling:\n  base_path: ${siblingComfy}\n` +
+      `a1111:\n  base_path: ${a1111}\n` +
+      `weird:\n  base_path: ${yamlOnlyA1111Layout}\n`
+    const result = computeModelsDirsToCarry(basePath, yaml, [])
+    expect(result).toContain(path.resolve(path.join(basePath, 'models')))
+    expect(result).toContain(path.resolve(path.join(siblingComfy, 'models')))
+    expect(result).toContain(path.resolve(path.join(a1111, 'models')))
+    expect(result).not.toContain(path.resolve(path.join(yamlOnlyA1111Layout, 'models')))
+    // Never the bare base_path.
+    expect(result).not.toContain(path.resolve(siblingComfy))
+    expect(result).not.toContain(path.resolve(a1111))
+  })
+
+  it('dedupes against the caller existing list', () => {
+    const basePath = path.join(tmpRoot, 'primary')
+    const sibling = path.join(tmpRoot, 'sibling')
+    fs.mkdirSync(path.join(sibling, 'models'), { recursive: true })
+    const existing = [path.resolve(path.join(basePath, 'models'))]
+    const yaml = `s:\n  base_path: ${sibling}\n`
     const result = computeModelsDirsToCarry(basePath, yaml, existing)
-    expect(result).toContain(path.resolve('/data/ComfyUI/models'))
-    expect(result).toContain(path.resolve('/extra/A1111'))
-    expect(result).not.toContain(path.resolve('/data/ComfyUI'))
+    expect(result).toEqual([path.resolve(path.join(sibling, 'models'))])
+  })
+
+  it('skips a YAML base_path that exists as a file (not a directory)', () => {
+    const basePath = path.join(tmpRoot, 'primary')
+    const yamlBase = path.join(tmpRoot, 'has-models-file')
+    fs.mkdirSync(yamlBase, { recursive: true })
+    // create `models` as a file, not a directory
+    fs.writeFileSync(path.join(yamlBase, 'models'), 'not a dir')
+    const yaml = `s:\n  base_path: ${yamlBase}\n`
+    const result = computeModelsDirsToCarry(basePath, yaml, [])
+    expect(result).not.toContain(path.resolve(path.join(yamlBase, 'models')))
   })
 })
 
@@ -408,6 +489,7 @@ describe('adoptDesktopInstall', () => {
     expect(telemetry.capture).toHaveBeenCalledWith(
       'comfy.desktop.adopt.failed',
       expect.objectContaining({
+        stage: 'detect',
         error_bucket: 'no-legacy-install'
       })
     )
@@ -471,8 +553,16 @@ describe('adoptDesktopInstall', () => {
     }
   })
 
-  it('merges modelsDirs from extra_models_config.yaml and basePath/models', async () => {
-    const yaml = `comfyui_desktop:\n  base_path: /shared/A\n  is_default: true\nA1111:\n  base_path: /shared/B\n`
+  it('merges modelsDirs: basePath/models always + <yamlBase>/models when present, never the bare base_path', async () => {
+    // Sibling install exists with a `/models` folder; "missing" install has no `/models`.
+    const tmpYamlRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'adopt-yaml-roots-'))
+    const sibling = path.join(tmpYamlRoot, 'sibling-comfy')
+    const missingModels = path.join(tmpYamlRoot, 'no-models')
+    fs.mkdirSync(path.join(sibling, 'models'), { recursive: true })
+    fs.mkdirSync(missingModels, { recursive: true })
+    const yaml =
+      `comfyui_sibling:\n  base_path: ${sibling}\n  is_default: true\n` +
+      `weird:\n  base_path: ${missingModels}\n`
     const legacy = buildFakeLegacy({
       configFiles: {
         'comfy.settings.json': '{}',
@@ -490,12 +580,15 @@ describe('adoptDesktopInstall', () => {
       expect(finalDirs).toEqual(
         expect.arrayContaining([
           path.resolve(path.join(legacy.basePath, 'models')),
-          path.resolve('/shared/A'),
-          path.resolve('/shared/B')
+          path.resolve(path.join(sibling, 'models'))
         ])
       )
+      expect(finalDirs).not.toContain(path.resolve(sibling))
+      expect(finalDirs).not.toContain(path.resolve(missingModels))
+      expect(finalDirs).not.toContain(path.resolve(path.join(missingModels, 'models')))
     } finally {
       legacy.cleanup()
+      fs.rmSync(tmpYamlRoot, { recursive: true, force: true })
     }
   })
 
@@ -611,9 +704,7 @@ describe('adoptDesktopInstall', () => {
   it('removes the auto-tracked legacy desktop card after successful adoption', async () => {
     const legacy = buildFakeLegacy()
     try {
-      // Pre-seed the auto-tracked legacy card that the startup auto-tracker
-      // would have inserted on first boot. Adoption must drop it so the
-      // dashboard doesn't show two cards for the same workspace.
+      // Pre-seed the auto-tracked legacy card; adoption must drop it (one card per workspace).
       await installations.add({
         name: 'ComfyUI Legacy Desktop',
         sourceId: 'desktop',
@@ -686,9 +777,7 @@ describe('adoptDesktopInstall', () => {
       configFiles: {
         'comfy.settings.json': JSON.stringify({
           'Comfy.ColorPalette': 'dark',
-          // Legacy user had Desktop auto-update OFF — must NOT carry that.
-          // Inheriting it would lock them out of future Desktop 2.0
-          // updates after the in-place app cutover.
+          // Legacy Desktop auto-update OFF must NOT carry, else they'd miss future updates.
           'Comfy-Desktop.AutoUpdate': false,
           'Comfy-Desktop.UV.PypiInstallMirror': 'https://mirrors.aliyun.com/pypi/simple/',
           'Comfy-Desktop.UV.TorchInstallMirror': 'https://download.pytorch.org/whl/cu121'
@@ -698,16 +787,14 @@ describe('adoptDesktopInstall', () => {
     try {
       const tools = buildSilentTools()
       const record = await adoptDesktopInstall({ tools, deps: buildDeps({}, legacy.info) })
-      // ColorPalette is a frontend canvas-color setting, not equivalent to
-      // v2's launcher `theme` — never carried.
+      // ColorPalette is a frontend setting, not v2's launcher `theme` — never carried.
       expect(settingsMock.__store).not.toHaveProperty('theme')
       // Force-on at adoption regardless of legacy value.
       expect(settingsMock.__store['autoInstallUpdates']).toBe(true)
       expect(settingsMock.__store['pypiMirror']).toBe('https://mirrors.aliyun.com/pypi/simple/')
       expect(settingsMock.__store['useChineseMirrors']).toBe(true)
       expect(settingsMock.__store['chineseMirrorsPrompted']).toBe(true)
-      // TorchInstallMirror has no v2 consumer (standalone variants ship
-      // torch pre-bundled) → never stashed on the record.
+      // TorchInstallMirror has no v2 consumer, never stashed on the record.
       expect(record).not.toHaveProperty('adoptedTorchMirror')
     } finally {
       legacy.cleanup()
@@ -715,9 +802,7 @@ describe('adoptDesktopInstall', () => {
   })
 
   it('respects a pre-existing v2 autoInstallUpdates choice on reconcile', async () => {
-    // User explicitly disabled Desktop auto-updates in v2 settings after a
-    // prior adoption. A subsequent migrate-to-standalone reconcile pass
-    // must not silently flip it back on.
+    // A reconcile pass must not silently flip a user's explicit v2 choice back on.
     settingsMock.__store['autoInstallUpdates'] = false
     const legacy = buildFakeLegacy({
       configFiles: {
@@ -736,8 +821,7 @@ describe('adoptDesktopInstall', () => {
   })
 
   it('respects pre-existing v2 settings under the "v2 user choice wins" rule', async () => {
-    // User already configured v2 with a custom pypi mirror before running
-    // adoption. Adoption must NOT overwrite that choice.
+    // Adoption must NOT overwrite a pre-configured v2 choice.
     settingsMock.__store['pypiMirror'] = 'https://pypi.org/simple/'
     settingsMock.__store['inputDir'] = '/v2/chosen/input'
     const legacy = buildFakeLegacy({
@@ -828,6 +912,151 @@ describe('adoptDesktopInstall', () => {
           adopted_comfy_tag_at_migration: null
         })
       )
+    } finally {
+      legacy.cleanup()
+    }
+  })
+
+  it('populates comfyVersion from the freshly checked-out source so update checks see the real git tag', async () => {
+    // Without comfyVersion, the release-cache falls back to comparing
+    // installation.version ("0.24.0", bare) against latestTag ("v0.24.0",
+    // "v"-prefixed) and reports a false "update available" forever.
+    readGitHeadMock.mockReturnValue('deadbeefdeadbeefdeadbeefdeadbeefdeadbeef')
+    resolveLocalVersionMock.mockResolvedValue({
+      commit: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+      baseTag: 'v0.24.0',
+      commitsAhead: 0
+    })
+    getLatestStableTagMock.mockResolvedValue('v0.24.0')
+    const legacy = buildFakeLegacy({ configFiles: { 'comfy.settings.json': '{}' } })
+    try {
+      const cloneFn = vi.fn(async (_url: string, dest: string) => {
+        fs.mkdirSync(dest, { recursive: true })
+        fs.mkdirSync(path.join(dest, '.git'), { recursive: true })
+        fs.writeFileSync(path.join(dest, 'main.py'), '# clone')
+        fs.writeFileSync(path.join(dest, 'comfyui_version.py'), '__version__ = "0.24.0"\n')
+        return { ok: true as const }
+      })
+      const tools = buildSilentTools()
+      const record = await adoptDesktopInstall({
+        tools,
+        deps: buildDeps({ cloneSourceFromGit: cloneFn }, legacy.info)
+      })
+      // resolveLocalVersion was invoked against the destination ComfyUI
+      // dir with the fallback tag threaded through from updateInfo.
+      expect(resolveLocalVersionMock).toHaveBeenCalledWith(
+        expect.stringContaining('ComfyUI'),
+        'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+        'v0.24.0'
+      )
+      expect(fetchTagsMock).toHaveBeenCalledWith(expect.stringContaining('ComfyUI'))
+      expect(record.comfyVersion).toEqual({
+        commit: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+        baseTag: 'v0.24.0',
+        commitsAhead: 0
+      })
+      // The bare-string `version` field is still set (used as the
+      // human-friendly display in the manage view) — both coexist.
+      expect(record.version).toBe('0.24.0')
+    } finally {
+      legacy.cleanup()
+    }
+  })
+
+  it('omits comfyVersion when no .git directory exists in the source tree', async () => {
+    // Pre-swap-copy mode often delivers a tarball with no .git. We can't
+    // resolve a real tag in that case, and falling back to the bare
+    // __version__ string is intentional — the release-cache change
+    // tolerates that mismatch on the comparison side.
+    readGitHeadMock.mockReturnValue('deadbeefdeadbeefdeadbeefdeadbeefdeadbeef')
+    resolveLocalVersionMock.mockResolvedValue({
+      commit: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+      baseTag: 'v0.24.0',
+      commitsAhead: 0
+    })
+    const legacy = buildFakeLegacy({ configFiles: { 'comfy.settings.json': '{}' } })
+    try {
+      writeFakeStagedSource(path.join(legacy.configDir, 'legacy-staging', 'comfyui'), '0.24.0')
+      const tools = buildSilentTools()
+      const record = await adoptDesktopInstall({
+        tools,
+        deps: buildDeps({}, legacy.info)
+      })
+      expect(resolveLocalVersionMock).not.toHaveBeenCalled()
+      expect(record).not.toHaveProperty('comfyVersion')
+      expect(record.version).toBe('0.24.0')
+    } finally {
+      legacy.cleanup()
+    }
+  })
+
+  it('adoption is non-fatal when comfyVersion resolution throws', async () => {
+    readGitHeadMock.mockReturnValue('deadbeefdeadbeefdeadbeefdeadbeefdeadbeef')
+    resolveLocalVersionMock.mockRejectedValue(new Error('pygit2 not configured'))
+    const legacy = buildFakeLegacy({ configFiles: { 'comfy.settings.json': '{}' } })
+    try {
+      const cloneFn = vi.fn(async (_url: string, dest: string) => {
+        fs.mkdirSync(dest, { recursive: true })
+        fs.mkdirSync(path.join(dest, '.git'), { recursive: true })
+        fs.writeFileSync(path.join(dest, 'main.py'), '# clone')
+        return { ok: true as const }
+      })
+      const tools = buildSilentTools()
+      const record = await adoptDesktopInstall({
+        tools,
+        deps: buildDeps({ cloneSourceFromGit: cloneFn }, legacy.info)
+      })
+      expect(record).not.toHaveProperty('comfyVersion')
+      // Warning surfaced to the user-facing output stream
+      expect(tools.sendOutput).toHaveBeenCalledWith(
+        expect.stringContaining('could not resolve adopted ComfyUI version: pygit2 not configured')
+      )
+    } finally {
+      legacy.cleanup()
+    }
+  })
+
+  it('registers human-readable step labels for the progress UI', async () => {
+    const legacy = buildFakeLegacy({ configFiles: { 'comfy.settings.json': '{}' } })
+    try {
+      const tools = buildSilentTools()
+      await adoptDesktopInstall({
+        tools,
+        deps: buildDeps({}, legacy.info)
+      })
+      // The very first sendProgress call must announce the step list so
+      // the renderer can replace its phase-id fallback with the real
+      // labels (issue: "Migration progress is weird").
+      const stepsCalls = (tools.sendProgress as ReturnType<typeof vi.fn>).mock.calls.filter(
+        ([phase]) => phase === 'steps'
+      )
+      expect(stepsCalls).toHaveLength(1)
+      const stepList = (stepsCalls[0]![1] as { steps: Array<{ phase: string; label: string }> }).steps
+      const phases = stepList.map((s) => s.phase)
+      // All adoption phases that emit sendProgress(...) below must be
+      // represented so the renderer never falls back to displaying the
+      // raw phase id like "source".
+      expect(phases).toContain('backup')
+      expect(phases).toContain('venv')
+      expect(phases).toContain('snapshot')
+      expect(phases).toContain('allocate')
+      expect(phases).toContain('source')
+      expect(phases).toContain('comfy-update')
+      expect(phases).toContain('requirements')
+      expect(phases).toContain('settings')
+      expect(phases).toContain('register')
+      // `tcc` is darwin-only — assert symmetry with the actual platform.
+      if (process.platform === 'darwin') {
+        expect(phases).toContain('tcc')
+      } else {
+        expect(phases).not.toContain('tcc')
+      }
+      // Every registered step has a non-empty label string.
+      for (const step of stepList) {
+        expect(typeof step.label).toBe('string')
+        expect(step.label.length).toBeGreaterThan(0)
+        expect(step.label).not.toBe(step.phase)
+      }
     } finally {
       legacy.cleanup()
     }

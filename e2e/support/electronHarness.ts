@@ -15,18 +15,11 @@ export interface LauncherAppHandle {
 export interface SeedOptions {
   /** Seed installation records into the isolated data directory. */
   installations?: SeedInstallation[]
-  /**
-   * Merge into the seeded `settings.json` before launch. Use to bypass
-   * one-time gates (e.g., `firstUseCompleted: true`) so a test isn't
-   * racing the first-use takeover for control of the chooser host.
-   */
+  /** Merge into the seeded `settings.json` to bypass one-time gates (e.g.
+   *  `firstUseCompleted`) so a test isn't racing the first-use takeover. */
   settings?: Record<string, unknown>
-  /**
-   * Runs after the isolated home + app-data dirs are created but before
-   * the Electron app is spawned. Use to drop platform-specific files
-   * (e.g. legacy Desktop `config.json` under `%APPDATA%/ComfyUI/`) the
-   * main process inspects during early boot.
-   */
+  /** Runs after the isolated dirs are created but before launch. Use to drop
+   *  platform-specific files the main process inspects during early boot. */
   onSetup?: (paths: { homeDir: string; appDataDir: string }) => Promise<void>
 }
 
@@ -36,17 +29,14 @@ export interface SeedInstallation {
   sourceId?: string
   installPath?: string
   status?: string
-  /**
-   * Snapshot JSON records to seed into `<installPath>/.launcher/snapshots/`.
-   * Each entry is written as a standalone `<timestamp>-<trigger>-<6hex>.json`
-   * file in the same format the live snapshot store produces.
-   */
+  /** Snapshot JSON records to seed into `<installPath>/.launcher/snapshots/`,
+   *  written in the same format the live snapshot store produces. */
   snapshots?: SeedSnapshot[]
   [key: string]: unknown
 }
 
-/** Loose Snapshot shape — duplicated locally to keep the harness free of
- *  src/ imports. Keep in sync with `src/main/lib/snapshots/types.ts`. */
+/** Loose Snapshot shape duplicated to keep the harness free of src/ imports.
+ *  Keep in sync with `src/main/lib/snapshots/types.ts`. */
 export interface SeedSnapshot {
   version?: 1
   createdAt?: string
@@ -64,13 +54,12 @@ export interface SeedSnapshot {
   pipPackages?: Record<string, string>
   pythonVersion?: string
   updateChannel?: string
-  /** Set on the seeded snapshot so `snapshot-restore` skips the live
-   *  pip phase (avoids needing a real `uv` + Python env on disk). */
+  /** Makes `snapshot-restore` skip the live pip phase (no real `uv`/Python). */
   skipPipSync?: boolean
 }
 
-/** Mirrors `formatTimestamp` in `src/main/lib/snapshots/store.ts` so seeded
- *  filenames sort identically to live ones (newest-first by name). */
+/** Must mirror `formatTimestamp` in `src/main/lib/snapshots/store.ts` so
+ *  seeded filenames sort identically to live ones (newest-first by name). */
 function formatSeedTimestamp(date: Date): string {
   const pad = (n: number, len = 2): string => String(n).padStart(len, '0')
   return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}_${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}_${pad(date.getMilliseconds(), 3)}`
@@ -89,24 +78,20 @@ function buildIsolatedEnv(homeDir: string, settingsSeed?: Record<string, unknown
     XDG_CACHE_HOME: path.join(homeDir, '.cache'),
     XDG_DATA_HOME: path.join(homeDir, '.local', 'share'),
     XDG_STATE_HOME: path.join(homeDir, '.local', 'state'),
-    // Gates `registerE2EHooks()` in main so test-only helpers
-    // (`globalThis.__e2e`) are wired up. See `src/main/lib/e2eHooks.ts`.
+    // Gates `registerE2EHooks()` in main so `globalThis.__e2e` is wired up.
     E2E: '1',
   }
 
-  // On Windows, Electron resolves userData via APPDATA (%APPDATA%\<appName>).
-  // Point it into the isolated home so the app doesn't touch the real profile.
+  // Windows resolves userData via APPDATA; point it into the isolated home
+  // so the app doesn't touch the real profile.
   if (process.platform === 'win32') {
     env['APPDATA'] = path.join(homeDir, 'AppData', 'Roaming')
   }
 
-  // Settings seed read by main `settings.maybeSeedFromEnv()` before first
-  // load. Bypasses platform-specific userData path resolution — most
-  // critically macOS, where Application Support is rooted at the real
-  // pw_dir and ignores our HOME override, so a prior dev session's
-  // `firstUseCompleted: true` would otherwise persist and wedge
-  // cold-start tests. Always send a seed so the harness starts from a
-  // known-clean state on every OS; caller overrides win on merge.
+  // Settings seed read by main before first load. Needed because on macOS
+  // Application Support ignores our HOME override, so a prior dev session's
+  // `firstUseCompleted: true` would persist and wedge cold-start tests.
+  // Always send a seed for a known-clean state; caller overrides win on merge.
   const effectiveSeed: Record<string, unknown> = {
     firstUseCompleted: false,
     telemetryEnabled: false,
@@ -118,14 +103,9 @@ function buildIsolatedEnv(homeDir: string, settingsSeed?: Record<string, unknown
 }
 
 export async function launchLauncherApp(options?: SeedOptions): Promise<LauncherAppHandle> {
-  // Honor `LIFECYCLE_REUSE_DIR` to reuse a previous run's profile dir.
-  // Pre-baked first-use + install state survives across runs, so a
-  // post-failure rerun via `--grep` (e.g. just the snapshot-restore
-  // test) doesn't have to redo the ~2-minute install. The reused dir
-  // is preserved on cleanup (`rm` is skipped). On a fresh run the
-  // dir we just mkdtemp'd is always printed so the operator can
-  // capture it and re-export `LIFECYCLE_REUSE_DIR=<path>` to chain
-  // follow-up runs.
+  // Honor `LIFECYCLE_REUSE_DIR` to reuse a previous run's profile dir so a
+  // rerun doesn't redo the ~2-minute install. A reused dir is preserved on
+  // cleanup; a fresh dir is printed so the operator can re-export it.
   const reuseDir = process.env['LIFECYCLE_REUSE_DIR']
   const homeDir = reuseDir ?? await mkdtemp(path.join(os.tmpdir(), 'comfyui-launcher-e2e-'))
   if (reuseDir) {
@@ -135,15 +115,10 @@ export async function launchLauncherApp(options?: SeedOptions): Promise<Launcher
     console.log(`[lifecycle-harness] re-export as LIFECYCLE_REUSE_DIR=${homeDir} to rerun individual tests against this profile`)
   }
 
-  // Pre-create the platform-specific config dir Electron's `userData`
-  // (or our XDG override on Linux) resolves to. macOS Application Support
-  // is rooted at `getpwuid(getuid())->pw_dir`, NOT $HOME — even when
-  // HOME is overridden — so the directory lives outside the test's
-  // mkdtemp sandbox. We still create it so `settings.set()` writes
-  // succeed, and we seed the persisted settings via the
-  // `E2E_SETTINGS_SEED` env var (read by main pre-chooser) instead of
-  // by writing a settings.json file the harness would have to guess
-  // the location of.
+  // Pre-create the platform-specific config dir Electron resolves to so
+  // `settings.set()` writes succeed. On macOS this lives outside the mkdtemp
+  // sandbox (Application Support ignores HOME), so persisted settings are
+  // seeded via `E2E_SETTINGS_SEED` rather than a settings.json file here.
   const appDataDir = process.platform === 'win32'
     ? path.join(homeDir, 'AppData', 'Roaming', 'comfyui-desktop-2')
     : process.platform === 'darwin'
@@ -156,8 +131,7 @@ export async function launchLauncherApp(options?: SeedOptions): Promise<Launcher
   }
 
   // Expose a CDP remote-debugging port so tests can connect to non-BrowserWindow
-  // webContents (e.g. the ComfyUI WebContentsView) via chromium.connectOverCDP().
-  // Derive port from Playwright worker index to avoid collisions in parallel runs.
+  // webContents. Derive the port from the worker index to avoid collisions.
   const workerIndex = parseInt(process.env['TEST_WORKER_INDEX'] || '0', 10)
   const cdpPort = 19200 + workerIndex
 
@@ -172,9 +146,8 @@ export async function launchLauncherApp(options?: SeedOptions): Promise<Launcher
     env: buildIsolatedEnv(homeDir, options?.settings),
   })
 
-  // The main window starts with show:false and transitions via ready-to-show.
-  // Under Playwright the event may fire but isVisible() can lag, so force-show
-  // once a BrowserWindow exists.
+  // Under Playwright the ready-to-show event may fire but isVisible() can lag,
+  // so force-show once a BrowserWindow exists.
   const page = await application.firstWindow()
   await page.waitForLoadState('domcontentloaded')
   await application.evaluate(({ BrowserWindow }) => {
@@ -182,22 +155,15 @@ export async function launchLauncherApp(options?: SeedOptions): Promise<Launcher
     if (win && !win.isVisible()) win.show()
   })
 
-  // Prevent Electron's default uncaught-exception dialog from blocking E2E tests.
-  // Suppress the native error dialog and exit immediately on uncaught exceptions
-  // so tests fail fast instead of timing out.
-  // Note: bare `process` is rewritten by Playwright's evaluate transpiler;
-  // use app.exit() instead and access process via Electron's internals.
+  // Suppress the native uncaught-exception dialog and exit fast so tests don't
+  // time out. `process` is rewritten by Playwright's transpiler, so use app.exit().
   await application.evaluate(({ app: electronApp, dialog }) => {
-    // Suppress any native error/message dialogs
     dialog.showErrorBox = () => {}
-    // Register uncaught exception handler via the app module
     electronApp.on('render-process-gone', () => electronApp.exit(1))
   })
 
   // Seed installations after launch so we can query app.getPath('userData')
-  // for the correct directory (Electron may capitalize or modify the app
-  // name on some platforms). Installations are read on chooser refresh, so
-  // a post-launch write is fine.
+  // for the correct dir (Electron may modify the app name per platform).
   if (options?.installations && options.installations.length > 0) {
     const userDataDir = await application.evaluate(async ({ app: electronApp }) => {
       return electronApp.getPath('userData')

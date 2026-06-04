@@ -23,9 +23,7 @@ describe('findActionById', () => {
 
   it('finds an action nested inside a channel-card field option (regression for #582)', () => {
     // The standalone source emits `update-comfyui` inside
-    // `field.options[].data.actions[]` rather than at the section level.
-    // A search of only `section.actions` would silently miss it — which
-    // was the install-update pill autoAction bug.
+    // `field.options[].data.actions[]`, not at the section level.
     const sections: DetailSection[] = [
       {
         tab: 'update',

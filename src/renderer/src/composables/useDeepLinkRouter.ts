@@ -9,44 +9,29 @@ import { REQUIRES_STOPPED, type Installation, type ShowProgressOpts } from '../t
 import type { Overlay } from './useOverlay'
 
 interface DeepLinkRouterOpts {
-  /** URL-derived installation id — the host this panel is bound to.
-   *  `install-update` payloads ignore mismatched ids so a deep link
-   *  fires only on the targeted host. */
+  /** Host id this panel is bound to. `install-update` payloads ignore
+   *  mismatched ids so a deep link fires only on the targeted host. */
   installationId: string
-  /** Resolves once `onMounted` finishes its async store/locale hydration.
-   *  Listener handlers await this so the install-update branch sees a
-   *  populated installationStore + translated copy on the very first
-   *  click after the panelView's `did-finish-load`. */
+  /** Resolves once `onMounted` finishes store/locale hydration. Handlers
+   *  await this so the store + translations are populated before use. */
   bootstrapReady: Promise<void>
   openOverlay: (next: Overlay | null) => Promise<boolean>
   showAppUpdateRestartPrompt: (version: string | null) => Promise<void>
   showAppUpdateDownloadPrompt: (version: string | null) => Promise<void>
-  /** Instance-picker popover picked an install that's not already
-   *  running. Routed to the panel so it can run the same
-   *  `useListAction` launch flow the chooser uses — without the
-   *  chooser-host attach-claim (which would swap install A out of
-   *  this host). */
+  /** Picker picked a non-running install; runs the chooser's launch flow
+   *  without the attach-claim that would swap this host's install out. */
   pickInstallFromPicker?: (installation: Installation) => Promise<void> | void
-  /** Instance-picker popover's "More" menu selected an install-level
-   *  action (Open Folder / Copy / Untrack / Delete). Routed to the
-   *  panel so it dispatches through the same `useInstallContextMenu`
-   *  path the dashboard kebab uses — confirm dialogs + showProgress
-   *  + DetailModal-mediated Delete all live there. */
+  /** Picker "More" menu selected an install-level action; dispatches
+   *  through the same `useInstallContextMenu` path the dashboard kebab uses. */
   runInstallActionFromPicker?: (installation: Installation, actionId: string) => Promise<void> | void
-  /** Instance-picker's expanded settings UI fired `show-progress`; the
-   *  popup forwarded it here so the panel's existing ProgressModal
-   *  pipeline can run the operation. */
+  /** Picker's settings UI fired `show-progress`, forwarded here to the
+   *  panel's ProgressModal pipeline. */
   showProgressFromPicker?: (opts: ShowProgressOpts) => void
 }
 
-/**
- * Routes `panel-trigger-overlay` IPCs from main into the right
- * renderer surface. Registered BEFORE the panel's async bootstrap
- * (locale + stores) so a deep-link IPC fired right after the
- * panelView's first `did-finish-load` is never dropped — payloads
- * that need the store park on `bootstrapReady` until hydration
- * completes.
- */
+/** Routes `panel-trigger-overlay` IPCs into the right renderer surface.
+ *  Registered before the panel's async bootstrap; payloads that need the
+ *  store park on `bootstrapReady` until hydration completes. */
 export function useDeepLinkRouter(opts: DeepLinkRouterOpts): void {
   const installationStore = useInstallationStore()
   const sessionStore = useSessionStore()
@@ -72,13 +57,8 @@ export function useDeepLinkRouter(opts: DeepLinkRouterOpts): void {
           await opts.bootstrapReady
           const inst = installationStore.getById(id)
           if (!inst) return
-          // `comfy://install-update/<id>` opens the picker on the
-          // Update tab and auto-fires the `update-comfyui` action so the
-          // user lands directly on its confirm modal (the "Update from…"
-          // / "Roll back…" + will-stop-running prompt) rather than just
-          // staring at the Update tab. `autoAction` resolves to the
-          // install's currently-selected channel via the same path the
-          // chooser-card kebab Update entry uses.
+          // Opens the picker on the Update tab and auto-fires
+          // `update-comfyui` so the user lands directly on its confirm modal.
           window.api.openInstancePicker({
             installationId: inst.id,
             initialTab: 'update',
@@ -90,17 +70,14 @@ export function useDeepLinkRouter(opts: DeepLinkRouterOpts): void {
           await opts.bootstrapReady
           const inst = opts.installationId ? installationStore.getById(opts.installationId) : null
           const requested = payload.settingsTab
-          // Default to the host's natural tab — same fall-through the
-          // file-menu / title-bar Settings entries use via switchPanel.
+          // Default to the host's natural tab.
           const tab = requested ?? (inst ? 'comfy' : 'global')
           if (tab === 'global') {
             window.api.openGlobalSettings()
             return
           }
-          // Per-install deep links (`comfy://open-settings?tab=comfy`)
-          // open the picker on the Config tab. If we don't have an
-          // install context (chooser host, no active install), open
-          // without a tab so the user picks an install first.
+          // Per-install deep links open the Config tab; with no install
+          // context, open without a tab so the user picks one first.
           if (inst) {
             window.api.openInstancePicker({
               installationId: inst.id,
@@ -138,11 +115,8 @@ export function useDeepLinkRouter(opts: DeepLinkRouterOpts): void {
           if (!id || !actionId || !title) return
           const inst = installationStore.getById(id)
           if (!inst) return
-          // Picker-driven apiCall: rebuild from actionId/actionData on
-          // this side because closures don't cross IPC. Mirrors
-          // `useComfyUISettings.runAction`'s showProgress branch —
-          // self-stops on a running install for REQUIRES_STOPPED and
-          // appends a relaunch for IN_PLACE_RELAUNCH ops.
+          // Rebuild the apiCall here because closures don't cross IPC:
+          // self-stop for REQUIRES_STOPPED, append relaunch for IN_PLACE_RELAUNCH.
           const isRestart = !!payload.isRestart
           const actionData = (payload.actionData ?? undefined) as
             | Record<string, unknown>
@@ -169,10 +143,7 @@ export function useDeepLinkRouter(opts: DeepLinkRouterOpts): void {
                 return result
               }
               : () => window.api.runAction(id, actionId, actionData)
-          // Picker forwarded `successChoice: true` for mutating non-launch
-          // ops where the user might NOT want to enter the app right
-          // away. Build the preset here — this side owns the i18n
-          // catalog the popup process doesn't.
+          // Built here because this side owns the i18n catalog the popup doesn't.
           const successTerminal = payload.successChoice
             ? successTerminalGoDashboardOrOpen({
               title: payload.opKind === 'update'

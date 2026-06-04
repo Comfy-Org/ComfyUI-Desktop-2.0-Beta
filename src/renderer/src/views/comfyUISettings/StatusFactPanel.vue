@@ -6,20 +6,14 @@ import BaseCopyButton from '../../components/ui/BaseCopyButton.vue'
 import type { DetailField, DetailSection, Installation } from '../../types/ipc'
 
 /**
- * Status tab — grouped install summary with identity hero and inset
- * fact groups. Replaces generic readonly SettingsSectionList rows.
- *
- * The hero name is inline-editable (contenteditable); committing it calls
- * the `onRename` prop. Mirrors the legacy `DetailModal` title affordance.
+ * Status tab: grouped install summary with an inline-editable identity hero (committing calls `onRename`).
  */
 
 interface Props {
   installation: Installation | null
   sections: DetailSection[]
   diskUsage: { label: string; value: string } | null
-  /** Commit a renamed install, resolving `true` when the write landed and
-   *  `false` on rejection. A function prop (not an emit) so the blur
-   *  handler can await the outcome and revert only on failure. */
+  /** Commit a rename, resolving `true` on success; a function prop (not an emit) so blur can await and revert only on failure. */
   onRename?: (newName: string) => Promise<boolean>
 }
 
@@ -27,16 +21,10 @@ const props = defineProps<Props>()
 
 const { t } = useI18n()
 
-// The hero name is a `contenteditable` whose text we drive imperatively
-// rather than via Vue interpolation: mixing `{{ }}` with the inline pencil
-// icon in one editable element left Vue unable to patch the manually-edited
-// text node, so a committed rename painted everywhere except this hero
-// until a remount. Owning the text via this ref + the `watch` below keeps
-// the element in lockstep with the prop.
+// Drive the hero name imperatively: mixing `{{ }}` with the inline pencil icon left Vue unable to patch the edited text node, so a committed rename painted everywhere except here.
 const nameEl = useTemplateRef<HTMLElement>('nameEl')
 
-/** Write the install's name into the editable element if it differs.
- *  Guarded so we don't stomp the caret while the user is mid-edit. */
+// Write the name into the editable element if it differs, without stomping the caret mid-edit.
 function syncName(): void {
   const el = nameEl.value
   if (!el) return
@@ -44,14 +32,10 @@ function syncName(): void {
   if (el.textContent !== name) el.textContent = name
 }
 
-// Watch both the name AND the element ref: the ref starts null and is
-// assigned after the first render, so keying on it too paints the initial
-// name once the contenteditable mounts (otherwise the `immediate` run fires
-// before the ref exists and the hero opens blank until the next change).
+// Watch the name AND the ref (which starts null) so the initial name paints once the contenteditable mounts.
 watch(
   [() => props.installation?.name ?? '', nameEl],
   () => {
-    // Don't fight the user's caret while they're typing in this field.
     if (document.activeElement !== nameEl.value) syncName()
   },
   { immediate: true, flush: 'post' },
@@ -73,8 +57,7 @@ function handleNamePaste(event: ClipboardEvent): void {
   document.execCommand('insertText', false, text)
 }
 
-/** Escape abandons the edit: restore the original name and blur. The
- *  blur handler then sees an unchanged value and no-ops. */
+// Escape restores the original name and blurs; the blur handler then no-ops.
 function handleNameEscape(): void {
   syncName()
   nameEl.value?.blur()
@@ -85,10 +68,7 @@ async function handleNameBlur(event: FocusEvent): Promise<void> {
   const current = props.installation?.name ?? ''
   const newName = el.textContent?.trim() ?? ''
   if (newName && newName !== current) {
-    // Keep the typed text optimistically (normalised to the trimmed value)
-    // so the hero doesn't flash back to the old name mid-round-trip. The
-    // watcher confirms it on success; only a rejection needs a manual
-    // revert, since an unchanged prop fires no watcher.
+    // Keep the trimmed text optimistically so the hero doesn't flash back mid-round-trip; only a rejection reverts.
     if (el.textContent !== newName) el.textContent = newName
     const committed = await props.onRename?.(newName)
     if (committed === false) syncName()
@@ -103,9 +83,7 @@ interface FactRow {
   label: string
   value: string
   copyable?: boolean
-  /** `'start'` truncates with a leading ellipsis so the tail (last
-   *  path segment) stays visible. Paths use it; everything else
-   *  defaults to end-truncation. */
+  /** `'start'` keeps the tail visible (used by paths); everything else end-truncates. */
   truncate?: 'start' | 'end'
 }
 
@@ -131,12 +109,7 @@ function fieldValue(field: DetailField): string {
   return String(v)
 }
 
-/** Localised dates (e.g. the "Installed" field) come through as
- *  `toLocaleDateString()` output — `5/28/2026` etc. — whose `/`
- *  separators would otherwise trip the slash-based path heuristic and
- *  sprout a copy button that makes no sense for a date (#712). A path
- *  always carries a letter (drive/segment name), a backslash, or a
- *  leading `~`; a date is only digits and date separators. */
+// Localised dates contain only digits and separators; without this guard the slash-based path heuristic sprouts a nonsensical copy button on dates.
 function looksLikeDate(value: string): boolean {
   return /^[\d/.\-: ]+$/.test(value)
 }
@@ -332,10 +305,7 @@ const groups = computed<FactGroup[]>(() => {
   gap: 8px;
 }
 
-/* Wrapper groups the editable name + the pencil hint as siblings (the
-   pencil can't live inside the contenteditable — `textContent =` writes
-   would wipe it). Hover/focus state is tracked on the wrap so the hint
-   reacts to interaction with the name. */
+/* Name + pencil as siblings (the pencil can't live inside the contenteditable — `textContent =` would wipe it). */
 .status-fact-hero-name-wrap {
   display: inline-flex;
   align-items: center;
@@ -354,10 +324,7 @@ const groups = computed<FactGroup[]>(() => {
   border-radius: 6px;
   outline: none;
   cursor: text;
-  /* A long name ellipsizes at rest like the old static title did; editing
-     scrolls horizontally within the box rather than wrapping or overflowing
-     the hero. `nowrap` (not `pre`) so the field still collapses runs of
-     whitespace the way a single-line name field should. */
+  /* Long names ellipsize at rest and scroll horizontally while editing. `nowrap` (not `pre`) so whitespace runs collapse. */
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -373,8 +340,7 @@ const groups = computed<FactGroup[]>(() => {
   box-shadow: 0 0 0 2px var(--focus-ring, var(--neutral-50));
 }
 
-/* Faded pencil hint — fades up on hover/focus so the name reads clean at
-   rest but advertises editability on intent. */
+/* Pencil hint fades up on hover/focus. */
 .status-fact-hero-edit-hint {
   flex-shrink: 0;
   color: var(--text-muted);
@@ -435,7 +401,7 @@ const groups = computed<FactGroup[]>(() => {
 
 .status-fact-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
   align-items: center;
   gap: 12px;
   padding: 10px 0;
@@ -473,10 +439,7 @@ const groups = computed<FactGroup[]>(() => {
   white-space: nowrap;
 }
 
-/* Path rows truncate from the START so the trailing folder name
- * (the useful bit) stays readable. `direction: rtl` makes the
- * ellipsis fall on the left; the inner <bdi dir="ltr"> keeps the
- * character order rendering left-to-right. */
+/* Truncate paths from the start to keep the trailing folder readable. `direction: rtl` puts the ellipsis on the left; the inner <bdi dir="ltr"> keeps character order. */
 .status-fact-value.is-truncate-start {
   direction: rtl;
   text-align: left;

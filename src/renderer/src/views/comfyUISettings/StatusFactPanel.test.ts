@@ -33,11 +33,7 @@ function mountPanel(props: {
 }
 
 describe('StatusFactPanel — hero name', () => {
-  // Regression: the contenteditable hero is painted imperatively, and the
-  // sync watcher's `immediate` run fired before the template ref was
-  // assigned — so the hero opened BLANK and only showed the name after an
-  // edit. The watcher must also key on the element ref so it paints once
-  // the contenteditable mounts.
+  // Guards that the imperatively-painted hero shows the name on mount (the watcher must key on the element ref, not just the name).
   it('shows the install name on initial mount, before any edit', async () => {
     const wrapper = mountPanel({ installation: makeInstall('Maanil\'s Comfy') })
     await nextTick()

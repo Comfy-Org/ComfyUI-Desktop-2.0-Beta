@@ -1,11 +1,8 @@
 /**
- * Discovers the registry of CLI-settable feature flags for a ComfyUI install
- * by invoking `python main.py --list-feature-flags`. The launcher uses this
- * to gate `--feature-flag KEY=VALUE` injection per-key, so we only set flags
- * the running ComfyUI version actually knows about.
- *
- * On any failure (older ComfyUI without the flag, parse error, timeout) this
- * returns an empty registry, which the caller treats as "inject nothing".
+ * Discovers the CLI-settable feature-flag registry via
+ * `python main.py --list-feature-flags`, so the launcher only injects
+ * `--feature-flag KEY=VALUE` for flags this ComfyUI version knows. Returns an
+ * empty registry (= inject nothing) on any failure.
  */
 
 import { execFile } from 'child_process'
@@ -38,11 +35,8 @@ export function parseFeatureFlagOutput(stdout: string): FeatureFlagRegistry {
   return {}
 }
 
-/**
- * Run `python main.py --list-feature-flags` and parse the JSON output.
- * Cached per (installationId, version), matching getComfyArgsSchema.
- * Returns {} on any error.
- */
+/** Run `--list-feature-flags` and parse it, cached per (installationId,
+ *  version). Returns {} on any error. */
 export async function getComfyFeatureFlagRegistry(
   pythonPath: string,
   mainPyPath: string,

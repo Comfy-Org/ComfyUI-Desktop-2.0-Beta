@@ -12,26 +12,9 @@ import { emitTelemetryAction } from '../../lib/telemetry'
 import { scoreName } from '../../utils/fuzzyMatch'
 
 /**
- * Sub-page editor for the `launchArgs` field. Takes over the drawer
- * body while open — opened by `ArgsBuilderField`'s gear button, closed
- * by the in-header Back arrow.
- *
- * Schema is fetched from `get-comfy-args` on mount (same IPC the legacy
- * `ArgsBuilder.vue` uses). Each flag renders as:
- *   - boolean  → toggle checkbox
- *   - value    → toggle + text input (value required when active)
- *   - optional → toggle + text input (value optional when active)
- *
- * `exclusiveGroup` flags collapse into a radio cluster: enabling one
- * disables its siblings. Unknown / typo'd flags in the current args
- * string round-trip verbatim via `parseArgs().extra`.
- *
- * Search bar filters by flag name / help text. The drawer is narrow so
- * categorical headers are sticky-ish but the page remains scrollable.
- *
- * The component owns its own local `value` mirror so rapid edits feel
- * snappy; the parent commits via the `update` emit on every mutation,
- * the composable persists through `update-installation`.
+ * Sub-page editor for `launchArgs`. Schema fetched from `get-comfy-args` on mount; each flag renders as a toggle (+ text input for value/optional types).
+ * `exclusiveGroup` flags collapse into a radio cluster (enabling one disables siblings); unknown flags round-trip via `parseArgs().extra`.
+ * Owns a local `value` mirror for snappy edits and commits to the parent via `update` on every mutation.
  */
 
 interface Props {
@@ -57,8 +40,7 @@ const search = ref('')
 watch(
   () => props.initialValue,
   (next) => {
-    // Keep our local mirror in sync when the parent commits a value
-    // we didn't originate (rare — e.g. backend default normalization).
+    // Resync the mirror when the parent commits a value we didn't originate.
     if (next !== localValue.value) localValue.value = next
   }
 )
@@ -85,15 +67,7 @@ async function fetchSchema(): Promise<void> {
   }
 }
 
-// ArgsBuilder usage telemetry. The previous one-coarse-settings.changed
-// event hid ArgsBuilder usage entirely; these make "did anyone edit
-// launch args" answerable, with per-arg detail.
-//
-// Debounced 500ms: text-input args (`--listen 0.0.0.0`, `--port 8188`)
-// otherwise emit one event per keystroke, which would make `args.changed`
-// the loudest event in the dataset for no analytical gain — we only care
-// that the user edited a given arg, not the per-character intermediate
-// states.
+// Debounced 500ms so text-input args don't emit one event per keystroke.
 const emitArgsChanged = useDebounceFn((argKey: string, valueKind: ComfyArgDef['type']) => {
   emitTelemetryAction('comfy.desktop.args.changed', {
     installation_id: props.installationId,
@@ -109,8 +83,7 @@ onMounted(() => {
   void fetchSchema()
 })
 
-// Last-chance flush — if the user closes the page mid-debounced edit,
-// make sure the parent gets the final value.
+// Flush the final value if the page closes mid-debounced edit.
 onBeforeUnmount(() => {
   if (localValue.value !== props.initialValue) emit('update', localValue.value)
 })
@@ -188,10 +161,7 @@ function selectExclusive(group: string, name: string): void {
   if (chosen) emitArgsChanged(chosen.name, chosen.type)
 }
 
-// Clearing an exclusive group is the affordance the native-radio version
-// lost — radios can't deselect, so the user had to hand-edit the raw text
-// to get back to "no flag from this group". The select picker below
-// surfaces a synthetic "None" option that calls this.
+// Backs the select's synthetic "None" option (radios can't deselect).
 function clearExclusive(group: string): void {
   const next = new Map(parsed.value.known)
   for (const a of schema.value) {
@@ -223,22 +193,12 @@ function onExclusiveChange(group: string, value: string): void {
   else selectExclusive(group, value)
 }
 
-/**
- * Score a single query token against a flag *help* text. Help is long
- * prose, so the scorer is intentionally strict — only word-boundary or
- * contiguous-substring matches count. We never fall through to loose
- * subsequence; otherwise short queries like "cuda" hit unrelated help
- * via c…u…d…a spread across the sentence.
- */
+// Score a query token against help prose. Strict (word-boundary or substring only); loose subsequence would make "cuda" hit unrelated help.
 function scoreHelp(needle: string, help: string): number {
   if (!needle) return 1
   if (!help) return 0
-  // Word-boundary match: token sits at the start of a word in help.
-  // \b is unicode-aware enough for our ASCII-ish flag descriptions.
   const wordBoundaryRe = new RegExp(`\\b${escapeRegExp(needle)}`, 'i')
   if (wordBoundaryRe.test(help)) return 500
-  // Plain substring (catches "tls" inside "TLS-encrypted") — lower
-  // score so name hits always win.
   if (help.includes(needle)) return 200
   return 0
 }
@@ -247,12 +207,7 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-/**
- * Score a flag definition against the (potentially multi-token) query.
- * Every token must hit *something* — name or help. Name hits dominate
- * help hits 3:1 so typing the start of a flag name surfaces that flag
- * even when the literal token appears in some other flag's help text.
- */
+// Score a flag against a multi-token query; every token must hit name or help. Name hits dominate help 3:1.
 function scoreArg(query: string, arg: ComfyArgDef): number {
   const tokens = query.split(/\s+/).filter(Boolean)
   if (tokens.length === 0) return 1
@@ -271,31 +226,22 @@ function scoreArg(query: string, arg: ComfyArgDef): number {
 
 interface GroupItem {
   kind: 'arg' | 'exclusive'
-  // For 'arg' — the single flag def.
   arg?: ComfyArgDef
-  // For 'exclusive' — the group key + member defs.
   group?: string
   args?: ComfyArgDef[]
 }
 
-// Categorized + search-filtered structure, with exclusive groups
-// collapsed into a single row per group. When a search query is
-// present, every category's items are sorted by descending fuzzy
-// score so the best matches surface first.
+// Categorized, search-filtered structure with exclusive groups collapsed to one row; sorted by descending score when a query is present.
 const structuredGroups = computed(() => {
   const q = search.value.trim().toLowerCase()
-  // Pre-score every flag once; flags with score 0 are dropped when
-  // there's an active query. With no query, every flag scores 1 so
-  // ordering falls back to the schema's original order.
+  // Pre-score every flag once; score-0 flags drop under an active query, and no query scores everything 1 (schema order).
   const scored = new Map<string, number>()
   for (const arg of schema.value) {
     const s = q ? scoreArg(q, arg) : 1
     if (s > 0) scored.set(arg.name, s)
   }
 
-  // Score of an exclusive group = max score among its members. Lets a
-  // query like "tls" surface the TLS-related radio cluster even if
-  // only one member matched.
+  // Group score = max member score, so a query surfaces the cluster even if one member matched.
   function groupScore(exclusiveGroup: string): number {
     let best = 0
     for (const a of schema.value) {
@@ -372,10 +318,7 @@ const unknownFlags = computed(() => {
   return out
 })
 
-// Render the warning ourselves rather than going through vue-i18n's
-// interpolated key — no catalog entry exists, so the bare key was
-// leaking into the UI. Fallback string lives here; a locale catalog
-// can override by registering the key with `{flags}` placeholder.
+// Built here (not via vue-i18n) because no catalog entry exists; a locale can override by registering the key with a `{flags}` placeholder.
 const unknownFlagsMessage = computed(() => {
   const flags = unknownFlags.value.join(', ')
   return t('comfyUISettings.argsUnknown', { flags }) === 'comfyUISettings.argsUnknown'
@@ -466,23 +409,14 @@ const unknownFlagsMessage = computed(() => {
         <header class="args-page-category-title">{{ category }}</header>
 
         <div v-for="(item, idx) in items" :key="idx" class="args-page-item">
-          <!-- Exclusive cluster: a single select picker. Members render as
-             options (label = `--flag`, description = help text) with a
-             synthetic "None" entry as the first option so the group is
-             clearable — the native-radio version this replaced had no
-             way to deselect, forcing users to edit the raw text. The
-             surrounding category heading + the "Choose one" label
-             below supply the human-readable context the auto-assigned
-             `group_N` ID can't. -->
+          <!-- Exclusive cluster as a select; a synthetic "None" option makes the group clearable (radios couldn't deselect). -->
           <template v-if="item.kind === 'exclusive' && item.args && item.group">
             <div class="args-page-row args-page-row-cluster-label">
               <span class="args-page-cluster-label">
                 {{ t('comfyUISettings.argsExclusiveLabel', 'Choose one') }}
               </span>
             </div>
-            <!-- BaseSelect has two root nodes (trigger + Teleport) so
-               attributes don't auto-fall through. Wrap in a div to
-               carry the layout class. -->
+            <!-- BaseSelect has two root nodes, so wrap in a div to carry the layout class. -->
             <div class="args-page-exclusive-select">
               <BaseSelect
                 :model-value="activeInGroup(item.group)"
@@ -494,9 +428,7 @@ const unknownFlagsMessage = computed(() => {
             </div>
           </template>
 
-          <!-- Single arg row: leading switch + flag/help stack. The
-             optional value input renders below, indented under the
-             flag column so it reads as subordinate. -->
+          <!-- Single arg row: switch + flag/help stack, optional value input indented below. -->
           <template v-else-if="item.kind === 'arg' && item.arg">
             <div class="args-page-arg-row">
               <button
@@ -746,9 +678,7 @@ const unknownFlagsMessage = computed(() => {
   margin-top: 2px;
 }
 
-/* Single arg row: grid puts the switch in column 1 (top-aligned) and
- * the flag + help + optional value input stacked in column 2. The whole
- * row gets a subtle hover background for affordance. */
+/* Switch in column 1, flag + help + value stacked in column 2. */
 .args-page-arg-row {
   display: grid;
   grid-template-columns: auto 1fr;
@@ -793,10 +723,7 @@ const unknownFlagsMessage = computed(() => {
   margin-top: 8px;
 }
 
-/* Switch (single arg) — built on a <button role="switch"> so the click
- * target is wide enough and keyboard focus is preserved. Visual matches
- * the BooleanToggle primitive (36×20 track, 16px thumb, accent fill on
- * checked) so the inner page reads as the same family. */
+/* Matches the BooleanToggle primitive so the inner page reads as the same family. */
 .args-page-switch {
   flex-shrink: 0;
   position: relative;
@@ -847,10 +774,7 @@ const unknownFlagsMessage = computed(() => {
   }
 }
 
-/* Exclusive ("choose one") cluster — the faint inline label sits above
- * a BaseSelect picker so the group can be cleared via a synthetic "None"
- * option (native radios couldn't deselect). Uses the shared BaseSelect
- * chrome — same as Global Settings language and other select fields. */
+/* "Choose one" cluster label above the BaseSelect picker. */
 .args-page-row-cluster-label {
   padding: 0 2px;
   margin: 2px 0 4px;
@@ -868,10 +792,7 @@ const unknownFlagsMessage = computed(() => {
   min-width: 0;
 }
 
-/* TODO(brand-cleanup): the radio cluster styles below are no longer
- * referenced — the exclusive group renders as a BaseSelect above. Kept
- * for one release cycle of validation per the soft-delete convention,
- * then drop the block entirely. */
+/* TODO(brand-cleanup): radio cluster styles below are unreferenced (exclusive group is a BaseSelect now); drop after validation. */
 .args-page-radio-row {
   display: grid;
   grid-template-columns: auto 1fr;

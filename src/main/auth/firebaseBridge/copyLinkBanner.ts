@@ -31,6 +31,17 @@ export interface CopyLinkBannerLabels {
   dismiss: string
 }
 
+// Values mirror the Comfy Desktop brand tokens defined in
+// `src/renderer/src/assets/main.css` — CSS vars don't cross into the
+// cloud webview, so we inline the resolved hex/rgba so this banner
+// reads as Desktop chrome on top of whatever cloud is rendering. Key
+// tokens used:
+//   --neutral-700: #2c2533   (deep plum surface)
+//   --neutral-100: #c2bfb9   (warm off-white text)
+//   --neutral-300: #8a8688   (muted text — close ✕, secondary copy)
+//   --accent-primary: #0b8ce9 (brand blue — primary CTA)
+//   --comfy-yellow: #f2ff59  (used for the success/copied flash so
+//                             the confirmation reads as branded)
 export const COPY_LINK_BANNER_CSS =
   // Width hugs the content (so the message stays on one line) but is
   // capped at the viewport, so as the window shrinks the card grows
@@ -38,18 +49,23 @@ export const COPY_LINK_BANNER_CSS =
   `#${COPY_LINK_BANNER_ID}{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);` +
   `z-index:2147483647;display:flex;align-items:center;gap:10px;` +
   `width:max-content;max-width:calc(100vw - 32px);` +
-  `background:#ffffff;color:#1f2937;font:13px/1.45 system-ui,-apple-system,sans-serif;` +
-  `padding:10px 12px;border:1px solid #e5e7eb;border-radius:12px;` +
-  `box-shadow:0 8px 28px rgba(0,0,0,.18);box-sizing:border-box;}` +
+  `background:#2c2533;color:#c2bfb9;font:13px/1.45 system-ui,-apple-system,sans-serif;` +
+  `padding:10px 12px;border:1px solid rgba(255,255,255,0.12);border-radius:12px;` +
+  `box-shadow:0 12px 36px rgba(0,0,0,.5),0 0 0 1px rgba(0,0,0,.2);box-sizing:border-box;}` +
   `#${COPY_LINK_BANNER_ID} .ccl-msg{flex:0 1 auto;min-width:0;white-space:nowrap;}` +
   `#${COPY_LINK_BANNER_ID} button{flex:0 0 auto;display:inline-flex;align-items:center;gap:6px;` +
   `cursor:pointer;border-radius:8px;font:13px/1 system-ui,sans-serif;padding:7px 12px;` +
-  `border:1px solid #d1d5db;background:#f9fafb;color:#111827;}` +
+  `border:1px solid rgba(255,255,255,0.14);background:rgba(255,255,255,0.06);color:#c2bfb9;` +
+  `transition:background 120ms ease,border-color 120ms ease,color 120ms ease;}` +
+  `#${COPY_LINK_BANNER_ID} button:hover{background:rgba(255,255,255,0.1);border-color:rgba(255,255,255,0.22);color:#ffffff;}` +
   `#${COPY_LINK_BANNER_ID} .ccl-ico{display:inline-flex;align-items:center;}` +
-  `#${COPY_LINK_BANNER_ID} button.ccl-primary{background:#111827;color:#fff;border-color:#111827;}` +
-  `#${COPY_LINK_BANNER_ID} button.ccl-done{background:#16a34a;border-color:#16a34a;}` +
-  `#${COPY_LINK_BANNER_ID} button.ccl-close{border:none;background:transparent;color:#6b7280;` +
-  `padding:4px 6px;font-size:16px;line-height:1;}`
+  `#${COPY_LINK_BANNER_ID} button.ccl-primary{background:#0b8ce9;color:#ffffff;border-color:#0b8ce9;}` +
+  `#${COPY_LINK_BANNER_ID} button.ccl-primary:hover{background:#0a7dd1;border-color:#0a7dd1;color:#ffffff;}` +
+  `#${COPY_LINK_BANNER_ID} button.ccl-done{background:#f2ff59;color:#100c13;border-color:#f2ff59;}` +
+  `#${COPY_LINK_BANNER_ID} button.ccl-done:hover{background:#f2ff59;border-color:#f2ff59;color:#100c13;}` +
+  `#${COPY_LINK_BANNER_ID} button.ccl-close{border:none;background:transparent;color:#8a8688;` +
+  `padding:4px 6px;font-size:16px;line-height:1;}` +
+  `#${COPY_LINK_BANNER_ID} button.ccl-close:hover{background:transparent;color:#c2bfb9;}`
 
 /**
  * Build the page-context IIFE that renders the card. Every interpolated

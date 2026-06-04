@@ -6,13 +6,7 @@ import BaseInput from '../../components/ui/BaseInput.vue'
 import type { DetailField } from '../../types/ipc'
 
 /**
- * Path field for the brand-redesigned Settings drawer (v2). Mirrors
- * the legacy `DetailSection.vue`'s `editType === 'path'` branch in
- * functionality but in the drawer's design language.
- *
- * `field.browseOnly === true` → the text input is read-only and the
- * user can only change the value via the Browse button (matches the
- * legacy behavior for paths where typing would be error-prone).
+ * Path field for the Settings drawer. `field.browseOnly === true` makes the input read-only so the value is only changed via Browse.
  */
 
 interface Props {

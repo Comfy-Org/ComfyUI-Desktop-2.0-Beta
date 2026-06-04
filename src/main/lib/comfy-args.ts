@@ -7,34 +7,25 @@ import { execFile } from 'child_process'
 import * as path from 'path'
 
 
-// --- Types ---
-
 export interface ComfyArgDef {
   /** CLI flag without leading dashes, e.g. "port" */
   name: string
   /** The full flag string, e.g. "--port" */
   flag: string
-  /** Help text from argparse */
   help: string
-  /** Argument type for the UI */
   type: 'boolean' | 'value' | 'optional-value'
   /** Metavar from argparse (e.g. "PORT", "IP") */
   metavar?: string
-  /** Available choices for select-type args */
   choices?: string[]
   /** Mutually exclusive group id (args sharing a group cannot coexist) */
   exclusiveGroup?: string
-  /** UI category for grouping in the helper panel */
   category: string
 }
 
 export interface ComfyArgsSchema {
   args: ComfyArgDef[]
-  /** Set of all known flag names (without dashes) for validation */
   knownFlags: Set<string>
 }
-
-// --- Category mapping ---
 
 const CATEGORY_MAP: Record<string, string> = {
   'listen': 'Network',
@@ -152,10 +143,8 @@ const CATEGORY_ORDER = [
 ]
 
 /**
- * Flags that exist in ComfyUI's --help output but should NOT be shown in the
- * args-builder suggestion panel. These are intended for internal launcher use
- * (e.g. desktop integration) — users can still type them manually and they
- * remain in `knownFlags` so they survive `filterUnsupportedArgs`.
+ * Flags present in --help but hidden from the suggestion panel (internal launcher use).
+ * Still kept in `knownFlags` so user-typed values survive `filterUnsupportedArgs`.
  */
 const HIDDEN_ARGS = new Set(['feature-flag', 'list-feature-flags'])
 
@@ -163,21 +152,15 @@ function getCategory(flagName: string): string {
   return CATEGORY_MAP[flagName] || 'Other'
 }
 
-// --- Help output parser ---
-
-/**
- * Parse the usage line to extract mutually exclusive groups.
- * argparse formats them as: [--flag1 | --flag2 | --flag3]
- */
+/** Parse the usage line's mutually exclusive groups: `[--flag1 | --flag2 | --flag3]`. */
 function parseExclusiveGroups(usageLine: string): Map<string, string> {
   const flagToGroup = new Map<string, string>()
-  // Match bracketed or parenthesized groups with pipes: [--a | --b] or (--a | --b)
+  // Match bracketed/parenthesized groups with pipes: [--a | --b] or (--a | --b)
   const groupRegex = /[[(]([^\])]*\|[^\])]*)[)\]]/g
   let match: RegExpExecArray | null
   let groupId = 0
   while ((match = groupRegex.exec(usageLine)) !== null) {
     const content = match[1]!
-    // Extract flag names from the group
     const flags = content.match(/--[\w_-]+/g)
     if (flags && flags.length > 1) {
       const gid = `group_${groupId++}`
@@ -189,10 +172,6 @@ function parseExclusiveGroups(usageLine: string): Map<string, string> {
   return flagToGroup
 }
 
-/**
- * Parse a single argument entry from the options section.
- * Returns the flag name, type, metavar, choices, and help text.
- */
 interface ParsedOption {
   name: string
   flag: string
@@ -223,13 +202,13 @@ function parseOptionsSection(optionsText: string): ParsedOption[] {
       current = { flagLine: optMatch[1]!, helpLines: [] }
       if (optMatch[2]!.trim()) current.helpLines.push(optMatch[2]!.trim())
     } else {
-      // Check for flag-only lines (no help on this line, e.g. long flag names)
+      // Flag-only line (no help on this line, e.g. long flag names)
       const flagOnly = line.match(/^ {2}(--\S+(?:\s+\S+)*)\s*$/)
       if (flagOnly) {
         if (current) results.push(parseOptionBlock(current.flagLine, current.helpLines.join(' ')))
         current = { flagLine: flagOnly[1]!, helpLines: [] }
       } else if (current) {
-        // Continuation line (help text) — usually indented more
+        // Continuation (help text), usually indented more
         const trimmed = line.trim()
         if (trimmed) current.helpLines.push(trimmed)
       }
@@ -263,11 +242,11 @@ function parseOptionBlock(flagLine: string, helpText: string): ParsedOption {
   const flag = `--${name}`
   const afterFlag = flagLine.slice(flagLine.indexOf(flag) + flag.length).trim()
 
-  // Check for choices: {a,b,c} or [a,b,c] or [{a,b,c}] or [a,b,c,d]
+  // Choices: {a,b,c} or [a,b,c] or [{a,b,c}]
   const choicesMatch = afterFlag.match(/\[?\{([^}]+)\}\]?/) || afterFlag.match(/\[([\w,]+)\]/)
   if (choicesMatch) {
     const choices = choicesMatch[1]!.split(',').map((s) => s.trim())
-    // If choices are in brackets [], it's optional (can be used without a value)
+    // Brackets [] mean optional (usable without a value)
     const isOptional = afterFlag.startsWith('[')
     return {
       name, flag, help: helpText, choices,
@@ -276,7 +255,7 @@ function parseOptionBlock(flagLine: string, helpText: string): ParsedOption {
     }
   }
 
-  // Check for metavar: UPPER_CASE or [UPPER_CASE] or [UPPER_CASE ...]
+  // Metavar: UPPER_CASE or [UPPER_CASE] or [UPPER_CASE ...]
   const metaMatch = afterFlag.match(/\[?([A-Z][A-Z0-9_]*(?:\s+\.\.\.)?)(?:\s+\[.*\])?\]?/)
   if (metaMatch) {
     const isOptional = afterFlag.startsWith('[')
@@ -292,17 +271,11 @@ function parseOptionBlock(flagLine: string, helpText: string): ParsedOption {
     return { name, flag, type: 'boolean', help: helpText }
   }
 
-  // Fallback: treat as value
   return { name, flag, type: 'value', help: helpText }
 }
 
-/**
- * Parse the full --help output into a structured schema.
- */
 export function parseHelpOutput(helpText: string): ComfyArgsSchema {
-  // Normalize Windows line endings
   helpText = helpText.replace(/\r\n/g, '\n')
-  // Split into usage section and options section
   const usageMatch = helpText.match(/^usage:.*?(?=\n\noptions:|$)/s)
   const usageLine = usageMatch ? usageMatch[0].replace(/\n\s+/g, ' ') : ''
   const exclusiveGroups = parseExclusiveGroups(usageLine)
@@ -317,8 +290,6 @@ export function parseHelpOutput(helpText: string): ComfyArgsSchema {
   for (const opt of parsedOptions) {
     if (opt.name === 'h' || opt.name === 'help') continue
     knownFlags.add(opt.name)
-    // HIDDEN_ARGS are kept in knownFlags (so user-typed values survive filtering)
-    // but excluded from the suggestion list shown in the UI.
     if (HIDDEN_ARGS.has(opt.name)) continue
     args.push({
       name: opt.name,
@@ -342,14 +313,9 @@ export function parseHelpOutput(helpText: string): ComfyArgsSchema {
   return { args, knownFlags }
 }
 
-// --- Runtime: call --help on a ComfyUI installation ---
-
 const schemaCache = new Map<string, { schema: ComfyArgsSchema; version: string }>()
 
-/**
- * Run `python main.py --help` and parse the output.
- * Results are cached per installationId+version.
- */
+/** Run `python main.py --help` and parse the output, cached per installationId+version. */
 export async function getComfyArgsSchema(
   pythonPath: string,
   mainPyPath: string,
@@ -357,7 +323,6 @@ export async function getComfyArgsSchema(
   installationId: string,
   version?: string
 ): Promise<ComfyArgsSchema> {
-  // Check cache
   const cached = schemaCache.get(installationId)
   if (cached && version && cached.version === version) {
     return cached.schema
@@ -366,7 +331,6 @@ export async function getComfyArgsSchema(
   const helpText = await runHelp(pythonPath, mainPyPath, cwd)
   const schema = parseHelpOutput(helpText)
 
-  // Cache it
   if (version) {
     schemaCache.set(installationId, { schema, version })
   }
@@ -378,11 +342,10 @@ function runHelp(pythonPath: string, mainPyPath: string, cwd: string): Promise<s
   return new Promise((resolve, reject) => {
     const mainPyRel = path.relative(cwd, mainPyPath)
     execFile(pythonPath, ['-s', mainPyRel, '--help'], { cwd, timeout: 15000 }, (err, stdout, stderr) => {
-      // argparse prints help to stdout and exits with code 0
       if (stdout && stdout.includes('usage:')) {
         resolve(stdout)
       } else if (stderr && stderr.includes('usage:')) {
-        // Some configurations may print help to stderr
+        // Some configurations print help to stderr
         resolve(stderr)
       } else if (err) {
         const detail = stderr ? `\nstderr: ${stderr.slice(0, 500)}` : ''
@@ -394,10 +357,7 @@ function runHelp(pythonPath: string, mainPyPath: string, cwd: string): Promise<s
   })
 }
 
-/**
- * Validate user args against a known schema.
- * Returns list of flag names that are not recognized by ComfyUI.
- */
+/** Return the flag names in `userArgs` not recognized by the schema. */
 export function validateArgs(userArgs: string[], schema: ComfyArgsSchema): string[] {
   const unsupported: string[] = []
   for (const arg of userArgs) {
@@ -411,10 +371,7 @@ export function validateArgs(userArgs: string[], schema: ComfyArgsSchema): strin
   return unsupported
 }
 
-/**
- * Filter out unsupported args from a parsed args array.
- * Returns only args that are known to ComfyUI.
- */
+/** Return only the args known to ComfyUI, dropping unsupported flags and their values. */
 export function filterUnsupportedArgs(userArgs: string[], schema: ComfyArgsSchema): string[] {
   const argTypes = new Map(schema.args.map((a) => [a.name, a.type]))
   const result: string[] = []

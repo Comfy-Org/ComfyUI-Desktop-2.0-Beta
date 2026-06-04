@@ -9,7 +9,7 @@ on:
         type: string
         default: main
       bump:
-        description: Which segment to bump
+        description: Which segment to bump (ignored when channel=rc and current version is already an rc)
         required: true
         type: choice
         default: patch
@@ -17,11 +17,14 @@ on:
           - patch
           - minor
           - major
-      release:
-        description: Apply Release label (tag + draft release after merge)
+      channel:
+        description: Release channel — rc builds a pre-release for testing; stable promotes to Latest
         required: true
-        type: boolean
-        default: true
+        type: choice
+        default: rc
+        options:
+          - rc
+          - stable
 
 permissions:
   contents: write
@@ -58,6 +61,7 @@ jobs:
         id: bump
         env:
           BUMP_TYPE: ${{ inputs.bump }}
+          CHANNEL: ${{ inputs.channel }}
         run: |
           set -euo pipefail
 
@@ -66,32 +70,56 @@ jobs:
           const fs = require('node:fs')
 
           const bumpType = process.env.BUMP_TYPE
+          const channel = process.env.CHANNEL
           const pkgPath = 'package.json'
           const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'))
-          const match = String(pkg.version).match(/^(\d+)\.(\d+)\.(\d+)$/)
+          const match = String(pkg.version).match(/^(\d+)\.(\d+)\.(\d+)(?:-rc\.(\d+))?$/)
 
           if (!match) {
-            throw new Error(`Unsupported version format: ${pkg.version}`)
+            throw new Error(`Unsupported version format: ${pkg.version} (expected X.Y.Z or X.Y.Z-rc.N)`)
           }
 
           let major = Number(match[1])
           let minor = Number(match[2])
           let patch = Number(match[3])
+          const currentRc = match[4] === undefined ? null : Number(match[4])
 
-          if (bumpType === 'major') {
-            major += 1
-            minor = 0
-            patch = 0
-          } else if (bumpType === 'minor') {
-            minor += 1
-            patch = 0
-          } else if (bumpType === 'patch') {
-            patch += 1
-          } else {
-            throw new Error(`Unsupported bump type: ${bumpType}`)
+          const applyBaseBump = () => {
+            if (bumpType === 'major') {
+              major += 1
+              minor = 0
+              patch = 0
+            } else if (bumpType === 'minor') {
+              minor += 1
+              patch = 0
+            } else if (bumpType === 'patch') {
+              patch += 1
+            } else {
+              throw new Error(`Unsupported bump type: ${bumpType}`)
+            }
           }
 
-          const nextVersion = `${major}.${minor}.${patch}`
+          let nextVersion
+          if (channel === 'stable') {
+            // stable: drop -rc suffix if present, otherwise apply the requested bump
+            if (currentRc !== null) {
+              nextVersion = `${major}.${minor}.${patch}`
+            } else {
+              applyBaseBump()
+              nextVersion = `${major}.${minor}.${patch}`
+            }
+          } else if (channel === 'rc') {
+            // rc: increment -rc.N if already on the same base, otherwise bump base and start at -rc.1
+            if (currentRc !== null) {
+              nextVersion = `${major}.${minor}.${patch}-rc.${currentRc + 1}`
+            } else {
+              applyBaseBump()
+              nextVersion = `${major}.${minor}.${patch}-rc.1`
+            }
+          } else {
+            throw new Error(`Unsupported channel: ${channel}`)
+          }
+
           pkg.version = nextVersion
           fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`)
           process.stdout.write(nextVersion)
@@ -100,7 +128,7 @@ jobs:
 
           echo "old_version=${OLD_VERSION}" >> "$GITHUB_OUTPUT"
           echo "new_version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
-          echo "Bumped version ${OLD_VERSION} -> ${NEW_VERSION}"
+          echo "Bumped version ${OLD_VERSION} -> ${NEW_VERSION} (channel=${CHANNEL})"
 
       - name: Prepare PR metadata
         id: prepare
@@ -133,6 +161,48 @@ jobs:
           git commit -m "chore: bump version to ${NEW_VERSION}"
           git push --force origin "${PR_BRANCH}"
 
+      - name: Draft release notes from commits since last tag
+        id: notes
+        run: |
+          set -euo pipefail
+
+          # Last released tag (annotated or lightweight). If the repo has
+          # no tags yet (first release), fall back to the full history.
+          LAST_TAG="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+          if [ -n "${LAST_TAG}" ]; then
+            RANGE="${LAST_TAG}..HEAD"
+          else
+            RANGE="HEAD"
+          fi
+
+          FEATS="${RUNNER_TEMP}/notes-features.md"
+          FIXES="${RUNNER_TEMP}/notes-fixes.md"
+          : > "${FEATS}"
+          : > "${FIXES}"
+
+          # Group conventional commits by type. Strip the prefix/scope.
+          # Drop the version-bump commit itself (always a chore).
+          while IFS= read -r line; do
+            [ -z "${line}" ] && continue
+            msg="$(printf '%s' "${line}" | sed -E 's/^(feat|fix|chore|docs|refactor|test|infra|ci|perf|build|style)(\([^)]*\))?(!)?: //')"
+            case "${line}" in
+              feat:*|feat\(*|feat!*)
+                printf -- '- %s\n' "${msg}" >> "${FEATS}"
+                ;;
+              fix:*|fix\(*|fix!*)
+                printf -- '- %s\n' "${msg}" >> "${FIXES}"
+                ;;
+            esac
+          done < <(git log --no-merges --pretty='format:%s' "${RANGE}")
+
+          # Placeholder when a section is empty so the human notices.
+          [ -s "${FEATS}" ] || echo "- _(no \`feat:\` commits since ${LAST_TAG:-repo start} — add highlights here)_" > "${FEATS}"
+          [ -s "${FIXES}" ] || echo "- _(no \`fix:\` commits since ${LAST_TAG:-repo start} — add highlights here)_" > "${FIXES}"
+
+          echo "features_file=${FEATS}" >> "$GITHUB_OUTPUT"
+          echo "fixes_file=${FIXES}" >> "$GITHUB_OUTPUT"
+          echo "last_tag=${LAST_TAG:-<none>}" >> "$GITHUB_OUTPUT"
+
       - name: Build pull request body
         id: body
         env:
@@ -140,21 +210,39 @@ jobs:
           OLD_VERSION: ${{ steps.bump.outputs.old_version }}
           NEW_VERSION: ${{ steps.bump.outputs.new_version }}
           BUMP_TYPE: ${{ inputs.bump }}
-          RELEASE_REQUESTED: ${{ inputs.release }}
+          CHANNEL: ${{ inputs.channel }}
+          LAST_TAG: ${{ steps.notes.outputs.last_tag }}
+          FEATURES_FILE: ${{ steps.notes.outputs.features_file }}
+          FIXES_FILE: ${{ steps.notes.outputs.fixes_file }}
         run: |
           set -euo pipefail
 
           BODY_FILE="${RUNNER_TEMP}/version-bump-pr-body.md"
-          cat > "${BODY_FILE}" <<EOF
+          {
+            cat <<HEADER
           ## Summary
           - bump \`package.json\` version from \`${OLD_VERSION}\` to \`${NEW_VERSION}\`
-          - generated by \`Version Bump PR\` workflow
+          - channel: \`${CHANNEL}\` (rc → GitHub pre-release, stable → Latest)
+          - commits since \`${LAST_TAG}\` were auto-grouped below
 
-          ## Details
-          - target branch: \`${TARGET_BRANCH}\`
-          - bump type: \`${BUMP_TYPE}\`
-          - release label requested: \`${RELEASE_REQUESTED}\`
-          EOF
+          ## How merging this PR ships the build
+          1. Merge — \`Release From Version PR\` workflow tags \`v${NEW_VERSION}\` on the merge commit
+          2. Tag triggers \`Publish All / build-release\`, which creates the GitHub Release using **this PR body as the release notes**
+          3. ToDesktop picks up the new build and rolls it out
+
+          > **Polish the sections below before merge.** The auto-fill is a starting point — rewrite for users, not for the changelog.
+
+          ## Features
+          HEADER
+            cat "${FEATURES_FILE}"
+            printf '\n## Fixes\n'
+            cat "${FIXES_FILE}"
+            cat <<FOOTER
+
+          ## Install
+          - 👉 [comfy.org/download](https://comfy.org/download)
+          FOOTER
+          } > "${BODY_FILE}"
 
           echo "body_file=${BODY_FILE}" >> "$GITHUB_OUTPUT"
 
@@ -247,29 +335,7 @@ jobs:
           echo "pull_request_number=${PR_NUMBER}" >> "$GITHUB_OUTPUT"
           echo "pull_request_url=${PR_URL}" >> "$GITHUB_OUTPUT"
 
-      - name: Ensure Release label exists
-        if: inputs.release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_LABEL: Release
-        run: |
-          set -euo pipefail
-
-          if gh api --silent --method GET "repos/${GITHUB_REPOSITORY}/labels/${RELEASE_LABEL}" >/dev/null 2>&1; then
-            echo "Label ${RELEASE_LABEL} already exists."
-            exit 0
-          fi
-
-          if ! gh api --method POST "repos/${GITHUB_REPOSITORY}/labels" \
-            -f name="${RELEASE_LABEL}" \
-            -f color="0e8a16" \
-            -f description="Create a post-merge version tag and draft release" >/dev/null; then
-            echo "Failed to create label ${RELEASE_LABEL}."
-            exit 1
-          fi
-
-      - name: Apply Release label to pull request
-        if: inputs.release
+      - name: Ensure Release label exists and apply it
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ steps.upsert_pr.outputs.pull_request_number }}
@@ -277,30 +343,31 @@ jobs:
         run: |
           set -euo pipefail
 
-          if ! gh pr edit "${PR_NUMBER}" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --add-label "${RELEASE_LABEL}"; then
-            echo "Failed to add label ${RELEASE_LABEL} to PR #${PR_NUMBER}."
-            exit 1
+          if ! gh api --silent --method GET "repos/${GITHUB_REPOSITORY}/labels/${RELEASE_LABEL}" >/dev/null 2>&1; then
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/labels" \
+              -f name="${RELEASE_LABEL}" \
+              -f color="0e8a16" \
+              -f description="Tag + GitHub Release on merge (set by Version Bump PR)" >/dev/null
           fi
-
-      - name: Remove Release label from pull request
-        if: ${{ !inputs.release }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ steps.upsert_pr.outputs.pull_request_number }}
-          RELEASE_LABEL: Release
-        run: |
-          set -euo pipefail
 
           gh pr edit "${PR_NUMBER}" \
             --repo "${GITHUB_REPOSITORY}" \
-            --remove-label "${RELEASE_LABEL}" >/dev/null 2>&1 || true
+            --add-label "${RELEASE_LABEL}"
 
       - name: Print results
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          NEW_VERSION: ${{ steps.bump.outputs.new_version }}
+          PR_URL: ${{ steps.upsert_pr.outputs.pull_request_url }}
         run: |
-          echo "pull_request_url=${{ steps.upsert_pr.outputs.pull_request_url }}"
-          if [ "${{ inputs.release }}" = "true" ]; then
-            echo "release_label=Release"
-            echo "post_merge_release=v${{ steps.bump.outputs.new_version }}"
+          echo "pull_request_url=${PR_URL}"
+          echo "channel=${CHANNEL}"
+          echo "post_merge_tag=v${NEW_VERSION}"
+          if [ "${CHANNEL}" = "rc" ]; then
+            echo "GitHub will mark v${NEW_VERSION} as Pre-release on tag push."
+          else
+            echo "GitHub will mark v${NEW_VERSION} as Latest on tag push."
           fi
+          echo ""
+          echo "Tip: add the 'automerge' label to ${PR_URL} once you're"
+          echo "happy with the notes — the PR will merge as soon as CI is green."

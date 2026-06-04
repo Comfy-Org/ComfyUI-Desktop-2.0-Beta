@@ -3,13 +3,6 @@ import { ref } from 'vue'
 import { useArgsAutocomplete } from './useArgsAutocomplete'
 import type { ComfyArgDef } from '../types/ipc'
 
-/**
- * Behavioral contract for the raw-input autocomplete. Mirrors the
- * affordance the legacy ArgsBuilder modal had — important to pin
- * because the rules (when to suppress, when to show full list, how to
- * splice the completion) have surprisingly many corners.
- */
-
 const SCHEMA: ComfyArgDef[] = [
   { name: 'cpu', flag: '--cpu', help: 'Run on CPU only.', type: 'boolean', category: 'GPU & VRAM' },
   { name: 'lowvram', flag: '--lowvram', help: 'Reduce VRAM.', type: 'boolean', category: 'GPU & VRAM' },

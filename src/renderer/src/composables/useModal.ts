@@ -24,10 +24,6 @@ export interface ModalCheckbox {
   checked: boolean
 }
 
-/** Optional per-modal test-id overrides forwarded to ModalDialog →
- *  BaseAlert. Lets call sites tag a specific dialog (e.g. the
- *  stop-instance confirm) without changing the singleton modal
- *  primitive's default selectors. */
 export interface ModalTestIds {
   root?: string
   action?: string
@@ -119,10 +115,7 @@ function getLastCheckboxValues(): Record<string, boolean> {
   return _lastCheckboxValues
 }
 
-/** Cancel value per `ModalType` — mirrors what a backdrop / ESC click
- *  resolves to so an external dismiss never lies about the awaited
- *  type (`null` for prompt/select/confirmWithOptions, `false` for
- *  confirm, `undefined` for alert). */
+/** Cancel value per ModalType — must match what a backdrop/ESC dismiss resolves to. */
 function cancelValueForType(type: ModalType): unknown {
   switch (type) {
     case 'confirm':
@@ -138,11 +131,7 @@ function cancelValueForType(type: ModalType): unknown {
   }
 }
 
-/** External dismiss — resolve any open `useModal` entry as if the user
- *  had clicked the backdrop. Used by the title-popup IPC that fires
- *  when the picker is preempted by another title-bar dropdown so a
- *  half-open confirm doesn't survive the kind-switch as orphaned
- *  state. No-op when nothing is open. */
+/** Resolve any open modal as if the user clicked the backdrop. No-op when nothing is open. */
 function dismiss(): void {
   if (!state.visible) return
   close(cancelValueForType(state.type))

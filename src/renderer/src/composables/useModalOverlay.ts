@@ -3,10 +3,8 @@ import { ref, onMounted, onUnmounted } from 'vue'
 /**
  * Shared modal overlay behavior: escape-to-close, click-outside-to-close.
  *
- * @param shouldClose - A function that returns true if the modal is currently open
- *   and should respond to escape/overlay clicks. Typically checks whether the
- *   driving prop (e.g. `installation`, `installationId`) is non-null.
- * @param close - The function to call when the modal should close (typically emits 'close').
+ * @param shouldClose - Returns true when the modal is open and should respond to escape/overlay clicks.
+ * @param close - Called when the modal should close.
  */
 export function useModalOverlay(
   shouldClose: () => boolean,

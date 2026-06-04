@@ -48,7 +48,7 @@ function identifyNode(nodePath: string): Omit<ScannedNode, 'enabled'> {
     return { id: dirName, type: 'git', dirName, commit, url }
   }
 
-  // Unknown directory node — treat as git without metadata
+  // Unknown directory: treat as git without metadata
   return { id: dirName, type: 'git', dirName }
 }
 
@@ -57,7 +57,6 @@ export async function scanCustomNodes(comfyuiDir: string): Promise<ScannedNode[]
   const disabledDir = path.join(customNodesDir, '.disabled')
   const nodes: ScannedNode[] = []
 
-  // Scan active nodes
   try {
     const entries = await fs.promises.readdir(customNodesDir, { withFileTypes: true })
     for (const entry of entries) {
@@ -71,7 +70,6 @@ export async function scanCustomNodes(comfyuiDir: string): Promise<ScannedNode[]
     }
   } catch {}
 
-  // Scan disabled nodes
   try {
     const entries = await fs.promises.readdir(disabledDir, { withFileTypes: true })
     for (const entry of entries) {

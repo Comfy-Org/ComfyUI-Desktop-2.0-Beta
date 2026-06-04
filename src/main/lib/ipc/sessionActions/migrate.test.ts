@@ -1,13 +1,4 @@
 // @vitest-environment node
-/**
- * Unit-level coverage for the `migrate-to-standalone` dispatcher.
- *
- * Pins the two-branch shape of `handleMigrateToStandalone`:
- *   - `inst.sourceId === 'desktop'` → routes to `adoptDesktopInstall`
- *     and returns `{ ok: true, navigate: 'list', newInstallationId }`.
- *   - everything else → routes to `performLocalMigration` with the legacy
- *     payload + return shape preserved.
- */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { InstallationRecord } from '../../../installations'
 

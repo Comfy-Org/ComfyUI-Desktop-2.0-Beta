@@ -77,7 +77,6 @@ describe('detectDesktopInstall', () => {
     const appData = '/mock/AppData/Roaming'
     const localAppData = '/mock/AppData/Local'
     const configDir = path.join(appData, 'ComfyUI')
-    // Use path.resolve so the expected value matches what the implementation produces
     const basePath = path.resolve(configDir, '/mock/Documents/ComfyUI')
     vi.stubGlobal('process', {
       ...process,
@@ -117,8 +116,7 @@ describe('detectDesktopInstall', () => {
       const s = p.toString()
       if (s === basePath) return true
       if (s === path.join(basePath, '.comfyui-desktop-2')) return true
-      // models/user/.venv would otherwise match — assert the marker
-      // short-circuits before those checks.
+      // models/user would otherwise match: assert the marker short-circuits.
       if (s === path.join(basePath, 'models')) return true
       if (s === path.join(basePath, 'user')) return true
       return false

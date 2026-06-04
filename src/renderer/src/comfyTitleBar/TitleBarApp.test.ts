@@ -227,23 +227,14 @@ describe('TitleBarApp', () => {
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp)
     await flushPromises()
-    // App / hamburger menu button on the left. We use an icon (no text
-    // label) so that on install-backed windows the host-app menu
-    // doesn't visually clash with ComfyUI's own "File" menu inside the
-    // Comfy WebContentsView.
+    // Icon-only so the host-app menu doesn't clash with ComfyUI's own File menu.
     const fileBtn = wrapper.find('.title-menu-button')
     expect(fileBtn.exists()).toBe(true)
     expect(fileBtn.attributes('aria-label')).toBe('Menu')
     expect(fileBtn.classes()).toContain('title-menu-button--icon')
-    // Center identity pill. On install-backed hosts the pill renders
-    // as a `<button>` that opens the instance-picker popover —
-    // matching the rest of the title-bar dropdown buttons (waffle +
-    // downloads). The trailing slot carries a ChevronDown caret so
-    // the pill reads as actionable.
     const pill = wrapper.find('.title-install-pill')
     expect(pill.exists()).toBe(true)
-    // A div with role=button (not a native <button>) so it can hold the
-    // nested, separately-clickable "Update" chip.
+    // role=button div (not native <button>) so it can hold the nested Update chip.
     expect(pill.element.tagName).toBe('DIV')
     expect(pill.attributes('role')).toBe('button')
     expect(pill.attributes('aria-haspopup')).toBe('dialog')
@@ -259,12 +250,7 @@ describe('TitleBarApp', () => {
   })
 
   it('routes pill clicks to the install-picker bridge handler with an anchor', async () => {
-    // The pill replaces the now-retired Settings click target. Clicking
-    // it asks main to open the instance-picker popup anchored beneath
-    // the pill — NOT a `setPanel` route. The waffle / downloads-tray
-    // / pill clicks all share the `useTitleBarMenus` open/close
-    // suppression book-keeping so the three buttons can't fight each
-    // other on reclick.
+    // Pill click opens the picker popup, NOT a `setPanel` route.
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp, { attachTo: document.body })
     await flushPromises()
@@ -283,8 +269,7 @@ describe('TitleBarApp', () => {
     await flushPromises()
     await wrapper.find('.title-menu-button').trigger('click')
     expect(bridgeState.fileMenuAnchors.length).toBe(1)
-    // Anchor is below the button; jsdom returns 0/0 rects but we assert
-    // the contract — anchor object is well-formed.
+    // jsdom returns 0/0 rects; assert the anchor contract is well-formed.
     const anchor = bridgeState.fileMenuAnchors[0]!
     expect(typeof anchor.x).toBe('number')
     expect(typeof anchor.y).toBe('number')
@@ -292,11 +277,6 @@ describe('TitleBarApp', () => {
   })
 
   it('renders the install-less pill as an interactive opener for the instance picker', async () => {
-    // Install-less host windows (the dashboard / chooser host) used to
-    // render the pill as a static div, but the picker now opens from
-    // here too so the user has one consistent way to switch instances.
-    // The pill is a button with the dropdown caret and carries the
-    // `is-install-less` modifier class for surface-specific styling.
     bridgeState = installMockBridge({ installationId: null })
     vi.resetModules()
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
@@ -312,9 +292,7 @@ describe('TitleBarApp', () => {
   })
 
   it('updates the install pill label when main pushes a title', async () => {
-    // The source-category suffix is not appended to the title text
-    // in main; the install name reads bare and the category surfaces
-    // as an icon (covered by separate tests below).
+    // The install name reads bare; the category surfaces as an icon.
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp)
     await flushPromises()
@@ -324,9 +302,6 @@ describe('TitleBarApp', () => {
   })
 
   it('does not mark the install pill active for any panel — pill is an identity label, not a tab', async () => {
-    // The pill no longer mirrors `activePanel`. Page navigation is
-    // tracked separately via Back/Forward arrows; the pill stays as a
-    // pure identity affordance.
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp)
     await flushPromises()
@@ -355,12 +330,6 @@ describe('TitleBarApp', () => {
   })
 
   it('shows the dropdown caret on install-less host windows so the picker opener reads as actionable', async () => {
-    // Install-less host windows (no installationId in the URL, so the
-    // preload returns null) used to render the pill as a static label
-    // because the dashboard body already IS the picker. The pill now
-    // also opens the picker popover from anywhere in the app, so the
-    // caret renders here too for visual consistency with install-backed
-    // hosts.
     bridgeState = installMockBridge({ installationId: null })
     vi.resetModules()
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
@@ -371,8 +340,6 @@ describe('TitleBarApp', () => {
   })
 
   it('accepts the install-less fallback label pushed by main', async () => {
-    // Main now pushes `Comfy Desktop` for install-less host
-    // windows in place of the previous `Choose an install` text.
     bridgeState = installMockBridge({ installationId: null })
     vi.resetModules()
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
@@ -384,23 +351,14 @@ describe('TitleBarApp', () => {
   })
 
   it('suppresses menu re-open immediately after a menu close (click-to-toggle dismiss)', async () => {
-    // When the user clicks the menu button while the popup is open,
-    // the OS dismisses the menu first and the click event then
-    // propagates to the renderer. Without suppression the click
-    // handler would ask main to pop the menu again, making the menu
-    // flicker open immediately.
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp, { attachTo: document.body })
     await flushPromises()
 
-    // First click opens the file menu.
     await wrapper.find('.title-menu-button').trigger('click')
     expect(bridgeState.fileMenuAnchors.length).toBe(1)
 
-    // Main pops, user clicks the same button → menu dismisses → main
-    // fires the popup callback → onMenuClosed handler stamps the
-    // suppression timestamp. Simulate that by invoking the registered
-    // callback directly.
+    // Simulate the close callback stamping the suppression timestamp.
     bridgeState.menuClosedCallbacks.forEach((cb) => cb({ menu: 'menu' }))
     await flushPromises()
 
@@ -412,18 +370,6 @@ describe('TitleBarApp', () => {
   })
 
   it('locks chrome through the first-use takeover and restores it during loading-lockdown', async () => {
-    // First-use lockdown (consent + post-consent) strips chrome to a
-    // minimal identity bar — waffle / pill / trailing pills all hide.
-    // `consent-lockdown` also drops the waffle entirely (no escape
-    // hatch); `post-consent` keeps the waffle so the menu can surface
-    // the "Skip Onboarding" entry.
-    //
-    // `loading-lockdown` (any long-running op takeover — install /
-    // update / migrate / snapshot / launch) is NOT a chrome lockdown
-    // — the waffle, picker pill, feedback, and downloads tray all
-    // stay live so the user can open a fresh window, switch
-    // installs, or quit cleanly while the op runs in the background
-    // (#653).
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp)
     await flushPromises()
@@ -434,8 +380,7 @@ describe('TitleBarApp', () => {
     expect(wrapper.find('.title-install-pill.is-interactive').exists()).toBe(true)
     expect(wrapper.find('header').classes()).not.toContain('is-consent-lockdown')
 
-    // Consent step — full strip (waffle gone, trailing cluster gone,
-    // pill collapses to static label).
+    // Consent step — full strip.
     bridgeState.firstUseModeChangedCallbacks.forEach((cb) => cb('consent-lockdown'))
     await flushPromises()
     expect(wrapper.find('header').classes()).toContain('is-consent-lockdown')
@@ -444,8 +389,7 @@ describe('TitleBarApp', () => {
     expect(wrapper.find('.title-feedback-button').exists()).toBe(false)
     expect(wrapper.find('.title-install-pill.is-interactive').exists()).toBe(false)
 
-    // Post-consent — waffle returns (Skip Onboarding lives there);
-    // trailing pills + interactive picker stay hidden.
+    // Post-consent — waffle returns (Skip Onboarding lives there); rest hidden.
     bridgeState.firstUseModeChangedCallbacks.forEach((cb) => cb('post-consent'))
     await flushPromises()
     expect(wrapper.find('header').classes()).not.toContain('is-consent-lockdown')
@@ -454,8 +398,7 @@ describe('TitleBarApp', () => {
     expect(wrapper.find('.title-feedback-button').exists()).toBe(false)
     expect(wrapper.find('.title-install-pill.is-interactive').exists()).toBe(false)
 
-    // Loading-lockdown — every chrome button stays live so the user
-    // keeps full title-bar access during long-running ops.
+    // Loading-lockdown — every chrome button stays live (not a chrome lockdown).
     bridgeState.firstUseModeChangedCallbacks.forEach((cb) => cb('loading-lockdown'))
     await flushPromises()
     expect(wrapper.find('header').classes()).not.toContain('is-consent-lockdown')
@@ -486,10 +429,6 @@ describe('TitleBarApp', () => {
     await flushPromises()
     expect(wrapper.find('header').classes()).not.toContain('is-fullscreen')
   })
-
-  // ===================================================================
-  // Install-type icon next to the install name
-  // ===================================================================
 
   it('hides the install-type icon by default until main pushes a category', async () => {
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
@@ -546,9 +485,6 @@ describe('TitleBarApp', () => {
     expect(wrapper.find('.title-install-type-icon').exists()).toBe(false)
   })
 
-  // ===================================================================
-  // Title-bar status pills (app-update + install-update)
-  // ===================================================================
 
   it('hides both status pills by default (no update available, no install update)', async () => {
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
@@ -559,10 +495,6 @@ describe('TitleBarApp', () => {
   })
 
   it('renders the app-update pill with "Desktop Update" copy when state.kind=available (auto-updates OFF)', async () => {
-    // Issue #488 — `kind: 'available'` only fires with auto-updates
-    // OFF (main suppresses it when ON and triggers the download
-    // itself). The pill label is the bare "Desktop Update"
-    // string; version moves to the tooltip / aria-label.
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp)
     await flushPromises()
@@ -579,9 +511,6 @@ describe('TitleBarApp', () => {
   })
 
   it('renders the app-update pill with "Desktop Update Ready" copy when state.kind=ready (auto-updates OFF)', async () => {
-    // Issue #488 — both auto-on and auto-off ready states share the
-    // same "Desktop Update Ready" label; the click-modal flow is what
-    // differs (handled in main, not here).
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp)
     await flushPromises()
@@ -597,10 +526,6 @@ describe('TitleBarApp', () => {
   })
 
   it('renders the app-update pill with "Desktop Update Ready" copy when state.kind=ready (auto-updates ON)', async () => {
-    // Issue #488 — auto-on uses the same "Desktop Update Ready" copy.
-    // The click handler in main branches on cached state to fire the
-    // restart-now modal directly (no separate "will apply on restart"
-    // hint needed in the pill itself).
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp)
     await flushPromises()
@@ -623,14 +548,10 @@ describe('TitleBarApp', () => {
     await flushPromises()
     const chip = wrapper.find('.title-install-update-chip')
     expect(chip.exists()).toBe(true)
-    // The chip text is just "Update"; the fuller label lives in the tooltip.
     expect(chip.text()).toBe('Update')
   })
 
   it('keeps the chip label short and carries the version in its tooltip', async () => {
-    // The chip text stays "Update" (no version) so the center pill
-    // doesn't grow with the version string; the full "ComfyUI v1.2.3"
-    // label lives in the tooltip / aria-label instead.
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp)
     await flushPromises()
@@ -696,14 +617,7 @@ describe('TitleBarApp', () => {
     expect(wrapper.find('.title-update-pill.is-app-update').exists()).toBe(false)
   })
 
-  // ===================================================================
-  // Title-bar downloads tray
-  // ===================================================================
-
   it('renders the downloads tray with no badge in the empty steady state', async () => {
-    // The downloads tray is always-visible — the empty-state copy
-    // ("No downloads yet") lives inside the popup, not in the title
-    // bar. The badge stays absent until something is in flight.
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp)
     await flushPromises()
@@ -741,23 +655,17 @@ describe('TitleBarApp', () => {
     await flushPromises()
     const tray = wrapper.find('.title-downloads-tray')
     expect(tray.exists()).toBe(true)
-    // Badge shows the in-flight count (2) — recent entries don't bump
-    // the counter.
+    // Badge shows the in-flight count; recent entries don't bump it.
     const badge = wrapper.find('.title-downloads-badge')
     expect(badge.exists()).toBe(true)
     expect(badge.text()).toBe('2')
-    // Tooltip + aria-label communicate the same count in plural form.
     expect(tray.attributes('title')).toBe('2 downloads in progress')
     expect(tray.attributes('aria-label')).toBe('2 downloads in progress')
   })
 
   it('treats recent entries already present on the first push as already-acknowledged', async () => {
-    // The first downloads-changed push is the initial state main
-    // hands the title bar after `ready()`. Anything `recent` there
-    // finished before this window even opened, so we suppress the
-    // unseen-finished indicator (it would otherwise misfire on every
-    // window mount). The tray collapses back to its idle label and
-    // shows neither a numeric nor an unseen badge.
+    // `recent` entries in the initial push finished before this window opened,
+    // so the unseen indicator must not misfire on mount.
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp)
     await flushPromises()
@@ -779,17 +687,10 @@ describe('TitleBarApp', () => {
     expect(wrapper.find('.title-downloads-tray').exists()).toBe(true)
     expect(wrapper.find('.title-downloads-badge').exists()).toBe(false)
     expect(wrapper.find('.title-downloads-tray').classes()).not.toContain('has-unseen')
-    // Idle label — no in-flight downloads, but the tray is still
-    // reachable so the recent-completed row in the popover stays
-    // accessible until the user dismisses it.
     expect(wrapper.find('.title-downloads-tray').attributes('title')).toBe('Downloads')
   })
 
   it('marks the tray as unseen when a download completes after the initial state', async () => {
-    // Simulate the real flow: the window opens with nothing in flight
-    // (initial empty push), then a download starts and finishes. The
-    // user never opened the popup, so the tray should switch to its
-    // success-coloured unseen state with a labelled badge.
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp)
     await flushPromises()
@@ -967,11 +868,6 @@ describe('TitleBarApp', () => {
   })
 
   it('renders a Send Feedback button and forwards clicks through the bridge', async () => {
-    // Restored from the pre-unified-window sidebar — the title-bar
-    // entry pairs with the file-menu "Send Feedback" entry. Both
-    // route through main → panel renderer (where the telemetry +
-    // openExternal side-effects fire); the title-bar half just has
-    // to surface the affordance and forward the click.
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp, { attachTo: document.body })
     await flushPromises()
@@ -985,10 +881,6 @@ describe('TitleBarApp', () => {
   })
 
   it('hides the Send Feedback button for the full first-use takeover (consent + post-consent)', async () => {
-    // Same gating as the waffle: the feedback button stays hidden for
-    // the entire onboarding flow (nothing meaningful to feed back about
-    // before the user has used the app) and only returns in the steady
-    // state.
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp)
     await flushPromises()
@@ -1027,16 +919,8 @@ describe('TitleBarApp', () => {
     expect(wrapper.find('.title-downloads-tray').exists()).toBe(true)
   })
 
-  // ===================================================================
-  // Issue #514 — macOS hover-tooltip relay.
-  //
-  // On macOS the native HTML `title` attribute does not reliably surface
-  // tooltips for controls inside a sibling chrome WebContentsView, so
-  // the title bar routes hover through the bridge's `showTooltip` /
-  // `hideTooltip`. On Windows / Linux the native attribute works fine
-  // and the JS handlers must NOT fire (otherwise we'd render two
-  // tooltips). The tests below assert the platform-gated behaviour.
-  // ===================================================================
+  // macOS routes hover through the bridge; Win/Linux must use the native
+  // `title` only (else two tooltips render).
   it('does NOT route hover through showTooltip on Win/Linux (native title is reliable there)', async () => {
     bridgeState = installMockBridge({ isMac: false })
     vi.resetModules()
@@ -1046,11 +930,9 @@ describe('TitleBarApp', () => {
       const wrapper = mount(TitleBarApp, { attachTo: document.body })
       await flushPromises()
       const btn = wrapper.find('.title-menu-button').element as HTMLElement
-      // Dispatch on the button so the event bubbles up to the
-      // window-level pointermove listener carrying btn as event.target.
+      // Dispatch on the button so it bubbles to the window-level listener.
       btn.dispatchEvent(new PointerEvent('pointermove', { bubbles: true }))
-      // Even after the show delay elapses the bridge should NOT be
-      // called — Win/Linux uses the native `title` attribute.
+      // Even past the show delay the bridge should NOT be called on Win/Linux.
       vi.advanceTimersByTime(1000)
       await flushPromises()
       expect(bridgeState.showTooltipCalls.length).toBe(0)
@@ -1061,14 +943,6 @@ describe('TitleBarApp', () => {
   })
 
   it('emits `title` only on Win/Linux and `data-title-tooltip` only on macOS so the two tooltip systems can never both fire', async () => {
-    // Cocoa's native HTML `title` tooltip occasionally DOES fire for
-    // sibling-WebContentsView buttons on macOS, even though it's
-    // documented as unreliable — when it does, the user sees both
-    // bubbles at once (native one + our custom popup, in two
-    // different fonts/sizes). The fix is to make the two systems
-    // mutually exclusive at the source: `title` only off-mac,
-    // `data-title-tooltip` only on mac. `aria-label` stays
-    // unconditional so screen readers see the same text everywhere.
     bridgeState = installMockBridge({ isMac: true })
     vi.resetModules()
     {
@@ -1107,28 +981,21 @@ describe('TitleBarApp', () => {
       // Stub a deterministic geometry — JSDOM returns 0×0 by default.
       btn.getBoundingClientRect = () =>
         ({ left: 20, top: 6, right: 50, bottom: 30, width: 30, height: 24, x: 20, y: 6 } as DOMRect)
-      // Dispatch on the button so the event bubbles up to the
-      // window-level pointermove listener carrying btn as event.target.
       btn.dispatchEvent(new PointerEvent('pointermove', { bubbles: true }))
-      // Show is gated by a small delay so quick fly-bys don't pop a
-      // bubble. Advance past it.
+      // Advance past the show delay.
       vi.advanceTimersByTime(500)
       await flushPromises()
       expect(bridgeState.showTooltipCalls.length).toBe(1)
       const call = bridgeState.showTooltipCalls[0]
       expect(call.text).toBe('Menu')
-      // The bridge sends both horizontal edges so main can prefer the
-      // rightward-anchored layout (bubble.left == leftX) and fall back
-      // to right-aligned (bubble.right == rightX) on overflow.
+      // Both edges sent so main can anchor left, falling back to right on overflow.
       expect(call.leftX).toBe(20)
       expect(call.rightX).toBe(50)
       expect(call.bottomY).toBe(30)
-      // Pointer leaves the title bar; bridge should be told to hide.
       const root = wrapper.find('header').element as HTMLElement
       root.dispatchEvent(new PointerEvent('pointerleave', { bubbles: true }))
-      // The pointerleave listener is registered on documentElement, so
-      // dispatch there too — JSDOM doesn't bubble custom PointerEvents
-      // up to the document root the way a real browser does.
+      // The listener is on documentElement; dispatch there too since JSDOM
+      // doesn't bubble custom PointerEvents to the document root.
       document.documentElement.dispatchEvent(new PointerEvent('pointerleave', { bubbles: true }))
       await flushPromises()
       expect(bridgeState.hideTooltipCalls).toBeGreaterThanOrEqual(1)
@@ -1138,12 +1005,9 @@ describe('TitleBarApp', () => {
     }
   })
 
-  // Centered-pill mirror — the trailing cluster's width is measured
-  // via ResizeObserver and reflected onto the title bar as
-  // `--title-trailing-width`. The left cluster reads that var as
-  // `min-width`, so the centre grid track stays equidistant from
-  // both sides and the install pill anchors to true window centre at
-  // every width (including when update pills appear / collapse).
+  // Centered-pill mirror: the trailing cluster's width is reflected onto
+  // `--title-trailing-width`, which the left cluster reads as `min-width` so the
+  // centre track stays equidistant and the pill anchors to true window centre.
   describe('trailing-width mirror (true-centered install pill)', () => {
     type ResizeCallback = (entries: ResizeObserverEntry[], obs: ResizeObserver) => void
     interface ResizeObserverHandle {
@@ -1203,15 +1067,11 @@ describe('TitleBarApp', () => {
       const mod = await import('./TitleBarApp.vue')
       const wrapper = mount(mod.default, { attachTo: document.body })
       await flushPromises()
-      // Two observers are created: one for the trailing-cluster
-      // mirror (this test's subject) and a second for the JS fit
-      // controller that watches the title-bar root.
+      // Two observers: the trailing-cluster mirror (this test) and the fit controller.
       expect(handles).toHaveLength(2)
       const trailingEl = wrapper.find('.title-trailing').element
       const handle = handles.find((h) => h.observed[0] === trailingEl)
       expect(handle).toBeDefined()
-      // Tear-down disconnects so the observer doesn't leak across
-      // the WebContentsView's lifecycle.
       wrapper.unmount()
       for (const h of handles) {
         expect(h.observed).toHaveLength(0)
@@ -1226,14 +1086,9 @@ describe('TitleBarApp', () => {
       const handle = handles[0]!
       // Initial state — no resize fired yet, var resolves to 0px.
       expect(titleBar.style.getPropertyValue('--title-trailing-width')).toBe('0px')
-      // Simulate the trailing cluster measuring 240px (e.g. icon-only
-      // narrow tier: feedback + downloads + settings + collapsed
-      // update pill icons).
       handle.fire(240)
       await flushPromises()
       expect(titleBar.style.getPropertyValue('--title-trailing-width')).toBe('240px')
-      // Now simulate the wide tier where both update pills carry
-      // full labels — trailing grows.
       handle.fire(520)
       await flushPromises()
       expect(titleBar.style.getPropertyValue('--title-trailing-width')).toBe('520px')
@@ -1249,8 +1104,7 @@ describe('TitleBarApp', () => {
       handle.fire(300)
       await flushPromises()
       expect(titleBar.style.getPropertyValue('--title-trailing-width')).toBe('300px')
-      // Firing the same width is a no-op — guard inside the observer
-      // callback skips the assignment so the layout doesn't churn.
+      // Firing the same width is a no-op (the callback guards the assignment).
       handle.fire(300)
       await flushPromises()
       expect(titleBar.style.getPropertyValue('--title-trailing-width')).toBe('300px')
@@ -1258,9 +1112,7 @@ describe('TitleBarApp', () => {
     })
 
     it('rounds fractional widths up so the left-cluster reservation never under-shoots', async () => {
-      // Sub-pixel widths from the layout engine should round to the
-      // next whole pixel — a 0.4px under-shoot would let the trailing
-      // cluster nudge the centre off true window centre.
+      // Round up: a sub-pixel under-shoot would nudge the centre off true centre.
       const mod = await import('./TitleBarApp.vue')
       const wrapper = mount(mod.default, { attachTo: document.body })
       await flushPromises()
@@ -1277,9 +1129,7 @@ describe('TitleBarApp', () => {
       const mod = await import('./TitleBarApp.vue')
       const wrapper = mount(mod.default, { attachTo: document.body })
       await flushPromises()
-      // No observer attached, but the component still renders. Var
-      // falls back to 0px via the CSS default, so the left cluster
-      // takes no reservation and the centre track is full-width.
+      // No observer, but the component renders; the var falls back to 0px.
       const titleBar = wrapper.find('.title-bar').element as HTMLElement
       expect(titleBar.style.getPropertyValue('--title-trailing-width')).toBe('0px')
       expect(wrapper.find('.title-install-pill').exists()).toBe(true)
@@ -1309,9 +1159,7 @@ describe('TitleBarApp', () => {
     })
 
     it('shows the coachmark when a window attaches to an instance AFTER mount', async () => {
-      // The original bug: the trigger ran once at mount when the window
-      // was still install-less, so it never fired after attach. The
-      // reactive watcher must re-attempt when isInstallLess flips false.
+      // The watcher must re-attempt when isInstallLess flips false post-attach.
       bridgeState = installMockBridge({ installationId: null })
       vi.resetModules()
       const { default: TitleBarApp } = await import('./TitleBarApp.vue')
@@ -1354,9 +1202,7 @@ describe('TitleBarApp', () => {
     })
 
     it('waits for loading-lockdown to clear (ComfyUI screen visible) before showing', async () => {
-      // An install-backed window with a progress / connect takeover up
-      // (loading-lockdown) must NOT show the coachmark over the brand
-      // loader — it should fire only once the lockdown clears to 'none'.
+      // Must not show the coachmark over the loader; fire only once lockdown clears.
       bridgeState = installMockBridge({ installationId: 'inst-1' })
       vi.resetModules()
       const { default: TitleBarApp } = await import('./TitleBarApp.vue')
@@ -1379,8 +1225,6 @@ describe('TitleBarApp', () => {
       const wrapper = mount(TitleBarApp, { attachTo: document.body })
       await flushPromises()
       expect(bridgeState.showCoachmarkCalls.length).toBe(1)
-      // The pill carries the coachmark-highlight modifier (same yellow lift
-      // as is-open) so it reads as the thing the card points at.
       expect(wrapper.find('.title-install-pill.is-coachmark').exists()).toBe(true)
       wrapper.unmount()
     })

@@ -15,9 +15,7 @@ export interface Snapshot {
   }
   customNodes: ScannedNode[]
   pipPackages: Record<string, string>
-  /** When true, pip packages are recorded for informational purposes only and
-   *  will NOT be force-synced during restore. Node dependencies are still
-   *  installed via each node's requirements.txt / install.py. */
+  /** When true, pip packages are recorded for info only and NOT force-synced during restore. */
   skipPipSync?: boolean
   pythonVersion?: string
   updateChannel?: string

@@ -1,14 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DraggableList } from './draggableList'
 
-/**
- * Builds a minimal DOM container with n items and a drag handle in each.
- * Items are laid out vertically with fixed 50px height + 10px gap.
- *
- * getBoundingClientRect is patched to read any inline `translate()` transform
- * so the DraggableList midpoint comparisons work in happy-dom (which ignores
- * CSS transforms).
- */
+// getBoundingClientRect is patched to read inline translate() since happy-dom ignores CSS transforms.
 function buildList(count: number, itemHeight = 50, gap = 10): HTMLElement {
   const container = document.createElement('div')
   container.getBoundingClientRect = () => ({
@@ -109,9 +102,8 @@ describe('DraggableList', () => {
       draggable = new DraggableList(container, '.item', { onReorder })
 
       const handle = container.querySelectorAll('.drag-handle')[0] as HTMLElement
-      // Item midpoints: 0→25, 1→85, 2→145
       mousedown(handle, 25)
-      // First move sets the transform; second move reads the shifted rect
+      // First move sets the transform; second reads the shifted rect.
       mousemove(90)
       mousemove(90)
       mouseup()
@@ -139,7 +131,6 @@ describe('DraggableList', () => {
       draggable = new DraggableList(container, '.item', { onReorder })
 
       const handle = container.querySelectorAll('.drag-handle')[2] as HTMLElement
-      // Start at midpoint of item 2 (y=145)
       mousedown(handle, 145)
       mousemove(20)
       mousemove(20)

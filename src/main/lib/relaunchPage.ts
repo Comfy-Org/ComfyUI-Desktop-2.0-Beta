@@ -10,12 +10,9 @@ function escapeHtml(s: string): string {
 }
 
 /**
- * Render the model-folder relaunch splash page into the given WebContents.
- *
- * NOTE: This must target the ComfyUI WebContentsView's webContents, NOT the
- * parent BrowserWindow's. After PR #414 the parent window's webContents is
- * empty and is fully covered by child WebContentsViews, so loading the
- * splash there is invisible to the user.
+ * Render the model-folder relaunch splash into the given WebContents.
+ * Must target the ComfyUI WebContentsView's webContents, NOT the parent
+ * BrowserWindow's (empty and covered by child views, so the splash is invisible there).
  */
 export async function showModelFolderRelaunchPage(webContents: WebContents, theme: SplashTheme = SPLASH_DARK): Promise<void> {
   const title = escapeHtml(i18n.t('launch.modelFolderRelaunchTitle'))
@@ -45,10 +42,9 @@ p{margin-top:10px;font-size:14px;color:${mutedFg};line-height:1.5;text-align:cen
 <h2>${title}<span class="dots"></span></h2>
 <p>${desc}</p>
 </body></html>`
-  // The caller (onModelFolderRelaunch) attaches a persistent will-navigate
-  // blocker before calling us, so we just need to stop + load the data URL.
+  // Caller attaches a will-navigate blocker beforehand, so we just stop + load the data URL.
   webContents.stop()
   await webContents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
-  // Give the renderer a frame to paint before the caller kills ComfyUI
+  // Give the renderer a frame to paint before the caller kills ComfyUI.
   await new Promise((r) => setTimeout(r, 100))
 }

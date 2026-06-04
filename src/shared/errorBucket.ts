@@ -1,36 +1,6 @@
 /**
- * Coarse error categorisation for telemetry. Shared between main
- * (`bucketError` in `telemetry.ts`) and renderer (`toErrorBucket` in
- * `lib/telemetry.ts`) so both surfaces classify identically.
- *
- * Used by:
- * - `execution.error` events from `executionTap.ts` (Python tracebacks
- * parsed from ComfyUI stdout).
- * - `trackedStep().error` events from `mainTelemetry.trackedStep()`
- * (install / migrate / snapshot-restore pipelines).
- * - `app_update.error` and any other failure event with a free-form
- * `error_message` that needs a stable categorical column.
- *
- * The bucket vocabulary is intentionally small so the Errors dashboard
- * can rank "what kind of failure is most common" without exploding
- * cardinality. Raw `error_class` / `error_message` are still sent
- * alongside the bucket for drill-down.
- *
- * Bucket vocabulary:
- * - oom — CUDA / system / Linux OOM-killer signals
- * - shape_mismatch — torch tensor / dimension errors (dominant ML
- * failure mode after OOM)
- * - model_load — corrupt or wrong-format checkpoints, missing keys
- * - cuda_init — CUDA not available / no CUDA-capable device
- * - import_error — ImportError / ModuleNotFoundError
- * - node_missing — ComfyUI custom-node not found
- * - validation — ComfyUI prompt validator rejected the workflow
- * - python — Python exception class shape not in a more specific bucket
- *
- * Order matters in `bucketError`: more-specific patterns are checked
- * first so e.g. `'ImportError: ...'` lands in `import_error`, not
- * `python`, and `'shape mismatch'` lands in `shape_mismatch`, not
- * `python`.
+ * Coarse error categorisation for telemetry, shared by main + renderer so both classify identically. Small vocabulary keeps the Errors dashboard low-cardinality; raw message is sent alongside for drill-down.
+ * Order matters in `bucketError`: more-specific patterns are checked first.
  */
 
 export type ErrorBucket =
@@ -48,6 +18,7 @@ export type ErrorBucket =
   | 'model_load'
   | 'validation'
   | 'python'
+  | 'source_missing'
   | 'other'
   | 'unknown'
 
@@ -55,8 +26,7 @@ export function bucketError(input: unknown): ErrorBucket {
   const raw = input instanceof Error ? input.message : typeof input === 'string' ? input : ''
   if (!raw) return 'unknown'
   const message = raw.toLowerCase()
-  // User cancellation should win even if the message also mentions other
-  // failures triggered by the cancel.
+  // Cancellation wins even if the message also mentions cancel-triggered failures.
   if (message.includes('cancel')) return 'cancelled'
   if (message.includes('timeout')) return 'timeout'
   if (
@@ -83,10 +53,7 @@ export function bucketError(input: unknown): ErrorBucket {
   ) {
     return 'node_missing'
   }
-  // Tensor / shape mismatch — dominant non-OOM failure mode in ComfyUI
-  // workflows where nodes don't compose. Catches torch's "size mismatch
-  // for ...", "shape '[1, 4, 64]' is invalid for input of size ...",
-  // and "expected ... got ..." phrasings.
+  // Tensor / shape mismatch (torch "size mismatch", "shape '[...]' is invalid", "expected ... got ...").
   if (
     message.includes('size mismatch') ||
     message.includes('shape mismatch') ||
@@ -96,10 +63,7 @@ export function bucketError(input: unknown): ErrorBucket {
   ) {
     return 'shape_mismatch'
   }
-  // Model load — corrupt / wrong-format / missing-key checkpoints &
-  // safetensors. ComfyUI surfaces these as "Error while deserializing",
-  // "missing key(s)", "unexpected key(s)", "no such file or directory:
-  // *.safetensors", etc.
+  // Model load: corrupt / wrong-format / missing-key checkpoints & safetensors.
   if (
     message.includes('safetensors') ||
     message.includes('error while deserializing') ||
@@ -108,13 +72,25 @@ export function bucketError(input: unknown): ErrorBucket {
   ) {
     return 'model_load'
   }
-  // Workflow validation rejected by ComfyUI's prompt validator. The
-  // executionTap emits these with `error_class: 'validation_failed'`.
+  // Rejected by ComfyUI's prompt validator (`error_class: 'validation_failed'`).
   if (
     message.includes('validation_failed') ||
     message.includes('prompt outputs failed validation')
   ) {
     return 'validation'
+  }
+  // Migration `source` phase — either the legacy ComfyUI tree is gone
+  // ("source-missing-switch-to-managed") or the replacement clone from
+  // a git mirror stalled mid-stream ("source-missing: Downloading
+  // ComfyUI source from …"). Bucketed before `network` because the
+  // mirror-clone failures also reach a fetch site and would otherwise
+  // bucket as network.
+  if (
+    message.includes('source-missing') ||
+    message.includes('source_missing') ||
+    /source.*clone.*fail/.test(message)
+  ) {
+    return 'source_missing'
   }
   if (message.includes('network') || message.includes('fetch')) return 'network'
   if (message.includes('disk') || message.includes('space') || message.includes('enospc'))
@@ -122,12 +98,7 @@ export function bucketError(input: unknown): ErrorBucket {
   if (message.includes('permission') || message.includes('access') || message.includes('eacces'))
     return 'permissions'
   if (message.includes('path') || message.includes('enoent')) return 'path'
-  // Python exception class shape ("FooError" / "FooException"). Match
-  // against the ORIGINAL (case-sensitive) `raw` — requires an uppercase
-  // first letter — so we don't false-positive on lowercase noise like
-  // "module.error", "user.exception", "see foo.error.somefile". scrubAll
-  // can still strip a path prefix and leave the class name mid-message,
-  // which is fine — no `^` anchor.
+  // Python exception class shape ("FooError"/"FooException"). Matched case-sensitively on `raw` (uppercase first letter) so lowercase noise like "module.error" doesn't false-positive.
   if (/\b[A-Z][A-Za-z0-9_.]*(?:Error|Exception)\b/.test(raw)) return 'python'
   return 'other'
 }

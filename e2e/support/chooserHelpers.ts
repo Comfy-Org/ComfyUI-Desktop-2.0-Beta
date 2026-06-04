@@ -1,8 +1,3 @@
-/**
- * Helpers for asserting against the chooser body and title bar via the
- * eval-bridge WebContentsPage facade.
- */
-
 import { expect } from '@playwright/test'
 import type { WebContentsPage } from './cdpPages'
 
@@ -19,18 +14,10 @@ export async function clickNewInstallTile(panel: WebContentsPage): Promise<void>
 }
 
 /**
- * Click an installed-card tile by its display name (case-insensitive
- * substring). Excludes the New Install and Cloud tiles — those use
- * dedicated class hooks and their descriptions can incidentally match
- * install-name substrings like "ComfyUI".
- *
- * The chooser PanelApp is freshly remounted whenever a host window
- * flips back to chooser mode (e.g. Return to Dashboard). Its
- * InstallationStore hydrates asynchronously via an IPC fetch on
- * mount, so the tile we want may not be in the DOM yet by the time
- * the helper is invoked. Poll for the tile's *named* presence — that
- * is the readiness signal (rather than `.chooser-view` which is up
- * before any tiles exist).
+ * Click an installed-card tile by display name (case-insensitive substring).
+ * Excludes New Install and Cloud tiles. Polls for the tile's named presence
+ * because the chooser store hydrates asynchronously after remount, so
+ * `.chooser-view` is up before any tiles exist.
  */
 export async function clickInstallTile(panel: WebContentsPage, nameSubstring: string): Promise<void> {
   const selector = '.chooser-tile:not(.chooser-tile-new):not(.chooser-tile-cloud) .chooser-tile-name'
