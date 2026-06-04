@@ -1967,7 +1967,11 @@ function toDetailField(
     placeholder: f.placeholder,
     min: f.min,
     max: f.max,
-    openable: f.openable
+    openable: f.openable,
+    // SettingsField `path` always means "folder picker" — the value
+    // must come from the native dialog so it can be validated. Renderer
+    // honors `browseOnly` to lock the text input as read-only.
+    browseOnly: editType === 'path' ? true : undefined
   }
 }
 

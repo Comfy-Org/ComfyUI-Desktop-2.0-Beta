@@ -222,6 +222,31 @@ describe('ComfyLifecycleView', () => {
     expect(wrapper.text()).toContain('View logs')
   })
 
+  it('renders user home paths in stderr verbatim — local logs must not be PII-scrubbed', async () => {
+    const wrapper = mountView()
+    const sessionStore = useSessionStore()
+    sessionStore.errorInstances.set('inst-1', {
+      installationName: 'My Local Install',
+      exitCode: 1,
+      lastStderr:
+        'Traceback (most recent call last):\n' +
+        '  File "C:\\Users\\alice\\ComfyUI\\main.py", line 1, in <module>\n' +
+        '  File "/Users/bob/ComfyUI/main.py", line 1, in <module>\n' +
+        '  File "/home/carol/ComfyUI/main.py", line 1, in <module>\n' +
+        "ImportError: No module named 'torch'",
+    })
+    await flushPromises()
+    const logs = wrapper.find('.brand-progress__logs')
+    expect(logs.exists()).toBe(true)
+    // PII scrubbing belongs on the telemetry path, not the local-UI path.
+    // If any of these fail, we've regressed back to scrubbing logs the user
+    // sees on their own machine (issue #674).
+    expect(logs.text()).toContain('C:\\Users\\alice\\ComfyUI\\main.py')
+    expect(logs.text()).toContain('/Users/bob/ComfyUI/main.py')
+    expect(logs.text()).toContain('/home/carol/ComfyUI/main.py')
+    expect(logs.text()).not.toContain('[REDACTED]')
+  })
+
   it('omits the logs accordion when no lastStderr is recorded', async () => {
     const wrapper = mountView()
     const sessionStore = useSessionStore()
