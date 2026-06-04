@@ -1,6 +1,6 @@
 // Start-screen tests for FirstUseTakeover. Heavy children are stubbed to focus on the start-step DOM.
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { mount, flushPromises } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 
 vi.mock('../lib/telemetry', () => ({
@@ -60,6 +60,11 @@ beforeEach(() => {
     detectGPU: vi.fn().mockResolvedValue(null),
     setFirstUseMode: vi.fn(),
     closeHostWindow: vi.fn().mockResolvedValue(undefined),
+    // Default to undefined so the existing tests exercise the control
+    // branch (Local-default). Tests that need the treatment arm mutate
+    // this per-case before mounting.
+    telemetryGetExperimentFlag: vi.fn().mockResolvedValue(undefined),
+    telemetryRecordExposure: vi.fn(),
   } as unknown as typeof window.api
 })
 
@@ -348,5 +353,85 @@ describe('FirstUseTakeover start step', () => {
 
     expect(wrapper.emitted('chain-local')).toBeTruthy()
     expect(wrapper.emitted('complete-cloud')).toBeFalsy()
+  })
+})
+
+describe('FirstUseTakeover desktop-first-use-fork-default experiment', () => {
+  it('keeps Local as the default when the flag is missing (control / fallback)', async () => {
+    const wrapper = mountTakeover()
+    await flushPromises()
+
+    await wrapper
+      .find('[data-testid="first-use-consent-tos"] input[type="checkbox"]')
+      .setValue(true)
+    await wrapper.find('[data-testid="first-use-continue"]').trigger('click')
+
+    // Local is the resolved default → routed to chain-local without
+    // touching the picker.
+    expect(wrapper.emitted('chain-local')).toBeTruthy()
+    expect(wrapper.emitted('complete-cloud')).toBeFalsy()
+    // Exposure fires with source='fallback' because the flag returned
+    // undefined (no cache, no recognised value).
+    expect(window.api.telemetryRecordExposure).toHaveBeenCalledWith({
+      experimentKey: 'desktop-first-use-fork-default',
+      variant: 'control',
+      source: 'fallback'
+    })
+  })
+
+  it("pre-selects Cloud when the flag returns 'cloud' (treatment) and fires exposure with source='cache'", async () => {
+    ;(window.api.telemetryGetExperimentFlag as ReturnType<typeof vi.fn>).mockResolvedValue('cloud')
+    const wrapper = mountTakeover()
+    await flushPromises()
+
+    await wrapper
+      .find('[data-testid="first-use-consent-tos"] input[type="checkbox"]')
+      .setValue(true)
+    await wrapper.find('[data-testid="first-use-continue"]').trigger('click')
+
+    // Cloud is now the resolved default → Continue without touching
+    // the picker routes to complete-cloud.
+    expect(wrapper.emitted('complete-cloud')).toBeTruthy()
+    expect(wrapper.emitted('chain-local')).toBeFalsy()
+    expect(window.api.telemetryRecordExposure).toHaveBeenCalledWith({
+      experimentKey: 'desktop-first-use-fork-default',
+      variant: 'treatment',
+      source: 'cache'
+    })
+  })
+
+  it("treats any other flag value ('control', unknown string, true) as control", async () => {
+    ;(window.api.telemetryGetExperimentFlag as ReturnType<typeof vi.fn>).mockResolvedValue('control')
+    const wrapper = mountTakeover()
+    await flushPromises()
+    await wrapper
+      .find('[data-testid="first-use-consent-tos"] input[type="checkbox"]')
+      .setValue(true)
+    await wrapper.find('[data-testid="first-use-continue"]').trigger('click')
+    expect(wrapper.emitted('chain-local')).toBeTruthy()
+    // 'control' is a string PostHog *might* return, so source is 'cache'
+    // not 'fallback' even though the variant is the same as no-flag.
+    expect(window.api.telemetryRecordExposure).toHaveBeenCalledWith({
+      experimentKey: 'desktop-first-use-fork-default',
+      variant: 'control',
+      source: 'cache'
+    })
+  })
+
+  it('legacy-desktop precedence forces Local even when the treatment variant says Cloud', async () => {
+    ;(window.api.telemetryGetExperimentFlag as ReturnType<typeof vi.fn>).mockResolvedValue('cloud')
+    const wrapper = mountTakeover()
+    await (
+      wrapper.vm as unknown as { open: (opts: { hasLegacyDesktop: boolean }) => Promise<void> }
+    ).open({ hasLegacyDesktop: true })
+    await flushPromises()
+
+    // The migrate-existing checkbox renders → user with legacy install
+    // landed on Local even though the treatment arm would have flipped
+    // them to Cloud. Precedence holds.
+    expect(wrapper.find('[data-testid="first-use-migrate-existing"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="first-use-express-install"]').classes()).not.toContain(
+      'start-express--hidden'
+    )
   })
 })

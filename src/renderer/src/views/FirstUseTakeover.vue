@@ -95,11 +95,24 @@ const emit = defineEmits<{
 const step = ref<Step>('start')
 const telemetryEnabled = ref(true)
 const locale = ref('en')
+
+/** A/B experiment that varies the pre-selected fork on the merged start
+ *  screen. Multivariate PostHog flag — variant strings come straight
+ *  from the server (`'local'` = control, `'cloud'` = treatment). Any
+ *  other value (missing cache entry, unrecognised string, network
+ *  failure on first-ever boot) falls back to `'local'` so the default
+ *  remains the Download-Local intent we shipped. */
+const FORK_DEFAULT_EXPERIMENT_KEY = 'desktop-first-use-fork-default'
+/** Variant assigned to this install. `null` until the boot-time fetch
+ *  resolves; treat as `'control'` for default-rendering purposes. */
+const forkExperimentVariant = ref<'control' | 'treatment' | null>(null)
+
 /** Cloud-vs-Local selection picked on the merged start screen. Local
- *  is the default everywhere — the user got here by clicking
- *  "Download Local" upstream, so honor that intent. Cloud is still
- *  rendered as an equal-weight peer card; users can flip to it before
- *  pressing Continue. */
+ *  is the shipped default — the user got here by clicking
+ *  "Download Local" upstream, so honor that intent unless the
+ *  experiment flips the variant to `'treatment'` (Cloud-default).
+ *  Cloud is rendered as an equal-weight peer card regardless; users
+ *  can flip to it before pressing Continue. */
 const pickedChoice = ref<'cloud' | 'local'>('local')
 
 // Capacity-protection switch for Cloud (PostHog flag
@@ -113,11 +126,61 @@ const cloudCapacity = useCloudCapacity()
 const capacityReady = ref(false)
 /** What the picker rendered as default before the user could interact —
  *  used to split `fork_chosen` conversion by signal-vs-defaulting: a
- *  user keeping the default Local pick is different from a user
- *  actively flipping to Cloud. */
+ *  user keeping the default pick is different from a user actively
+ *  flipping the card. Updated post-mount once the experiment flag and
+ *  capacity status resolve. */
 const initialDefaultChoice = ref<'cloud' | 'local'>('local')
+
+/** Read the experiment variant (boot-time cache, sync once main is
+ *  ready) and decide whether Cloud should be the pre-selected default.
+ *  Capacity-disabled and Legacy-Desktop branches still force Local
+ *  ahead of the experiment — see `applyForkExperimentDefault` below. */
+async function loadForkExperimentVariant(): Promise<'control' | 'treatment'> {
+  let flagValue: string | boolean | null | undefined
+  try {
+    flagValue = await window.api.telemetryGetExperimentFlag(FORK_DEFAULT_EXPERIMENT_KEY)
+  } catch {
+    flagValue = undefined
+  }
+  const variant = flagValue === 'cloud' ? 'treatment' : 'control'
+  // Fire exposure exactly once per process via main's per-session dedup.
+  // Source: 'cache' when the on-disk experiment-flags.json had a value
+  // we recognised, 'fallback' when nothing usable came back (first-ever
+  // boot with no network, network failure, or unrecognised payload).
+  try {
+    window.api.telemetryRecordExposure({
+      experimentKey: FORK_DEFAULT_EXPERIMENT_KEY,
+      variant,
+      source: typeof flagValue === 'string' ? 'cache' : 'fallback'
+    })
+  } catch {
+    // best-effort
+  }
+  return variant
+}
+
+/** Apply the resolved variant to the picker state, respecting the
+ *  hard precedence rules (capacity-disabled > legacy-desktop >
+ *  experiment). Idempotent — safe to call from `onMounted` and from
+ *  `open()` on takeover replay. */
+function applyForkExperimentDefault(variant: 'control' | 'treatment'): void {
+  if (cloudCapacity.isDisabled()) return
+  if (hasLegacyDesktop.value) return
+  if (variant === 'treatment') {
+    pickedChoice.value = 'cloud'
+    initialDefaultChoice.value = 'cloud'
+  }
+}
+
 onMounted(async () => {
-  await cloudCapacity.whenReady()
+  // Capacity + experiment in parallel; both are best-effort and
+  // fail-closed so the picker still works if either errors.
+  const [variant] = await Promise.all([
+    loadForkExperimentVariant(),
+    cloudCapacity.whenReady()
+  ])
+  forkExperimentVariant.value = variant
+  applyForkExperimentDefault(variant)
   capacityReady.value = true
 })
 // Defensive: if the user manually flipped to Cloud and the kill-switch
@@ -179,7 +242,13 @@ function emitCompleted(exitPath: 'cloud' | 'local-new' | 'local-migrate' | 'skip
     duration_ms: durationMs,
     duration_seconds: Math.round(durationMs / 1000),
     had_legacy: hasLegacyDesktop.value,
-    had_existing_install: skipPick.value
+    had_existing_install: skipPick.value,
+    // A/B attribution: completion rate IS the experiment's primary
+    // guardrail — if Cloud-default makes users bounce, this drops
+    // even when fork_chosen rate looks better. Carry the same
+    // variant tag through so the funnel can be sliced per arm.
+    experiment_key: FORK_DEFAULT_EXPERIMENT_KEY,
+    experiment_variant: forkExperimentVariant.value
   })
 }
 /** When the host detects prior usage of the launcher (any
@@ -280,7 +349,13 @@ async function onContinue(): Promise<void> {
     // tier the user would have hit on dashboard / IPP.
     capacity_status: cloudCapacity.status.value,
     was_default: pickedChoice.value === initialDefaultChoice.value,
-    user_tier: cloudCapacity.tier.value
+    user_tier: cloudCapacity.tier.value,
+    // A/B attribution: identify which experiment arm this pick belongs
+    // to so PostHog can compute cloud-pick rate, subscription rate, and
+    // bounce-after-cloud rate per variant. The key is captured too so
+    // future experiments running concurrently can be split apart.
+    experiment_key: FORK_DEFAULT_EXPERIMENT_KEY,
+    experiment_variant: forkExperimentVariant.value
   })
 
   if (isChinese.value) {
@@ -457,11 +532,22 @@ async function open(opts: OpenOpts = {}): Promise<void> {
   whyCloudOpen.value = false
   termsDoc.value = null
   acceptedTos.value = false
-  // Local is the default everywhere. Cloud-disabled and Legacy-Desktop-
-  // detected used to flip the default to Local; both now collapse into
-  // the same default, so the reset is unconditional.
+  // Local is the shipped baseline. The experiment may flip both refs
+  // to Cloud below when the variant is `'treatment'` and neither hard
+  // gate (capacity-disabled, legacy-desktop) applies. Reset to Local
+  // unconditionally first so the variant-aware apply call has a clean
+  // slate after a takeover replay.
   pickedChoice.value = 'local'
   initialDefaultChoice.value = 'local'
+  // Re-apply the experiment variant on every replay so a user who
+  // cancelled mid-flow lands back on the same default they saw the
+  // first time. `forkExperimentVariant.value` is locked at boot — on
+  // first mount it may still be null if `loadForkExperimentVariant`
+  // hasn't resolved yet, which is fine: onMounted applies it once it
+  // does.
+  if (forkExperimentVariant.value) {
+    applyForkExperimentDefault(forkExperimentVariant.value)
+  }
   expressInstall.value = true
   migrateExisting.value = true
   // `onContinue` keeps `isContinuing` true past `routePostStart()`
