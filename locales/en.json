@@ -301,8 +301,8 @@
   },
 
   "track": {
-    "title": "Track Existing Install",
-    "grandTitle": "Track Existing Install",
+    "title": "Add Existing Install",
+    "grandTitle": "Add Existing Install",
     "grandSubtitle": "Add an existing local ComfyUI checkout to Desktop without reinstalling it.",
     "installDir": "Install Directory",
     "selectDir": "Select a directory…",
