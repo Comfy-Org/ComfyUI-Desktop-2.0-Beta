@@ -50,7 +50,10 @@
     "menuRevealInFolder": "Open Folder",
     "menuDelete": "Uninstall",
     "stoppedActionGatedReason": "Stop the running instance first.",
-    "menuDismissError": "Dismiss Error"
+    "menuDismissError": "Dismiss Error",
+    "statusRunning": "Running",
+    "statusLaunching": "Starting…",
+    "statusStopping": "Stopping…"
   },
 
   "titleBar": {

@@ -4,6 +4,7 @@ import { createI18n } from 'vue-i18n'
 import { createPinia, setActivePinia } from 'pinia'
 
 import ChooserView from './ChooserView.vue'
+import { useSessionStore } from '../stores/sessionStore'
 import type { Installation } from '../types/ipc'
 
 // Stub the heavy ContextMenu child — we don't exercise menu interactions here.
@@ -49,6 +50,7 @@ interface MockApi {
   runAction: ReturnType<typeof vi.fn>
   // progressStore subscribes to onErrorDetail at construction time.
   onErrorDetail: ReturnType<typeof vi.fn>
+  focusComfyWindow: ReturnType<typeof vi.fn>
 }
 
 function installMockApi(initial: Installation[]): MockApi {
@@ -59,6 +61,7 @@ function installMockApi(initial: Installation[]): MockApi {
     getSetting: vi.fn().mockResolvedValue(undefined),
     runAction: vi.fn().mockResolvedValue({ ok: true }),
     onErrorDetail: vi.fn(() => () => {}),
+    focusComfyWindow: vi.fn().mockResolvedValue(undefined),
   }
   ;(window as unknown as { api: MockApi }).api = api
   return api
@@ -164,19 +167,42 @@ describe('ChooserView', () => {
     expect((events![0]![0] as Installation).id).toBe('a')
   })
 
-  it('does not render per-state launch CTAs — only the Close-instance CTA when running', async () => {
-    // Per-state CTAs collapsed into the body click handler; only a
-    // "Close instance" CTA remains, and only while running / stopping.
+  it('renders no lifecycle CTA cluster on a tile — the instance window owns lifecycle', async () => {
+    // The dashboard no longer carries any stop/launch button. State is
+    // shown via a labelled status pill; lifecycle actions live in the
+    // instance window.
     installMockApi([
       makeInstall({ id: 'a', name: 'Alpha', status: 'installed' }),
     ])
     const wrapper = mountChooser()
     await flushPromises()
-    expect(wrapper.find('.chooser-tile-cta-play').exists()).toBe(false)
-    expect(wrapper.find('.chooser-tile-cta-show').exists()).toBe(false)
-    expect(wrapper.find('.chooser-tile-cta-progress').exists()).toBe(false)
-    // Idle install has no CTA cluster at all.
     expect(wrapper.find('.chooser-tile-cta').exists()).toBe(false)
+    // Idle install has no status pill.
+    expect(wrapper.find('.chooser-tile-status').exists()).toBe(false)
+  })
+
+  it('shows a "Running" status pill and focuses the existing window instead of emitting pick', async () => {
+    const api = installMockApi([
+      makeInstall({ id: 'a', name: 'Alpha', status: 'installed' }),
+    ])
+    api.focusComfyWindow = vi.fn().mockResolvedValue(undefined)
+    const wrapper = mountChooser()
+    await flushPromises()
+
+    // Mark the install as running directly in the session store.
+    const sessionStore = useSessionStore()
+    sessionStore.runningInstances.set('a', { installationId: 'a' } as never)
+    await flushPromises()
+
+    const tile = wrapper.findAll('.chooser-tile').find((t) => t.text().includes('Alpha'))!
+    expect(tile.find('.chooser-tile-status--running').exists()).toBe(true)
+    expect(tile.text()).toContain('Running')
+
+    await tile.trigger('click')
+    await flushPromises()
+    // Running tile focuses the existing window; it must NOT open a second one.
+    expect(api.focusComfyWindow).toHaveBeenCalledWith('a')
+    expect(wrapper.emitted('pick')).toBeUndefined()
   })
 
   it('does not emit pick when the kebab button is clicked — only the menu opens', async () => {

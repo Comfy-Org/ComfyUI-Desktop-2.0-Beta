@@ -138,28 +138,20 @@ const {
   onShowProgress: (showOpts) => emit('show-progress', showOpts)
 })
 
-function hasError(inst: Installation): boolean {
-  return sessionStore.errorInstances.has(inst.id)
-}
-
 async function pickInstall(inst: Installation): Promise<void> {
+  // The instance window owns lifecycle. If a session already exists
+  // (running or launching), don't open a second one — bring the existing
+  // window forward instead. This is the dashboard's only running-tile
+  // action; stop/restart live inside that window.
+  if (sessionStore.isRunning(inst.id) || sessionStore.isLaunching(inst.id)) {
+    await window.api.focusComfyWindow(inst.id)
+    return
+  }
   // Cloud capacity gate — catches the case where a cloud install
   // already exists and the user clicks its per-install tile (the
   // generic "Try Cloud" tile gates separately in `handleCloudClick`).
   if (inst.sourceCategory === 'cloud' && !(await cloudCapacity.confirmEntry())) return
   emit('pick', inst)
-}
-
-/** Close the install's window AND its underlying process. The window's
- *  main-side `close` handler runs the full teardown, so closeComfyWindow
- *  is enough — no separate stop call needed.
- *
- *  Focus the install window first so a Tier 2 / Tier 3 cancel prompt
- *  (raised by main consulting the panel renderer) is visible — without
- *  this the dashboard window stays in front and the prompt is hidden. */
-async function closeRunningInstance(inst: Installation): Promise<void> {
-  await window.api.focusComfyWindow(inst.id)
-  await window.api.closeComfyWindow(inst.id)
 }
 
 // Capacity-protection switch (PostHog flag `desktop-cloud-capacity`).
@@ -287,12 +279,10 @@ function handleNewInstallClick(): void {
           :installation="inst"
           :is-stopped-action-gated="isStoppedActionGated(inst)"
           :last-launched-label="lastLaunchedLabel(inst)"
-          :has-error="hasError(inst)"
           @pick="pickInstall"
           @open-card-menu="openCardMenu"
           @open-kebab-menu="openKebabMenu"
           @trigger-action="(action, installation) => triggerAction(action, installation)"
-          @close-running="closeRunningInstance"
         />
       </div>
 

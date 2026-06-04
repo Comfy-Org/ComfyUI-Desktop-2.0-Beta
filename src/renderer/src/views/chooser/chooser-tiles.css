@@ -93,11 +93,6 @@
   min-width: 0;
   font-size: 12px;
   color: var(--neutral-100);
-  /* Reserve space at the bottom-right for the absolutely-positioned
-   * Close-instance CTA so pills don't run under it. The CTA is only
-   * present while running/stopping, but reserving unconditionally
-   * keeps the pill row's geometry stable across states. */
-  padding-right: 40px;
 }
 
 .chooser-tile-pill {
@@ -200,19 +195,55 @@
   background: var(--accent-warning-soft, rgba(217, 119, 6, 0.12));
 }
 
-/* Status overlays — running / stopping / errored. */
+/* Status treatment — the labelled status pill (below) is the source of
+ * truth for lifecycle state. The tile chrome only quietly reinforces it:
+ * a running tile gets a slightly firmer resting border so it reads as
+ * "active" without the old 2px accent outline that looked "selected". */
 .chooser-tile-running {
-  box-shadow: inset 0 0 0 2px var(--accent, #4a90e2);
-}
-.chooser-tile-errored {
-  box-shadow: inset 0 0 0 2px var(--accent-danger, #d92d20);
-}
-.chooser-tile-running.chooser-tile-errored {
-  /* Errored takes precedence — a crashed-while-running install reads more usefully as "errored". */
-  box-shadow: inset 0 0 0 2px var(--accent-danger, #d92d20);
+  border-color: var(--chooser-surface-border-hover);
 }
 .chooser-tile-stopping {
   opacity: 0.7;
+}
+
+/* Status pill — colored dot + label (e.g. "● Running"). Holds its width
+ * so the source pill stays the truncation target. */
+.chooser-tile-status {
+  gap: 6px;
+  flex-shrink: 0;
+  opacity: 1;
+}
+.chooser-tile-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex-shrink: 0;
+  background: currentColor;
+}
+.chooser-tile-status--running {
+  color: var(--success);
+}
+.chooser-tile-status--launching,
+.chooser-tile-status--stopping {
+  color: var(--accent-warning, #d97706);
+}
+/* Launching pulses so an in-flight start reads as active, not parked. */
+.chooser-tile-status--launching .chooser-tile-status-dot {
+  animation: chooser-tile-status-pulse 1.2s ease-in-out infinite;
+}
+@keyframes chooser-tile-status-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chooser-tile-status--launching .chooser-tile-status-dot {
+    animation: none;
+  }
 }
 
 /* Top-right cluster — error badge + kebab (⋮) action button. */
@@ -224,14 +255,6 @@
   align-items: center;
   gap: 4px;
   z-index: 1;
-}
-.chooser-tile-error {
-  color: var(--accent-danger, #d92d20);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  pointer-events: none;
-  padding: 0 4px;
 }
 .chooser-tile-kebab {
   background: transparent;
@@ -255,55 +278,6 @@
   border-color: var(--border-strong, rgba(127, 127, 127, 0.4));
   opacity: 1;
   outline: none;
-}
-
-/* CTA cluster — overlay anchored to the bottom-right of each tile. */
-.chooser-tile-cta {
-  position: absolute;
-  right: 12px;
-  bottom: 12px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  z-index: 1;
-}
-.chooser-tile-cta-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 999px;
-  border: 1px solid var(--border-strong, rgba(127, 127, 127, 0.4));
-  background: var(--bg-elev-2, rgba(127, 127, 127, 0.14));
-  color: inherit;
-  cursor: pointer;
-  padding: 0;
-  transition:
-    background-color 100ms ease,
-    border-color 100ms ease,
-    transform 100ms ease,
-    color 100ms ease;
-}
-.chooser-tile-cta-btn:hover:not(:disabled),
-.chooser-tile-cta-btn:focus-visible {
-  transform: scale(1.05);
-  outline: none;
-}
-.chooser-tile-cta-btn:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-/* Close instance — danger fill so it reads as a destructive CTA at small size. */
-.chooser-tile-cta-close {
-  background: var(--accent-danger, #d92d20);
-  color: var(--bg, #fff);
-  border-color: var(--accent-danger, #d92d20);
-}
-.chooser-tile-cta-close:hover:not(:disabled),
-.chooser-tile-cta-close:focus-visible {
-  background: var(--accent-danger-hover, #b8241a);
-  border-color: var(--accent-danger-hover, #b8241a);
 }
 
 /* Capacity-protection state for the cloud tile (PostHog flag

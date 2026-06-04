@@ -40,7 +40,10 @@
     "menuRestoreSnapshot": "恢复快照…",
     "menuRevealInFolder": "打开文件夹",
     "menuDelete": "删除…",
-    "stoppedActionGatedReason": "请先停止正在运行的实例。"
+    "stoppedActionGatedReason": "请先停止正在运行的实例。",
+    "statusRunning": "运行中",
+    "statusLaunching": "正在启动…",
+    "statusStopping": "正在停止…"
   },
 
   "titleBar": {
