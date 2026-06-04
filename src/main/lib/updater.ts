@@ -439,6 +439,18 @@ export function installUpdate(): void {
   })
   try {
     setQuitReason('update-install')
+    // macOS Squirrel quirk: if requestSingleInstanceLock is still held by
+    // the quitting process, ShipIt swaps the .app bundle correctly but
+    // the new Squirrel.Mac process cannot acquire the lock and exits
+    // silently — the user sees the app close and nothing relaunches.
+    // Electron's own docs call this out: quitAndInstall + single-instance
+    // lock is a known footgun on darwin. Releasing the lock immediately
+    // before restartAndInstall lets the next process come up cleanly.
+    // Windows / Linux update paths don't have this contention and don't
+    // need the release.
+    if (process.platform === 'darwin') {
+      app.releaseSingleInstanceLock()
+    }
     updater.restartAndInstall({ isSilent: true })
   } catch (err) {
     clearQuitReason()
