@@ -15,7 +15,7 @@ import { dataDir } from './paths'
 import { writeFileSafe } from './safe-file'
 import { fetchLatestRelease, getLatestStableTag, truncateNotes } from './comfyui-releases'
 import { fetchTags, countCommitsAhead, fetchCommitSha, findNearestTag } from './git'
-import { formatComfyVersion } from './version'
+import { formatComfyVersion, tagsEqual } from './version'
 import type { ComfyVersion } from './version'
 
 export interface ReleaseCacheEntry {
@@ -404,19 +404,6 @@ function _notifyEnriched(repo: string): void {
       console.warn('[release-cache] onEnriched listener threw:', err)
     }
   }
-}
-
-/**
- * Compare two tag-ish strings tolerant of a leading `v`. The comfyui_version.py
- * `__version__` string is bare ("0.24.0") while GitHub tag names are
- * "v"-prefixed ("v0.24.0"); legacy code paths persist either form. Without
- * this normalization an adopted install permanently looks one revision
- * behind because "0.24.0" !== "v0.24.0".
- */
-function tagsEqual(a: string | undefined, b: string | undefined): boolean {
-  if (!a || !b) return false
-  if (a === b) return true
-  return a.replace(/^v/, '') === b.replace(/^v/, '')
 }
 
 /**

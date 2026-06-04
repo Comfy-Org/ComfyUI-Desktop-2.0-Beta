@@ -17,7 +17,7 @@ import {
   writeComfyEnvironment,
 } from './envPaths'
 import type { InstallationRecord } from '../../installations'
-import type { ComfyVersion } from '../../lib/version'
+import { tagsEqual, type ComfyVersion } from '../../lib/version'
 import type { InstallTools, PostInstallTools } from '../../types/sources'
 
 const BULKY_PREFIXES = ['torch', 'nvidia', 'triton', 'cuda']
@@ -154,7 +154,7 @@ export async function postInstall(installation: InstallationRecord, { sendProgre
       const latestRelease = await fetchLatestRelease('stable', { refresh: true })
       const latestTag = latestRelease?.tag_name as string | undefined
       const current = installation.comfyVersion as ComfyVersion | undefined
-      const onLatestTag = !!latestTag && current?.baseTag === latestTag && current?.commitsAhead === 0
+      const onLatestTag = !!latestTag && tagsEqual(current?.baseTag, latestTag) && current?.commitsAhead === 0
 
       if (!latestTag) {
         // Don't lie. A network flake here previously masqueraded as "Already up to date,"
