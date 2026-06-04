@@ -37,6 +37,20 @@
     "icon": "./assets/Comfy_Logo_mac_x1024.png",
     "category": "public.app-category.graphics-design"
   },
+  "dmg": {
+    "title": "Comfy Desktop",
+    "background": "./resources/dmg/background.tiff",
+    "iconSize": 84,
+    "iconTextSize": 11,
+    "window": {
+      "width": 540,
+      "height": 400
+    },
+    "contents": [
+      { "x": 135, "y": 195 },
+      { "x": 405, "y": 195 }
+    ]
+  },
   "linux": {
     "icon": "./assets/Comfy_Logo_x512.png",
     "category": "AudioVideo;Graphics;3DGraphics;"
