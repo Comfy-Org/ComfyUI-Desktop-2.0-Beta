@@ -22,10 +22,8 @@ export function getCachedGithubStarCount(repo: string): number | null {
 }
 
 export async function getGithubStarCount(repo: string): Promise<number | null> {
-  const cached = cache.get(repo)
-  if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
-    return cached.count
-  }
+  const fresh = getCachedGithubStarCount(repo)
+  if (fresh != null) return fresh
 
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
