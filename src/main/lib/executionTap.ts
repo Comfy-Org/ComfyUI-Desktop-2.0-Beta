@@ -14,7 +14,7 @@
  *
  * The per-install `firstRunAt` flag mirrors legacy desktop's once-ever
  * `execution:completed` semantic. It is set on the first successful prompt
- * and emitted as `desktop2.execution.first_completed`.
+ * and emitted as `comfy.desktop.execution.first_completed`.
  *
  * Defensive bounds:
  *   - `promptStartTimes` is capped to avoid leaking when starts and
@@ -80,13 +80,13 @@ export function createExecutionTap(opts: {
     errorCount: 0,
     tracebackBuffer: [],
     tracebackChars: 0,
-    tracebackPhase: 'none',
+    tracebackPhase: 'none'
   }
 
   const baseContext = {
     installation_id: state.installationId,
     variant: state.variant,
-    release: state.release,
+    release: state.release
   }
 
   function pushPromptStart(): void {
@@ -111,9 +111,9 @@ export function createExecutionTap(opts: {
         if (!inst || (inst as Record<string, unknown>)['firstRunAt']) return
         const firstRunAt = new Date().toISOString()
         await installationsApi.update(state.installationId, { firstRunAt })
-        telemetry.emit('desktop2.execution.first_completed', {
+        telemetry.emit('comfy.desktop.execution.first_completed', {
           ...baseContext,
-          first_run_at: firstRunAt,
+          first_run_at: firstRunAt
         })
       } catch {
         // ignore – telemetry side effect, not user-visible
@@ -140,14 +140,19 @@ export function createExecutionTap(opts: {
     const errorClass = exceptionLine.split(':')[0]?.trim() || 'unknown'
     const scrubbedMessage = scrubAll(exceptionLine).slice(0, ERROR_MESSAGE_MAX)
     state.errorCount++
-    // An error consumes a pending start so wall-clock pairing stays sane.
-    consumePromptStart()
-    telemetry.emit('desktop2.execution.error', {
+    // Wall-clock between the matching `Got prompt` and the error end —
+    // mirror what `execution.completed` already emits so error-vs-success
+    // duration can be compared directly on the dashboard. Null when the
+    // error fired without a paired start (already-pending traceback at
+    // boot, etc.).
+    const wallMs = consumePromptStart()
+    telemetry.emit('comfy.desktop.execution.error', {
       ...baseContext,
       error_class: errorClass.slice(0, ERROR_CLASS_MAX),
       error_message: scrubbedMessage,
       error_bucket: telemetry.bucketError(scrubbedMessage),
       error_count: state.errorCount,
+      wall_clock_ms: wallMs
     })
     state.tracebackPhase = 'none'
     state.tracebackBuffer = []
@@ -160,8 +165,8 @@ export function createExecutionTap(opts: {
     // Bounded buffer: if the traceback is pathologically long, force-emit
     // and reset so we never accumulate forever.
     if (
-      state.tracebackBuffer.length >= MAX_TRACEBACK_LINES
-      || state.tracebackChars >= MAX_TRACEBACK_CHARS
+      state.tracebackBuffer.length >= MAX_TRACEBACK_LINES ||
+      state.tracebackChars >= MAX_TRACEBACK_CHARS
     ) {
       emitTracebackError()
     }
@@ -175,9 +180,9 @@ export function createExecutionTap(opts: {
     if (PROMPT_GOT.test(trimmed)) {
       state.startedCount++
       pushPromptStart()
-      telemetry.emit('desktop2.execution.started', {
+      telemetry.emit('comfy.desktop.execution.started', {
         ...baseContext,
-        started_count: state.startedCount,
+        started_count: state.startedCount
       })
       return
     }
@@ -187,11 +192,11 @@ export function createExecutionTap(opts: {
       const seconds = Number(doneMatch.groups['seconds'])
       const wallMs = consumePromptStart()
       state.completedCount++
-      telemetry.emit('desktop2.execution.completed', {
+      telemetry.emit('comfy.desktop.execution.completed', {
         ...baseContext,
         duration_seconds: Number.isFinite(seconds) ? seconds : null,
         wall_clock_ms: wallMs,
-        completed_count: state.completedCount,
+        completed_count: state.completedCount
       })
       emitFirstCompletedIfNeeded()
       return
@@ -200,13 +205,14 @@ export function createExecutionTap(opts: {
     const validationMatch = trimmed.match(VALIDATION_FAIL)
     if (validationMatch?.groups) {
       state.errorCount++
-      consumePromptStart()
-      telemetry.emit('desktop2.execution.error', {
+      const wallMs = consumePromptStart()
+      telemetry.emit('comfy.desktop.execution.error', {
         ...baseContext,
         error_class: 'validation_failed',
         error_bucket: 'validation',
         error_count: state.errorCount,
         node_id: validationMatch.groups['nodeId'],
+        wall_clock_ms: wallMs
       })
       return
     }
@@ -268,19 +274,19 @@ export function createExecutionTap(opts: {
       // Drain any in-flight traceback so we don't drop the error if the
       // process exited before a boundary line arrived.
       if (
-        state.tracebackPhase !== 'none'
-        && state.tracebackBuffer.some((l) => EXCEPTION_LINE.test(l))
+        state.tracebackPhase !== 'none' &&
+        state.tracebackBuffer.some((l) => EXCEPTION_LINE.test(l))
       ) {
         emitTracebackError()
       }
       // Per-session summary so analytics always has a row, even if a session
       // produced no individual prompt events.
-      telemetry.emit('desktop2.execution.session_summary', {
+      telemetry.emit('comfy.desktop.execution.session_summary', {
         ...baseContext,
         started_count: state.startedCount,
         completed_count: state.completedCount,
-        error_count: state.errorCount,
+        error_count: state.errorCount
       })
-    },
+    }
   }
 }

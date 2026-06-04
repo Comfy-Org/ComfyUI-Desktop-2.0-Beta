@@ -23,8 +23,7 @@ export function toVariantBucket(variantId: string | undefined): string {
   return variantId.replace(/^(win|mac|linux)-/, '')
 }
 
-// Re-exported from `src/shared/errorBucket.ts` so renderer and main classify
-// identically. Kept as `toErrorBucket` for the renderer's existing callers.
+// Re-exported so renderer and main classify errors identically.
 export { bucketError as toErrorBucket } from '../../../shared/errorBucket'
 
 export function toCountBucket(count: number): string {
@@ -77,26 +76,7 @@ export function isTerminalModelDownloadStatus(status: ModelDownloadStatus): bool
   return status === 'completed' || status === 'error' || status === 'cancelled'
 }
 
-/**
- * Coarse hardware tier classification for cohort filtering.
- *
- * The exact thresholds are deliberately heuristic — the raw `gpu_model`
- * and `gpu_vram_gb`
- * are also sent to PostHog, so finer slicing is always available. The
- * tier exists so dashboards can rank "high-end vs low-end rigs" without
- * re-deriving classification per query.
- *
- * Rules:
- * - `apple` — vendor is Apple (M1 / M2 / M3 unified memory; perf curve
- * differs from discrete cards enough to warrant a tier).
- * - `high` — NVIDIA / AMD with VRAM ≥ 24 GB.
- * - `mid` — NVIDIA / AMD with VRAM 12-23 GB.
- * - `low` — NVIDIA / AMD with VRAM 6-11 GB.
- * - `sub_low` — NVIDIA / AMD with VRAM < 6 GB, OR any non-NVIDIA-AMD
- * discrete card (Intel Arc, etc. — most desktop ML
- * workloads struggle on these).
- * - `cpu_only` — no GPU vendor reported, or VRAM is zero / unknown.
- */
+/** Coarse hardware tier for cohort filtering; raw gpu_model / gpu_vram_gb are also sent for finer slicing. */
 export type GpuTier = 'high' | 'mid' | 'low' | 'sub_low' | 'apple' | 'cpu_only'
 
 export function deriveGpuTier(opts: {
@@ -104,10 +84,7 @@ export function deriveGpuTier(opts: {
   vramGb: number | null | undefined
 }): GpuTier {
   const vendor = (opts.vendor ?? '').toLowerCase()
-  // Main reports `gpu_vendor: 'mps'` for Apple Silicon (via gpu.ts's
-  // canonical GpuId enum — see GPU_LABELS where 'mps' → "Apple Silicon").
-  // Also accept the literal 'apple' for any future code path that uses
-  // the vendor-name string directly instead of the canonical id.
+  // Main reports 'mps' for Apple Silicon; also accept literal 'apple'.
   if (vendor === 'apple' || vendor === 'mps') return 'apple'
   const vram = opts.vramGb ?? 0
   if (!vendor) return 'cpu_only'

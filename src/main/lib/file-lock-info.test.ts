@@ -37,17 +37,13 @@ describe('findLockingProcesses', { timeout: 30_000 }, () => {
   })
 
   it('detects a process holding a file open', async () => {
-    // On Windows, the Restart Manager API only detects applications that
-    // registered with it (GUI apps, services) — it does not reliably detect
-    // arbitrary file handles from console processes like Node.js. Skip this
-    // test on Windows since the underlying API cannot provide the result we
-    // need. On Linux/macOS, lsof works correctly for all process types.
+    // Windows' Restart Manager API doesn't detect arbitrary handles from console processes
+    // like Node, so skip there; lsof works for all process types on Linux/macOS.
     if (process.platform === 'win32') return
 
     const tmpFile = path.join(os.tmpdir(), `file-lock-held-test-${Date.now()}.txt`)
     fs.writeFileSync(tmpFile, 'test')
 
-    // Spawn a child process that opens the file and holds it open
     const child = fork(
       '-e',
       [
@@ -59,7 +55,6 @@ describe('findLockingProcesses', { timeout: 30_000 }, () => {
       { stdio: ['pipe', 'pipe', 'pipe', 'ipc'] }
     )
 
-    // Wait for the child to signal it has the file open
     await new Promise<void>((resolve) => { child.on('message', () => resolve()) })
     await new Promise((r) => setTimeout(r, 500))
 

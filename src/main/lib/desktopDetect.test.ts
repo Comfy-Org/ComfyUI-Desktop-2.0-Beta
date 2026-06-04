@@ -77,7 +77,6 @@ describe('detectDesktopInstall', () => {
     const appData = '/mock/AppData/Roaming'
     const localAppData = '/mock/AppData/Local'
     const configDir = path.join(appData, 'ComfyUI')
-    // Use path.resolve so the expected value matches what the implementation produces
     const basePath = path.resolve(configDir, '/mock/Documents/ComfyUI')
     vi.stubGlobal('process', {
       ...process,
@@ -99,6 +98,31 @@ describe('detectDesktopInstall', () => {
     expect(result).not.toBeNull()
     expect(result!.basePath).toBe(basePath)
     expect(result!.hasVenv).toBe(true)
+    vi.unstubAllGlobals()
+  })
+
+  it('returns null when adoption marker is present at basePath', () => {
+    const appData = '/mock/AppData/Roaming'
+    const configDir = path.join(appData, 'ComfyUI')
+    const basePath = path.resolve(configDir, '/mock/Documents/ComfyUI')
+    vi.stubGlobal('process', {
+      ...process,
+      platform: 'win32',
+      env: { APPDATA: appData },
+    })
+
+    readFileSyncSpy.mockReturnValue(JSON.stringify({ basePath: '/mock/Documents/ComfyUI' }))
+    existsSyncSpy.mockImplementation((p: fs.PathLike) => {
+      const s = p.toString()
+      if (s === basePath) return true
+      if (s === path.join(basePath, '.comfyui-desktop-2')) return true
+      // models/user would otherwise match: assert the marker short-circuits.
+      if (s === path.join(basePath, 'models')) return true
+      if (s === path.join(basePath, 'user')) return true
+      return false
+    })
+
+    expect(detectDesktopInstall()).toBeNull()
     vi.unstubAllGlobals()
   })
 

@@ -17,6 +17,7 @@ import { migrateXdgPaths } from './lib/paths'
 import { saveWindowBounds } from './lib/windowState'
 import { registerProcessErrorHandlers } from './lib/processErrorHandlers'
 import { registerTitleTooltipIpc } from './popups/titleTooltip'
+import { registerTitleCoachmarkIpc } from './popups/titleCoachmark'
 import { openSystemModal, openSystemModalAsync, registerSystemModalIpc } from './popups/systemModal'
 import {
   registerTitlePopupIpc,
@@ -78,6 +79,7 @@ import {
   consumeAttachClaim,
   dropAttachClaimsForWindow,
   findEntryByTitleBarSender,
+  findEntryByHostWindow,
   getEntryByInstallationId,
   isChooserHost,
   isInstallHost,
@@ -112,6 +114,7 @@ import {
 import {
   destroyPanelView,
   ensurePanelView,
+  focusActiveBody,
   refreshComfyTabBody,
   registerPanelViewIpc,
   sendToPanelDeferred,
@@ -214,6 +217,12 @@ interface RelaunchState {
 const relaunchStates = new Map<string, RelaunchState>()
 /** Cancel functions for pending did-fail-load retry timers per installation. */
 const comfyFailRetryTimerCancels = new Map<string, () => void>()
+/** Browser-style comfyView reload per installation. Registered by
+ *  `attachInstall`; reached by the title-bar refresh button's IPC handler. */
+const comfyReloads = new Map<string, () => void>()
+/** comfyView zoom reset (→ 100%) per installation. Registered by
+ *  `attachInstall`; reached by the title-bar zoom pill's IPC handler. */
+const comfyZoomResets = new Map<string, () => void>()
 /** Counter for generating unique relaunch tokens. */
 let relaunchTokenCounter = 0
 
@@ -467,7 +476,7 @@ function onLaunch({
   const initialSourceCategory = sourceMap[installation.sourceId]?.category ?? null
 
   const { entry } = createHostWindow({
-    windowTitle: `${installation.name} — Desktop 2.0 v${APP_VERSION}`,
+    windowTitle: `${installation.name} — Comfy Desktop v${APP_VERSION}`,
     boundsKey: installationId,
     initialTheme: { bg: COMFY_BG, text: '#dddddd' },
     titleBarOverlay:
@@ -633,6 +642,32 @@ function _broadcastAppUpdateStateToTitleBars(state: updater.AppUpdateState): voi
  * and matches the spec's "modal" wording — overlays are a different
  * surface (Tier 1/2/3 popovers).
  */
+// Title-bar refresh button (cloud instances). Browser-style page reload:
+// re-navigates the host's comfyView via the same `reloadComfy` closure as
+// F5/Ctrl+R, which respects the relaunch-in-flight guard. Cloud-only gating
+// lives renderer-side; main reloads whatever comfyView the sender owns.
+ipcMain.on('comfy-window:click-refresh-instance', (event) => {
+  const found = findEntryByTitleBarSender(event.sender)
+  if (!found) return
+  const { entry } = found
+  if (entry.window.isDestroyed()) return
+  const id = entry.installationId
+  if (id === null) return
+  comfyReloads.get(id)?.()
+  focusActiveBody(entry)
+})
+
+ipcMain.on('comfy-window:reset-zoom', (event) => {
+  const found = findEntryByTitleBarSender(event.sender)
+  if (!found) return
+  const { entry } = found
+  if (entry.window.isDestroyed()) return
+  const id = entry.installationId
+  if (id === null) return
+  comfyZoomResets.get(id)?.()
+  focusActiveBody(entry)
+})
+
 ipcMain.on('comfy-window:click-app-update-pill', (event) => {
   const found = findEntryByTitleBarSender(event.sender)
   if (!found) return
@@ -746,7 +781,7 @@ function _broadcastDownloadsToTitleBars(): void {
 
 /**
  * Forward a Send Feedback request to the host's panel renderer.
- * Panel-side (`PanelApp.vue`) fires the `desktop2.feedback.opened`
+ * Panel-side (`PanelApp.vue`) fires the `comfy.desktop.feedback.opened`
  * telemetry action and opens the typeform support URL via
  * `openExternal`. The renderer is the natural home because
  * `buildSupportUrl()` reads `navigator.userAgent` and the telemetry
@@ -754,7 +789,7 @@ function _broadcastDownloadsToTitleBars(): void {
  * Feedback" entry and the title-bar feedback button.
  *
  * `source` is forwarded into the renderer's telemetry context as
- * `desktop2.feedback.opened` `{ source }` so we can tell which
+ * `comfy.desktop.feedback.opened` `{ source }` so we can tell which
  * affordance the user reached for.
  *
  * In Comfy instance windows the panelView is constructed lazily on
@@ -1040,6 +1075,8 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     })
     setAttachFactories({
       comfyFailRetryTimerCancels,
+      comfyReloads,
+      comfyZoomResets,
       relaunchStates,
       computeInstallUpdateAvailable
     })
@@ -1060,7 +1097,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     installAppMenu(process.platform, undefined, {
       onCheckForUpdates: () => {
         void updater.runCheck('app-menu').catch(() => {})
-      },
+      }
     })
 
     // Bring up main-process telemetry as early as possible so install/migrate
@@ -1155,6 +1192,11 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     registerTitleTooltipIpc({
       findParentByTitleBarSender: (wc) => findEntryByTitleBarSender(wc)?.entry.window ?? null
     })
+    registerTitleCoachmarkIpc({
+      findParentByTitleBarSender: (wc) => findEntryByTitleBarSender(wc)?.entry.window ?? null,
+      findTitleBarByParent: (parent) =>
+        findEntryByHostWindow(parent)?.titleBarView.webContents ?? null
+    })
     registerSystemModalIpc()
     // Swap-in-place contract: when the user picks a different install
     // from a Comfy-instance window, the picked install replaces the
@@ -1236,7 +1278,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
         // Multi-instance validation signal. Fired once per picker swap
         // (with or without a confirm); other paths (fresh chooser pick,
         // new-window launch) are NOT swaps.
-        mainTelemetry.emit('desktop2.instance.switched', {
+        mainTelemetry.emit('comfy.desktop.instance.switched', {
           from_installation_id: parentEntry.installationId,
           to_installation_id: installationId,
           method: 'picker'
@@ -1330,7 +1372,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
           // `source: 'picker'`, symmetric with the panel path (which emits
           // action.invoked from the drawer + op.result from progressStore).
           const opStartMs = Date.now()
-          mainTelemetry.capture('desktop2.action.invoked', {
+          mainTelemetry.capture('comfy.desktop.action.invoked', {
             action_id: actionId,
             installation_id: installationId,
             source: 'picker'
@@ -1339,7 +1381,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
             opResult: 'success' | 'failed' | 'cancelled_user',
             errorMessage?: string | null
           ): void => {
-            mainTelemetry.emit('desktop2.op.result', {
+            mainTelemetry.emit('comfy.desktop.op.result', {
               installation_id: installationId,
               action_id: actionId,
               source: 'picker',

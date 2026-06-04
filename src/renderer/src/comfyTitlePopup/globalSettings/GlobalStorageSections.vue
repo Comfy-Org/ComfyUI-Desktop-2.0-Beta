@@ -7,18 +7,9 @@ import ModelsDirList from './ModelsDirList.vue'
 import SettingsSectionList from '../../views/comfyUISettings/SettingsSectionList.vue'
 import type { DetailField, DetailSection } from '../../types/ipc'
 
-/**
- * Shared "global storage" UI — the Shared Models directory list plus
- * the Shared Directories field section. Rendered identically by the
- * Global Settings popup's Storage tab and by the per-instance Storage
- * pane (`StoragePane.vue`) so the two surfaces can't drift.
- *
- * All writes are persisted immediately through the existing
- * `__comfyTitlePopup.globalSettings*` bridge — there is no save step.
- * `touched` is emitted on any mutating action so hosts that care
- * (StoragePane drives a restart-warning bar) can react; hosts that
- * don't care (Global Settings popup) just ignore it.
- */
+// Shared global-storage UI rendered identically by the Global Settings
+// popup and StoragePane.vue so the two can't drift. Writes persist
+// immediately (no save step); `touched` is emitted on any mutation.
 
 interface ModelsDir {
   path: string
@@ -44,10 +35,7 @@ interface GlobalSettingsBridge {
 
 interface Props {
   snapshot: GlobalStorageSnapshot
-  /** Forwarded to the inner Shared Directories `SettingsSectionList`
-   *  so install-aware fields (today: none — these are all global
-   *  fields, but the prop is wired through for parity with the
-   *  per-install renderer in StoragePane). */
+  /** Wired through for parity with the per-install renderer in StoragePane. */
   installationId?: string
   pendingRestartFieldIds?: Set<string>
   fieldErrorMessages?: Map<string, string>

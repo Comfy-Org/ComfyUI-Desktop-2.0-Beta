@@ -3,7 +3,7 @@ import path from 'path'
 import { readGitHead } from '../git'
 import { scanCustomNodes, nodeKey } from '../nodes'
 import { pipFreeze } from '../pip'
-import { getUvPath, getActivePythonPath } from '../pythonEnv'
+import { getActiveUvPath, getActivePythonPath } from '../pythonEnv'
 import * as telemetry from '../telemetry'
 import type { Snapshot, SnapshotEntry } from './types'
 import type { InstallationRecord } from '../../installations'
@@ -87,7 +87,13 @@ export async function captureState(
   const customNodes = await scanCustomNodes(comfyuiDir)
 
   let pipPackages: Record<string, string> = {}
-  const uvPath = getUvPath(installPath)
+  // `getActiveUvPath` is adopted-aware: returns the uv pip-installed
+  // into the legacy `.venv` for adopted installs, and the standalone-env
+  // uv otherwise. Using the plain `getUvPath(installPath)` here meant
+  // adopted installs (which have no standalone-env) failed `fs.existsSync`
+  // and skipped the freeze, leaving every boot snapshot with `0 packages`
+  // in the UI for freshly-migrated installs (issue #855).
+  const uvPath = getActiveUvPath(installation)
   const pythonPath = getActivePythonPath(installation)
   if (fs.existsSync(uvPath) && pythonPath) {
     try {
@@ -274,7 +280,7 @@ async function deduplicateRestartSnapshot(
 }
 
 /**
- * Emit `desktop2.snapshot.created` for every successful snapshot write.
+ * Emit `comfy.desktop.snapshot.created` for every successful snapshot write.
  *
  * Centralized here (instead of inside `writeSnapshot`) because the wrapper
  * functions own the `InstallationRecord` (for `installation_id`) and the
@@ -304,7 +310,7 @@ function emitSnapshotCreated(opts: {
   // stay on. `manual` in particular is what we use to measure actual
   // user-initiated snapshotting.
   if (opts.trigger === 'boot') return
-  telemetry.emit('desktop2.snapshot.created', {
+  telemetry.emit('comfy.desktop.snapshot.created', {
     installation_id: opts.installation.id,
     trigger: opts.trigger,
     custom_nodes_count: opts.customNodesCount,

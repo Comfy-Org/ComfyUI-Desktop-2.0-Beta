@@ -8,15 +8,6 @@ import {
   type LegalDocId,
 } from './legalDocs'
 
-/**
- * Smoke tests for the legal-doc lookup. The runtime contract is:
- *   - every LegalDocId resolves to a populated LegalDoc
- *   - each doc has an effective date, an "applies to" string, and a
- *     non-empty blocks array
- *
- * Adding a new doc requires updating both the union and the map; this
- * suite is the early-warning when the two go out of sync.
- */
 describe('LEGAL_DOCS', () => {
   const ids: LegalDocId[] = ['eula', 'tos', 'privacy', 'notices']
 
@@ -24,7 +15,7 @@ describe('LEGAL_DOCS', () => {
     const doc = LEGAL_DOCS[id]
     expect(doc).toBeDefined()
     expect(doc.effectiveDate).toMatch(/^\d{4}-\d{2}-\d{2}$/)
-    expect(doc.appliesTo).toContain('ComfyUI Desktop')
+    expect(doc.appliesTo).toContain('Comfy Desktop')
     expect(doc.blocks.length).toBeGreaterThan(0)
   })
 
@@ -36,9 +27,7 @@ describe('LEGAL_DOCS', () => {
   })
 
   it('no doc body still claims "anonymous" data collection', () => {
-    // We dropped the anonymity framing in favor of the device-id +
-    // OAuth-linkage description because the data stops being anonymous
-    // the moment the user signs in to Comfy Cloud. Regression-guard.
+    // Data stops being anonymous once the user signs in to Comfy Cloud.
     for (const id of ids) {
       for (const block of LEGAL_DOCS[id].blocks) {
         const body = block.text ?? block.items?.join(' ') ?? ''

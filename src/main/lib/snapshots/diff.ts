@@ -16,11 +16,6 @@ export function formatSnapshotVersion(comfyui: { ref: string; commit: string | n
   return comfyui.ref
 }
 
-/**
- * Resolve the version for a snapshot's commit from local git state, then
- * format for display.  Falls back to stored baseTag/commitsAhead when git
- * is unavailable or the commit is missing from the repo.
- */
 /** Subset of Snapshot['comfyui'] needed for version resolution. */
 interface VersionResolvable {
   ref: string
@@ -29,6 +24,7 @@ interface VersionResolvable {
   commitsAhead?: number
 }
 
+/** Resolve a snapshot's version from local git state, falling back to stored fields when git is unavailable. */
 export async function resolveSnapshotVersion(
   installPath: string,
   comfyui: VersionResolvable,
@@ -65,7 +61,6 @@ export function diffSnapshots(a: Snapshot, b: Snapshot): SnapshotDiff {
     pipsChanged: [],
   }
 
-  // ComfyUI version
   if (a.comfyui.ref !== b.comfyui.ref || a.comfyui.commit !== b.comfyui.commit) {
     diff.comfyuiChanged = true
     diff.comfyui = {
@@ -74,7 +69,6 @@ export function diffSnapshots(a: Snapshot, b: Snapshot): SnapshotDiff {
     }
   }
 
-  // Update channel
   const aChannel = a.updateChannel || 'stable'
   const bChannel = b.updateChannel || 'stable'
   if (aChannel !== bChannel) {
@@ -82,7 +76,6 @@ export function diffSnapshots(a: Snapshot, b: Snapshot): SnapshotDiff {
     diff.updateChannel = { from: aChannel, to: bChannel }
   }
 
-  // Custom nodes — keyed by (type, dirName)
   const aNodes = new Map(a.customNodes.map((n) => [nodeKey(n), n]))
   const bNodes = new Map(b.customNodes.map((n) => [nodeKey(n), n]))
 
@@ -105,7 +98,6 @@ export function diffSnapshots(a: Snapshot, b: Snapshot): SnapshotDiff {
     }
   }
 
-  // Pip packages
   for (const [name, ver] of Object.entries(b.pipPackages)) {
     if (!(name in a.pipPackages)) {
       diff.pipsAdded.push({ name, version: ver })
@@ -122,10 +114,7 @@ export function diffSnapshots(a: Snapshot, b: Snapshot): SnapshotDiff {
   return diff
 }
 
-/**
- * Capture the current live state and diff it against a target snapshot.
- * Returns the diff from current → target (what a restore would change).
- */
+/** Diff current live state against a target snapshot (what a restore would change). */
 export async function diffAgainstCurrent(
   installPath: string,
   installation: InstallationRecord,
@@ -144,10 +133,7 @@ export async function diffAgainstCurrent(
   return diff
 }
 
-/**
- * Post-process a diff to resolve formattedVersion fields from git state.
- * Mutates diff.comfyui in place.
- */
+/** Resolve formattedVersion fields from git state, mutating diff.comfyui in place. */
 export async function resolveDiffVersions(installPath: string, diff: SnapshotDiff): Promise<void> {
   if (!diff.comfyui) return
   const [fromVersion, toVersion] = await Promise.all([

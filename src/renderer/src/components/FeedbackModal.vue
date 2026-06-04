@@ -4,17 +4,9 @@ import { useI18n } from 'vue-i18n'
 import BaseModal from './ui/BaseModal.vue'
 import { emitTelemetryAction } from '../lib/telemetry'
 
-/**
- * Send Beta Feedback modal — wraps the typeform in an in-app iframe so
- * the user never leaves the desktop window. The iframe origin is
- * whitelisted in `panel.html`'s `frame-src` CSP directive.
- *
- * Submission detection: typeform's embed protocol posts a
- * `{ type: 'form-submit' }` message from `https://form.typeform.com`
- * when the form is submitted. Typeform's own page renders the
- * thank-you screen; we just wait 2s so the user reads it, then close
- * the modal automatically so they're not stuck dismissing it.
- */
+// Send Feedback modal wrapping the typeform in an iframe. The iframe origin
+// must stay whitelisted in panel.html's `frame-src` CSP directive. On submit
+// (detected via the typeform postMessage protocol) we wait 2s, then auto-close.
 
 const TYPEFORM_ORIGIN = 'https://form.typeform.com'
 const AUTOCLOSE_MS = 2000
@@ -64,13 +56,11 @@ function handleTypeformMessage(event: MessageEvent): void {
   if (!props.open || submitted.value) return
   const data = event.data as { type?: string } | string | null
   const type = typeof data === 'string' ? data : data?.type
-  // Typeform's embed protocol emits `form-submit` on completion. We
-  // accept any `*-submit` variant defensively — their event names
-  // have changed across SDK versions (`embed-auto-close-thank-you-screen`,
-  // `form-submit`) but always include `submit`.
+  // Match any `*-submit` variant: typeform's event names have changed across
+  // SDK versions but always include `submit`.
   if (typeof type !== 'string' || !type.toLowerCase().includes('submit')) return
   submitted.value = true
-  emitTelemetryAction('desktop2.feedback.submitted', {})
+  emitTelemetryAction('comfy.desktop.feedback.submitted', {})
   autocloseTimer = setTimeout(() => {
     autocloseTimer = null
     emit('close')
@@ -91,7 +81,7 @@ onBeforeUnmount(() => {
   <BaseModal
     :open="open"
     size="xl"
-    :aria-label="t('feedback.modalLabel', 'Send Beta Feedback')"
+    :aria-label="t('feedback.modalLabel', 'Send Feedback')"
     content-class="feedback-modal-panel"
     @close="onClose"
   >
@@ -103,7 +93,7 @@ onBeforeUnmount(() => {
         v-if="open && url"
         class="feedback-modal-frame"
         :src="url"
-        :title="t('feedback.modalLabel', 'Send Beta Feedback')"
+        :title="t('feedback.modalLabel', 'Send Feedback')"
         loading="eager"
         allow="camera; microphone; autoplay; encrypted-media; fullscreen"
         @load="onFrameLoad"
@@ -113,10 +103,8 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-/* The typeform page is white — the default BaseModal border + dark
- * surface bg + the close button's translucent chip would all show as
- * a coloured frame around the white form. Repaint the panel for this
- * consumer; the backdrop already separates the modal from the page. */
+/* The typeform page is white, so repaint the panel to avoid a coloured
+ * frame around the form from the default dark BaseModal chrome. */
 :global(.base-modal-panel.feedback-modal-panel) {
   background: #ffffff;
   border-color: transparent;

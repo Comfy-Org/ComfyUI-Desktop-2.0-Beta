@@ -17,8 +17,8 @@
  *
  * ## Adding a product event — checklist
  *
- *   1. Pick a name. Convention: `desktop2.<area>.<verb>` snake_case
- *      (e.g. `desktop2.instance.switched`). Add to whichever code path
+ *   1. Pick a name. Convention: `comfy.desktop.<area>.<verb>` snake_case
+ *      (e.g. `comfy.desktop.instance.switched`). Add to whichever code path
  *      naturally owns the event.
  *   2. Use `capture(event, properties)` in main, or
  *      `emitTelemetryAction(event, props)` in a Vue component. Never call
@@ -56,7 +56,7 @@
  *   - `'granted'`   — collect everything.
  *   - `'denied'`    — collect nothing.
  *   - `'undecided'` — fresh install or Desktop-1 migrator; collect ONLY
- *                     `desktop2.first_use.consent_decision` until the
+ *                     `comfy.desktop.first_use.consent_decision` until the
  *                     user makes a choice.
  *
  *   Every capture path here is consent-gated. `setConsentState(state)` is
@@ -112,6 +112,7 @@ import {
 } from '../../shared/posthogConfig'
 import { isDatadogMirroredEvent } from '../../shared/datadogMirroredEvents'
 import { bucketError as sharedBucketError } from '../../shared/errorBucket'
+import { scrubAll } from '../../shared/piiScrub'
 
 export type TelemetryValue = boolean | number | string | null | undefined
 export type TelemetryContext = Record<string, TelemetryValue | TelemetryValue[]>
@@ -239,28 +240,45 @@ function deriveAppChannel(appVersion: string): string {
  * Three-state consent.
  *
  * - `'granted'` — user opted in. Everything ships.
- * - `'denied'` — user opted out. Nothing ships.
+ * - `'denied'` — user opted out. Nothing ships, EXCEPT the
+ *   `PRE_CONSENT_ALLOWED_EVENTS` set — see the next paragraph for why.
  * - `'undecided'` — user has not chosen yet (fresh install OR a Desktop-1
- * migrator whose `telemetryEnabled` setting was never set).
- * Only events in `PRE_CONSENT_ALLOWED_EVENTS` ship; everything
- * else is suppressed until the user makes a choice. Mirrors
- * the renderer's pre-consent gate in `rendererBootstrap.ts`.
+ *   migrator whose `telemetryEnabled` setting was never set).
+ *   Only events in `PRE_CONSENT_ALLOWED_EVENTS` ship; everything
+ *   else is suppressed until the user makes a choice. Mirrors
+ *   the renderer's pre-consent gate in `rendererBootstrap.ts`.
+ *
+ * **Why `PRE_CONSENT_ALLOWED_EVENTS` survive `'denied'`**: the consent
+ * decision event itself races the state flip. The renderer's "Continue"
+ * handler in `FirstUseTakeover.vue` awaits the telemetryEnabled setting
+ * write (which propagates to `setConsentState('denied')` here) and only
+ * then calls `emitTelemetryAction('first_use.consent_decision', { decision: 'decline' })`.
+ * If `isAllowedToFire` short-circuited on `'denied'` without consulting the
+ * allow-list, every decline would be dropped — meaning we'd have 100%
+ * accept-rate signal and zero ability to measure decline. The allow-list
+ * is intentionally the FIRST check so the decision event survives the
+ * exact state it triggers.
  *
  * Default at module load is `'undecided'`: if `setConsentState` is never
- * called (test paths, mis-wired boot), we fail closed.
+ * called (test paths, mis-wired boot), we fail closed for everything that
+ * isn't in the allow-list.
  */
 export type ConsentState = 'granted' | 'denied' | 'undecided'
 
 let consentState: ConsentState = 'undecided'
 
 const PRE_CONSENT_ALLOWED_EVENTS: ReadonlySet<string> = new Set([
-  'desktop2.first_use.consent_decision'
+  'comfy.desktop.first_use.consent_decision'
 ])
 
 function isAllowedToFire(event: string): boolean {
+  // Allow-list takes precedence over every state, including 'denied'.
+  // See the ConsentState docstring above for the full reasoning — short
+  // version: the consent decision event races the 'denied' state flip
+  // and would otherwise be dropped by its own decision.
+  if (PRE_CONSENT_ALLOWED_EVENTS.has(event)) return true
   if (consentState === 'granted') return true
-  if (consentState === 'denied') return false
-  return PRE_CONSENT_ALLOWED_EVENTS.has(event)
+  return false
 }
 
 /**
@@ -268,7 +286,7 @@ function isAllowedToFire(event: string): boolean {
  * the per-call-site dedup guards that individual emit paths add.
  *
  * Motivation: the 2026-06-02 volume incident shipped 3M+ events of the
- * same four `desktop2.app_update.*` names in 24h before anyone noticed.
+ * same four `comfy.desktop.app_update.*` names in 24h before anyone noticed.
  * The per-call fix in `updater.ts` prevents *that specific* loop, but
  * any future emit-in-a-tight-loop bug (a Vue watcher that fires on
  * every render, an IPC handler called every animation frame, a
@@ -281,7 +299,7 @@ function isAllowedToFire(event: string): boolean {
  *   60/min is well above any legitimate product event rate (the
  *   loudest healthy event was `execution.completed` at ~36/user/day)
  *   and well below any loop signature (the incident was ~2/sec).
- *   One `desktop2.telemetry.rate_limited` warning fires per (event ×
+ *   One `comfy.desktop.telemetry.rate_limited` warning fires per (event ×
  *   process) so dashboards surface that it happened.
  *
  * Layer 2: per-process total cap.
@@ -289,7 +307,7 @@ function isAllowedToFire(event: string): boolean {
  *   no-ops. 5000 covers a heavy multi-hour workflow user (~500–1000
  *   events) with 5–10x headroom, and turns "millions of events" into
  *   "at most 5000" for any single runaway install. One
- *   `desktop2.telemetry.session_cap_hit` warning fires once when the
+ *   `comfy.desktop.telemetry.session_cap_hit` warning fires once when the
  *   cap is crossed.
  *
  * `*.error` events bypass Layer 1 — error volume is exactly the signal
@@ -309,7 +327,7 @@ function _bypassRateLimit(event: string): boolean {
   // Failure events are reliability signal we never want to silently
   // throttle. Telemetry-self events bypass to avoid recursion when
   // we emit the warning events below.
-  return event.endsWith('.error') || event.startsWith('desktop2.telemetry.')
+  return event.endsWith('.error') || event.startsWith('comfy.desktop.telemetry.')
 }
 
 function _emitWarning(event: string, properties: TelemetryContext): void {
@@ -329,7 +347,7 @@ function _checkRateLimit(event: string): boolean {
   if (_eventsCapturedThisProcess >= SESSION_EVENT_CAP) {
     if (!_sessionCapWarned) {
       _sessionCapWarned = true
-      _emitWarning('desktop2.telemetry.session_cap_hit', {
+      _emitWarning('comfy.desktop.telemetry.session_cap_hit', {
         cap: SESSION_EVENT_CAP,
         last_event: event
       })
@@ -349,7 +367,7 @@ function _checkRateLimit(event: string): boolean {
   if (stamps.length >= RATE_LIMIT_COUNT) {
     if (!_rateLimitWarned.has(event)) {
       _rateLimitWarned.add(event)
-      _emitWarning('desktop2.telemetry.rate_limited', {
+      _emitWarning('comfy.desktop.telemetry.rate_limited', {
         event_name: event,
         limit: RATE_LIMIT_COUNT,
         window_ms: RATE_LIMIT_WINDOW_MS
@@ -374,7 +392,7 @@ export function _test_resetVolumeGuards(): void {
 }
 
 /**
- * Set the current consent state. The deferred `desktop2.session.started`
+ * Set the current consent state. The deferred `comfy.desktop.session.started`
  * event (and the deferred `identify` person-property update) fire as soon
  * as state transitions to `'granted'`.
  */
@@ -466,14 +484,15 @@ export function initTelemetry(opts: InitOptions): void {
       host: cfg.host,
       flushAt: 20,
       flushInterval: 10_000,
-      // posthog-node defaults `disableGeoip: true` (it assumes a server
-      // whose IP isn't the user's). Here posthog-node runs in the
-      // desktop main process ON the user's machine, so the request IP is
-      // the real user IP — opt back into GeoIP so PostHog derives
-      // `$geoip_country_name` / region / city for geo cohorts. Only
-      // consented users emit at all (capture() is consent-gated), and we
-      // surface country/region for analytics, not the raw `$ip`.
-      disableGeoip: false
+      // Privacy: posthog-node runs in the desktop main process ON the
+      // user's machine, so the request IP would be the real user IP and
+      // the server would derive city-level geo. Both are high-cardinality
+      // identifiers we don't need for product analytics — explicitly
+      // disable server-side GeoIP derivation. Also strip `$ip` from
+      // every event payload (see `capture`) so PostHog never stores it.
+      // If we ever need country-level cohorts for paying users, derive
+      // it from Stripe checkout country at subscription time instead.
+      disableGeoip: true
     })
   } catch {
     client = null
@@ -543,7 +562,7 @@ function tryFlushDeferred(): void {
       // again on a regular event would scatter it across the event
       // properties column where it shows up in every export and
       // ad-hoc query — unnecessary proliferation of an identifier.
-      capture('desktop2.identity.migrated', {
+      capture('comfy.desktop.identity.migrated', {
         installation_id: m.installationId,
         id_class: m.idClass
       })
@@ -556,7 +575,7 @@ function tryFlushDeferred(): void {
     })()
   }
   if (pendingSessionStart) {
-    capture('desktop2.session.started', pendingSessionStart)
+    capture('comfy.desktop.session.started', pendingSessionStart)
     pendingSessionStart = null
   }
 }
@@ -667,6 +686,29 @@ export function unbindUserId(): void {
   }
 }
 
+/**
+ * Defense-in-depth: run every string-valued property through `scrubAll`
+ * before it leaves the process. Callers should still scrub at the emit
+ * site (so the field shape is intentional and the scrub is visible in
+ * code review) — this is the last-resort safety net that catches future
+ * emit sites that forget. Mirrors the renderer's `scrubTelemetryContext`
+ * pass; without it, any new main-process call site that ships raw
+ * strings (`error_message`, `last_stderr`, free-text from external libs)
+ * is one regression away from leaking a user path.
+ */
+function scrubProperties(properties: TelemetryContext): TelemetryContext {
+  let mutated: TelemetryContext | null = null
+  for (const key of Object.keys(properties)) {
+    const value = properties[key]
+    if (typeof value !== 'string') continue
+    const cleaned = scrubAll(value)
+    if (cleaned === value) continue
+    if (!mutated) mutated = { ...properties }
+    mutated[key] = cleaned
+  }
+  return mutated ?? properties
+}
+
 export function capture(event: string, properties: TelemetryContext = {}): void {
   if (!canEmit() || !distinctId) return
   if (!isAllowedToFire(event)) return
@@ -676,10 +718,14 @@ export function capture(event: string, properties: TelemetryContext = {}): void 
     // Per-call properties override defaults on key collision — callers
     // that explicitly pass `app_version` (e.g. session-start payload,
     // legacy event re-emitters) win.
+    // `$ip: ''` tells the PostHog server to treat the request as
+    // IP-less — paired with `disableGeoip: true` at init, this
+    // suppresses both raw IP storage and server-side geo derivation.
+    const merged = { ...defaultEventProperties, ...properties, $ip: '' }
     client!.capture({
       distinctId,
       event,
-      properties: { ...defaultEventProperties, ...properties }
+      properties: scrubProperties(merged)
     })
   } catch {
     // ignore – telemetry must never break the app
@@ -839,11 +885,16 @@ export async function trackedStep<T>(
     return result
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
+    // Bucket runs on raw text — its regexes don't care about user paths
+    // and would otherwise miss legitimate matches hidden inside a
+    // `[REDACTED]` substitution. The wire-bound field gets scrubbed
+    // before the 500-char slice so the redaction prefix can't get
+    // truncated mid-token.
     capture(`${step}.error`, {
       ...context,
       duration_ms: Date.now() - t0,
       error_bucket: bucketError(message),
-      error_message: message.slice(0, 500)
+      error_message: scrubAll(message).slice(0, 500)
     })
     throw err
   }
@@ -903,7 +954,7 @@ export async function shutdown(reason: string): Promise<void> {
   if (!client) return
   const uptimeMs = Date.now() - bootstrapTimeMs
   try {
-    capture('desktop2.session.ended', {
+    capture('comfy.desktop.session.ended', {
       reason,
       uptime_ms: uptimeMs,
       uptime_seconds: Math.round(uptimeMs / 1000)

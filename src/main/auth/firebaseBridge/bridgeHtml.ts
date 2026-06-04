@@ -204,10 +204,10 @@ function shell(title: string, body: string): string {
  */
 export function renderDoneHtml(): string {
   return shell(
-    "You're signed in — ComfyUI Desktop",
+    "You're signed in — Comfy Desktop",
     `<div class="status-icon success">${CHECK_ICON}</div>
     <h1>You're signed in</h1>
-    <p id="countdown">Returning to ComfyUI Desktop in 3…</p>
+    <p id="countdown">Returning to Comfy Desktop in 3…</p>
     <div class="hint">You can close this tab when you're back in the app.</div>
     <script>
       (function(){
@@ -216,7 +216,7 @@ export function renderDoneHtml(): string {
         function tick(){
           n -= 1;
           if (n <= 0) {
-            el.textContent = 'Returning to ComfyUI Desktop…';
+            el.textContent = 'Returning to Comfy Desktop…';
             // Best-effort tab close. Browsers block window.close on tabs
             // that weren't opened by window.open() — but Chrome / Safari
             // increasingly allow it when the tab originated from an
@@ -225,7 +225,7 @@ export function renderDoneHtml(): string {
             setTimeout(function(){ try { window.close() } catch (_) {} }, 250);
             return;
           }
-          el.textContent = 'Returning to ComfyUI Desktop in ' + n + '…';
+          el.textContent = 'Returning to Comfy Desktop in ' + n + '…';
           setTimeout(tick, 1000);
         }
         setTimeout(tick, 1000);
@@ -236,15 +236,15 @@ export function renderDoneHtml(): string {
 
 /**
  * Terminal error page for IdP-denied or Firebase-exchange failures.
- * The user can retry by returning to ComfyUI Desktop and clicking
+ * The user can retry by returning to Comfy Desktop and clicking
  * Sign in again.
  */
 export function renderErrorHtml(message: string): string {
   return shell(
-    'Sign-in failed — ComfyUI Desktop',
+    'Sign-in failed — Comfy Desktop',
     `<div class="status-icon error">${ERROR_ICON}</div>
     <h1>Sign-in failed</h1>
-    <p>We weren't able to complete sign-in. Return to ComfyUI Desktop and click Sign in again to retry.</p>
+    <p>We weren't able to complete sign-in. Return to Comfy Desktop and click Sign in again to retry.</p>
     <div class="error-block">${escapeHtml(message)}</div>`,
   )
 }
@@ -275,7 +275,7 @@ export function renderPopupBridgeHtml(
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Sign in to ComfyUI Desktop</title>
+  <title>Sign in to Comfy Desktop</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex">
   <style>${STYLES}</style>
@@ -321,7 +321,7 @@ export function renderPopupBridgeHtml(
           <span>Continue with \${providerLabel}</span>
         </button>
         \${err}
-        <div class="hint">You'll be returned to ComfyUI Desktop automatically once sign-in completes.</div>
+        <div class="hint">You'll be returned to Comfy Desktop automatically once sign-in completes.</div>
       \`
       document.getElementById('signinBtn').addEventListener('click', onClick)
     }
@@ -341,7 +341,7 @@ export function renderPopupBridgeHtml(
       contentEl.innerHTML = \`
         <div class="status-icon success">${CHECK_ICON}</div>
         <h1>You're signed in</h1>
-        <p id="countdown">Returning to ComfyUI Desktop in 3…</p>
+        <p id="countdown">Returning to Comfy Desktop in 3…</p>
         <div class="hint">You can close this tab when you're back in the app.</div>
       \`
       var n = 3
@@ -349,11 +349,11 @@ export function renderPopupBridgeHtml(
       function tick(){
         n -= 1
         if (n <= 0) {
-          el.textContent = 'Returning to ComfyUI Desktop…'
+          el.textContent = 'Returning to Comfy Desktop…'
           setTimeout(function(){ try { window.close() } catch (_) {} }, 250)
           return
         }
-        el.textContent = 'Returning to ComfyUI Desktop in ' + n + '…'
+        el.textContent = 'Returning to Comfy Desktop in ' + n + '…'
         setTimeout(tick, 1000)
       }
       setTimeout(tick, 1000)
@@ -377,7 +377,7 @@ export function renderPopupBridgeHtml(
       const app = initializeApp(firebaseConfig)
       auth = getAuth(app)
     } catch (err) {
-      contentEl.innerHTML = '<h1>Sign-in unavailable</h1><p>The Firebase SDK failed to load. Please reopen sign-in from ComfyUI Desktop.</p>'
+      contentEl.innerHTML = '<h1>Sign-in unavailable</h1><p>The Firebase SDK failed to load. Please reopen sign-in from Comfy Desktop.</p>'
       throw err
     }
 

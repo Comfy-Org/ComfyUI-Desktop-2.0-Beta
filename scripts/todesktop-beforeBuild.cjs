@@ -24,6 +24,17 @@ const PYTHON_BINARY = {
   'linux-x64': 'bin/python3',
 }
 
+// Mirrors UV_BINARY in fetch-bootstrap-python.mjs and uvDestRel in
+// build-bootstrap-python.mjs. Verified here too so that a fetch returning
+// success without uv (e.g. accidentally re-tagging a pre-v2 archive at the
+// current default tag) fails the build instead of shipping a launcher whose
+// adopted-install flows have no usable package manager.
+const UV_BINARY = {
+  'win-x64': 'uv.exe',
+  'mac-arm64': 'bin/uv',
+  'linux-x64': 'bin/uv',
+}
+
 module.exports = async ({ appDir, platform, arch }) => {
   const { execSync } = await import('node:child_process')
   const fs = await import('node:fs')
@@ -58,16 +69,24 @@ module.exports = async ({ appDir, platform, arch }) => {
   )
 
   // Defense-in-depth: even if the fetch script returns success, verify the
-  // expected binary exists before handing control back to todesktop. A
+  // expected binaries exist before handing control back to todesktop. A
   // divergence between the fetch script's success criteria and what the app
   // looks for at runtime would otherwise reproduce the same silent failure.
-  const expectedBinary = path.join(outDir, bootstrapPlatform, PYTHON_BINARY[bootstrapPlatform])
-  if (!fs.existsSync(expectedBinary)) {
+  const expectedPython = path.join(outDir, bootstrapPlatform, PYTHON_BINARY[bootstrapPlatform])
+  if (!fs.existsSync(expectedPython)) {
     throw new Error(
-      `[todesktop:beforeBuild] fetch script returned success but ${expectedBinary} is missing. ` +
+      `[todesktop:beforeBuild] fetch script returned success but ${expectedPython} is missing. ` +
       `Refusing to build — the installer would not provide a git backend and "Latest Stable" ` +
       `installs would silently strand on the bundled ComfyUI version.`
     )
   }
-  console.log(`[todesktop:beforeBuild] Verified ${expectedBinary}`)
+  const expectedUv = path.join(outDir, bootstrapPlatform, UV_BINARY[bootstrapPlatform])
+  if (!fs.existsSync(expectedUv)) {
+    throw new Error(
+      `[todesktop:beforeBuild] fetch script returned success but ${expectedUv} is missing. ` +
+      `Refusing to build — the bootstrap archive predates bootstrap-v2 (no bundled uv). ` +
+      `Bump the default tag in fetch-bootstrap-python.mjs or publish the v2 archives.`
+    )
+  }
+  console.log(`[todesktop:beforeBuild] Verified ${expectedPython} and ${expectedUv}`)
 }

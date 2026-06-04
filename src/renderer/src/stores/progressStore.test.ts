@@ -13,7 +13,7 @@ vi.mock('vue-i18n', () => ({
   })
 }))
 
-// progressStore now emits `desktop2.op.result` via `emitTelemetryAction`,
+// progressStore now emits `comfy.desktop.op.result` via `emitTelemetryAction`,
 // which dispatches a CustomEvent on `window`. The `vi.stubGlobal('window',
 // …)` below replaces window with a plain object that drops prototype
 // methods like `dispatchEvent`, so stub the telemetry helper out — these
@@ -110,7 +110,7 @@ describe('useProgressStore', () => {
       expect(info).toEqual({ status: 'Fetching files...', percent: 75 })
     })
 
-    it('falls back to phase name when lastStatus has no entry', () => {
+    it('falls back to step label, not the raw phase id, when lastStatus has no entry', () => {
       const apiCall = () => new Promise<ActionResult>(() => {})
       store.startOperation({
         installationId: 'inst-1',
@@ -123,8 +123,11 @@ describe('useProgressStore', () => {
       op.activePhase = 'download'
       op.activePercent = 0
 
+      // Without an explicit status string from main, ambient consumers
+      // should see the registered step label rather than the dev-y phase
+      // slug. Phase id only surfaces when no label exists either.
       const info = store.getProgressInfo('inst-1')
-      expect(info).toEqual({ status: 'download', percent: 0 })
+      expect(info).toEqual({ status: 'Download', percent: 0 })
     })
 
     it('falls back to title when flatStatus is empty', () => {

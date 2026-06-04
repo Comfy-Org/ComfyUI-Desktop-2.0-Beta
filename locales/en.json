@@ -4,10 +4,10 @@
   "dashboard": {
     "launchedAgo": "Launched {time}",
     "neverLaunched": "Not launched yet",
-    "telemetryNotice": "Anonymous telemetry is collected to improve ComfyUI Desktop 2.0.",
+    "telemetryNotice": "Anonymous telemetry is collected to improve Comfy Desktop.",
     "telemetrySettings": "Manage in Settings",
     "migrateBannerTitle": "Migrate to Standalone",
-    "migrateBannerDesc": "Your Legacy Desktop installation was detected. Migrate to a Standalone install for better performance, easier updates, and full Desktop 2.0 management.",
+    "migrateBannerDesc": "Your Legacy Desktop installation was detected. Migrate to a Standalone install for better performance, easier updates, and full Comfy Desktop management.",
     "migrateBannerAction": "Migrate Now",
     "migrateBannerSkip": "New Install Without Migrating",
     "confirmStopLocal": {
@@ -78,7 +78,8 @@
     "envVarsCount": "{n} defined",
     "emptyInstallLess": "Open a ComfyUI install to view its settings.",
     "storageGlobalNote": "Changes here apply to all of your ComfyUI instances.",
-    "storageRestartNote": "Restart the application (or close and reopen) for these changes to take effect."
+    "storageRestartNote": "Restart the application (or close and reopen) for these changes to take effect.",
+    "useSharedModelsOffWarning": "Shared models is OFF for this install. It can only see models placed under its own folder — your shared library is hidden until you turn this back on."
   },
 
   "comfyLifecycle": {
@@ -169,7 +170,10 @@
     "portConflictAuto": "Use next available port (asks if --port is set)",
     "download": "Download",
     "extract": "Extract",
-    "useSharedPaths": "Use Shared Directories",
+    "useSharedModels": "Use Shared Models",
+    "useSharedInputOutput": "Use Shared Input/Output Folders",
+    "perInstallInputDir": "Input Folder",
+    "perInstallOutputDir": "Output Folder",
     "autoDownloadOutputs": "Auto-Download Outputs",
     "useSharedOutputDir": "Use Shared Output Directory",
     "done": "Done",
@@ -297,8 +301,8 @@
   },
 
   "track": {
-    "title": "Track Existing Install",
-    "grandTitle": "Track Existing Install",
+    "title": "Add Existing Install",
+    "grandTitle": "Add Existing Install",
     "grandSubtitle": "Add an existing local ComfyUI checkout to Desktop without reinstalling it.",
     "installDir": "Install Directory",
     "selectDir": "Select a directory…",
@@ -336,7 +340,17 @@
       "migration": "Migrating your Legacy Desktop install…",
       "restore-nodes": "Restoring custom nodes from your snapshot…",
       "restore-pip": "Reinstalling Python packages from your snapshot…",
-      "launch": "Starting ComfyUI…"
+      "launch": "Starting ComfyUI…",
+      "backup": "Backing up Legacy Desktop state…",
+      "tcc": "Checking folder access…",
+      "venv": "Validating Legacy Python environment…",
+      "snapshot": "Capturing a forensic snapshot…",
+      "allocate": "Allocating install folder…",
+      "source": "Staging ComfyUI source…",
+      "comfy-update": "Updating ComfyUI to the latest stable release…",
+      "requirements": "Installing Python requirements…",
+      "settings": "Carrying over Legacy Desktop settings…",
+      "register": "Registering the adopted installation…"
     }
   },
 
@@ -368,7 +382,7 @@
     "onAppClose": "When app is closed",
     "closeTray": "Minimize to tray (keep instances running)",
     "closeQuit": "Stop all instances and quit",
-    "closeQuitTitle": "Quit Desktop 2.0",
+    "closeQuitTitle": "Quit Comfy Desktop",
     "closeQuitMessage": "The following are still active. Quitting will stop all of them.",
     "closeQuitConfirm": "Quit",
     "closeQuitSessions": "Running",
@@ -414,7 +428,7 @@
   "update": {
     "updateCheck": "Update Check",
     "updateError": "Update Error",
-    "upToDate": "You are running the latest version of ComfyUI Desktop 2.0.",
+    "upToDate": "You are running the latest version of Comfy Desktop.",
     "debUpToDate": "You are running the latest version. Updates for .deb installs are delivered through your system package manager (apt)."
   },
 
@@ -429,7 +443,7 @@
     "later": "Later",
     "errorTitle": "Desktop Update Error",
     "sectionTitle": "Desktop Updates",
-    "panelIdleTitle": "ComfyUI Desktop is up to date",
+    "panelIdleTitle": "Comfy Desktop is up to date",
     "panelAvailableTitle": "Update {version} available",
     "panelReadyTitle": "Update {version} ready to install",
     "panelDownloadingTitle": "Downloading update {version}…",
@@ -454,7 +468,7 @@
     "cancelMessage": "The operation will stop where it is. Anything not yet completed will be rolled back where possible.",
     "cancelConfirm": "Cancel operation",
     "quitSetupTitle": "Quit setup?",
-    "quitSetupMessage": "If you close now, your selection won't be saved and setup will start again the next time you launch ComfyUI Desktop.",
+    "quitSetupMessage": "If you close now, your selection won't be saved and setup will start again the next time you launch Comfy Desktop.",
     "quitSetupConfirm": "Quit setup",
     "discardSetupTitle": "Discard install setup?",
     "discardSetupMessage": "If you close now, your wizard selections won't be saved. No install has been created yet, so nothing will be rolled back.",
@@ -462,8 +476,8 @@
   },
 
   "firstUse": {
-    "title": "Welcome to ComfyUI Desktop",
-    "grandTitle": "Welcome to ComfyUI Desktop",
+    "title": "Welcome to Comfy Desktop",
+    "grandTitle": "Welcome to Comfy Desktop",
     "grandSubtitle": "A quick first-run setup so you're ready to launch ComfyUI.",
     "consentLead": "Before you get started, please review the privacy policy below and choose whether to share anonymous usage telemetry.",
     "legalDocEffective": "Effective",
@@ -484,7 +498,7 @@
     "expressInstallLine": "Express Install with recommended settings",
     "expressGpuHintPrefix": "Detected: ",
     "expressGpuHintSuffix": " - if that's not your hardware, uncheck Express",
-    "termsModalTitle": "ComfyUI Desktop Terms",
+    "termsModalTitle": "Comfy Desktop Terms",
     "eulaModalTitle": "End-User License Agreement",
     "tosModalTitle": "Terms of Service",
     "privacyModalTitle": "Privacy Policy",
@@ -499,6 +513,8 @@
     "localLabel": "Local",
     "localTagline": "Full control. Your hardware.",
     "localDesc": "Best for **power users** who want to manage versions, custom nodes, and offline workflows.",
+    "migrateExistingLine": "Migrate existing install",
+    "migrateExistingDesc": "Bring over **workflows, models, and settings** from your existing ComfyUI install.",
     "whyTryCloud": "Why try Cloud?",
     "whyCloud": {
       "title": "Why try Cloud?",
@@ -524,7 +540,7 @@
   },
 
   "tray": {
-    "showApp": "Show Desktop 2.0",
+    "showApp": "Show Comfy Desktop",
     "quit": "Quit"
   },
 
@@ -554,7 +570,10 @@
     "untrack": "Forget",
     "untrackConfirmTitle": "Forget Install",
     "untrackConfirmMessage": "This will remove the install from the app. The files will not be deleted.",
-    "share": "Share"
+    "share": "Share",
+    "rename": "Rename",
+    "renameTitle": "Rename Install",
+    "renameMessage": "Enter a new name for this install."
   },
 
   "migrate": {
@@ -675,18 +694,35 @@
     "migrateConfirmMessage": "This will create a new Standalone installation with your Legacy Desktop custom nodes, workflows, and settings. Your Legacy Desktop installation will not be modified.",
     "migrateConfirm": "Start Migration",
     "migrating": "Migrating Legacy Desktop to Standalone",
-    "scanningDesktop": "Scanning Legacy Desktop installation…",
-    "creatingSnapshot": "Creating Legacy Desktop snapshot…",
-    "copyingUserData": "Copying workflows and settings…",
-    "copyUserData": "Copy workflows and settings",
-    "copyingInput": "Copying input files…",
-    "copyInput": "Copy input files",
-    "copyingOutput": "Copying output files…",
-    "copyOutput": "Copy output files",
-    "addingModels": "Adding Legacy Desktop models to shared paths…",
+    "reuseUserData": "Reuse your existing workflows and settings in place",
+    "reuseInput": "Reuse your existing input files in place",
+    "reuseOutput": "Reuse your existing output files in place",
     "addModels": "Add Legacy Desktop models to shared paths",
-    "migrateComplete": "Migration complete",
-    "migrateNoData": "No data found to migrate."
+    "migrateBeforeLaunchTitle": "Migrate before launching?",
+    "migrateBeforeLaunchMessage": "Legacy ComfyUI Desktop must be migrated to Comfy Desktop before it can launch. We'll adopt your existing data, Python environment, and models in place, then start ComfyUI.",
+    "migrateBeforeLaunchConfirm": "Migrate and launch",
+    "adoptConfirmTitle": "Adopt Legacy Desktop install",
+    "adoptConfirmMessage": "Reuses your existing data folder, Python environment, and models in place. ComfyUI source is staged into a new managed directory so updates work normally. Your Legacy Desktop installation is not modified.",
+    "adoptConfirm": "Adopt",
+    "adoptPromptTccTitle": "Folder access needed",
+    "adoptPromptTccMessage": "macOS blocked access to your Legacy Desktop folder. Grant Full Disk Access in System Settings → Privacy & Security and retry.",
+    "adoptPromptVenvBrokenTitle": "Python environment looks broken",
+    "adoptPromptVenvBrokenMessage": "The Legacy Desktop Python environment failed to import torch. You can adopt anyway or cancel.",
+    "adoptPromptUseAnyway": "Adopt anyway",
+    "adoptPromptSourceMissingTitle": "ComfyUI source unavailable",
+    "adoptPromptSourceMissingMessage": "Could not source ComfyUI from the staged copy or git. Switch to a managed environment (full reinstall) or retry.",
+    "adoptPromptSwitchToManaged": "Switch to managed env",
+    "adoptPromptRetry": "Retry",
+    "adoptStepBackup": "Back up legacy state",
+    "adoptStepTcc": "Check folder access",
+    "adoptStepVenv": "Validate Python environment",
+    "adoptStepSnapshot": "Capture snapshot",
+    "adoptStepAllocate": "Allocate install folder",
+    "adoptStepSource": "Stage ComfyUI source",
+    "adoptStepComfyUpdate": "Update ComfyUI",
+    "adoptStepRequirements": "Install requirements",
+    "adoptStepSettings": "Carry over settings",
+    "adoptStepRegister": "Register installation"
   },
 
   "standalone": {
@@ -971,11 +1007,11 @@
     "cannotOpenDir": "Could not open directory: {error}",
     "launchCancelled": "Launch cancelled.",
     "cannotConnect": "Could not connect to {url}. Make sure ComfyUI is running at that address.",
-    "portConflictLauncher": "Port {port} is already in use by \"{name}\", launched from another ComfyUI Desktop 2.0 instance. You can use the next available port, stop it first, or change the port in Startup Arguments.",
+    "portConflictLauncher": "Port {port} is already in use by \"{name}\", launched from another Comfy Desktop instance. You can use the next available port, stop it first, or change the port in Startup Arguments.",
     "portConflictComfy": "Port {port} is already in use by {process}, which appears to be a ComfyUI instance. You can use the next available port, stop the process, or change the port in Startup Arguments.",
     "portConflictOther": "Port {port} is already in use by {process}. You can use the next available port or change the port in Startup Arguments.",
     "portConflictTitle": "Port already in use",
-    "portConflictUsePort": "Use port {port} instead",
+    "portConflictUsePort": "Use next available port",
     "portConflictKill": "Stop process and retry",
     "portConflictKillConfirmTitle": "Stop Existing Process",
     "portConflictKillConfirmMessage": "This will forcefully stop the process currently using this port. Any unsaved work in that ComfyUI instance will be lost.",
@@ -983,13 +1019,14 @@
     "portConflictKilling": "Stopping…",
     "portConflictKillFailed": "Could not free port {port}. The process may require manual termination.",
     "duplicateName": "An install named \"{name}\" already exists. Please choose a different name.",
+    "nameRequired": "Please enter a name.",
     "unknownSource": "This installation has an unrecognized source type. It may have been created by a different version. Delete it and reinstall.",
     "operationInProgress": "\"{operation}\" is currently in progress for this installation. Would you like to cancel it?",
     "operationInProgressGeneric": "Another operation is currently in progress for this installation. Would you like to cancel it?",
     "cancelOperation": "Cancel Operation",
     "stopRequired": "This installation is currently running and must be stopped first.",
     "willStopRunning": "{name} is running and will be stopped first.",
-    "folderPermissionDenied": "macOS denied access to \"{path}\". Please open System Settings → Privacy & Security → Files and Folders, grant access to ComfyUI Desktop 2.0, then retry."
+    "folderPermissionDenied": "macOS denied access to \"{path}\". Please open System Settings → Privacy & Security → Files and Folders, grant access to Comfy Desktop, then retry."
   },
 
   "tooltips": {
@@ -1007,7 +1044,10 @@
     "sharedModels": "Folders shared across all installations so models aren't downloaded twice. Newly downloaded models go to the primary folder. The system default folder is always kept and can't be removed, and the primary folder can't be removed while it's in use — pick a different primary first.",
     "modelsPrimary": "The primary directory is where ComfyUI saves newly downloaded models by default.",
     "modelsDefault": "The system default directory. This path is created automatically and cannot be removed.",
-    "useSharedPaths": "When enabled, this install can access models, inputs, and outputs from the shared directories. Disable to use only this install's own local paths.",
+    "useSharedModels": "When enabled, this install can see every model in your global shared model folders. Disabling hides those models — most users want this on.",
+    "useSharedInputOutput": "When enabled, this install reads and writes input and output files from the global shared folders. Disable to point this install at its own folders below.",
+    "perInstallInputDir": "Folder this install reads input files from. Leave blank to use this install's own internal input folder.",
+    "perInstallOutputDir": "Folder this install writes generated output files to. Leave blank to use this install's own internal output folder.",
     "inputDir": "Shared folder for input files (images, masks, etc.) accessible to all installations.",
     "outputDir": "Shared folder where ComfyUI saves generated outputs, accessible to all installations.",
     "autoDownloadOutputs": "Automatically download output files (images, videos) from this remote instance to a local directory after each workflow run.",

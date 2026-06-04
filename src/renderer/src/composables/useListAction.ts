@@ -18,19 +18,9 @@ export interface ListActionCallbacks {
   onNavigate?: (result: ActionResult, action: ListAction) => void | Promise<void>
 }
 
-/**
- * Per-call hooks for an `executeAction` invocation.
- *
- * `onGuardsPassed` fires exactly once, after every cancel-path
- * (disabled-message alert, busy guard, confirm modal, local-instance
- * guard) has resolved positively but BEFORE the action is actually
- * dispatched (either through `callbacks.showProgress` or the inline
- * `runAction` path). The chooser-host pick flow uses this to stake the
- * in-place attach claim only when the launch will really proceed —
- * staking earlier (before the guard) would cross-window overwrite a
- * sibling chooser's existing claim and leave the wrong window with the
- * preview / claim if the user cancels.
- */
+// `onGuardsPassed` fires once after all cancel-paths pass but before the
+// action dispatches, so the chooser stakes its attach claim only when the
+// launch will really proceed (staking earlier would clobber a sibling's claim).
 export interface ListActionInvocationHooks {
   onGuardsPassed?: () => Promise<void> | void
 }
@@ -45,7 +35,7 @@ export function useListAction(uiSurface: string, callbacks: ListActionCallbacks)
   async function executeAction(
     inst: Installation,
     action: ListAction,
-    hooks?: ListActionInvocationHooks,
+    hooks?: ListActionInvocationHooks
   ): Promise<void> {
     const telemetryContext = {
       source_category: inst.sourceCategory || 'unknown',
@@ -61,10 +51,7 @@ export function useListAction(uiSurface: string, callbacks: ListActionCallbacks)
       REQUIRES_STOPPED.has(action.id) && action.id !== 'migrate-to-standalone'
     const wasRunning = sessionStore.isRunning(inst.id)
 
-    // Busy guard fires for every list-action runner so non-REQUIRES_STOPPED
-    // entries (e.g. `launch`, `restart`, source-delegated actions) can't
-    // race an in-flight op on the same install. The guard no-ops when
-    // nothing is running.
+    // Busy guard runs for every action so none can race an in-flight op.
     if (!(await actionGuard.checkBeforeAction(inst.id, action.label))) return
 
     if (action.confirm || (requiresStoppedGuard && wasRunning)) {
@@ -83,7 +70,7 @@ export function useListAction(uiSurface: string, callbacks: ListActionCallbacks)
         confirmStyle: action.style || 'danger'
       })
       if (!confirmed) {
-        emitTelemetryAction('desktop2.action.result', {
+        emitTelemetryAction('comfy.desktop.action.result', {
           action_id: action.id,
           result: 'cancelled',
           ...telemetryContext
@@ -95,7 +82,7 @@ export function useListAction(uiSurface: string, callbacks: ListActionCallbacks)
     if (action.id === 'launch') {
       const canLaunch = await localInstanceGuard.checkBeforeLaunch(inst.id)
       if (!canLaunch) {
-        emitTelemetryAction('desktop2.action.result', {
+        emitTelemetryAction('comfy.desktop.action.result', {
           action_id: action.id,
           result: 'cancelled',
           ...telemetryContext
@@ -104,23 +91,61 @@ export function useListAction(uiSurface: string, callbacks: ListActionCallbacks)
       }
     }
 
-    // All cancel-paths have committed to running. Side effects that
-    // must NOT survive a cancel (chooser in-place attach claim +
-    // title-bar preview) belong in this hook.
+    // Launching a not-yet-adopted Legacy Desktop install runs a
+    // migrate-then-launch chain (adoption is the prerequisite). Skips
+    // onGuardsPassed since the launch targets the freshly-adopted install.
+    if (action.id === 'launch' && inst.sourceId === 'desktop' && !inst.adopted) {
+      const confirmed = await modal.confirm({
+        title: t('desktop.migrateBeforeLaunchTitle'),
+        message: t('desktop.migrateBeforeLaunchMessage'),
+        confirmLabel: t('desktop.migrateBeforeLaunchConfirm'),
+        confirmStyle: 'primary'
+      })
+      if (!confirmed) {
+        emitTelemetryAction('comfy.desktop.action.result', {
+          action_id: action.id,
+          result: 'cancelled',
+          ...telemetryContext
+        })
+        return
+      }
+      sessionStore.clearErrorInstance(inst.id)
+      emitTelemetryAction('comfy.desktop.action.invoked', {
+        action_id: action.id,
+        ...telemetryContext
+      })
+      callbacks.showProgress({
+        installationId: inst.id,
+        title: `${t('desktop.migrating')} — ${inst.name}`,
+        apiCall: async () => {
+          const migrateResult = await window.api.runAction(inst.id, 'migrate-to-standalone')
+          if (!migrateResult.ok || !migrateResult.newInstallationId) return migrateResult
+          // Launch the adopted install in the same overlay (continuous flow).
+          return window.api.runAction(migrateResult.newInstallationId, 'launch')
+        },
+        cancellable: true,
+        triggersInstanceStart: true,
+        opKind: 'launch'
+      })
+      return
+    }
+
+    // Past all cancel-paths; cancel-sensitive side effects go in this hook.
     if (hooks?.onGuardsPassed) await hooks.onGuardsPassed()
 
     sessionStore.clearErrorInstance(inst.id)
-    emitTelemetryAction('desktop2.action.invoked', { action_id: action.id, ...telemetryContext })
+    emitTelemetryAction('comfy.desktop.action.invoked', {
+      action_id: action.id,
+      ...telemetryContext
+    })
 
     const needsSelfStop = wasRunning && requiresStoppedGuard
     const wantsRelaunch = needsSelfStop && IN_PLACE_RELAUNCH.has(action.id)
     const isRunning = (): boolean => sessionStore.isRunning(inst.id)
 
     if (action.showProgress) {
-      // Tag launch / restart so PanelApp's `handleShowProgress` installs
-      // the chooser-host close-on-instance-started subscription AND
-      // routes through the brand-chrome takeover when the source is an
-      // install-less chooser host. Mirrors DetailModal's flag.
+      // Tag launch/restart so the host installs the close-on-instance-started
+      // subscription and routes through the brand-chrome takeover.
       const triggersInstanceStart =
         action.id === 'launch' || action.id === 'restart' || wantsRelaunch
       const apiCall = needsSelfStop
@@ -159,7 +184,7 @@ export function useListAction(uiSurface: string, callbacks: ListActionCallbacks)
         await window.api.runAction(inst.id, 'launch')
       }
       const resultValue = result.cancelled ? 'cancelled' : result.ok === false ? 'failed' : 'ok'
-      emitTelemetryAction('desktop2.action.result', {
+      emitTelemetryAction('comfy.desktop.action.result', {
         action_id: action.id,
         result: resultValue,
         ...telemetryContext
@@ -170,7 +195,7 @@ export function useListAction(uiSurface: string, callbacks: ListActionCallbacks)
         await modal.alert({ title: action.label, message: result.message })
       }
     } catch (error: unknown) {
-      emitTelemetryAction('desktop2.action.result', {
+      emitTelemetryAction('comfy.desktop.action.result', {
         action_id: action.id,
         result: 'failed',
         error_bucket: toErrorBucket(error),

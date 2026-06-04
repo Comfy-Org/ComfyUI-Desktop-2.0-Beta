@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
-// shared.ts (transitively imported by registry.ts) loads electron at module
-// load, so the mock has to be in place before the host module imports.
+// shared.ts (via registry.ts) loads electron at module load, so the mock
+// must be in place before the host module imports.
 vi.mock('electron', () => ({
   app: {
     isPackaged: false,
@@ -92,20 +92,16 @@ describe('cascadeOffsetForCollisions', () => {
   })
 })
 
-// Decision helpers for the host window's close handler. The handler
-// has to honour a `preClearedClose` flag (caller pre-cleared via
-// launch-guard eviction or bulk Exit-All) that can land mid-consult or
-// mid-confirm. These pure helpers encode the three re-check points so
-// the behaviour stays testable without mocking BrowserWindow.
+// Pure decision helpers for the close handler's three `preClearedClose`
+// re-check points, kept testable without mocking BrowserWindow.
 describe('shouldBailAfterConsult', () => {
   it('bails when the renderer aborted and no force-close override is set', () => {
     expect(shouldBailAfterConsult('aborted', false)).toBe(true)
   })
 
   it('does not bail when the renderer aborted but the caller pre-cleared the close', () => {
-    // Launch-guard eviction / bulk Exit-All consent overrides a
-    // per-window cancel — without this, an unrelated open prompt would
-    // strand the caller's awaited teardown.
+    // Bulk Exit-All consent overrides a per-window cancel, else an unrelated
+    // open prompt would strand the caller's awaited teardown.
     expect(shouldBailAfterConsult('aborted', true)).toBe(false)
   })
 
@@ -162,24 +158,34 @@ describe('shouldBailAfterCloseConfirm', () => {
 describe('shouldDetachLastInstallWindowToDashboard', () => {
   it('detaches an install host with a live entry when it is the last window', () => {
     // OS ✕ on the last install window → flip to dashboard in place.
-    expect(shouldDetachLastInstallWindowToDashboard(true, true, true, false)).toBe(true)
+    expect(shouldDetachLastInstallWindowToDashboard(true, true, true, false, false)).toBe(true)
   })
 
   it('does not detach on a force-close even if it is the last install window', () => {
     // Launch-guard swap / bulk Exit-All want the window gone, not a
     // stray dashboard window left behind.
-    expect(shouldDetachLastInstallWindowToDashboard(true, true, true, true)).toBe(false)
+    expect(shouldDetachLastInstallWindowToDashboard(true, true, true, true, false)).toBe(false)
   })
 
   it('does not detach when other host windows are still open', () => {
-    expect(shouldDetachLastInstallWindowToDashboard(true, true, false, false)).toBe(false)
+    expect(shouldDetachLastInstallWindowToDashboard(true, true, false, false, false)).toBe(false)
   })
 
   it('does not detach a chooser/dashboard host (no install backing)', () => {
-    expect(shouldDetachLastInstallWindowToDashboard(false, true, true, false)).toBe(false)
+    expect(shouldDetachLastInstallWindowToDashboard(false, true, true, false, false)).toBe(false)
   })
 
   it('does not detach when the entry has already been dropped from the registry', () => {
-    expect(shouldDetachLastInstallWindowToDashboard(true, false, true, false)).toBe(false)
+    expect(shouldDetachLastInstallWindowToDashboard(true, false, true, false, false)).toBe(false)
+  })
+
+  it('does not detach when a quit is in progress (Cmd+Q, app-update restart, etc.)', () => {
+    // Regression for: clicking "Restart Now" in the Desktop Update modal
+    // fired app.quit() which fired close on the last install window —
+    // and that close was being intercepted into a dashboard-detach,
+    // swallowing the quit. The first restart click was a silent no-op
+    // because the window flipped to dashboard instead of destroying;
+    // only the second click (after the flip) actually restarted.
+    expect(shouldDetachLastInstallWindowToDashboard(true, true, true, false, true)).toBe(false)
   })
 })

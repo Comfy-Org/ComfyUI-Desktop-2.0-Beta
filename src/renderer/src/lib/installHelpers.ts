@@ -6,37 +6,42 @@ import { formatBytes } from './formatting'
 const pathIssueI18nKeys: Record<PathIssue, { title: string; message: string }> = {
   insideAppBundle: {
     title: 'pathValidation.insideAppBundleTitle',
-    message: 'pathValidation.insideAppBundleMessage',
+    message: 'pathValidation.insideAppBundleMessage'
   },
   oneDrive: {
     title: 'pathValidation.oneDriveTitle',
-    message: 'pathValidation.oneDriveMessage',
+    message: 'pathValidation.oneDriveMessage'
   },
   insideSharedDir: {
     title: 'pathValidation.insideSharedDirTitle',
-    message: 'pathValidation.insideSharedDirMessage',
+    message: 'pathValidation.insideSharedDirMessage'
   },
   insideExistingInstall: {
     title: 'pathValidation.insideExistingInstallTitle',
-    message: 'pathValidation.insideExistingInstallMessage',
-  },
+    message: 'pathValidation.insideExistingInstallMessage'
+  }
 }
 
 export function toPathGuardrail(issue: PathIssue): string {
   switch (issue) {
-    case 'insideAppBundle': return 'path_inside_bundle'
-    case 'oneDrive': return 'onedrive'
-    case 'insideSharedDir': return 'inside_shared_dir'
-    case 'insideExistingInstall': return 'inside_existing_install'
-    default: return 'path_issue'
+    case 'insideAppBundle':
+      return 'path_inside_bundle'
+    case 'oneDrive':
+      return 'onedrive'
+    case 'insideSharedDir':
+      return 'inside_shared_dir'
+    case 'insideExistingInstall':
+      return 'inside_existing_install'
+    default:
+      return 'path_issue'
   }
 }
 
 export function trackGuardrailBlocked(guardrailType: string, flow: string, stage: string): void {
-  emitTelemetryAction('desktop2.install.guardrail.blocked', {
+  emitTelemetryAction('comfy.desktop.install.guardrail.blocked', {
     guardrail_type: guardrailType,
     flow,
-    stage,
+    stage
   })
 }
 
@@ -49,7 +54,7 @@ export async function showPathIssueAlerts(
   flow: string,
   stage: string,
   alert: (opts: { title: string; message: string }) => Promise<void>,
-  t: (key: string) => string,
+  t: (key: string) => string
 ): Promise<boolean> {
   for (const issue of issues) {
     const keys = pathIssueI18nKeys[issue]
@@ -69,8 +74,13 @@ export async function showPathIssueAlerts(
 export async function checkNvidiaDriverOrWarn(
   flow: string,
   stage: string,
-  confirm: (opts: { title: string; message: string; confirmLabel: string; confirmStyle: string }) => Promise<boolean>,
-  t: (key: string, params?: Record<string, string>) => string,
+  confirm: (opts: {
+    title: string
+    message: string
+    confirmLabel: string
+    confirmStyle: string
+  }) => Promise<boolean>,
+  t: (key: string, params?: Record<string, string>) => string
 ): Promise<boolean> {
   const driverCheck = await window.api.checkNvidiaDriver()
   if (driverCheck && !driverCheck.supported) {
@@ -78,10 +88,10 @@ export async function checkNvidiaDriverOrWarn(
       title: t('newInstall.nvidiaDriverWarningTitle'),
       message: t('newInstall.nvidiaDriverWarning', {
         driverVersion: driverCheck.driverVersion,
-        minimumVersion: driverCheck.minimumVersion,
+        minimumVersion: driverCheck.minimumVersion
       }),
       confirmLabel: t('newInstall.nvidiaDriverContinue'),
-      confirmStyle: 'primary',
+      confirmStyle: 'primary'
     })
     if (!ok) {
       trackGuardrailBlocked('nvidia_driver', flow, stage)
@@ -91,11 +101,15 @@ export async function checkNvidiaDriverOrWarn(
   return true
 }
 
-export function trackDiskWarningResponse(warningType: string, accepted: boolean, flow: string): void {
-  emitTelemetryAction('desktop2.install.disk_warning.response', {
+export function trackDiskWarningResponse(
+  warningType: string,
+  accepted: boolean,
+  flow: string
+): void {
+  emitTelemetryAction('comfy.desktop.install.disk_warning.response', {
     warning_type: warningType,
     accepted,
-    flow,
+    flow
   })
 }
 
@@ -107,7 +121,12 @@ export async function checkDiskSpaceOrWarn(opts: {
   path: string
   estimatedRequired: number
   flow: string
-  confirm: (opts: { title: string; message: string; confirmLabel: string; confirmStyle: string }) => Promise<boolean>
+  confirm: (opts: {
+    title: string
+    message: string
+    confirmLabel: string
+    confirmStyle: string
+  }) => Promise<boolean>
   t: (key: string, params?: Record<string, string>) => string
 }): Promise<boolean> {
   const space = await window.api.getDiskSpace(opts.path)
@@ -117,10 +136,10 @@ export async function checkDiskSpaceOrWarn(opts: {
       title: opts.t('diskSpace.warningTitle'),
       message: opts.t('diskSpace.warningMessage', {
         free: formatBytes(space.free),
-        required: formatBytes(opts.estimatedRequired),
+        required: formatBytes(opts.estimatedRequired)
       }),
       confirmLabel: opts.t('diskSpace.continueAnyway'),
-      confirmStyle: 'primary',
+      confirmStyle: 'primary'
     })
     trackDiskWarningResponse('insufficient_estimated', !!ok, opts.flow)
     if (!ok) return false
@@ -128,10 +147,10 @@ export async function checkDiskSpaceOrWarn(opts: {
     const ok = await opts.confirm({
       title: opts.t('diskSpace.warningTitle'),
       message: opts.t('diskSpace.warningMessageGeneric', {
-        free: formatBytes(space.free),
+        free: formatBytes(space.free)
       }),
       confirmLabel: opts.t('diskSpace.continueAnyway'),
-      confirmStyle: 'primary',
+      confirmStyle: 'primary'
     })
     trackDiskWarningResponse('low_free_space', !!ok, opts.flow)
     if (!ok) return false
@@ -160,7 +179,7 @@ export function createDiskSpaceChecker() {
       try {
         const [space, issues] = await Promise.all([
           window.api.getDiskSpace(targetPath),
-          window.api.validateInstallPath(targetPath),
+          window.api.validateInstallPath(targetPath)
         ])
         if (gen !== diskSpaceGeneration) return
         diskSpace.value = space
@@ -194,6 +213,6 @@ export function createDiskSpaceChecker() {
     diskSpaceLoading,
     pathIssues,
     fetchDiskSpace,
-    reset,
+    reset
   }
 }

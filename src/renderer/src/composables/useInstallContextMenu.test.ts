@@ -4,9 +4,8 @@ import { createI18n } from 'vue-i18n'
 import { defineComponent, h } from 'vue'
 import { mount } from '@vue/test-utils'
 
-// `useModal` is a singleton with module-level state. The composable
-// awaits `modal.confirm(...)` which never resolves on its own — mock
-// the composable so tests can drive the confirm response synchronously.
+// Mocked so tests can drive `modal.confirm(...)`, which never resolves
+// on its own.
 const modalMock = {
   confirm: vi.fn(),
   alert: vi.fn(),
@@ -24,9 +23,8 @@ import { useProgressStore } from '../stores/progressStore'
 import type { Installation, ShowProgressOpts } from '../types/ipc'
 import type { ContextMenuItem } from '../types/context-menu'
 
-// Mock api on `window`. `getDetailSections` is spied so tests can
-// assert it is NOT called by the delete fast path (regression for the
-// ~2s confirm-modal latency on the dashboard kebab → Delete click).
+// `getDetailSections` is spied so tests can assert the delete fast path
+// never calls it.
 const apiMock = {
   platform: 'darwin',
   runAction: vi.fn().mockResolvedValue({ ok: true }),
@@ -90,16 +88,8 @@ interface HarnessHandles {
   progress: ReturnType<typeof useProgressStore>
 }
 
-/**
- * Common harness component used by every spec. `useInstallContextMenu`
- * calls Pinia stores + `useI18n()` so the composable can only run from
- * inside a real component setup scope; this single `defineComponent`
- * is reused across all `mountHarness*` factories so the file stays
- * compliant with `vue/one-component-per-file`.
- *
- * The factory hands `setup` a closure that runs once per mount and
- * captures handles back into the caller-supplied refs.
- */
+// Shared harness reused across factories (one component to satisfy
+// `vue/one-component-per-file`); `setup` runs the per-mount closure.
 let _harnessSetup: (() => void) | null = null
 const HarnessComponent = defineComponent({
   setup() {
@@ -210,21 +200,10 @@ describe('useInstallContextMenu — gated REQUIRES_STOPPED items', () => {
   })
 })
 
-// --- Delete fast path (regression for #582) ---
-//
-// Old delete branch called `fetchActionDef` → `getDetailSections` →
-// rebuilds the entire detail tree just to pluck the 12-line
-// `deleteAction()` constant; on Windows this stalled the confirm modal
-// by ~2s. The fast path builds the confirm + showProgress payload
-// entirely renderer-side.
-
 function mountHarnessWithProgress(
   _inst: Installation,
   onShowProgress: (opts: ShowProgressOpts) => void,
 ): { menu: ReturnType<typeof useInstallContextMenu> } {
-  // Reuses the shared `HarnessComponent` defined above; tests drive
-  // `menu.triggerAction(...)` directly so the inst arg is just a
-  // documented call-site hint.
   const pinia = createPinia()
   setActivePinia(pinia)
   const i18n = createI18n({ legacy: false, locale: 'en', messages })
@@ -333,9 +312,6 @@ describe('useInstallContextMenu — copy-install routing', () => {
   })
 
   it('update opens the Update tab AND auto-fires the update (matches the title-bar pill)', async () => {
-    // Parity with the title-bar install-update pill (useDeepLinkRouter):
-    // open the picker on the Update tab with `autoAction: 'update-comfyui'`
-    // so the update modal runs, instead of just landing on the tab page.
     const onManage = vi.fn<(inst: Installation, options?: { initialTab?: string; autoAction?: string | null }) => void>()
     const inst = makeInstall()
     const { menu } = mountHarnessWithManage(onManage)
@@ -388,6 +364,26 @@ describe('useInstallContextMenu — untrack confirm-then-remove', () => {
     await menu.triggerAction('untrack', inst)
 
     expect(apiMock.runAction).not.toHaveBeenCalled()
+  })
+
+  // Adopted (legacy-desktop) installs hide the Forget item: the
+  // `.comfyui-desktop-2` marker on disk also makes the legacy
+  // auto-tracker stop surfacing the install, so forgetting strands
+  // the user with no path back. Delete still appears (real disposal).
+  it('hides the Forget item for adopted installs but keeps Delete', () => {
+    const inst = makeInstall({ adopted: true } as Partial<Installation>)
+    const { menu } = mountHarness(inst)
+    const items = menu.ctxMenuItems.value
+    expect(findItem(items, 'untrack')).toBeUndefined()
+    expect(findItem(items, 'delete')).toBeTruthy()
+  })
+
+  it('shows the Forget item for non-adopted installs', () => {
+    const inst = makeInstall()
+    const { menu } = mountHarness(inst)
+    const items = menu.ctxMenuItems.value
+    expect(findItem(items, 'untrack')).toBeTruthy()
+    expect(findItem(items, 'delete')).toBeTruthy()
   })
 })
 

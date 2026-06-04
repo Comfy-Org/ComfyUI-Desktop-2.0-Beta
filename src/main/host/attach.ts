@@ -12,7 +12,7 @@ import {
   dropInstallationIndex,
   indexInstallationId,
   isInstallHost,
-  setLastFocusedInstallationId,
+  setLastFocusedInstallationId
 } from './registry'
 import type { ComfyWindowEntry } from './registry'
 
@@ -27,6 +27,15 @@ export interface AttachFactories {
    *  retry timer. The relaunch flow uses this to interrupt a pending
    *  retry that would otherwise navigate away from the splash page. */
   comfyFailRetryTimerCancels: Map<string, () => void>
+  /** Per-install comfyView reload (browser-style page reload). Registered
+   *  on attach, cleared on detach. Lets the title-bar refresh button reuse
+   *  the same reload path as F5/Ctrl+R without lifting the closure. */
+  comfyReloads: Map<string, () => void>
+  /** Per-install comfyView zoom reset (→ 100%). Registered on attach,
+   *  cleared on detach. Lets the title-bar zoom pill reset the live
+   *  comfyContents and emit the matching `comfy.desktop.zoom.reset` telemetry
+   *  without lifting the closure. */
+  comfyZoomResets: Map<string, () => void>
   /** Per-install relaunch state. Keys present in this map gate every
    *  attach-side reload path so a relaunch-in-progress install can't
    *  be auto-retried out from under the splash. */
@@ -35,7 +44,7 @@ export interface AttachFactories {
    *  push the title-bar install-update pill on attach + on every
    *  install-record `'updated'` event. */
   computeInstallUpdateAvailable: (
-    installationId: string,
+    installationId: string
   ) => Promise<{ available: boolean; version?: string }>
 }
 
@@ -98,8 +107,8 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
         origin: 'main-process',
         windowKey: String(entry.windowKey),
         existingInstallationId: entry.installationId,
-        attemptedInstallationId: opts.installation.id,
-      },
+        attemptedInstallationId: opts.installation.id
+      }
     })
     return false
   }
@@ -138,7 +147,7 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
   const refreshOsWindowTitle = (): void => {
     if (comfyWindow.isDestroyed()) return
     const suffix = currentPageTitle ? ` — ${currentPageTitle}` : ''
-    comfyWindow.setTitle(`${currentInstallName}${suffix} — Desktop 2.0 v${APP_VERSION}`)
+    comfyWindow.setTitle(`${currentInstallName}${suffix} — Comfy Desktop v${APP_VERSION}`)
   }
   refreshOsWindowTitle()
 
@@ -211,10 +220,16 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
       titleBarView.webContents.send('comfy-titlebar:theme-changed', theme)
     }
     if (process.platform !== 'darwin') {
-      try { comfyWindow.setTitleBarOverlay({ color: theme.bg, symbolColor: theme.text }) } catch {}
+      try {
+        comfyWindow.setTitleBarOverlay({ color: theme.bg, symbolColor: theme.text })
+      } catch {}
     }
   }
-  const onIpcMessage = (_event: Electron.IpcMainEvent, channel: string, ...args: unknown[]): void => {
+  const onIpcMessage = (
+    _event: Electron.IpcMainEvent,
+    channel: string,
+    ...args: unknown[]
+  ): void => {
     if (channel === 'desktop2-theme-report') {
       const { bg, text } = (args[0] || {}) as { bg?: string; text?: string }
       if (bg) applyComfyTheme(bg, text || '#ddd')
@@ -231,23 +246,25 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
 
   const COMFY_THEME_OBSERVER_JS =
     `(function(){` +
-      `let last='';` +
-      `function read(){` +
-        `const s=getComputedStyle(document.body);` +
-        `const bg=s.getPropertyValue('--comfy-menu-bg').trim();` +
-        `const text=s.getPropertyValue('--descrip-text').trim();` +
-        `const key=bg+'|'+text;` +
-        `if(key!==last&&bg){last=key;window.__comfyDesktop2?.reportTheme?.(bg,text)}` +
-      `}` +
-      `new MutationObserver(()=>setTimeout(read,50)).observe(document.documentElement,{attributes:true,attributeFilter:['class','data-theme','style']});` +
-      `read();` +
+    `let last='';` +
+    `function read(){` +
+    `const s=getComputedStyle(document.body);` +
+    `const bg=s.getPropertyValue('--comfy-menu-bg').trim();` +
+    `const text=s.getPropertyValue('--descrip-text').trim();` +
+    `const key=bg+'|'+text;` +
+    `if(key!==last&&bg){last=key;window.__comfyDesktop2?.reportTheme?.(bg,text)}` +
+    `}` +
+    `new MutationObserver(()=>setTimeout(read,50)).observe(document.documentElement,{attributes:true,attributeFilter:['class','data-theme','style']});` +
+    `read();` +
     `})()`
 
   /**
-   * Two cloud-only patches injected on every dom-ready of the comfy view:
+   * Three cloud-only patches injected on every dom-ready of the comfy view:
    *
    *   1. popup-blocked toast suppressor — observes new toast DOM nodes
-   *      and removes any that mention `auth/popup-blocked`. That error
+   *      and removes any that mention `auth/popup-blocked` OR the
+   *      user-friendly variants the cloud frontend now maps that code
+   *      to ("Something went wrong while signing you in…"). That error
    *      is fired by the cloud frontend's Firebase SDK every time our
    *      `setWindowOpenHandler` denies the auth popup (so the bridge
    *      can take over), and the user has no way to dismiss the toast
@@ -258,49 +275,108 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
    *      script hides documentElement for ~1s on the next load so the
    *      user doesn't see the cloud login page flash before the
    *      Firebase rehydrate redirects to the workspace.
+   *
+   *   3. cloud-onboarding "Download ComfyUI" CTA hider — desktop users
+   *      who hit the cloud onboarding screen see a bottom-right CTA
+   *      ("Want to run ComfyUI locally instead? — Download ComfyUI")
+   *      pointing at comfy.org/download. They already have desktop;
+   *      the link is redundant + confusing. We inject a <style> with
+   *      a :has() rule keyed on the CloudTemplate.vue container's
+   *      Tailwind class chain (CSS-only path — no race vs SPA
+   *      hydration since the rule matches continuously). The
+   *      MutationObserver below also tags any <button> with the
+   *      literal text "Download ComfyUI" via data-comfy-desktop-hide,
+   *      which the same stylesheet hides — that's the text-based
+   *      fallback for when the class chain shifts build-to-build.
+   *      TODO(desktop band-aid): remove once Comfy-Org/ComfyUI_frontend
+   *      PR <link-here> lands (conditional skip when running in desktop).
    */
   const COMFY_CLOUD_PATCHES_JS =
     `(function(){` +
-      `try{` +
-        `if(sessionStorage.getItem('__comfyDesktopPostSignin')==='1'){` +
-          `sessionStorage.removeItem('__comfyDesktopPostSignin');` +
-          `var de=document.documentElement;` +
-          `de.style.visibility='hidden';` +
-          `setTimeout(function(){de.style.visibility=''},1000);` +
-        `}` +
-      `}catch(_){}` +
-      `function looksBlocked(n){` +
-        `if(!n||n.nodeType!==1)return false;` +
-        `var t=(n.textContent||'').toLowerCase();` +
-        `return t.indexOf('auth/popup-blocked')>=0;` +
-      `}` +
-      `function nukeToast(n){` +
-        `var root=(n.closest&&n.closest('.p-toast-message,.p-toast-item,[role=alert]'))||n;` +
-        `try{root.remove()}catch(_){}` +
-      `}` +
-      `new MutationObserver(function(muts){` +
-        `for(var i=0;i<muts.length;i++){` +
-          `var added=muts[i].addedNodes;` +
-          `for(var j=0;j<added.length;j++){` +
-            `var n=added[j];` +
-            `if(looksBlocked(n)){nukeToast(n);continue;}` +
-            `if(n.querySelectorAll){` +
-              `var hits=n.querySelectorAll('*');` +
-              `for(var k=0;k<hits.length;k++){` +
-                `if(looksBlocked(hits[k])){nukeToast(hits[k]);break;}` +
-              `}` +
-            `}` +
-          `}` +
-        `}` +
-      `}).observe(document.documentElement,{childList:true,subtree:true});` +
+    `try{` +
+    `if(sessionStorage.getItem('__comfyDesktopPostSignin')==='1'){` +
+    `sessionStorage.removeItem('__comfyDesktopPostSignin');` +
+    `var de=document.documentElement;` +
+    `de.style.visibility='hidden';` +
+    `setTimeout(function(){de.style.visibility=''},1000);` +
+    `}` +
+    `}catch(_){}` +
+    `try{` +
+    `if(!document.getElementById('__comfyDesktopHideDownloadCta')){` +
+    `var st=document.createElement('style');` +
+    `st.id='__comfyDesktopHideDownloadCta';` +
+    `st.textContent='[data-comfy-desktop-hide="download-cta"]{display:none !important}';` +
+    `(document.head||document.documentElement).appendChild(st);` +
+    `}` +
+    `}catch(_){}` +
+    `function looksBlocked(n){` +
+    `if(!n||n.nodeType!==1)return false;` +
+    `var t=(n.textContent||'').toLowerCase();` +
+    // Raw SDK error code (older cloud frontend builds surface it
+    // directly) + the user-friendly text current builds map it to.
+    // Both phrases are specific enough to the sign-in popup path
+    // that matching them won't catch unrelated toasts.
+    `return t.indexOf('auth/popup-blocked')>=0` +
+    `||t.indexOf('signing you in')>=0;` +
+    `}` +
+    `function nukeToast(n){` +
+    `var root=(n.closest&&n.closest('.p-toast-message,.p-toast-item,[role=alert]'))||n;` +
+    `try{root.remove()}catch(_){}` +
+    `}` +
+    `function tagDownloadCta(){` +
+    `var els=document.querySelectorAll('button,a,[role="button"]');` +
+    `for(var i=0;i<els.length;i++){` +
+    `var el=els[i];` +
+    `if(!el)continue;` +
+    `var t=(el.textContent||'').trim().toLowerCase();` +
+    `if(t!=='download comfyui')continue;` +
+    `el.setAttribute('data-comfy-desktop-hide','download-cta');` +
+    `var cur=el.parentElement,tagged=false;` +
+    `while(cur&&cur!==document.body){` +
+    `var ct=(cur.textContent||'').toLowerCase();` +
+    `if(ct.indexOf('want to run')>=0&&ct.indexOf('comfyui')>=0){` +
+    `cur.setAttribute('data-comfy-desktop-hide','download-cta');` +
+    `tagged=true;break;` +
+    `}` +
+    `cur=cur.parentElement;` +
+    `}` +
+    `if(!tagged&&el.parentElement&&el.parentElement.setAttribute){` +
+    `el.parentElement.setAttribute('data-comfy-desktop-hide','download-cta');` +
+    `}` +
+    `}` +
+    `}` +
+    `tagDownloadCta();` +
+    `try{` +
+    `new MutationObserver(function(muts){` +
+    `for(var i=0;i<muts.length;i++){` +
+    `var added=muts[i].addedNodes;` +
+    `for(var j=0;j<added.length;j++){` +
+    `var n=added[j];` +
+    `if(looksBlocked(n)){nukeToast(n);continue;}` +
+    `if(n.querySelectorAll){` +
+    `var hits=n.querySelectorAll('*');` +
+    `for(var k=0;k<hits.length;k++){` +
+    `if(looksBlocked(hits[k])){nukeToast(hits[k]);break;}` +
+    `}` +
+    `}` +
+    `}` +
+    `}` +
+    `tagDownloadCta();` +
+    `}).observe(document.documentElement,{childList:true,subtree:true});` +
+    `}catch(_){}` +
+    `try{` +
+    `var __ctaPolls=0;` +
+    `var __ctaPoll=setInterval(function(){` +
+    `tagDownloadCta();` +
+    `__ctaPolls++;if(__ctaPolls>60)clearInterval(__ctaPoll);` +
+    `},500);` +
+    `}catch(_){}` +
     `})()`
 
   const onDomReady = (): void => {
     comfyContents.executeJavaScript(COMFY_THEME_OBSERVER_JS).catch(() => {})
     const preamble = isLocal ? '' : 'window.__comfyDesktop2Remote = true;\n'
-    comfyContents
-      .executeJavaScript(preamble + getModelDownloadContentScript())
-      .catch(() => {})
+    comfyContents.executeJavaScript(preamble + getModelDownloadContentScript()).catch(() => {})
     // Cloud-only patches (popup-blocked toast suppression + post-signin
     // flicker hide). Skipped for local installs — they don't load cloud
     // frontend, never see the toast or the redirect flash.
@@ -353,30 +429,43 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
     // down install state), this binding goes stale and zoom shortcuts will
     // silently stop working until the next attach. The Reset Zoom menu item
     // re-reads parentEntry.comfyView at click time, so it stays correct.
-    if (mod && !input.alt && (input.key === '=' || input.key === '+' || input.key === '-' || input.key === '0')) {
+    if (
+      mod &&
+      !input.alt &&
+      (input.key === '=' || input.key === '+' || input.key === '-' || input.key === '0')
+    ) {
       e.preventDefault()
       if (comfyContents.isDestroyed()) return
       if (input.key === '0') {
         const previousLevel = comfyContents.getZoomLevel()
         comfyContents.setZoomLevel(0)
+        pushZoom()
         // Only emit when this was a real reset (skip no-op presses at 1x)
         // so the event count tracks actual recovery actions, not key-spam.
         if (previousLevel !== 0) {
-          mainTelemetry.emit('desktop2.zoom.reset', {
+          mainTelemetry.emit('comfy.desktop.zoom.reset', {
             source: 'shortcut',
             parent_entry_id: entry.windowKey,
             installation_id: entry.installationId,
             previous_zoom_level: previousLevel,
-            previous_zoom_percent: Math.round(Math.pow(1.2, previousLevel) * 100),
+            previous_zoom_percent: Math.round(Math.pow(1.2, previousLevel) * 100)
           })
         }
         return
       }
       const step = input.key === '-' ? -0.5 : 0.5
       comfyContents.setZoomLevel(comfyContents.getZoomLevel() + step)
+      pushZoom()
     }
   }
   comfyContents.on('before-input-event', onBeforeInputEvent)
+
+  const pushZoom = (): void => {
+    if (titleBarView.webContents.isDestroyed() || comfyContents.isDestroyed()) return
+    titleBarView.webContents.send('comfy-titlebar:zoom-changed', comfyContents.getZoomLevel())
+  }
+  const onZoomChanged = (): void => pushZoom()
+  comfyContents.on('zoom-changed', onZoomChanged)
 
   // Failure retry — backoff on did-fail-load that isn't aborted /
   // mid-relaunch. Per-install timer cancel registered into the
@@ -384,15 +473,33 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
   // retry that would otherwise navigate away from the splash page.
   let failRetryTimer: ReturnType<typeof setTimeout> | null = null
   const cancelFailRetry = (): void => {
-    if (failRetryTimer) { clearTimeout(failRetryTimer); failRetryTimer = null }
+    if (failRetryTimer) {
+      clearTimeout(failRetryTimer)
+      failRetryTimer = null
+    }
   }
   fx.comfyFailRetryTimerCancels.set(installationId, cancelFailRetry)
+  fx.comfyReloads.set(installationId, reloadComfy)
+  fx.comfyZoomResets.set(installationId, () => {
+    if (comfyContents.isDestroyed()) return
+    const previousLevel = comfyContents.getZoomLevel()
+    if (previousLevel === 0) return
+    comfyContents.setZoomLevel(0)
+    pushZoom()
+    mainTelemetry.emit('comfy.desktop.zoom.reset', {
+      source: 'titlebar',
+      parent_entry_id: entry.windowKey,
+      installation_id: entry.installationId,
+      previous_zoom_level: previousLevel,
+      previous_zoom_percent: Math.round(Math.pow(1.2, previousLevel) * 100)
+    })
+  })
   const onDidFailLoad = (
     _e: Electron.Event,
     code: number,
     _desc: string,
     _failUrl: string,
-    isMainFrame: boolean,
+    isMainFrame: boolean
   ): void => {
     if (!isMainFrame || code === -3 || failRetryTimer) return
     const id = entry.installationId
@@ -412,7 +519,7 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
 
   const onRenderProcessGone = (
     _event: Electron.Event,
-    details: Electron.RenderProcessGoneDetails,
+    details: Electron.RenderProcessGoneDetails
   ): void => {
     forwardDatadogError({
       source: 'comfy-window-render-process-gone',
@@ -422,8 +529,8 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
         origin: 'main-process',
         installationId: entry.installationId ?? '(detached)',
         reason: details.reason,
-        exitCode: details.exitCode,
-      },
+        exitCode: details.exitCode
+      }
     })
     reloadComfy()
   }
@@ -454,6 +561,7 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
       comfyContents.off('did-fail-load', onDidFailLoad)
       comfyContents.off('render-process-gone', onRenderProcessGone)
       comfyContents.off('before-input-event', onBeforeInputEvent)
+      comfyContents.off('zoom-changed', onZoomChanged)
     }
     const id = entry.installationId
     if (id !== null) {
@@ -482,6 +590,8 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
       }
       ipc.stopRunning(id)
       fx.comfyFailRetryTimerCancels.delete(id)
+      fx.comfyReloads.delete(id)
+      fx.comfyZoomResets.delete(id)
       fx.relaunchStates.delete(id)
       dropInstallationIndex(id)
       entry.installationId = null

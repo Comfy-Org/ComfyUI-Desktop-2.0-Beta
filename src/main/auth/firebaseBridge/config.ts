@@ -1,11 +1,7 @@
 /**
- * Firebase project configs mirroring the cloud frontend's
- * `src/config/firebase.ts`. The values are public (apiKey is a
- * project identifier, not a secret) so hardcoding them here is fine.
- *
- * `prod` is used when the embedded cloud-workspace view opens a
- * popup whose host is `dreamboothy.firebaseapp.com`; `dev` for
- * `dreamboothy-dev.firebaseapp.com`.
+ * Firebase project configs. Must mirror the cloud frontend's
+ * `src/config/firebase.ts`. Values are public (apiKey is a project
+ * identifier, not a secret), so hardcoding them here is fine.
  */
 export interface FirebaseProjectConfig {
   apiKey: string
@@ -43,11 +39,7 @@ export function getFirebaseConfig(env: FirebaseEnv): FirebaseProjectConfig {
   return env === 'dev' ? DEV_CONFIG : PROD_CONFIG
 }
 
-/**
- * Decide which Firebase project the intercepted popup URL points at.
- * The URL is always one of the auth-handler URLs we already match in
- * `isFirebaseAuthHandlerUrl`, so the host check is the source of truth.
- */
+/** Decide which Firebase project the intercepted popup URL points at. */
 export function detectFirebaseEnv(url: string): FirebaseEnv {
   try {
     const host = new URL(url).host

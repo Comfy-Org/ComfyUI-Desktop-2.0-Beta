@@ -3,12 +3,7 @@ import type { IpcRendererEvent } from 'electron'
 import { buildElectronApi } from './api'
 import { normaliseFirstUseMode, type FirstUseMode } from '../shared/firstUseMode'
 
-export type ComfyPanelKey =
-  | 'comfy'
-  | 'new-install'
-  | 'track'
-  | 'load-snapshot'
-  | 'quick-install'
+export type ComfyPanelKey = 'comfy' | 'new-install' | 'track' | 'load-snapshot' | 'quick-install'
 
 /** Anchor coordinates for a native title-bar menu — title-bar-local
  *  pixels (x = button left, y = button bottom). The titleBarView sits
@@ -75,6 +70,10 @@ export interface ComfyTitleBarBridge {
    *  resolved — the renderer suppresses the icon entirely in that
    *  case. */
   onSourceCategoryChanged(cb: (category: string | null) => void): () => void
+  /** Subscribe to comfyView zoom-level pushes from main. Level 0 = 100%;
+   *  the title bar surfaces the contextual "NNN%" reset pill for any
+   *  non-zero level. */
+  onZoomChanged(cb: (level: number) => void): () => void
   /** Subscribe to theme updates (background + symbol color). */
   onThemeChanged(cb: (theme: { bg: string; text: string }) => void): () => void
   /** Subscribe to macOS fullscreen state — drives traffic-light padding. */
@@ -85,9 +84,7 @@ export interface ComfyTitleBarBridge {
    *  (the blur-driven dismiss handles the close on its own). On
    *  macOS the click event can fire before the dismiss propagates,
    *  so a timestamp-only guard isn't reliable. */
-  onMenuOpened(
-    cb: (info: { menu: 'menu' | 'downloads' | 'instance-picker' }) => void,
-  ): () => void
+  onMenuOpened(cb: (info: { menu: 'menu' | 'downloads' | 'instance-picker' }) => void): () => void
   /** Subscribe to title-bar popup close events. Fires when the popup
    *  view (waffle menu, downloads tray, OR instance-picker) closes,
    *  after the user picks an item or dismisses by clicking outside.
@@ -95,9 +92,7 @@ export interface ComfyTitleBarBridge {
    *  same click that dismissed the popup also re-targets the opener
    *  button. The payload carries which kind closed so the per-button
    *  reopen guards stay independent. */
-  onMenuClosed(
-    cb: (info: { menu: 'menu' | 'downloads' | 'instance-picker' }) => void,
-  ): () => void
+  onMenuClosed(cb: (info: { menu: 'menu' | 'downloads' | 'instance-picker' }) => void): () => void
   /** Subscribe to first-use takeover step changes. Mode mirrors
    *  `firstUseMode` on the entry — see `FirstUseMode` in
    *  `src/shared/firstUseMode.ts` for the full union. The title bar
@@ -137,7 +132,7 @@ export interface ComfyTitleBarBridge {
       kind: 'available' | 'downloading' | 'ready' | null
       version: string | null
       autoUpdate: boolean
-    }) => void,
+    }) => void
   ): () => void
   /** Subscribe to install-update state pushes (status pills).
    *  `available` is `true` when the install's
@@ -147,7 +142,7 @@ export interface ComfyTitleBarBridge {
    *  "Update available". Only relevant on install-backed host
    *  windows; install-less hosts never receive this signal. */
   onInstallUpdateAvailable(
-    cb: (state: { available: boolean; version: string | null }) => void,
+    cb: (state: { available: boolean; version: string | null }) => void
   ): () => void
   /** Click handler for the app-update pill. Main responds by sending
    *  `panel-trigger-overlay` to the host's panelView so the renderer
@@ -175,9 +170,16 @@ export interface ComfyTitleBarBridge {
   /** Click handler for the title-bar Send Feedback button. Main
    *  resolves the host entry from the sender and forwards
    *  `comfy-panel:open-feedback` to the panel renderer, which fires
-   *  the `desktop2.feedback.opened` telemetry action and opens the
+   *  the `comfy.desktop.feedback.opened` telemetry action and opens the
    *  support URL via `openExternal`. */
   clickFeedback(): void
+  /** Click handler for the title-bar cloud-instance refresh button.
+   *  Main resolves the host entry from the sender and re-navigates its
+   *  comfyView via the same reload path as F5/Ctrl+R. */
+  clickRefreshInstance(): void
+  /** Reset the host comfyView's zoom to 100% (the title-bar zoom pill).
+   *  Mirrors Ctrl/Cmd+0 and the hamburger-menu Reset Zoom item. */
+  resetZoom(): void
   /** Issue #514 — show the title-bar hover tooltip popup. Routed
    *  through main, which positions a cached `WebContentsView` popup
    *  attached to the host window so the bubble escapes the title-bar
@@ -200,6 +202,25 @@ export interface ComfyTitleBarBridge {
   /** Issue #514 — hide the title-bar hover tooltip popup. Sent on
    *  pointer leave, focus loss, menu open, or panel switch. */
   hideTooltip(): void
+  /** First-instance onboarding coachmark (issue #701) — show the sticky
+   *  card pointing at the centre pill. Reuses the clip-escaping tooltip
+   *  popup pipeline (`variant: 'coachmark'`). `leftX`/`rightX` bracket
+   *  the pill's edges, `bottomY` is its bottom edge — title-bar-local
+   *  px (the title-bar view sits at window (0,0)). */
+  showCoachmark(payload: {
+    title: string
+    body: string
+    dismissLabel: string
+    leftX: number
+    rightX: number
+    bottomY: number
+  }): void
+  /** Hide the onboarding coachmark popup. */
+  hideCoachmark(): void
+  /** Subscribe to the coachmark's own dismiss button. Main forwards this
+   *  after the popup's ✕ / "Got it" is clicked so the renderer flips the
+   *  once-ever `hasSeenCentralPillHint` flag via `window.api`. */
+  onCoachmarkDismissed(cb: () => void): () => void
   /** Tell main this title bar is mounted; main responds with the initial state. */
   ready(): void
 }
@@ -258,6 +279,13 @@ const bridge: ComfyTitleBarBridge = {
     }
     ipcRenderer.on('comfy-titlebar:source-category-changed', handler)
     return () => ipcRenderer.removeListener('comfy-titlebar:source-category-changed', handler)
+  },
+  onZoomChanged: (cb) => {
+    const handler = (_event: IpcRendererEvent, level: unknown): void => {
+      cb(typeof level === 'number' ? level : 0)
+    }
+    ipcRenderer.on('comfy-titlebar:zoom-changed', handler)
+    return () => ipcRenderer.removeListener('comfy-titlebar:zoom-changed', handler)
   },
   onThemeChanged: (cb) => {
     const handler = (_event: IpcRendererEvent, data: unknown): void => {
@@ -365,17 +393,33 @@ const bridge: ComfyTitleBarBridge = {
   clickFeedback: () => {
     ipcRenderer.send('comfy-window:click-feedback')
   },
+  clickRefreshInstance: () => {
+    ipcRenderer.send('comfy-window:click-refresh-instance')
+  },
+  resetZoom: () => {
+    ipcRenderer.send('comfy-window:reset-zoom')
+  },
   showTooltip: (payload) => {
     ipcRenderer.send('comfy-window:show-titlebar-tooltip', payload)
   },
   hideTooltip: () => {
     ipcRenderer.send('comfy-window:hide-titlebar-tooltip')
   },
+  showCoachmark: (payload) => {
+    ipcRenderer.send('comfy-window:show-titlebar-coachmark', payload)
+  },
+  hideCoachmark: () => {
+    ipcRenderer.send('comfy-window:hide-titlebar-coachmark')
+  },
+  onCoachmarkDismissed: (cb) => {
+    const handler = (): void => cb()
+    ipcRenderer.on('comfy-titlebar:coachmark-dismissed', handler)
+    return () => ipcRenderer.removeListener('comfy-titlebar:coachmark-dismissed', handler)
+  },
   ready: () => {
     ipcRenderer.send('comfy-window:title-bar-ready')
-  },
+  }
 }
-
 
 // Expose the standard window.api bridge alongside __comfyTitleBar so the
 // title-bar renderer can call initializeRendererBootstrap() (which depends

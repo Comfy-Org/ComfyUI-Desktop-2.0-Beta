@@ -49,6 +49,7 @@ interface Snapshot {
   }
   githubUrl: string
   githubStars: number | null
+  githubStarsLoading: boolean
   i18n: {
     overview: string
     updates: string
@@ -146,9 +147,7 @@ const isChecking = ref(false)
 async function handleCheckForUpdate(): Promise<void> {
   isChecking.value = true
   try {
-    // `withMinDuration` floors the busy state so a sub-frame backend
-    // response (e.g. dev-mode no-op, up-to-date short-circuit) still
-    // flashes the "Checking…" label long enough to feel acknowledged.
+    // Floor the busy state so a sub-frame response still flashes "Checking…".
     await withMinDuration(async () => {
       await bridge?.globalSettingsCheckForUpdate()
     })
@@ -242,6 +241,7 @@ onMounted(() => {
             <GitHubLinkCard
               :url="snapshot.githubUrl"
               :stars="snapshot.githubStars"
+              :loading="snapshot.githubStarsLoading"
               @open="handleOpenExternal"
             />
           </GlobalSettingsMicroSection>

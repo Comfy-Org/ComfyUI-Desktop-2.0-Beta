@@ -1,8 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-// The primitive only imports `WebContentsView` from electron, but vitest
-// can't load the native binding so the module mock has to be in place
-// before the import.
+// Mock electron before import: vitest can't load the native WebContentsView binding.
 type FakeListener = (...args: unknown[]) => void
 
 interface FakeWebContents {
@@ -97,9 +95,7 @@ function makeBrowserWindow(): FakeBrowserWindow {
   return win
 }
 
-// vi.mock is hoisted above all imports, so the factory cannot capture
-// `FakeWebContentsViewCtor` defined later in the module — define the
-// constructor inside the factory itself.
+// Constructor defined inside the factory because vi.mock is hoisted above all imports.
 vi.mock('electron', () => {
   let nextId = 1
   class Ctor {
@@ -147,11 +143,7 @@ vi.mock('electron', () => {
     setBounds(b: Electron.Rectangle): void { this.bounds = b }
     getBounds(): Electron.Rectangle { return this.bounds }
   }
-  // `embeddedPopupView.ts` now imports `_registerExtraBroadcastTarget` from
-  // `../lib/ipc/broadcast`, which itself imports `BrowserWindow` from
-  // electron at module scope. Provide a minimal stub so module evaluation
-  // doesn't fault; the broadcast helper itself isn't exercised in these
-  // tests (no call path triggers a broadcast).
+  // BrowserWindow stub so the transitively-imported broadcast helper's module eval doesn't fault.
   return {
     WebContentsView: Ctor,
     BrowserWindow: { getAllWindows: () => [] },
@@ -230,9 +222,7 @@ describe('EmbeddedPopupView', () => {
     it('re-stacks the popup as the most recent child and flips it visible', () => {
       const { view, parent } = makePopup()
       const child = view.popup as unknown as FakeWebContentsView
-      // Insert another fake child after construction so the popup is no
-      // longer at the end of the stack — showOnTop must remove + re-add
-      // it so it paints above any later-attached views.
+      // Insert a later sibling so showOnTop must re-add the popup to paint above it.
       const sibling = { tag: 'sibling' } as unknown as FakeWebContentsView
       parent.contentView.addChildView(sibling)
       expect(parent.childViews[parent.childViews.length - 1]).toBe(sibling)

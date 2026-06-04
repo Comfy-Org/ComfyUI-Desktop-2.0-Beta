@@ -161,7 +161,7 @@ async function hydrateLastCrashError(installationId: string): Promise<void> {
       signal: data.signal,
       lastStderr: data.lastStderr,
       // Carry the main-side crash timestamp so
-      // `desktop2.instance.relaunched_after_crash` can compute a real
+      // `comfy.desktop.instance.relaunched_after_crash` can compute a real
       // `crash_to_relaunch_seconds` even when this view hydrated AFTER
       // the live `comfy-exited` event (panel recreated, etc.).
       crashedAtMs: data.crashedAtMs
@@ -193,7 +193,7 @@ function startLaunch(): void {
   if (state.value === 'crashed') {
     const errorInfoSnapshot = sessionStore.errorInstances.get(props.installationId)
     const crashedAtMs = errorInfoSnapshot?.crashedAtMs
-    emitTelemetryAction('desktop2.instance.relaunched_after_crash', {
+    emitTelemetryAction('comfy.desktop.instance.relaunched_after_crash', {
       installation_id: props.installationId,
       crash_to_relaunch_seconds:
         crashedAtMs != null ? Math.round((Date.now() - crashedAtMs) / 1000) : null
@@ -224,7 +224,7 @@ async function returnToDashboard(): Promise<void> {
   const reason = isRunning ? 'running' : 'crashed'
   const ok = await confirmReturnToDashboard(props.installation, reason)
   if (!ok) return
-  emitTelemetryAction('desktop2.instance.return_to_dashboard', { from: 'lifecycle', reason })
+  emitTelemetryAction('comfy.desktop.instance.return_to_dashboard', { from: 'lifecycle', reason })
   await window.api.returnToDashboard()
 }
 

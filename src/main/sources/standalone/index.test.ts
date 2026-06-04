@@ -1,4 +1,6 @@
-import { describe, expect, it, vi } from 'vitest'
+import fs from 'fs'
+import path from 'path'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('electron', () => ({
   app: { getPath: () => '' },
@@ -18,6 +20,7 @@ import { fetchJSON } from '../../lib/fetch'
 import { getLatestStableTag } from '../../lib/comfyui-releases'
 import { PLATFORM_PREFIX } from './envPaths'
 import type { FieldOption } from '../../types/sources'
+import type { InstallationRecord } from '../../installations'
 
 const mockedFetchJSON = vi.mocked(fetchJSON)
 const mockedGetLatestStableTag = vi.mocked(getLatestStableTag)
@@ -71,41 +74,44 @@ describe('standalone.buildInstallation', () => {
     } as unknown as Record<string, unknown>,
   })
 
-  it('sets autoUpdateComfyUI when release value is "latest"', () => {
+  it('Stable: sets autoUpdateComfyUI + updateChannel="stable" so post-install checks out the latest stable tag', () => {
     const result = standalone.buildInstallation({
-      release: makeRelease('latest', 'v0.18.2-env1'),
+      release: makeRelease('stable', 'v0.18.2-env1'),
       variant: makeVariant(VENDOR_ID),
     })
     expect(result.autoUpdateComfyUI).toBe(true)
+    expect(result.updateChannel).toBe('stable')
   })
 
-  it('does NOT set autoUpdateComfyUI for a specific release tag', () => {
-    const result = standalone.buildInstallation({
-      release: makeRelease('v0.18.2-env1'),
-      variant: makeVariant(VENDOR_ID),
-    })
-    expect(result.autoUpdateComfyUI).toBeUndefined()
-  })
-
-  it('uses r2Release tag as releaseTag when "latest" is selected', () => {
+  it('Latest on GitHub: sets autoUpdateComfyUI + updateChannel="latest" so post-install fast-forwards to master HEAD', () => {
     const result = standalone.buildInstallation({
       release: makeRelease('latest', 'v0.18.2-env1'),
       variant: makeVariant(VENDOR_ID),
     })
-    expect(result.releaseTag).toBe('v0.18.2-env1')
+    // Both channels run the post-install update step — the bundle's
+    // checked-in commit is necessarily behind both stable AND master,
+    // so picking "Latest on GitHub" without an update would leave the
+    // user on an OLD master commit, not the actual latest one.
+    expect(result.autoUpdateComfyUI).toBe(true)
+    expect(result.updateChannel).toBe('latest')
   })
 
-  it('uses the release value directly as releaseTag for specific releases', () => {
-    const result = standalone.buildInstallation({
-      release: makeRelease('v0.18.2-env1'),
+  it('uses r2Release tag as releaseTag for both channels', () => {
+    const stable = standalone.buildInstallation({
+      release: makeRelease('stable', 'v0.18.2-env1'),
       variant: makeVariant(VENDOR_ID),
     })
-    expect(result.releaseTag).toBe('v0.18.2-env1')
+    const latest = standalone.buildInstallation({
+      release: makeRelease('latest', 'v0.18.2-env1'),
+      variant: makeVariant(VENDOR_ID),
+    })
+    expect(stable.releaseTag).toBe('v0.18.2-env1')
+    expect(latest.releaseTag).toBe('v0.18.2-env1')
   })
 
   it('freezes originalBuild and originalTorchVersion from r2Release on the installation', () => {
     const result = standalone.buildInstallation({
-      release: makeRelease('v0.18.2-env1'),
+      release: makeRelease('stable', 'v0.18.2-env1'),
       variant: makeVariant(VENDOR_ID),
     })
     expect(result.originalBuild).toBe(1)
@@ -129,51 +135,182 @@ describe('standalone.getFieldOptions release', () => {
     })
   }
 
-  it('includes "Latest Stable" when includeLatestStable is true', async () => {
+  it('returns exactly the two IPP channel options (Stable + Latest on GitHub)', async () => {
     setupMockReleases()
     const options = await standalone.getFieldOptions!('release', {}, { includeLatestStable: true })
-    expect(options[0]!.value).toBe('latest')
+    // No per-tag entries — only the two channel options surface, in
+    // the same order + with the same value ids the IPP Update tab uses.
+    expect(options.length).toBe(2)
+    expect(options[0]!.value).toBe('stable')
     expect(options[0]!.recommended).toBe(true)
-    // Real releases follow
-    expect(options[1]!.value).toBe('v0.18.3-env1')
-    expect(options[2]!.value).toBe('v0.18.2-env1')
+    expect(options[1]!.value).toBe('latest')
+    expect(options[1]!.recommended).toBeUndefined()
   })
 
-  it('excludes "Latest Stable" by default (no context flag)', async () => {
+  it('returns no options when includeLatestStable is omitted', async () => {
     setupMockReleases()
     const options = await standalone.getFieldOptions!('release', {}, {})
-    expect(options.every((o) => o.value !== 'latest')).toBe(true)
-    expect(options[0]!.value).toBe('v0.18.3-env1')
+    expect(options).toEqual([])
   })
 
-  it('excludes "Latest Stable" when includeLatestStable is false', async () => {
-    setupMockReleases()
-    const options = await standalone.getFieldOptions!('release', {}, { includeLatestStable: false })
-    expect(options.every((o) => o.value !== 'latest')).toBe(true)
-  })
-
-  it('"Latest Stable" entry uses the newest release tag', async () => {
+  it('both entries point data.tag at the newest available bundle', async () => {
     setupMockReleases()
     const options = await standalone.getFieldOptions!('release', {}, { includeLatestStable: true })
-    const latestEntry = options.find((o) => o.value === 'latest')!
-    const underlyingData = latestEntry.data as Record<string, unknown>
-    expect(underlyingData.tag).toBe('v0.18.3-env1')
+    const stableData = options.find((o) => o.value === 'stable')!.data as Record<string, unknown>
+    const latestData = options.find((o) => o.value === 'latest')!.data as Record<string, unknown>
+    expect(stableData.tag).toBe('v0.18.3-env1')
+    expect(latestData.tag).toBe('v0.18.3-env1')
   })
 
-  it('"Latest Stable" entry shows the upstream ComfyUI tag in description when resolved', async () => {
+  it('Stable entry threads the upstream stable tag through data.latestStableTag', async () => {
+    // The variant card reads `data.latestStableTag` to show the version
+    // the user lands on after post-install update — that survived the
+    // IPP-label cleanup so issue #708 stays fixed.
     setupMockReleases()
     mockedGetLatestStableTag.mockResolvedValue('v1.19.5')
     const options = await standalone.getFieldOptions!('release', {}, { includeLatestStable: true })
-    const latestEntry = options.find((o) => o.value === 'latest')!
-    expect(latestEntry.description).toBe('v1.19.5')
+    const stableData = options.find((o) => o.value === 'stable')!.data as Record<string, unknown>
+    expect(stableData.latestStableTag).toBe('v1.19.5')
+  })
+})
+
+// --- getLaunchCommand: adopted Legacy Desktop installs ---
+
+describe('standalone.getLaunchCommand for adopted Legacy Desktop installs', () => {
+  const installPath = path.join('C:', 'fake', 'installs', 'adopted')
+  const adoptedBaseDir = path.join('C:', 'Users', 'me', 'Documents', 'ComfyUI')
+  const adoptedPythonPath = path.join(adoptedBaseDir, '.venv', 'Scripts', 'python.exe')
+
+  // Pretend every path the source checks is on disk — we're only exercising
+  // arg construction, not file resolution.
+  beforeEach(() => {
+    vi.spyOn(fs, 'existsSync').mockReturnValue(true)
   })
 
-  it('"Latest Stable" entry omits description when the tag lookup fails', async () => {
-    setupMockReleases()
-    mockedGetLatestStableTag.mockResolvedValue(null)
-    const options = await standalone.getFieldOptions!('release', {}, { includeLatestStable: true })
-    const latestEntry = options.find((o) => o.value === 'latest')!
-    expect(latestEntry.description).toBeUndefined()
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  function makeAdoptedRecord(overrides: Partial<InstallationRecord> = {}): InstallationRecord {
+    return {
+      id: 'inst-1',
+      name: 'ComfyUI',
+      createdAt: new Date().toISOString(),
+      sourceId: 'standalone',
+      installPath,
+      adopted: true,
+      adoptedBaseDir,
+      adoptedPythonPath,
+      // Adopted records ship with shared models on (legacy `models/` is
+      // registered in the global modelsDirs list) and shared input/output
+      // off — the workspace is pinned to legacy basePath via the
+      // per-install inputDir/outputDir fields, which launch.ts handles.
+      useSharedModels: true,
+      useSharedInputOutput: false,
+      inputDir: path.join(adoptedBaseDir, 'input'),
+      outputDir: path.join(adoptedBaseDir, 'output'),
+      launchArgs: '--listen 127.0.0.1 --port 8188',
+      ...overrides,
+    } as InstallationRecord
+  }
+
+  it('uses adoptedPythonPath for the cmd instead of standalone-env python', () => {
+    const cmd = standalone.getLaunchCommand!(makeAdoptedRecord())
+    expect(cmd).not.toBeNull()
+    expect(cmd!.cmd).toBe(adoptedPythonPath)
+  })
+
+  it('runs ComfyUI/main.py from installPath (not from adoptedBaseDir)', () => {
+    const cmd = standalone.getLaunchCommand!(makeAdoptedRecord())!
+    expect(cmd.cwd).toBe(installPath)
+    expect(cmd.args![0]).toBe('-s')
+    expect(cmd.args![1]).toBe(path.join('ComfyUI', 'main.py'))
+  })
+
+  it('injects only --base-directory / --user-directory rooted at adoptedBaseDir', () => {
+    // --input-directory / --output-directory are NOT injected here anymore;
+    // they're first-class per-install fields handled by launch.ts'
+    // shared-input-output branch.
+    const cmd = standalone.getLaunchCommand!(makeAdoptedRecord())!
+    const args = cmd.args!
+    const idx = (flag: string) => args.indexOf(flag)
+    expect(args[idx('--base-directory') + 1]).toBe(adoptedBaseDir)
+    expect(args[idx('--user-directory') + 1]).toBe(path.join(adoptedBaseDir, 'user'))
+    expect(args.includes('--input-directory')).toBe(false)
+    expect(args.includes('--output-directory')).toBe(false)
+  })
+
+  it('pins --database-url at the legacy user dir so SQLite can open it', () => {
+    // ComfyUI's default --database-url resolves to <source>/../user/comfyui.db,
+    // which for an adopted install lives in the empty new install dir — the
+    // parent `user/` doesn't exist there, so SQLite raised "unable to open
+    // database file" on launch. Anchor the URL at the legacy user folder.
+    const cmd = standalone.getLaunchCommand!(makeAdoptedRecord())!
+    const args = cmd.args!
+    const idx = args.indexOf('--database-url')
+    expect(idx).toBeGreaterThanOrEqual(0)
+    expect(args[idx + 1]).toBe(
+      `sqlite:///${path.join(adoptedBaseDir, 'user', 'comfyui.db')}`
+    )
+  })
+
+  it('does not override a user-supplied --database-url', () => {
+    const userUrl = 'sqlite:///D:/custom/path/my.db'
+    const cmd = standalone.getLaunchCommand!(
+      makeAdoptedRecord({ launchArgs: `--port 8188 --database-url ${userUrl}` })
+    )!
+    const args = cmd.args!
+    // Only one --database-url, and it's the user's value.
+    const positions = args
+      .map((value, index) => (value === '--database-url' ? index : -1))
+      .filter((index) => index >= 0)
+    expect(positions.length).toBe(1)
+    expect(args[positions[0]! + 1]).toBe(userUrl)
+  })
+
+  it('does not override a user-supplied --database-url=VALUE form', () => {
+    const cmd = standalone.getLaunchCommand!(
+      makeAdoptedRecord({ launchArgs: '--port 8188 --database-url=sqlite:///:memory:' })
+    )!
+    const args = cmd.args!
+    // Adopt branch must not inject its own --database-url alongside the
+    // `=`-style override.
+    expect(args.includes('--database-url')).toBe(false)
+    expect(args.some((a) => a === '--database-url=sqlite:///:memory:')).toBe(true)
+  })
+
+  it('places adopt CLI args before user launchArgs so user values win on conflict', () => {
+    const cmd = standalone.getLaunchCommand!(makeAdoptedRecord({
+      launchArgs: '--listen 0.0.0.0 --port 9000 --base-directory /custom/override',
+    }))!
+    const args = cmd.args!
+    // Two --base-directory occurrences; user override comes after the adopt-injected one
+    const positions = args
+      .map((value, index) => value === '--base-directory' ? index : -1)
+      .filter((index) => index >= 0)
+    expect(positions.length).toBe(2)
+    expect(positions[0]!).toBeLessThan(positions[1]!)
+    expect(args[positions[1]! + 1]).toBe('/custom/override')
+  })
+
+  it('extracts the port from user launchArgs', () => {
+    const cmd = standalone.getLaunchCommand!(makeAdoptedRecord())!
+    expect(cmd.port).toBe(8188)
+  })
+
+  it('returns null when adoptedPythonPath is missing', () => {
+    const cmd = standalone.getLaunchCommand!(makeAdoptedRecord({ adoptedPythonPath: undefined }))
+    expect(cmd).toBeNull()
+  })
+
+  it('does not inject adopt args when adopted flag is absent', () => {
+    const record = makeAdoptedRecord({ adopted: undefined })
+    const cmd = standalone.getLaunchCommand!(record)
+    // adoptedPythonPath is ignored for non-adopted; getActivePythonPath would
+    // return a standalone-env path which our existsSync mock also accepts.
+    expect(cmd).not.toBeNull()
+    expect(cmd!.args!.includes('--base-directory')).toBe(false)
+    expect(cmd!.args!.includes('--user-directory')).toBe(false)
   })
 })
 
@@ -203,10 +340,10 @@ describe('standalone.getFieldOptions variant version display', () => {
     return releaseOptions.find((o) => o.value === value)!
   }
 
-  it('variant card shows the upstream stable version (not the bundled one) when "Latest Stable" is selected', async () => {
+  it('variant card shows the upstream stable version (not the bundled one) when "Stable" is selected', async () => {
     const { vendorId } = setupVersionGap()
     mockedGetLatestStableTag.mockResolvedValue('v0.22.3')
-    const release = await getReleaseOption('latest')
+    const release = await getReleaseOption('stable')
 
     const variants = await standalone.getFieldOptions!('variant', { release }, {})
     const card = variants.find((o) => o.value === vendorId)!
@@ -218,21 +355,23 @@ describe('standalone.getFieldOptions variant version display', () => {
   it('variant card falls back to the bundled version when the upstream tag is unresolved', async () => {
     const { vendorId } = setupVersionGap()
     mockedGetLatestStableTag.mockResolvedValue(null)
-    const release = await getReleaseOption('latest')
+    const release = await getReleaseOption('stable')
 
     const variants = await standalone.getFieldOptions!('variant', { release }, {})
     const card = variants.find((o) => o.value === vendorId)!
     expect(card.description).toContain('ComfyUI 0.20.1')
   })
 
-  it('variant card shows the bundled version for a pinned (non-latest) release', async () => {
+  it('variant card shows the bundled version when "Latest on GitHub" is selected', async () => {
     const { vendorId } = setupVersionGap()
     mockedGetLatestStableTag.mockResolvedValue('v0.22.3')
-    const release = await getReleaseOption('v0.20.1-env1')
+    const release = await getReleaseOption('latest')
 
     const variants = await standalone.getFieldOptions!('variant', { release }, {})
     const card = variants.find((o) => o.value === vendorId)!
-    // Pinned releases legitimately show the version baked into that env.
+    // Latest-on-GitHub leaves the install on whatever the bundle
+    // shipped with (master-ish HEAD); the card advertises that, not
+    // the stable tag the OTHER channel would land on.
     expect(card.description).toContain('ComfyUI 0.20.1')
   })
 })

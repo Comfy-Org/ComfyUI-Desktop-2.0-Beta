@@ -3,18 +3,11 @@ import type { IpcMainInvokeEvent } from 'electron'
 import { PICKER_SETTINGS_CHANNELS as CH } from '../../types/ipc'
 
 /**
- * Picker expanded-Manage IPC handlers.
+ * Picker expanded-Manage IPC handlers. The picker popup has its own preload (no `window.api`), so each
+ * popup-facing channel forwards to the existing panel-facing handler.
  *
- * The instance-picker popup is a separate WebContentsView with its own preload
- * (no `window.api`). To run the per-install settings UI inside it, every
- * `window.api.*` call the settings UI makes must round-trip through main. Each
- * handler here registers a popup-facing channel that forwards to the existing
- * panel-facing handler — one source of truth, no duplicated bodies.
- *
- * Forwarding goes through `ipcMain._invokeHandlers` (a private Electron map,
- * stable as of v33 but not contractually so). If a future Electron release
- * removes it, factor the panel handlers into plain async functions both sides
- * call directly.
+ * Forwarding uses `ipcMain._invokeHandlers`, a private Electron map (stable as of v33, not contractual).
+ * If a future release removes it, factor the panel handlers into plain async functions both sides call.
  */
 type InvokeHandler = (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown
 function dispatchInvoke(
@@ -165,7 +158,6 @@ export function registerPickerSettingsIpc(): void {
     }
   })
 
-  // The popup boots with a smaller static i18n catalog; pull main's full
-  // catalog so keys like `actions.restart` resolve inside the popup.
+  // Pull main's full i18n catalog so keys like `actions.restart` resolve inside the popup.
   ipcMain.handle(CH.getLocaleMessages, (event) => dispatchInvoke('get-locale-messages', event))
 }

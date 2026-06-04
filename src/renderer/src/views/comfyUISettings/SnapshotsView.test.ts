@@ -8,18 +8,7 @@ import { TID } from '../../../../shared/testIds'
 import SnapshotsView from './SnapshotsView.vue'
 import type { SnapshotSummary, SnapshotListData } from '../../types/ipc'
 
-/**
- * Component tests for the snapshots tab + its inline restore op-card.
- *
- * The card swaps into the dashed "Save New Snapshot" slot at the top of
- * the timeline rail when an `activeOperation` with `actionId='snapshot-restore'`
- * is passed in. Four terminal states: in-flight (spinner + percent),
- * success ("Snapshot restored" — auto-dismisses after 1.8s), error
- * ("Restore failed" — Retry / Dismiss), cancelled (silently restores idle).
- *
- * These tests lock the card's state machine + emit contract + scroll
- * behaviour so the snapshot UX stays in the user's face.
- */
+// Tests the snapshots tab + inline restore op-card state machine: in-flight, success (auto-dismiss 1.8s), error (Retry/Dismiss), cancelled.
 
 const messages = {
   en: {

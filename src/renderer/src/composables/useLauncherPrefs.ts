@@ -1,13 +1,11 @@
 import { ref } from 'vue'
 
-// Module-level shared state so all components see the same values
+// Module-level shared state so all components see the same values.
 const firstUseCompleted = ref<boolean>(false)
 const loaded = ref(false)
 let loadPromise: Promise<void> | null = null
 
-/** Seed from the panel URL so the first paint can gate on first-use
- *  without waiting for the async `getSetting` IPC round-trip. Main
- *  passes the persisted value synchronously when loading panel.html. */
+// Seed from the panel URL so first paint can gate without the async getSetting IPC.
 export function seedLauncherPrefsFromUrl(search: string): void {
   const value = new URLSearchParams(search).get('firstUseCompleted')
   if (value !== 'true' && value !== 'false') return
@@ -26,16 +24,8 @@ export function useLauncherPrefs() {
     return loadPromise
   }
 
-  /**
-   * Flip the first-use takeover gate to "complete" after the user finishes
-   * the consent + pick flow (Cloud branch: immediately on Cloud-card pick;
-   * Local branch: when the chained new-install Tier 3 takeover signals a
-   * successful install via close or navigate-list). Mid-flow cancel never
-   * calls this — the takeover replays on the next launch.
-   *
-   * Idempotent: a second call is a no-op if the flag is already set, so
-   * close-after-success listeners don't need to dedupe.
-   */
+  // Marks first-use complete after the consent + pick flow succeeds (never on
+  // mid-flow cancel). Idempotent.
   async function markFirstUseCompleted(): Promise<void> {
     if (firstUseCompleted.value) return
     firstUseCompleted.value = true
@@ -50,12 +40,7 @@ export function useLauncherPrefs() {
   }
 }
 
-/**
- * Test-only: clear the module-level memoized load promise + reset all
- * refs so a fresh `loadPrefs()` call re-reads the persisted settings.
- * Production code should never call this — `loadPrefs` is intentionally
- * memoized so all components share one fetched view.
- */
+// Test-only: clear the memoized load promise + refs so loadPrefs re-reads.
 export function __resetLauncherPrefsForTest(): void {
   loadPromise = null
   loaded.value = false

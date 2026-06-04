@@ -58,7 +58,7 @@ export interface Operation {
   actionId?: string
   /** Wall-clock start, for the op-outcome event's duration_ms. */
   _startedAtMs: number
-  /** One-shot guard so `desktop2.op.result` fires exactly once per op
+  /** One-shot guard so `comfy.desktop.op.result` fires exactly once per op
    *  (a terminal transition AND a later cleanup must not double-count). */
   _resultEmitted: boolean
   unsubProgress: Unsubscribe | null
@@ -91,8 +91,8 @@ export const useProgressStore = defineStore('progress', () => {
   })
 
   /**
-   * Fire `desktop2.op.result` exactly once per operation. This is the
-   * outcome half of the multi-instance funnel: `desktop2.action.invoked`
+   * Fire `comfy.desktop.op.result` exactly once per operation. This is the
+   * outcome half of the multi-instance funnel: `comfy.desktop.action.invoked`
    * (with `action_id`) marks the click; this marks how it ended.
    *
    * `result`:
@@ -114,7 +114,7 @@ export const useProgressStore = defineStore('progress', () => {
   ): void {
     if (op._resultEmitted) return
     op._resultEmitted = true
-    emitTelemetryAction('desktop2.op.result', {
+    emitTelemetryAction('comfy.desktop.op.result', {
       installation_id: installationId,
       action_id: op.actionId ?? null,
       op_kind: op.opKind,
@@ -147,7 +147,13 @@ export const useProgressStore = defineStore('progress', () => {
     const op = operations.get(installationId)
     if (!op || op.finished) return null
     if (op.steps && op.activePhase) {
-      const status = op.lastStatus[op.activePhase] || op.activePhase
+      // Prefer real status detail, then the registered step label, only
+      // falling back to the raw phase id when neither is available — so
+      // ambient surfaces never surface dev-y slugs like "source".
+      const raw = op.lastStatus[op.activePhase]
+      const stepLabel = op.steps.find((s) => s.phase === op.activePhase)?.label
+      const status =
+        (raw && raw !== op.activePhase ? raw : null) || stepLabel || op.activePhase
       return { status, percent: op.activePercent }
     }
     return { status: op.flatStatus || op.title, percent: op.flatPercent }

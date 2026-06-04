@@ -42,7 +42,6 @@ const statusLabel = computed(() => {
 
 <template>
   <div class="pip">
-    <!-- In-flight -->
     <Transition name="pip-fade" mode="out-in">
       <div v-if="isInflight" key="inflight" class="pip__body">
         <div class="pip__spinner" aria-hidden="true">
@@ -70,7 +69,6 @@ const statusLabel = computed(() => {
         </button>
       </div>
 
-      <!-- Success -->
       <div v-else-if="isSuccess" key="success" class="pip__body">
         <div class="pip__icon pip__icon--success">
           <CheckCircle :size="40" />
@@ -86,7 +84,6 @@ const statusLabel = computed(() => {
         </button>
       </div>
 
-      <!-- Error -->
       <div v-else-if="isError" key="error" class="pip__body">
         <div class="pip__icon pip__icon--error">
           <XCircle :size="40" />
@@ -111,7 +108,6 @@ const statusLabel = computed(() => {
         </div>
       </div>
 
-      <!-- Cancelled -->
       <div v-else-if="isCancelled" key="cancelled" class="pip__body">
         <div class="pip__icon pip__icon--cancelled">
           <Ban :size="36" />
@@ -133,7 +129,6 @@ const statusLabel = computed(() => {
   padding: 32px 24px;
 }
 
-/* ── State body ─────────────────────────────────────────────────── */
 .pip__body {
   display: flex;
   flex-direction: column;
@@ -144,7 +139,6 @@ const statusLabel = computed(() => {
   text-align: center;
 }
 
-/* ── SVG ring spinner ───────────────────────────────────────────── */
 .pip__spinner {
   position: relative;
   width: 64px;
@@ -192,7 +186,6 @@ const statusLabel = computed(() => {
   letter-spacing: -0.3px;
 }
 
-/* ── Status icon (success / error / cancelled) ──────────────────── */
 .pip__icon {
   display: flex;
   align-items: center;
@@ -206,7 +199,6 @@ const statusLabel = computed(() => {
   opacity: 0.45;
 }
 
-/* ── Text ───────────────────────────────────────────────────────── */
 .pip__label {
   font-size: 12px;
   color: var(--text-muted, var(--neutral-100));
@@ -234,7 +226,6 @@ const statusLabel = computed(() => {
   opacity: 0.8;
 }
 
-/* ── Buttons ────────────────────────────────────────────────────── */
 .pip__primary-btn {
   margin-top: 4px;
   height: 34px;
@@ -273,7 +264,6 @@ const statusLabel = computed(() => {
   margin-top: 4px;
 }
 
-/* ── Fade transition between states ────────────────────────────── */
 .pip-fade-enter-active,
 .pip-fade-leave-active {
   transition: opacity 200ms ease, transform 200ms ease;

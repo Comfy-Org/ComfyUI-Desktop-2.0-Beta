@@ -1,32 +1,89 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { Pencil } from 'lucide-vue-next'
 import BaseCopyButton from '../../components/ui/BaseCopyButton.vue'
 import type { DetailField, DetailSection, Installation } from '../../types/ipc'
 
 /**
- * Status tab — grouped install summary with identity hero and inset
- * fact groups. Replaces generic readonly SettingsSectionList rows.
+ * Status tab: grouped install summary with an inline-editable identity hero (committing calls `onRename`).
  */
 
 interface Props {
   installation: Installation | null
   sections: DetailSection[]
   diskUsage: { label: string; value: string } | null
+  /** Commit a rename, resolving `true` on success; a function prop (not an emit) so blur can await and revert only on failure. */
+  onRename?: (newName: string) => Promise<boolean>
 }
 
 const props = defineProps<Props>()
 
 const { t } = useI18n()
 
+// Drive the hero name imperatively: mixing `{{ }}` with the inline pencil icon left Vue unable to patch the edited text node, so a committed rename painted everywhere except here.
+const nameEl = useTemplateRef<HTMLElement>('nameEl')
+
+// Write the name into the editable element if it differs, without stomping the caret mid-edit.
+function syncName(): void {
+  const el = nameEl.value
+  if (!el) return
+  const name = props.installation?.name ?? ''
+  if (el.textContent !== name) el.textContent = name
+}
+
+// Watch the name AND the ref (which starts null) so the initial name paints once the contenteditable mounts.
+watch(
+  [() => props.installation?.name ?? '', nameEl],
+  () => {
+    if (document.activeElement !== nameEl.value) syncName()
+  },
+  { immediate: true, flush: 'post' },
+)
+
+function handleNameSelectAll(event: KeyboardEvent): void {
+  event.preventDefault()
+  const el = event.currentTarget as HTMLElement
+  const range = document.createRange()
+  range.selectNodeContents(el)
+  const sel = window.getSelection()
+  sel?.removeAllRanges()
+  sel?.addRange(range)
+}
+
+function handleNamePaste(event: ClipboardEvent): void {
+  event.preventDefault()
+  const text = event.clipboardData?.getData('text/plain') ?? ''
+  document.execCommand('insertText', false, text)
+}
+
+// Escape restores the original name and blurs; the blur handler then no-ops.
+function handleNameEscape(): void {
+  syncName()
+  nameEl.value?.blur()
+}
+
+async function handleNameBlur(event: FocusEvent): Promise<void> {
+  const el = event.target as HTMLElement
+  const current = props.installation?.name ?? ''
+  const newName = el.textContent?.trim() ?? ''
+  if (newName && newName !== current) {
+    // Keep the trimmed text optimistically so the hero doesn't flash back mid-round-trip; only a rejection reverts.
+    if (el.textContent !== newName) el.textContent = newName
+    const committed = await props.onRename?.(newName)
+    if (committed === false) syncName()
+    return
+  }
+  // Empty / whitespace-only / unchanged: restore the canonical name now.
+  syncName()
+}
+
 interface FactRow {
   id: string
   label: string
   value: string
   copyable?: boolean
-  /** `'start'` truncates with a leading ellipsis so the tail (last
-   *  path segment) stays visible. Paths use it; everything else
-   *  defaults to end-truncation. */
+  /** `'start'` keeps the tail visible (used by paths); everything else end-truncates. */
   truncate?: 'start' | 'end'
 }
 
@@ -52,12 +109,7 @@ function fieldValue(field: DetailField): string {
   return String(v)
 }
 
-/** Localised dates (e.g. the "Installed" field) come through as
- *  `toLocaleDateString()` output — `5/28/2026` etc. — whose `/`
- *  separators would otherwise trip the slash-based path heuristic and
- *  sprout a copy button that makes no sense for a date (#712). A path
- *  always carries a letter (drive/segment name), a backslash, or a
- *  leading `~`; a date is only digits and date separators. */
+// Localised dates contain only digits and separators; without this guard the slash-based path heuristic sprouts a nonsensical copy button on dates.
 function looksLikeDate(value: string): boolean {
   return /^[\d/.\-: ]+$/.test(value)
 }
@@ -187,7 +239,23 @@ const groups = computed<FactGroup[]>(() => {
   <div class="status-fact-panel">
     <header v-if="installation" class="status-fact-hero">
       <div class="status-fact-hero-title-row">
-        <p class="status-fact-hero-name">{{ installation.name }}</p>
+        <span class="status-fact-hero-name-wrap">
+          <span
+            ref="nameEl"
+            class="status-fact-hero-name"
+            role="textbox"
+            :aria-label="t('statusFactPanel.editName', 'Edit installation name')"
+            contenteditable="plaintext-only"
+            spellcheck="false"
+            @blur="handleNameBlur"
+            @keydown.enter.prevent="($event.target as HTMLElement).blur()"
+            @keydown.esc.prevent="handleNameEscape"
+            @keydown.ctrl.a.prevent="handleNameSelectAll"
+            @keydown.meta.a.prevent="handleNameSelectAll"
+            @paste="handleNamePaste"
+          />
+          <Pencil :size="13" class="status-fact-hero-edit-hint" aria-hidden="true" />
+        </span>
         <span v-if="installation.sourceLabel" class="status-fact-hero-badge">
           {{ installation.sourceLabel }}
         </span>
@@ -237,12 +305,54 @@ const groups = computed<FactGroup[]>(() => {
   gap: 8px;
 }
 
+/* Name + pencil as siblings (the pencil can't live inside the contenteditable — `textContent =` would wipe it). */
+.status-fact-hero-name-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  margin-left: -6px;
+}
+
 .status-fact-hero-name {
-  margin: 0;
   font-size: 18px;
   font-weight: 600;
   line-height: 24px;
   color: var(--text);
+  min-width: 0;
+  padding: 2px 6px;
+  border-radius: 6px;
+  outline: none;
+  cursor: text;
+  /* Long names ellipsize at rest and scroll horizontally while editing. `nowrap` (not `pre`) so whitespace runs collapse. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background-color 120ms ease;
+}
+
+.status-fact-hero-name:hover {
+  background: var(--brand-surface-bg-hover);
+}
+
+.status-fact-hero-name:focus-visible {
+  background: var(--brand-surface-bg-hover);
+  box-shadow: 0 0 0 2px var(--focus-ring, var(--neutral-50));
+}
+
+/* Pencil hint fades up on hover/focus. */
+.status-fact-hero-edit-hint {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  opacity: 0;
+  transition: opacity 120ms ease;
+  user-select: none;
+  pointer-events: none;
+}
+
+.status-fact-hero-name-wrap:hover .status-fact-hero-edit-hint,
+.status-fact-hero-name:focus-visible ~ .status-fact-hero-edit-hint {
+  opacity: 0.6;
 }
 
 .status-fact-hero-badge {
@@ -291,7 +401,7 @@ const groups = computed<FactGroup[]>(() => {
 
 .status-fact-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
   align-items: center;
   gap: 12px;
   padding: 10px 0;
@@ -329,10 +439,7 @@ const groups = computed<FactGroup[]>(() => {
   white-space: nowrap;
 }
 
-/* Path rows truncate from the START so the trailing folder name
- * (the useful bit) stays readable. `direction: rtl` makes the
- * ellipsis fall on the left; the inner <bdi dir="ltr"> keeps the
- * character order rendering left-to-right. */
+/* Truncate paths from the start to keep the trailing folder readable. `direction: rtl` puts the ellipsis on the left; the inner <bdi dir="ltr"> keeps character order. */
 .status-fact-value.is-truncate-start {
   direction: rtl;
   text-align: left;

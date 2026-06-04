@@ -10,7 +10,7 @@
 # Those apparmor_parser flags are akin to performing a dry run of loading a profile.
 # https://wiki.debian.org/AppArmor/HowToUse#Dumping_profiles
 if apparmor_status --enabled > /dev/null 2>&1; then
-  APPARMOR_PROFILE_SOURCE='/opt/ComfyUI Desktop 2.0/resources/apparmor-profile'
+  APPARMOR_PROFILE_SOURCE='/opt/Comfy Desktop/resources/apparmor-profile'
   APPARMOR_PROFILE_TARGET='/etc/apparmor.d/comfyui-desktop-2'
   if apparmor_parser --skip-kernel-load --debug "$APPARMOR_PROFILE_SOURCE" > /dev/null 2>&1; then
     cp -f "$APPARMOR_PROFILE_SOURCE" "$APPARMOR_PROFILE_TARGET"

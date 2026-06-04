@@ -1,7 +1,8 @@
 import fs from 'fs'
 import path from 'path'
 import { execFile } from 'child_process'
-import { getVenvDir } from './envPaths'
+import { getActiveVenvDir } from '../../lib/pythonEnv'
+import type { InstallationRecord } from '../../installations'
 
 export async function removeQuarantine(dir: string, log?: (text: string) => void): Promise<void> {
   if (process.platform !== 'darwin') return
@@ -13,18 +14,27 @@ export async function removeQuarantine(dir: string, log?: (text: string) => void
   })
 }
 
+/**
+ * Strip macOS quarantine flags and re-codesign Mach-O binaries in the install's
+ * Python env(s). Pass `installation` so adopted installs get their legacy venv
+ * (`<adoptedBaseDir>/.venv`, resolved by `getActiveVenvDir`) repaired instead of a
+ * non-existent path under `installPath`.
+ */
 export async function repairMacBinaries(
   installPath: string,
   sendProgress: (step: string, data: { percent: number; status: string; [key: string]: unknown }) => void,
-  sendOutput?: (text: string) => void
+  sendOutput?: (text: string) => void,
+  installation?: InstallationRecord,
 ): Promise<void> {
   if (process.platform !== 'darwin') return
   const standaloneEnvDir = path.join(installPath, 'standalone-env')
-  sendProgress('repair', { percent: -1, status: 'Removing quarantine flags…' })
-  await removeQuarantine(standaloneEnvDir, sendOutput)
-  sendProgress('repair', { percent: -1, status: 'Codesigning binaries…' })
-  await codesignBinaries(standaloneEnvDir, sendOutput)
-  const venvDir = getVenvDir(installPath)
+  if (fs.existsSync(standaloneEnvDir)) {
+    sendProgress('repair', { percent: -1, status: 'Removing quarantine flags…' })
+    await removeQuarantine(standaloneEnvDir, sendOutput)
+    sendProgress('repair', { percent: -1, status: 'Codesigning binaries…' })
+    await codesignBinaries(standaloneEnvDir, sendOutput)
+  }
+  const venvDir = installation ? getActiveVenvDir(installation) : path.join(installPath, 'ComfyUI', '.venv')
   if (fs.existsSync(venvDir)) {
     sendProgress('repair', { percent: -1, status: 'Codesigning environment binaries…' })
     await removeQuarantine(venvDir, sendOutput)

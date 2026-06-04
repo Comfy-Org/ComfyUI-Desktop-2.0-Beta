@@ -29,19 +29,8 @@ type MockPopupConfig =
 interface MockBridgeState {
   configCallbacks: ((cfg: MockPopupConfig) => void)[]
   downloadsCallbacks: ((state: MockDownloadsState) => void)[]
-  /** Snapshot push callbacks for the instance-picker kind. Mirrors
-   *  the bridge's `onInstancePickerSnapshot` subscription — registered
-   *  at app mount, so callers can also assert the listener is wired
-   *  before any picker view exists. */
   instancePickerSnapshotCallbacks: ((snapshot: unknown) => void)[]
-  /** Will-show push callbacks. Fires unconditionally on every popup
-   *  open (including the fast-path reopen that skips set-config), so
-   *  the shell can bump openSeq and re-key its view to reset transient
-   *  per-open state. */
   willShowCallbacks: ((info: { kind: string }) => void)[]
-  /** Dismiss-modals push callbacks. Fires when main wants the popup
-   *  renderer to cancel any open useModal / useDialogs entry — e.g.
-   *  another title-bar dropdown is preempting the picker (#770). */
   dismissModalsCallbacks: (() => void)[]
   activateCalls: string[]
   closeCalls: number
@@ -196,9 +185,8 @@ describe('TitlePopupApp', () => {
   })
 
   it('acks via notifyRendered after a config flush so main can show the view', async () => {
-    // The render-ack runs inside a `requestAnimationFrame` after Vue's
-    // tick; jsdom resolves rAF synchronously via a setTimeout shim, so
-    // we wait one macrotask.
+    // The render-ack runs in a rAF; jsdom resolves rAF via a setTimeout
+    // shim, so we wait one macrotask.
     const { default: TitlePopupApp } = await import('./TitlePopupApp.vue')
     mount(TitlePopupApp)
     await flushPromises()
@@ -238,40 +226,24 @@ describe('TitlePopupApp', () => {
     )
     await flushPromises()
     const style = wrapper.find('.popup').attributes('style') ?? ''
-    // Browsers normalize hex to rgb in inline styles, so we accept either.
+    // Browsers normalize hex to rgb in inline styles.
     expect(style).toMatch(/background:\s*(#1f2024|rgb\(31,\s*32,\s*36\))/i)
     expect(style).toMatch(/color:\s*(#eeeeee|rgb\(238,\s*238,\s*238\))/i)
   })
 
   it('re-keys the popup root when the will-show event fires, resetting per-open transient state', async () => {
-    // The reused WebContentsView means InstancePickerView stays mounted
-    // across opens. Without a per-open signal, transient state like
-    // selectedId leaks from one open to the next. The shell subscribes
-    // to `onWillShow` so it can bump openSeq and re-key the root —
-    // which tears down + remounts the inner view. This is the only path
-    // that catches the fast-path reopen that skips `set-config`.
     const { default: TitlePopupApp } = await import('./TitlePopupApp.vue')
     const wrapper = mount(TitlePopupApp)
     await flushPromises()
     const initialKey = (wrapper.find('.popup').element as HTMLElement).outerHTML
     bridgeState.willShowCallbacks.forEach((cb) => cb({ kind: 'instance-picker' }))
     await flushPromises()
-    // Re-key produces a structurally identical DOM but Vue tears down +
-    // remounts the keyed subtree — the cheapest observable proof is
-    // that the willShow listener was registered in the first place.
     expect(bridgeState.willShowCallbacks.length).toBe(1)
-    // Sanity: the root still renders post-bump (no error in the keyed
-    // remount path).
     expect(wrapper.find('.popup').exists()).toBe(true)
     expect(initialKey.length).toBeGreaterThan(0)
   })
 
   it('subscribes to downloads-changed at app mount, before any DownloadsView is rendered', async () => {
-    // Regression: previously the popup's DownloadsView owned the
-    // subscription in its onMounted, so an initial state push that
-    // arrived during a fresh `'downloads'` open landed before the
-    // listener existed. The shell now owns the listener so the data
-    // is captured even while the menu view is still mounted.
     const { default: TitlePopupApp } = await import('./TitlePopupApp.vue')
     mount(TitlePopupApp)
     await flushPromises()
@@ -282,9 +254,8 @@ describe('TitlePopupApp', () => {
     const { default: TitlePopupApp } = await import('./TitlePopupApp.vue')
     const wrapper = mount(TitlePopupApp)
     await flushPromises()
-    // Push a state snapshot BEFORE switching kinds — this is the race
-    // the fix addresses: a snapshot pushed while the menu view is
-    // mounted still has to be visible once we flip to 'downloads'.
+    // A snapshot pushed while the menu view is mounted must still be
+    // visible once we flip to 'downloads'.
     bridgeState.downloadsCallbacks.forEach((cb) =>
       cb({
         active: [
@@ -307,10 +278,8 @@ describe('TitlePopupApp', () => {
   })
 
   it('suppresses stale render-acks on rapid back-to-back configs', async () => {
-    // Regression: rapid set-config pushes used to queue overlapping
-    // rAFs that all called notifyRendered. Only the most recent
-    // config's ack should fire so main never marks an older config as
-    // synced after the user has moved past it.
+    // Only the most recent config's ack should fire so main never marks an
+    // older config as synced after the user has moved past it.
     const { default: TitlePopupApp } = await import('./TitlePopupApp.vue')
     mount(TitlePopupApp)
     await flushPromises()
@@ -331,7 +300,6 @@ describe('TitlePopupApp', () => {
     )
     await flushPromises()
     await new Promise((r) => setTimeout(r, 30))
-    // Exactly one ack — the older rAF closure no-ops via the seq guard.
     expect(bridgeState.notifyRenderedCalls - before).toBe(1)
   })
 
@@ -344,16 +312,13 @@ describe('TitlePopupApp', () => {
     expect(bridgeState.closeCalls).toBe(0)
   })
 
-  // Issue #770 — the picker's modal layer must not survive a kind-switch
-  // hide. Main fires `dismiss-modals` right before hiding the picker so
-  // a half-open confirm doesn't get stranded in the reused popup view.
+  // The picker's modal layer must not survive a kind-switch hide; main
+  // fires dismiss-modals before hiding so a half-open confirm isn't stranded.
   it('cancels any open useModal entry when main fires dismiss-modals', async () => {
     const { useModal } = await import('../composables/useModal')
     const { default: TitlePopupApp } = await import('./TitlePopupApp.vue')
     mount(TitlePopupApp, { attachTo: document.body })
     await flushPromises()
-    // App always subscribes; assert the wiring then fire the callback
-    // and confirm an open `useModal.confirm` resolves to `false`.
     expect(bridgeState.dismissModalsCallbacks.length).toBeGreaterThan(0)
     const modal = useModal()
     const pending = modal.confirm({ title: 'Update ComfyUI', message: 'Confirm?' })

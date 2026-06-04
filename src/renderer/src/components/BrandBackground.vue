@@ -1,15 +1,7 @@
 <script setup lang="ts">
-/**
- * Brand-refresh backdrop: dark plum outer/inner frame plus the two
- * angled SVG beams. Extracted from BrandTakeoverLayout so non-takeover
- * surfaces (e.g. the chooser dashboard) can reuse the visuals without
- * inheriting the takeover chrome (teleport-to-body, full-viewport
- * fixed positioning, fade-in animation, ComfyC logo).
- *
- * Fills its parent — no fixed positioning of its own. Forces
- * `data-theme="dark"` because the brand palette is dark-only today;
- * light-mode parity is deferred to match BrandTakeoverLayout.
- */
+// Brand-refresh backdrop (frame + angled SVG beams), extracted from
+// BrandTakeoverLayout so non-takeover surfaces can reuse the visuals
+// without the takeover chrome. Forces dark; the brand palette is dark-only.
 import beamSvg from '../assets/lighting/beam.svg?raw'
 import beam2Svg from '../assets/lighting/beam_2.svg?raw'
 

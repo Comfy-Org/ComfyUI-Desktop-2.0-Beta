@@ -20,10 +20,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# Refuse to run while the app is open. "ComfyUI Desktop" covers the
+# Refuse to run while the app is open. "Comfy Desktop" covers the
 # upcoming post-rename productName (the "2.0" suffix is being dropped).
 $runningNames = @(
-  'ComfyUI Desktop',
+  'Comfy Desktop',
   'ComfyUI Desktop 2.0',
   'ComfyUI Launcher',
   'comfyui-desktop-2',
@@ -31,20 +31,20 @@ $runningNames = @(
 )
 $running = Get-Process -Name $runningNames -ErrorAction SilentlyContinue
 if ($running) {
-  Write-Host "ComfyUI Desktop / Launcher is running. Please quit it first,"
+  Write-Host "Comfy Desktop / Launcher is running. Please quit it first,"
   Write-Host "then re-run this script."
   exit 1
 }
 
 # Every historical app/package name. The userData folder on Windows is named
-# after the productName (or package.json "name") field. "ComfyUI Desktop"
+# after the productName (or package.json "name") field. "Comfy Desktop"
 # is included for the upcoming post-rename productName. "ComfyUI" covers
 # the legacy v1.x desktop app (productName "ComfyUI") whose state can
 # survive an upgrade to the 2.0 beta and break a clean install (mirrors
 # #679's macOS findings).
 $appNames = @(
   'ComfyUI',
-  'ComfyUI Desktop',
+  'Comfy Desktop',
   'ComfyUI Desktop 2.0',
   'ComfyUI Launcher',
   'comfyui-desktop-2',

@@ -1,5 +1,5 @@
-appId: org.comfy.comfyui-desktop-2
-productName: ComfyUI Desktop 2.0
+appId: com.todesktop.241012ess7yxs0e
+productName: Comfy Desktop
 directories:
   buildResources: resources
 files:
@@ -7,7 +7,7 @@ files:
   - '!src/*'
   - '!electron.vite.config.{js,ts,mjs,cjs}'
   - '!eslint.config.ts'
-  - '!{.eslintcache,.prettierrc.json,README.md,DESIGN_PROCESS.md,MANAGER_RESTART.md,REFERENCE_COMFY_DESKTOP.md}'
+  - '!{.eslintcache,.prettierrc.json,README.md,AGENTS.md}'
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
   - '!{.env,.env.*,.npmrc}'
   - '!docs/*'
@@ -23,8 +23,8 @@ afterPack: ./scripts/afterPack.mjs
 publish:
   provider: github
   owner: Comfy-Org
-  repo: ComfyUI-Desktop-2.0-Beta
-artifactName: ComfyUI-Desktop-2.0-${version}-${os}-${arch}.${ext}
+  repo: Comfy-Desktop
+artifactName: Comfy-Desktop-${version}-${os}-${arch}.${ext}
 win:
   target: nsis
   icon: assets/Comfy_Logo_x256.png
@@ -54,6 +54,25 @@ mac:
       to: bootstrap-python
       filter:
         - '**/*'
+dmg:
+  title: Comfy Desktop
+  # background + background@2x live under resources/ (directories.buildResources).
+  background: dmg/background.png
+  iconSize: 84
+  iconTextSize: 11
+  window:
+    width: 540
+    height: 400
+  # x/y are icon centers in the 540x400 content area, aligned to the
+  # arrow and title drawn into background.png.
+  contents:
+    - x: 135
+      y: 195
+      type: file
+    - x: 405
+      y: 195
+      type: link
+      path: /Applications
 linux:
   target:
     - AppImage

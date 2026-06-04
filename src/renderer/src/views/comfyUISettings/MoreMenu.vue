@@ -4,25 +4,8 @@ import { TID } from '../../../../shared/testIds'
 import type { ActionDef } from '../../types/ipc'
 
 /**
- * Footer "More" dropdown for the brand-redesigned Settings drawer
- * (v2). Renders the install-level actions main ships in the
- * `pinBottom` section of `getDetailSections()` — Launch / Copy
- * Installation / Open Folder / Untrack Installation / Delete
- * Installation — without leaving the drawer.
- *
- * UX:
- *   - The drawer's footer renders a single "More" button (with a
- *     chevron). Clicking it opens this menu anchored above the button.
- *   - Items are sourced from `pinBottomActions` in `useComfyUISettings`
- *     (which already applies the Launch→Restart synthetic swap).
- *   - Clicking an item closes the menu and emits `'pick'` with the
- *     `ActionDef` — the parent runs it through `runAction` so all the
- *     prompt/confirm/select/showProgress chains fire correctly.
- *   - ESC, click-outside, or another click on the trigger closes.
- *
- * The menu is keyboard-navigable (ArrowUp / ArrowDown) and respects
- * the a11y baseline the drawer set (role="menu", aria-activedescendant,
- * focus restore on close).
+ * Footer "More" dropdown for the Settings drawer, rendering the `pinBottom` install-level actions.
+ * Clicking an item emits `'pick'` with the `ActionDef`; the parent runs it through `runAction`. Keyboard-navigable, ESC / click-outside dismiss.
  */
 
 interface Props {
@@ -77,11 +60,7 @@ function handleKeydown(event: KeyboardEvent): void {
   })
 }
 
-// Click-outside dismiss. The trigger button toggles `open` itself —
-// so we only close when the click lands outside both the trigger and
-// the menu. Detecting "outside the trigger" needs the trigger's
-// element; the drawer's footer passes us a `data-more-trigger` attr
-// (see ComfyUISettingsPanel template) so we don't have to thread a ref.
+// Click-outside dismiss. The trigger toggles `open` itself, so we skip clicks on it via the `data-more-trigger` attr (avoids threading a ref).
 function handleDocumentClick(event: MouseEvent): void {
   if (!props.open) return
   const target = event.target as Node | null
@@ -139,11 +118,7 @@ const visibleActions = computed(() => props.actions)
 </template>
 
 <style scoped>
-/* Container chrome mirrors the dashboard's `.context-menu` (defined in
- * `main.css`) so the kebab and the More menu read as one visual family.
- * Same modal-surface bg + chooser border + modal shadow + 10px radius.
- * The only delta is `padding: 6px` (vs `.context-menu`'s 6px) for the
- * inner item rhythm. */
+/* Mirrors the dashboard's `.context-menu` chrome so kebab and More menu read as one family. */
 .more-menu {
   position: absolute;
   right: 0;
@@ -159,10 +134,7 @@ const visibleActions = computed(() => props.actions)
   z-index: 62;
 }
 
-/* Menu items override the global `button` chrome — they're transparent
- * full-row items in a popover, not freestanding buttons. Item paint
- * matches `.context-menu-item` so both menus tap the same hover
- * token. */
+/* Override global `button` chrome: transparent full-row popover items matching `.context-menu-item`. */
 .more-menu-item {
   width: 100%;
   display: block;

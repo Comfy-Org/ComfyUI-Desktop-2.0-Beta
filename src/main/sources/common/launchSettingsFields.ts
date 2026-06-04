@@ -9,17 +9,45 @@ export interface LaunchSettingsOptions {
   extraFields?: Record<string, unknown>[]
 }
 
-/** Per-install `useSharedPaths` toggle. Rendered in the picker's
- *  Storage tab next to the global model-directory UI. Emitted by
- *  sources that participate in shared-model storage (desktop /
- *  portable); git-source installs omit this section entirely. */
-export function buildSharedPathsField(installation: InstallationRecord): Record<string, unknown> {
-  return {
-    id: 'useSharedPaths', label: t('common.useSharedPaths'),
-    value: (installation.useSharedPaths as boolean | undefined) !== false,
-    editable: true, editType: 'boolean', tooltip: t('tooltips.useSharedPaths'),
-    requiresRestart: true,
-  }
+/**
+ * Per-install storage toggles + input/output path fields for the picker's Storage tab.
+ * `useSharedModels` gates `--extra-model-paths-config`; `useSharedInputOutput` gates
+ * `--input-directory` / `--output-directory`, falling back to the per-install fields
+ * below (then `<installPath>/{input,output}`) when off. Shared-storage sources only.
+ */
+export function buildStorageFields(installation: InstallationRecord): Record<string, unknown>[] {
+  const useSharedModels = (installation.useSharedModels as boolean | undefined) !== false
+  const useSharedInputOutput = (installation.useSharedInputOutput as boolean | undefined) !== false
+  return [
+    {
+      id: 'useSharedModels', label: t('common.useSharedModels'),
+      value: useSharedModels,
+      editable: true, editType: 'boolean', tooltip: t('tooltips.useSharedModels'),
+      requiresRestart: true,
+    },
+    {
+      id: 'useSharedInputOutput', label: t('common.useSharedInputOutput'),
+      value: useSharedInputOutput,
+      editable: true, editType: 'boolean', tooltip: t('tooltips.useSharedInputOutput'),
+      requiresRestart: true,
+    },
+    // Per-install paths, only meaningful when `useSharedInputOutput === false`;
+    // StoragePane.vue hides them while the toggle is on.
+    {
+      id: 'inputDir', label: t('common.perInstallInputDir'),
+      value: (installation.inputDir as string | undefined) ?? '',
+      editable: true, editType: 'path', browseOnly: true,
+      tooltip: t('tooltips.perInstallInputDir'),
+      requiresRestart: true,
+    },
+    {
+      id: 'outputDir', label: t('common.perInstallOutputDir'),
+      value: (installation.outputDir as string | undefined) ?? '',
+      editable: true, editType: 'path', browseOnly: true,
+      tooltip: t('tooltips.perInstallOutputDir'),
+      requiresRestart: true,
+    },
+  ]
 }
 
 export function buildLaunchSettingsFields(

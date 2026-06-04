@@ -6,10 +6,10 @@ import TrackModal from './TrackModal.vue'
 import type { ProbeResult } from '../types/ipc'
 
 /**
- * Regression harness for #726 — pasting/typing a path into the Install
- * Directory field must auto-probe and enable the "Track Install" button.
- * Previously `probe()` was wired only to the Browse button, so a pasted
- * path left `selectedProbe` null and the primary button stayed disabled.
+ * The Install Directory field is browse-only: typing/pasting must not
+ * change it. The only way to populate it is the Browse button, which
+ * runs the probe and enables the "Track Install" button when an
+ * existing install is detected.
  */
 
 // Minimal catalog covering the keys the template reads. Missing keys fall
@@ -24,7 +24,7 @@ const messages = {
     },
     git: { venv: 'Virtual Environment', venvNotFound: 'Not found' },
     track: {
-      grandTitle: 'Track Existing Install',
+      grandTitle: 'Add Existing Install',
       grandSubtitle: 'Add an existing local ComfyUI checkout.',
       installDir: 'Install Directory',
       selectDir: 'Select a directory',
@@ -93,80 +93,66 @@ function trackButton(wrapper: ReturnType<typeof mountTrack>) {
   return wrapper.get('button.track-save')
 }
 
-describe('TrackModal — pasted-path probing (#726)', () => {
+describe('TrackModal — browse-only install directory', () => {
   beforeEach(() => {
-    vi.useFakeTimers()
     installMockApi()
   })
 
   afterEach(() => {
-    vi.useRealTimers()
     vi.restoreAllMocks()
   })
 
-  it('probes and enables Track Install when a path is pasted into the field', async () => {
+  it('renders the install-directory input as readonly', async () => {
+    const wrapper = mountTrack()
+    ;(wrapper.vm as unknown as { open: () => void }).open()
+    await flushPromises()
+
+    const input = wrapper.get('#track-path')
+    expect(input.attributes('readonly')).toBeDefined()
+  })
+
+  it('does not probe when the user attempts to type into the field', async () => {
     const api = installMockApi()
+    const wrapper = mountTrack()
+    ;(wrapper.vm as unknown as { open: () => void }).open()
+    await flushPromises()
+
+    // Programmatically dispatch an input event — readonly prevents real
+    // keyboard input but a stray input dispatch must not reach probe().
+    await wrapper.get('#track-path').trigger('input')
+    await flushPromises()
+
+    expect(api.probeInstallation).not.toHaveBeenCalled()
+    expect(trackButton(wrapper).attributes('disabled')).toBeDefined()
+  })
+
+  it('probes and enables Track Install when a folder is picked via Browse', async () => {
+    const api = installMockApi({
+      browseFolder: vi.fn().mockResolvedValue('/Users/jo/ComfyUI'),
+    })
     const wrapper = mountTrack()
     ;(wrapper.vm as unknown as { open: () => void }).open()
     await flushPromises()
 
     expect(trackButton(wrapper).attributes('disabled')).toBeDefined()
 
-    // Simulate a paste: v-model updates trackPath via the input event.
-    await wrapper.get('#track-path').setValue('/Users/jo/ComfyUI')
-
-    // Debounced — no probe before the timer fires.
-    expect(api.probeInstallation).not.toHaveBeenCalled()
-    await vi.advanceTimersByTimeAsync(300)
+    await wrapper.get('button.brand-tertiary').trigger('click')
     await flushPromises()
 
     expect(api.probeInstallation).toHaveBeenCalledWith('/Users/jo/ComfyUI')
     expect(trackButton(wrapper).attributes('disabled')).toBeUndefined()
   })
 
-  it('trims trailing whitespace from a pasted path before probing', async () => {
-    const api = installMockApi()
+  it('keeps Track Install disabled when no install is detected at the picked folder', async () => {
+    const api = installMockApi({
+      browseFolder: vi.fn().mockResolvedValue('/tmp/not-comfy'),
+      probeInstallation: vi.fn().mockResolvedValue([]),
+    })
     const wrapper = mountTrack()
     ;(wrapper.vm as unknown as { open: () => void }).open()
     await flushPromises()
 
-    await wrapper.get('#track-path').setValue('  /Users/jo/ComfyUI  ')
-    await vi.advanceTimersByTimeAsync(300)
-    await flushPromises()
-
-    expect(api.probeInstallation).toHaveBeenCalledWith('/Users/jo/ComfyUI')
-    expect(trackButton(wrapper).attributes('disabled')).toBeUndefined()
-  })
-
-  it('keeps the button disabled and clears results when the path is emptied', async () => {
-    const api = installMockApi()
-    const wrapper = mountTrack()
-    ;(wrapper.vm as unknown as { open: () => void }).open()
-    await flushPromises()
-
-    await wrapper.get('#track-path').setValue('/Users/jo/ComfyUI')
-    await vi.advanceTimersByTimeAsync(300)
-    await flushPromises()
-    expect(trackButton(wrapper).attributes('disabled')).toBeUndefined()
-
-    await wrapper.get('#track-path').setValue('')
-    await flushPromises()
-    expect(trackButton(wrapper).attributes('disabled')).toBeDefined()
-
-    // No probe should be queued for an empty value.
-    api.probeInstallation.mockClear()
-    await vi.advanceTimersByTimeAsync(300)
-    expect(api.probeInstallation).not.toHaveBeenCalled()
-  })
-
-  it('does not enable the button when no install is detected at the path', async () => {
-    const api = installMockApi({ probeInstallation: vi.fn().mockResolvedValue([]) })
-    const wrapper = mountTrack()
-    ;(wrapper.vm as unknown as { open: () => void }).open()
-    await flushPromises()
-
-    await wrapper.get('#track-path').setValue('/tmp/not-comfy')
-    await vi.advanceTimersByTimeAsync(300)
+    await wrapper.get('button.brand-tertiary').trigger('click')
     await flushPromises()
 
     expect(api.probeInstallation).toHaveBeenCalledWith('/tmp/not-comfy')

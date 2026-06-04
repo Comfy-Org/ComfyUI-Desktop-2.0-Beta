@@ -45,7 +45,6 @@ describe('getPipIndexArgs', () => {
   it('includes remaining Chinese mirrors as --extra-index-url when useChineseMirrors is true', () => {
     const args = getPipIndexArgs(undefined, true)
     const extras = getExtras(args)
-    // pypi.org + remaining mirrors (all except the first which is --index-url)
     const expectedExtras = [PYPI_INDEX_URL, ...PYPI_MIRROR_URLS.slice(1)]
     expect(extras).toEqual(expectedExtras)
   })
@@ -93,10 +92,8 @@ describe('getPipIndexArgs', () => {
 
   it('deduplicates when user mirror matches pypi.org', () => {
     const args = getPipIndexArgs('https://pypi.org/simple/', true)
-    // pypi.org is --index-url (user mirror = pypi.org)
     expect(getIndexUrl(args)).toBe('https://pypi.org/simple/')
     const extras = getExtras(args)
-    // pypi.org should not appear again as extra
     expect(extras).not.toContain('https://pypi.org/simple/')
     expect(extras).toHaveLength(PYPI_MIRROR_URLS.length)
   })
@@ -110,12 +107,9 @@ describe('getPipIndexArgs', () => {
   it('deduplicates when user mirror is one of the Chinese mirrors', () => {
     const mirror = PYPI_MIRROR_URLS[0]!
     const args = getPipIndexArgs(mirror, true)
-    // User mirror (= first Chinese mirror) is --index-url
     expect(getIndexUrl(args)).toBe(mirror)
     const extras = getExtras(args)
-    // Should not be duplicated in extras
     expect(extras.filter((u) => u === mirror)).toHaveLength(0)
-    // pypi.org + remaining Chinese mirrors
     expect(extras).toHaveLength(1 + PYPI_MIRROR_URLS.length - 1)
   })
 

@@ -7,23 +7,10 @@ import type { ActionResult, FieldOption, ShowProgressOpts, Source } from '../typ
 import { useProgressStore } from '../stores/progressStore'
 import { useFirstUseChain, type FirstUseChainApi } from './useFirstUseChain'
 
-// The express-install path emits telemetry via `emitTelemetryAction`,
-// which dispatches a CustomEvent on `window`. These tests replace
-// `window` with a plain stub (`vi.stubGlobal`) that drops prototype
-// methods like `dispatchEvent`, so stub the dispatch out — the chain
-// logic under test doesn't care about the telemetry side effect.
+// The stubbed `window` lacks dispatchEvent, so mock the telemetry emit out.
 vi.mock('../lib/telemetry', () => ({
   emitTelemetryAction: vi.fn()
 }))
-
-/**
- * `useFirstUseChain` integration tests focused on the Express Install
- * path. Express skips the Configure (`InstallWizardModal`) screen and
- * runs Standalone + recommended defaults straight through to the
- * install-progress takeover. The other chain branches (Cloud auto-
- * launch, migrate, file-menu skip) are exercised indirectly by
- * PanelApp's integration tests.
- */
 
 const standaloneSource: Source = {
   id: 'standalone',
@@ -105,6 +92,7 @@ interface MountedChain {
   dismissTakeoverDirect: ReturnType<typeof vi.fn>
   performChooserLaunch: ReturnType<typeof vi.fn>
   openFirstUseTakeover: ReturnType<typeof vi.fn>
+  resetFirstUseSpinner: ReturnType<typeof vi.fn>
 }
 
 function mountChain(): MountedChain {
@@ -113,6 +101,7 @@ function mountChain(): MountedChain {
   const dismissTakeoverDirect = vi.fn()
   const performChooserLaunch = vi.fn().mockResolvedValue('launched')
   const openFirstUseTakeover = vi.fn().mockResolvedValue(undefined)
+  const resetFirstUseSpinner = vi.fn()
 
   const apiRef: Ref<FirstUseChainApi | null> = ref(null)
 
@@ -123,7 +112,8 @@ function mountChain(): MountedChain {
         switchPanel,
         dismissTakeoverDirect,
         performChooserLaunch,
-        openFirstUseTakeover
+        openFirstUseTakeover,
+        resetFirstUseSpinner
       })
       return () => h('div')
     }
@@ -137,7 +127,8 @@ function mountChain(): MountedChain {
     switchPanel,
     dismissTakeoverDirect,
     performChooserLaunch,
-    openFirstUseTakeover
+    openFirstUseTakeover,
+    resetFirstUseSpinner
   }
 }
 
@@ -178,7 +169,6 @@ describe('useFirstUseChain — Express Install', () => {
         opKind: 'install'
       })
     )
-    // Did NOT delegate to Configure when express succeeded.
     expect(chain.switchPanel).not.toHaveBeenCalled()
   })
 
@@ -258,19 +248,11 @@ describe('useFirstUseChain — chainSpan stamping', () => {
 
   it('stamps chainSpan=install when the first-use chain captures an install op', async () => {
     const chain = mountChain()
-    // Kick off the chain — sets `chainingFirstUseToNewInstall=true` so
-    // the next show-progress qualifies as the chained install leg.
     await chain.api!.handleFirstUseChainLocal({ express: true })
 
-    // Inspect what handleShowProgress received from `runExpressInstall`.
-    // `onShowProgress` mutated the opts object IN PLACE before the call
-    // (it's how usePanelOverlays-style hosts forward chainSpan into the
-    // store), so we can assert directly on the mock call's argument.
     const showOpts = chain.handleShowProgress.mock.calls[0]?.[0] as ShowProgressOpts | undefined
     expect(showOpts).toBeDefined()
-    // Express install runs onShowProgress synchronously inside the chain
-    // composable's hook — the test mock for handleShowProgress doesn't
-    // call onShowProgress itself, so simulate the host's job here:
+    // The mock handleShowProgress doesn't call onShowProgress, so simulate the host here.
     chain.api!.hooks.onShowProgress(showOpts!)
     expect(showOpts!.chainSpan).toBe('install')
   })
@@ -291,11 +273,7 @@ describe('useFirstUseChain — chainSpan stamping', () => {
 
   it('stamps chainSpan=launch when the auto-launch watcher fires the chained launch leg', async () => {
     const chain = mountChain()
-    // Hold `performChooserLaunch` open: the production flow stamps the
-    // launch op's `show-progress` BEFORE the launch action resolves
-    // (main emits the IPC mid-flight). Returning an unresolved promise
-    // mirrors that — `.finally()` won't clear `pendingChainedLaunch`
-    // until we explicitly resolve.
+    // Hold performChooserLaunch open so .finally() doesn't clear pendingChainedLaunch before the launch leg arrives.
     let resolveLaunch: (v: unknown) => void = () => {}
     chain.performChooserLaunch.mockReturnValue(
       new Promise((res) => {
@@ -320,8 +298,7 @@ describe('useFirstUseChain — chainSpan stamping', () => {
     chain.api!.hooks.onShowProgress(installOpts)
     expect(installOpts.chainSpan).toBe('install')
 
-    // Seed a finished+ok op so the watcher's predicate sees it and
-    // calls performChooserLaunch (which we've held open above).
+    // Seed a finished+ok op so the watcher fires performChooserLaunch.
     progressStore.startOperation({
       installationId: 'inst-chained-1',
       title: 'Installing',
@@ -332,15 +309,12 @@ describe('useFirstUseChain — chainSpan stamping', () => {
     op.result = { ok: true }
     await vi.waitFor(() => expect(chain.performChooserLaunch).toHaveBeenCalledTimes(1))
 
-    // Second leg: while performChooserLaunch is still pending, the
-    // launch action's `show-progress` arrives. `pendingChainedLaunch`
-    // is still true so the hook stamps the launch span.
+    // Second leg: the launch op arrives while performChooserLaunch is still pending, so it's stamped 'launch'.
     const launchOpts = progressOpts('inst-chained-1', { triggersInstanceStart: true })
     chain.api!.hooks.onShowProgress(launchOpts)
     expect(launchOpts.chainSpan).toBe('launch')
 
-    // After we let the launch promise settle, the .finally() clears
-    // the flag — a subsequent unrelated op must NOT be stamped.
+    // Once the launch settles, .finally() clears the flag so a later unrelated op isn't stamped.
     resolveLaunch('launched')
     await Promise.resolve()
     await Promise.resolve()
@@ -350,9 +324,7 @@ describe('useFirstUseChain — chainSpan stamping', () => {
   })
 
   it('clears pendingChainedLaunch via the watcher .finally() when performChooserLaunch resolves', async () => {
-    // performChooserLaunch returning 'missing-action' means the launch
-    // never reached handleShowProgress. The .finally() in the watcher
-    // must reset the flag so a later unrelated op isn't mis-stamped.
+    // 'missing-action' means the launch never reached handleShowProgress, so .finally() must reset the flag.
     const chain = mountChain()
     chain.performChooserLaunch.mockResolvedValue('missing-action')
 
@@ -378,7 +350,6 @@ describe('useFirstUseChain — chainSpan stamping', () => {
     op.finished = true
     op.result = { ok: true }
     await nextTick()
-    // Let the watcher's .finally() flush.
     await vi.waitFor(() => expect(chain.performChooserLaunch).toHaveBeenCalled())
     await Promise.resolve()
     await Promise.resolve()

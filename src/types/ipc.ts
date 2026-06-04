@@ -514,6 +514,9 @@ export interface ModelDownloadProgress {
    *  bottom when they leave the in-flight bucket. Optional only for
    *  back-compat with snapshots that predate the field. */
   createdAt?: number
+  /** Set on a completed asset download whose file is an image, so the surface
+   *  knows to lazily request a thumbnail via `getDownloadThumbnail`. */
+  isImage?: boolean
 }
 
 // --- Track types ---
@@ -636,7 +639,7 @@ export interface InstallationDdContext {
 }
 
 /** Compact per-install summary for the per-session boot census
- *  emitted as `desktop2.session.installs_inventory`. Strictly metadata
+ *  emitted as `comfy.desktop.session.installs_inventory`. Strictly metadata
  *  + counts + diff summaries (no per-node / per-package contents) so
  *  the inventory can pack many installs into the same RUM payload. */
 export interface InstallInventoryEntry {
@@ -1001,7 +1004,7 @@ export interface ElectronApi {
   onFirstUseSkip(callback: () => void): Unsubscribe
   /** Main forwards both the title-bar feedback button and the file-menu
    *  "Send Feedback" entry here. The panel renderer fires the
-   *  `desktop2.feedback.opened` telemetry action (with `source` so we
+   *  `comfy.desktop.feedback.opened` telemetry action (with `source` so we
    *  can tell the two affordances apart) and opens the support URL via
    *  `openExternal` — the renderer is the natural home because
    *  `buildSupportUrl()` reads `navigator.userAgent` and the telemetry
@@ -1159,7 +1162,7 @@ export interface ElectronApi {
   getSystemInfo(): Promise<SystemInfo>
   getInstallationDdContext(installationId: string): Promise<InstallationDdContext | null>
   /** Per-session boot census of every persisted install (metadata +
-   *  snapshot diff counts). Powers the `desktop2.session.installs_inventory`
+   *  snapshot diff counts). Powers the `comfy.desktop.session.installs_inventory`
    *  telemetry event so dashboards see the user's full install footprint
    *  without waiting for them to launch each one. Capped to ~200 KB
    *  total to stay under Datadog RUM's per-action context limit. */
@@ -1198,6 +1201,9 @@ export interface ElectronApi {
    *  params were evicted from the recent buffer. */
   retryModelDownload(url: string): Promise<boolean>
   showDownloadInFolder(savePath: string): Promise<void>
+  /** Downscaled `data:` URL preview of a completed image download, or null for
+   *  non-images / unreadable files. */
+  getDownloadThumbnail(savePath: string): Promise<string | null>
 
   // Event listeners (return unsubscribe functions)
   onInstallProgress(callback: (data: ProgressData) => void): Unsubscribe

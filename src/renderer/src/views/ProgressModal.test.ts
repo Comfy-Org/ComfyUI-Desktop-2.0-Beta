@@ -10,28 +10,8 @@ import { useProgressStore } from '../stores/progressStore'
 import type { Operation } from '../stores/progressStore'
 import type { ActionResult, PortConflictInfo } from '../types/ipc'
 
-/**
- * Vitest coverage for ProgressModal's brand-branch state machine. Each
- * spec drives a synthetic op through `progressStore.operations` (rather
- * than going through `startOperation` + a real `apiCall`) so we can
- * snap the op to a precise state and assert what renders. The branches
- * under test:
- *
- *   - in-flight                     → bar + caption + Return-to-Dashboard
- *   - finished success              → success banner + auto-close
- *   - finished error                → error banner + message + Copy +
- *                                     Reboot + Return-to-Dashboard
- *   - finished cancelled            → cancelled banner + auto-close
- *   - finished port conflict        → port banner + dual-action footer
- *
- * Gating rules are centralized in `isPortConflictOpen` and
- * `finishedErrorMessage` computeds; these specs are the regression
- * harness for those.
- */
-
-// Minimal i18n catalog mirroring the keys the brand branch reads. We
-// only need exact-match strings for assertions; missing keys fall back
-// to the dotted path which we'd see in failed assertions anyway.
+// Each spec snaps a synthetic op into `progressStore.operations` to lock
+// a precise state and assert what renders, bypassing `startOperation`.
 const messages = {
   en: {
     common: {
@@ -64,7 +44,7 @@ const messages = {
     },
     errors: {
       portConflictTitle: 'Port already in use',
-      portConflictUsePort: 'Use port {port} instead',
+      portConflictUsePort: 'Use next available port',
       portConflictKill: 'Stop process and retry',
     },
   },
@@ -107,16 +87,8 @@ function installMockApi(overrides: Partial<MockApi> = {}): MockApi {
   return api
 }
 
-/**
- * Snap a synthetic op into the progress store. Bypasses
- * `startOperation`'s apiCall machinery so a spec can lock the op to a
- * precise state and assert what the template renders. The fields here
- * match `Operation` 1:1.
- *
- * Must be called AFTER the component is mounted — the store's setup
- * function calls `useI18n()`, which only works inside an active app
- * context. The component mount installs that context.
- */
+/** Snap a synthetic op into the store. Must be called AFTER mount — the
+ *  store's setup calls `useI18n()`, which needs the app context. */
 function snapOp(installationId: string, patch: Partial<Operation> = {}): Operation {
   const store = useProgressStore()
   const op: Operation = {
@@ -147,13 +119,8 @@ function snapOp(installationId: string, patch: Partial<Operation> = {}): Operati
   return op
 }
 
-/**
- * Mount with `installationId: null` so the component renders nothing
- * on first mount — no template branch reaches `currentOp`, so the
- * `useI18n()` call inside `useProgressStore.startOperation` never
- * fires. We can then snap an op into the store via `snapOp` and flip
- * `installation-id` to surface it, all inside the app's i18n context.
- */
+/** Mount with `installationId: null` so nothing renders yet, giving an
+ *  active i18n context for `snapOp` before flipping `installation-id`. */
 function mountProgress() {
   return mount(ProgressModal, {
     props: { installationId: null },
@@ -161,20 +128,9 @@ function mountProgress() {
   })
 }
 
-/**
- * Helper that runs the full mount-then-snap dance for a single spec:
- * (1) mount with `installationId: null` so the template doesn't reach
- *     the store yet — that gives us an active i18n context.
- * (2) snap the op into the store while still inside that context.
- * (3) flip `installation-id` on the props so the template now finds
- *     the op and renders the matching state.
- *
- * Returns the wrapper plus convenience accessors that look against
- * `document.body` instead of the wrapper root. ProgressModal's
- * `BrandTakeoverLayout` teleports the rendered tree to body, so
- * `wrapper.find()` / `wrapper.text()` would return nothing for any
- * content inside the takeover.
- */
+/** Mount, snap an op, then surface it via `installation-id`. Returns
+ *  body-scoped accessors because the takeover teleports its tree to
+ *  `document.body`, where `wrapper.find()` can't see it. */
 async function mountWithOp(
   installationId: string,
   patch: Partial<Operation> = {},
@@ -227,9 +183,8 @@ function makeBodyHelpers(): BodyHelpers {
 }
 
 afterEach(() => {
-  // Teleported takeover stays attached to `document.body` across
-  // wrapper unmounts — wipe it manually so the next spec starts on a
-  // clean DOM and `body.text()` only sees the current spec's render.
+  // The teleported takeover survives wrapper unmount; wipe it so the
+  // next spec starts on a clean DOM.
   document.body.innerHTML = ''
 })
 
@@ -270,13 +225,11 @@ describe('ProgressModal — brand branch state transitions', () => {
     expect(body.classList('.brand-progress__banner')).toContain('brand-progress__banner--success')
     expect(body.selectorText('.brand-progress__banner')).toContain('Completed successfully')
 
-    // No action buttons during the auto-close window — success self-dismisses.
-    // The footer band itself stays mounted (it also hosts the logs accordion
-    // after the redesign), so assert on the buttons specifically.
+    // No action buttons during auto-close; the footer band stays mounted
+    // (it hosts the logs accordion), so assert on the buttons specifically.
     expect(body.exists('.brand-progress__footer-btn')).toBe(false)
 
-    // The auto-close watcher fires after ~700ms; advancing timers should
-    // emit a `close` event so the host can tear down the takeover.
+    // Auto-close fires after ~700ms and emits `close`.
     vi.advanceTimersByTime(800)
     await flushPromises()
     expect(wrapper.emitted('close')?.length).toBeGreaterThan(0)
@@ -313,24 +266,18 @@ describe('ProgressModal — brand branch state transitions', () => {
     expect(body.selectorText('.brand-progress__error-message')).toContain(
       'Disk write failed: ENOSPC',
     )
-    // Test-id exposes the element for e2e selectors that need to assert
-    // overflow / scrollability against the real layout (jsdom can't
-    // compute scroll height).
+    // Test-id exposes the element for e2e overflow assertions.
     expect(body.exists('[data-testid="progress-error-message"]')).toBe(true)
 
-    // Inline Copy button rides alongside the message body.
     expect(body.exists('.brand-progress__error-copy')).toBe(true)
 
-    // Error CTAs now live in the centered hero stack (directly under the
-    // error message), not the bottom-left footer — Back (ghost) on the
-    // left, Reboot (primary) on the right.
+    // Error CTAs live in the centered hero stack, not the footer.
     expect(body.exists('.brand-progress__error-actions')).toBe(true)
     expect(body.selectorText('.brand-progress__error-actions')).toContain('Reboot')
     expect(body.selectorText('.brand-progress__error-actions')).toContain('Back')
     expect(body.selectorText('.brand-progress__footer')).not.toContain('Reboot')
 
-    // Errors stay mounted so the user can read / copy. Verify no close
-    // emit fires even after we advance well past the grace window.
+    // Errors stay mounted, so no close emit even past the grace window.
     vi.advanceTimersByTime(2000)
     await flushPromises()
     expect(wrapper.emitted('close')).toBeUndefined()
@@ -347,7 +294,7 @@ describe('ProgressModal — brand branch state transitions', () => {
       error: null,
       result: {
         ok: false,
-        message: 'Port 8188 is already in use by ComfyUI Desktop',
+        message: 'Port 8188 is already in use by Comfy Desktop',
         portConflict,
       } as ActionResult,
     })
@@ -363,11 +310,12 @@ describe('ProgressModal — brand branch state transitions', () => {
       'Port 8188 is already in use',
     )
 
-    // Footer carries Use-Port + Kill-Process — not Return-to-Dashboard.
+    // Footer carries Return-to-Dashboard alongside Use-Port + Kill-Process
+    // so the user is never stuck on the conflict screen.
     expect(body.exists('.brand-progress__footer')).toBe(true)
-    expect(body.selectorText('.brand-progress__footer')).toContain('Use port 8189 instead')
+    expect(body.selectorText('.brand-progress__footer')).toContain('Return to Dashboard')
+    expect(body.selectorText('.brand-progress__footer')).toContain('Use next available port')
     expect(body.selectorText('.brand-progress__footer')).toContain('Stop process and retry')
-    expect(body.selectorText('.brand-progress__footer')).not.toContain('Return to Dashboard')
 
     // Port conflict is explicitly excluded from auto-close so the user
     // has time to pick a resolution.
@@ -391,10 +339,39 @@ describe('ProgressModal — brand branch state transitions', () => {
       } as ActionResult,
     })
 
-    expect(body.selectorText('.brand-progress__footer')).toContain('Use port 8189 instead')
+    expect(body.selectorText('.brand-progress__footer')).toContain('Use next available port')
     // Kill-Process is only shown when the offender is itself a Comfy
     // process — there's nothing safe to suggest killing otherwise.
     expect(body.selectorText('.brand-progress__footer')).not.toContain('Stop process and retry')
+    // Return-to-Dashboard is always present so non-Comfy conflicts still
+    // have a non-destructive escape.
+    expect(body.selectorText('.brand-progress__footer')).toContain('Return to Dashboard')
+  })
+
+  it('renders only Return to Dashboard when a port conflict has no suggested fix', async () => {
+    // Worst-case: main couldn't find a next port and the offender isn't
+    // ComfyUI. Without the back button the user is stuck on the takeover.
+    const portConflict: PortConflictInfo = {
+      port: 8188,
+      isComfy: false,
+    }
+    const { body } = await mountWithOp('inst-1', {
+      finished: true,
+      result: {
+        ok: false,
+        message: 'Port 8188 is already in use',
+        portConflict,
+      } as ActionResult,
+    })
+
+    expect(body.exists('.brand-progress__footer')).toBe(true)
+    expect(body.selectorText('.brand-progress__footer')).toContain('Return to Dashboard')
+    expect(body.selectorText('.brand-progress__footer')).not.toContain('Use next available port')
+    expect(body.selectorText('.brand-progress__footer')).not.toContain('Stop process and retry')
+
+    const api = (window as unknown as { api: MockApi }).api
+    expect(await body.click('.brand-progress__footer-bar button')).toBe(true)
+    expect(api.returnToDashboard).toHaveBeenCalledTimes(1)
   })
 
   it('renders Cancel (not Return to Dashboard) in flight for destroy ops', async () => {
@@ -472,9 +449,7 @@ describe('ProgressModal — brand branch state transitions', () => {
   })
 
   it('uses friendlyCaption (not launchCaption) for non-launch ops', async () => {
-    // Stepped destructive op with the `download` phase active — should
-    // resolve through `progress.phaseLabel.download`, NOT through the
-    // launch caption pipeline ("Mounting model libraries…" etc.).
+    // Resolves through `progress.phaseLabel.download`, not the launch caption.
     const { body } = await mountWithOp('inst-1', {
       opKind: 'destructive',
       steps: [
@@ -487,10 +462,28 @@ describe('ProgressModal — brand branch state transitions', () => {
     })
 
     expect(body.text()).toContain('Downloading ComfyUI…')
-    // The launch-only narrative phrases must NEVER show up for non-
-    // launch ops — this was the regression that motivated Phase 2.2.
+    // Launch-only narrative phrases must never show for non-launch ops.
     expect(body.text()).not.toContain('Mounting model libraries')
     expect(body.text()).not.toContain('Security scan')
+  })
+
+  it('uses registered step label as the headline and hides the substatus when no rich detail was sent', async () => {
+    // Adopt/migration flow path: main registers steps with friendly
+    // labels but emits `sendProgress(phase, { percent })` without a
+    // `status` string. Without this guard the headline fell through to
+    // the raw phase id ("source") and the substatus duplicated it.
+    const { body } = await mountWithOp('inst-1', {
+      opKind: 'install',
+      steps: [{ phase: 'source', label: 'Stage ComfyUI source' }],
+      activePhase: 'source',
+      activePercent: 10,
+      // progressStore writes `data.status || data.phase`, so the raw id
+      // is what lands here when main sends no status string.
+      lastStatus: { source: 'source' },
+    })
+
+    expect(body.text()).toContain('Stage ComfyUI source')
+    expect(body.exists('.brand-progress__substatus')).toBe(false)
   })
 
   it('surfaces the rich main-side detail as a substatus under the curated headline', async () => {
@@ -502,12 +495,9 @@ describe('ProgressModal — brand branch state transitions', () => {
       lastStatus: { download: '1050 / 2100 MB · 22 MB/s · ~1m remaining' },
     })
 
-    // Headline (curated label).
     expect(body.text()).toContain('Downloading ComfyUI…')
-    // Substatus (rich main-side detail with bytes/speed/ETA). The view
-    // runs `formattedSubStatus` over the raw string so byte counts >= 4
-    // digits get locale grouping (`2100 MB` → `2,100 MB`) for readability.
-    // `1050` stays as-is because it's followed by `/`, not a byte unit.
+    // Substatus: `formattedSubStatus` locale-groups byte counts >= 4 digits
+    // (`2100 MB` → `2,100 MB`); `1050` stays since it's followed by `/`.
     expect(body.exists('.brand-progress__substatus')).toBe(true)
     const subText = body.selectorText('.brand-progress__substatus')
     expect(subText).toContain('1050 / 2,100 MB')
@@ -518,9 +508,6 @@ describe('ProgressModal — brand branch state transitions', () => {
 
 describe('ProgressModal — unified bar (install→launch chained 0→100)', () => {
   beforeEach(() => {
-    // Match the helpers the rest of this file's specs already use —
-    // `createPinia` + `installMockApi` are what `beforeEach` at the top
-    // of the brand-branch describe block runs.
     setActivePinia(createPinia())
     installMockApi()
     vi.useFakeTimers()
@@ -540,10 +527,8 @@ describe('ProgressModal — unified bar (install→launch chained 0→100)', () 
   }
 
   it('caps unifiedPercent at 70% for a chainSpan=install op even at 100% real progress', async () => {
-    // The install leg of an install→launch chain maps its full 0→100%
-    // into the unified bar's 0–70% slot, leaving the remaining 30% for
-    // the launch leg. This is what stops the bar from saturating at 100
-    // mid-install and then stalling there through the launch tail.
+    // The install leg maps its 0→100% into the bar's 0–70% slot, leaving
+    // 30% for launch so the bar doesn't saturate mid-install.
     await mountWithOp('inst-chain-install', {
       opKind: 'install',
       chainSpan: 'install',
@@ -556,9 +541,8 @@ describe('ProgressModal — unified bar (install→launch chained 0→100)', () 
   })
 
   it('renders the unified bar for launch ops (no separate stepper)', async () => {
-    // The single 0→100% bar spans the whole install→launch journey.
-    // Launch ops render the SAME bar element as install ops — only the
-    // caption underneath swaps to the rolling launchCaption.
+    // Launch ops render the same bar element as install ops; only the
+    // caption swaps to the rolling launchCaption.
     const { body } = await mountWithOp('inst-launch-bar', {
       opKind: 'launch',
       chainSpan: 'launch',
@@ -568,9 +552,8 @@ describe('ProgressModal — unified bar (install→launch chained 0→100)', () 
   })
 
   it('starts a chainSpan=launch op in the 70% region', async () => {
-    // Launch leg of the chain → 70 + launchPercent*0.3. At
-    // launchActiveIndex=0 and zero elapsed, launchPercent ~= 0, so the
-    // bar reads ~70%. No discontinuity from where install left off.
+    // Launch leg → 70 + launchPercent*0.3; at start launchPercent ~= 0,
+    // so the bar reads ~70% with no discontinuity from install.
     await mountWithOp('inst-chain-launch', {
       opKind: 'launch',
       chainSpan: 'launch',
@@ -580,51 +563,35 @@ describe('ProgressModal — unified bar (install→launch chained 0→100)', () 
   })
 
   it('rolls launchCaption through phases on the 900ms caption timer', async () => {
-    // Standalone launch: each 900ms tick bumps captionFloor by 1, which
-    // is what guarantees the narrative phases ("security scan", "mount
-    // libraries") each get airtime even on fast machines where stdout
-    // races ahead. The clamp logic lives in `launchActiveIndex`.
+    // Each 900ms tick bumps captionFloor by 1 so every narrative phase gets
+    // airtime even when stdout races ahead.
     const { body } = await mountWithOp('inst-launch-roll', { opKind: 'launch' })
 
-    // Tick 0: securityScan.
     expect(body.selectorText('.brand-progress__caption')).toContain('security')
     vi.advanceTimersByTime(900 + 50)
     await flushPromises()
-    // Tick 1: mountLibraries.
     expect(body.selectorText('.brand-progress__caption')).toMatch(/mount|librar/i)
   })
 
   it('snaps unifiedPercent toward 100 for chainSpan=launch when stdout signals server-ready', async () => {
-    // Production sequence: launch starts → narrative phases tick along
-    // on the 900ms timer → eventually "Uvicorn running on" arrives in
-    // stdout. The snap-to-100 fires when BOTH `launchActiveIndex === 4`
-    // AND `stdoutStep === 4`.
-    //
-    // The 1-per-tick clamp in `launchActiveIndex` means stdout alone
-    // can't fast-forward to row 4 — captionFloor has to catch up.
-    // So we let the timer advance the floor first, then inject the
-    // stdout signal that fires the snap.
-    //
-    // (Watcher has no `{ immediate: true }`, so seeding `terminalOutput`
-    // at mount-time wouldn't fire the regex. Mutating after mount is
-    // what production's IPC chunks do.)
+    // The snap-to-100 fires only when both `launchActiveIndex === 4` and
+    // `stdoutStep === 4`. The 1-per-tick clamp means captionFloor must
+    // catch up first, so advance the timer before injecting the stdout
+    // signal (mutating after mount mirrors production's IPC chunks).
     await mountWithOp('inst-launch-ready', {
       opKind: 'launch',
       chainSpan: 'launch',
       terminalOutput: '',
     })
-    // Five timer ticks → captionFloor reaches 4 (startingServer).
+    // Five ticks → captionFloor reaches 4.
     vi.advanceTimersByTime(900 * 5 + 100)
     await flushPromises()
-    // Now feed the server-ready signal — stdoutStep flips to 4. Combined
-    // with captionFloor=4 the active index lands at 4 and launchPercent
-    // shortcuts to 100 → unifiedPercent = 70 + 30 = 100.
+    // Server-ready signal flips stdoutStep to 4 → unifiedPercent = 100.
     const store = useProgressStore()
     const op = store.operations.get('inst-launch-ready')!
     op.terminalOutput = 'Uvicorn running on http://127.0.0.1:8188\n'
     await flushPromises()
-    // One extra tick of the 250ms launch-percent ticker so the bar's
-    // reactive readout catches the new active index.
+    // One launch-percent tick so the bar catches the new active index.
     vi.advanceTimersByTime(300)
     await flushPromises()
     expect(barPercent()).toBeCloseTo(100, 1)
@@ -637,10 +604,8 @@ describe('ProgressModal — unified bar (install→launch chained 0→100)', () 
       activePhase: 'download',
       activePercent: 40,
     })
-    // The caption row is shared between launch and non-launch ops; the
-    // content is what differs. For an install op with `activePhase=download`
-    // we expect the curated `progress.phaseLabel.download` ("Downloading
-    // ComfyUI…"), NOT the launch rolling caption.
+    // Install op with `activePhase=download` shows the curated
+    // `progress.phaseLabel.download`, not the launch rolling caption.
     const caption = body.selectorText('.brand-progress__caption')
     expect(caption).toContain('Downloading')
     expect(caption).not.toMatch(/security scan|mount.*librar/i)
@@ -648,28 +613,18 @@ describe('ProgressModal — unified bar (install→launch chained 0→100)', () 
 })
 
 describe('ProgressModal — error message styling (regression for #582)', () => {
-  // jsdom doesn't compute layout, so we can't assert via
-  // `getComputedStyle().maxHeight` against the rendered element. Instead
-  // we parse the .vue file's `<style>` block directly and assert the
-  // `.brand-progress__error-message` rule still carries the `max-height`
-  // + `overflow-y` declarations introduced to stop long tracebacks from
-  // stretching the takeover.
-  //
-  // Without this guard the only signal a future refactor would have is a
-  // visual e2e diff — too easy to miss in a CSS-only PR.
+  // jsdom can't compute layout, so parse the .vue `<style>` directly to
+  // assert `.brand-progress__error-message` keeps its `max-height` +
+  // `overflow-y` rules that stop long tracebacks stretching the takeover.
 
-  // Resolved against the workspace root (cwd at test time) so this
-  // doesn't depend on import.meta.url (vitest jsdom mode can hand back
-  // a non-file URL there).
+  // Resolved against cwd (not import.meta.url, which jsdom can mangle).
   const vueSource = readFileSync(
     path.resolve('src/renderer/src/views/ProgressModal.vue'),
     'utf8',
   )
 
   function extractRule(selector: string): string {
-    // Anchor on a line start so we match the base rule rather than a
-    // descendant override (e.g. `.foo .bar { ... }` would otherwise win
-    // over `.bar { ... }` because it appears first in the file).
+    // Anchor on a line start so we match the base rule, not a descendant override.
     const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     const re = new RegExp(`(?:^|\\n)${escaped}\\s*\\{([^}]*)\\}`)
     const match = vueSource.match(re)

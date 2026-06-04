@@ -17,10 +17,7 @@ function makeProgress(
 }
 
 interface BroadcastHooks {
-  /** Invokes whatever callback the store registered via
-   *  `onModelDownloadRemoved` — used to fake main's removal
-   *  broadcast in unit tests so we can verify that the store drops
-   *  entries in lockstep with main. */
+  /** Fires the store's `onModelDownloadRemoved` callback to fake main's removal broadcast. */
   emitRemoved: (url: string) => void
   emitClearedFinished: (urls: string[]) => void
   dismissModelDownload: ReturnType<typeof vi.fn>
@@ -64,11 +61,7 @@ describe('useDownloadStore', () => {
     api = installMockApi()
     setActivePinia(createTestingPinia({ stubActions: false }))
     store = useDownloadStore()
-    // init() wires up the removed / cleared broadcast handlers that
-    // the dismiss/clearFinished tests rely on for round-tripping.
     store.init()
-    // listModelDownloads() seeds asynchronously; we only care about
-    // the post-init state here so reset call counts.
     api.dismissModelDownload.mockClear()
     api.clearFinishedModelDownloads.mockClear()
   })
@@ -116,9 +109,7 @@ describe('useDownloadStore', () => {
 
       store.dismiss(url)
       expect(api.dismissModelDownload).toHaveBeenCalledWith(url)
-      // The store deliberately doesn't mutate locally — every other
-      // surface watching the same broadcast would otherwise drift out
-      // of sync. The entry is still present until main echoes back.
+      // Store doesn't mutate locally; entry stays until main echoes back so surfaces don't drift.
       expect(store.downloads.has(url)).toBe(true)
 
       api.emitRemoved(url)

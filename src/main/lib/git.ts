@@ -83,7 +83,7 @@ function disablePygit2(reason: string): void {
   // Python env for a population of users (signing / quarantine /
   // bootstrap-python copy drift).
   const failures = _pygit2.status === 'healthy' ? _pygit2.failures : 0
-  telemetry.emit('desktop2.pygit2.circuit_broken', {
+  telemetry.emit('comfy.desktop.pygit2.circuit_broken', {
     reason_bucket: telemetry.bucketError(reason),
     failures
   })
@@ -155,10 +155,16 @@ export function probePygit2(
 }
 
 /**
- * Best-effort macOS repair for a Python env directory: remove quarantine
- * flag and adhoc-sign Mach-O binaries.  Used for both the bundled
- * bootstrap-python (whose codesignature gets invalidated when the .app is
+ * Best-effort macOS repair for an env directory: remove quarantine flag and
+ * adhoc-sign every Mach-O binary in the tree.  Used for both the bundled
+ * bootstrap-python (whose codesignatures get invalidated when the .app is
  * extracted from a zip) and standalone-env (copied/migrated installs).
+ *
+ * The walk in codesignBinaries() signs anything that looks like Mach-O, so
+ * this single call covers every bundled binary in the env — currently the
+ * Python interpreter + pygit2 .so files + the bundled `uv` binary at the
+ * env root / under `bin/`.  Adding more bundled binaries to bootstrap-python
+ * does not require changes here.
  *
  * No-op on non-Darwin platforms or when already attempted for this dir
  * in the current session.
@@ -185,7 +191,7 @@ async function repairEnvForPygit2(envDir: string): Promise<void> {
     result = 'failed'
     console.warn('[git] pygit2 repair failed:', err)
   }
-  telemetry.emit('desktop2.pygit2.repair_attempted', { result })
+  telemetry.emit('comfy.desktop.pygit2.repair_attempted', { result })
 }
 
 /**
@@ -221,7 +227,7 @@ export async function tryConfigurePygit2Fallback(installPath: string): Promise<b
     // Probe still failing AFTER any repair attempt — the user is in the
     // broken state we shipped #738 to detect. Datadog-mirrored so ops
     // can correlate with release / signing-cert changes.
-    telemetry.emit('desktop2.pygit2.probe_failed', {
+    telemetry.emit('comfy.desktop.pygit2.probe_failed', {
       source: 'standalone',
       error_bucket: telemetry.bucketError(probe.reason)
     })
@@ -272,7 +278,7 @@ export async function tryConfigureBootstrapPygit2(): Promise<boolean> {
 
   if (!probe.ok) {
     console.warn(`[git] bootstrap pygit2 rejected at ${pythonPath}: ${probe.reason}`)
-    telemetry.emit('desktop2.pygit2.probe_failed', {
+    telemetry.emit('comfy.desktop.pygit2.probe_failed', {
       source: 'bootstrap',
       error_bucket: telemetry.bucketError(probe.reason)
     })

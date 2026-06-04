@@ -53,8 +53,7 @@ describe('spawnCommand', { timeout: 30_000 }, () => {
   })
 
   afterEach(async () => {
-    // Small delay to let any lingering taskkill processes release file handles
-    // before cleanup — Windows can hold directory locks briefly after kill.
+    // Let lingering taskkill processes release file handles; Windows holds dir locks briefly.
     await new Promise((r) => setTimeout(r, 200))
     try { fs.rmSync(tmpDir, { recursive: true, force: true }) } catch {}
   })
@@ -108,10 +107,7 @@ describe('spawnCommand', { timeout: 30_000 }, () => {
 
     const result = await spawnCommand(command, args, tmpDir, undefined, undefined, controller.signal)
 
-    // The process should have been killed (non-zero exit code).
-    // We do not assert elapsed time — on Windows, taskkill /T /F can take
-    // several seconds depending on system load. The test timeout (15s)
-    // serves as the upper bound.
+    // Killed process exits non-zero. No elapsed-time assertion: Windows taskkill can be slow.
     expect(result.code).not.toBe(0)
   })
 

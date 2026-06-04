@@ -30,9 +30,7 @@ const emit = defineEmits<{
   close: []
   'show-detail': [installationId: string]
   'show-console': [installationId: string]
-  /** Picker-driven mutating ops that opted into a `successTerminal`
-   *  resolve here instead of auto-closing. The host maps the action id
-   *  (`go-dashboard`, `open-instance`, future presets) to behaviour. */
+  /** `successTerminal` ops resolve here instead of auto-closing; the host maps the action id to behaviour. */
   'success-choice': [actionId: string, installationId: string]
 }>()
 
@@ -53,14 +51,7 @@ const currentOp = computed(() => {
 
 const displayId = computed(() => currentId.value ?? props.installationId)
 
-/**
- * Whether the op finished with an unresolved port conflict. Used by
- * the brand layout to swap the generic finished-state UI (banner + Back
- * to dashboard) for the port-specific banner + Use-Port / Kill-Process
- * footer. `resolvingConflict` flips to true the moment the user picks
- * a fix and the op is re-started, which drops us back into the running
- * state — so this guard fires only while the conflict is actionable.
- */
+// True while a finished op has an unresolved, still-actionable port conflict (false once the user picks a fix and re-runs).
 const isPortConflictOpen = computed<boolean>(() => {
   const op = currentOp.value
   if (!op?.finished) return false
@@ -71,15 +62,7 @@ const isPortConflictOpen = computed<boolean>(() => {
   return true
 })
 
-/**
- * Detail-line text to render under the finished-state banner — either
- * the generic error string or the port-conflict message. Centralised
- * so the `<div>` gate and the `<BaseCopyButton>` `value` can't drift:
- * whatever the user sees is exactly what gets copied.
- *
- * Returns null while the op is in flight or in any other terminal
- * state (success, cancelled) so the row collapses cleanly.
- */
+// Error / port-conflict detail under the finished banner. Centralised so the gate and the copy value can't drift. Null in any non-error terminal state.
 const finishedErrorMessage = computed<string | null>(() => {
   const op = currentOp.value
   if (!op?.finished) return null
@@ -89,105 +72,61 @@ const finishedErrorMessage = computed<string | null>(() => {
   return null
 })
 
-/**
- * Unified 0→100 progress for the bar. Reads through `progressStore.
- * globalProgressFor` which handles flat vs stepped + the monotonic
- * clamp + the held-fill-on-indeterminate trick. See the store helper
- * for the full contract.
- */
+// Unified 0→100 progress via `progressStore.globalProgressFor` (handles flat/stepped + monotonic clamp).
 const globalProgress = computed<{ percent: number; indeterminate: boolean }>(() => {
   const op = currentOp.value
   if (!op) return { percent: 0, indeterminate: true }
   return progressStore.globalProgressFor(op)
 })
 
-/**
- * Per-step weight slots for the launch 0→100% bar. Each entry is the
- * end-of-slot percent; the active step interpolates between the
- * previous slot's end and its own end as elapsed-time-in-step grows.
- * Calibrated so gpu + customNodes — the two long ones — own the middle
- * of the bar, and startingServer holds the final 25% for the port-wait.
- *
- * Indexed by `LAUNCH_STEP_ORDER`:
- *   [securityScan, mountLibraries, gpu, customNodes, startingServer]
- */
+// End-of-slot percents for the launch bar (indexed by LAUNCH_STEP_ORDER); the active step interpolates within its slot.
 const LAUNCH_SLOT_ENDS = [10, 25, 45, 70, 95] as const
 const LAUNCH_SLOT_STARTS = [0, 10, 25, 45, 70] as const
-/** Soft estimate (ms) for how long the active step takes when no
- *  stdout signal arrives — used purely to interpolate the bar fill
- *  inside its slot. Steps still advance only on the 900ms timer +
- *  stdout regexes; this constant just keeps the bar from looking
- *  frozen between transitions. */
+/** Soft per-step duration estimate for interpolating the bar fill when no stdout signal arrives. Steps still advance on the timer + stdout regexes. */
 const LAUNCH_STEP_BUDGET_MS = 4_000
 
-/**
- * User-facing caption that swaps as phases advance.
- *
- * Stepped ops: maps `activePhase` to `progress.phaseLabel.<phase>` —
- * curated strings like "Downloading ComfyUI…" instead of the developer-y
- * `lastStatus` string. Falls back to `lastStatus[activePhase]` for any
- * phase not in the i18n table (e.g. a new main-side phase shipped before
- * the table is updated) so we never go blank.
- *
- * Flat ops: pass through `flatStatus` — chooser-launch overrides this
- * anyway via the existing `launchCaption` branch.
- */
+// Friendly label registered by main via `sendProgress('steps', { steps })` for the active phase (used by the adopt/migration flow).
+const activeStepLabel = computed<string | null>(() => {
+  const op = currentOp.value
+  if (!op?.steps || !op.activePhase) return null
+  return op.steps.find((s) => s.phase === op.activePhase)?.label?.trim() || null
+})
+
+// Trimmed raw status string main pushed for the active phase.
+const activePhaseStatus = computed<string | null>(() => {
+  const op = currentOp.value
+  if (!op?.steps || !op.activePhase) return null
+  return op.lastStatus[op.activePhase]?.trim() || null
+})
+
+// User-facing caption per phase. Stepped ops resolve in order: curated `progress.phaseLabel.<phase>` → registered step label → real status detail → raw phase id (last resort). Flat ops pass through `flatStatus`.
 const friendlyCaption = computed<string>(() => {
   const op = currentOp.value
   if (!op) return t('progress.starting')
   if (op.steps && op.activePhase) {
     const key = `progress.phaseLabel.${op.activePhase}`
     const friendly = t(key)
-    // vue-i18n returns the key itself when missing — fall back to the raw
-    // status string so the UI never shows the dotted key.
     if (friendly !== key) return friendly
-    return op.lastStatus[op.activePhase] || op.activePhase
+    if (activeStepLabel.value) return activeStepLabel.value
+    const raw = activePhaseStatus.value
+    if (raw && raw !== op.activePhase) return raw
+    return op.activePhase
   }
   return op.flatStatus || t('progress.starting')
 })
 
-/**
- * Optional second-line caption rendered under `friendlyCaption`. Today
- * surfaces the main-side rich `lastStatus[activePhase]` string for any
- * stepped phase where `friendlyCaption` is showing a curated label —
- * giving the user the bytes / speed / ETA detail main already computed
- * (see `installer.ts` download progress emitter) without the dev-y
- * raw phase id leaking through as a headline.
- *
- * Gated on:
- *  - stepped op (so the launch-style flat ops don't get a substatus —
- *    their narrative captions already convey what's happening).
- *  - the curated phase label *was* found (`friendlyCaption !==
- *    op.lastStatus[activePhase]`); otherwise headline + substatus would
- *    say the same thing.
- *  - the raw status is meaningfully different from the headline (a
- *    string equality check) — for phases that only emit the curated
- *    label, this collapses to null and the line is hidden.
- *
- * Flat ops fall through to null since `flatStatus` already lands as
- * the headline.
- */
+// Second-line caption: rich `lastStatus[activePhase]` (bytes/speed/ETA) when it adds info beyond the headline. Suppresses the raw phase-id fallback so dev-y slugs never leak in as a sub-label.
 const subStatus = computed<string | null>(() => {
-  const op = currentOp.value
-  if (!op?.steps || !op.activePhase) return null
-  const raw = op.lastStatus[op.activePhase]
+  const raw = activePhaseStatus.value
   if (!raw) return null
+  const op = currentOp.value
+  if (op?.activePhase && raw === op.activePhase) return null
+  if (raw === activeStepLabel.value) return null
   if (raw === friendlyCaption.value) return null
   return raw
 })
 
-/**
- * Polish the rich substatus string main produces (e.g. `"250 / 1000 MB ·
- * 12.3 MB/s · 1m30s elapsed · 45s remaining"`). Three passes:
- *   1. Group 4+ digit byte counts (`1000 MB` → `1,000 MB`). Lookahead is
- *      scoped to a byte-unit suffix so unrelated numerics (port, PID,
- *      timestamp) elsewhere in the string can't be mangled into
- *      `12,345`.
- *   2. Drop the "· 0s remaining" / "· — remaining" tail at the very end
- *      of the elapsed window — it's noise once the ETA has collapsed.
- *   3. Collapse the doubled separator left behind and trim a trailing
- *      one so we never render `"… elapsed  ·  "`.
- */
+// Polish the rich substatus: group byte counts (lookahead scoped to a byte unit so ports/PIDs aren't mangled), drop a collapsed "· 0s remaining" tail, fix the leftover separator.
 const formattedSubStatus = computed<string | null>(() => {
   const raw = subStatus.value
   if (!raw) return null
@@ -201,35 +140,7 @@ const formattedSubStatus = computed<string | null>(() => {
   )
 })
 
-/**
- * Brand-loader launch step list — chooser-tile launch path only.
- *
- * Active ONLY when `brandChrome && currentOp && currentOp.steps === null`.
- * That second guard is what keeps this off the other surfaces that also
- * mount the brand branch:
- *   - First-use install op (`steps` is non-null → multi-step install).
- *   - Update-while-running on first-use (also has `steps`).
- *
- * Launch ops are flat (`steps === null`) so this list activates cleanly
- * for chooser-tile launches and stays dormant everywhere else. When
- * dormant, the brand branch falls through to `friendlyCaption`.
- *
- * Five narrative rows:
- *   1. securityScan     — narrative, advanced by the timer below.
- *   2. mountLibraries   — narrative, advanced by the timer below.
- *   3. gpu              — Comfy stdout `Total VRAM <N> MB` line. Falls
- *                         back to the no-VRAM label until parsed.
- *   4. customNodes      — Comfy stdout custom-node / ComfyUI-Manager
- *                         load lines.
- *   5. startingServer   — stays active until the launch op finishes
- *                         (terminal "To see the GUI go to: …" line or
- *                          op.finished).
- *
- * Steps 1 + 2 are decorative — main only emits launch.starting /
- * launch.waiting today. If real integrity / library-mount phases land
- * in main later (sendProgress in launch.ts), drop the narrative timer
- * and key off `op.lastStatus.launch` instead.
- */
+// Launch-caption step list for the flat chooser-tile launch path (steps 1-2 narrative/timer-driven, 3-4 from stdout, 5 until op finishes). Dormant for stepped ops, which fall through to `friendlyCaption`.
 type LaunchStepKey = 'securityScan' | 'mountLibraries' | 'gpu' | 'customNodes' | 'startingServer'
 
 const LAUNCH_STEP_ORDER: readonly LaunchStepKey[] = [
@@ -240,47 +151,19 @@ const LAUNCH_STEP_ORDER: readonly LaunchStepKey[] = [
   'startingServer'
 ]
 
-// True only for launch-class ops in the brand layout. Drives the
-// rolling 5-step launchCaption pipeline ("security scan → mount
-// libraries → GPU → custom nodes → starting server") + the GPU stdout
-// scanner + the `launchPercent` bar interpolation. Non-launch ops
-// (delete / update / install / snapshot / generic) fall through to
-// `friendlyCaption`, which maps `progress.phaseLabel.<phase>` or
-// `flatStatus` to a user-facing string — so a delete op now reads
-// "Deleting installation…" instead of "Mounting model libraries…".
+// True only for flat launch-class ops; drives the rolling launchCaption pipeline, GPU stdout scanner, and `launchPercent` interpolation. Other op kinds use `friendlyCaption`.
 const isBrandLaunch = computed(
   () => !!currentOp.value && currentOp.value.opKind === 'launch' && currentOp.value.steps === null
 )
 
-/**
- * `captionFloor` is a monotonically-rising index ticked by a fixed-
- * interval timer (900ms). The active caption is `max(floor, stdoutStep)`
- * clamped so it never gets more than one step *ahead* of the floor —
- * that's what guarantees the first two narrative captions ("security
- * scan", "mount libraries") each get ~900ms of airtime even when Comfy
- * stdout immediately races to step 4. Without the clamp, a fast local
- * launch would silently skip both rows.
- */
+// Monotonic caption index ticked every 900ms; the active caption is `max(floor, stdoutStep)` clamped to floor+1 so the first narrative captions each get airtime even when stdout races ahead.
 const captionFloor = ref(0)
 let captionTimer: ReturnType<typeof setInterval> | null = null
 const CAPTION_TICK_MS = 900
 
 /**
- * Latched VRAM (GB) and furthest stdout-driven step, both maintained by
- * the tail-walking watcher below.
- *
- * Why a watcher instead of a `computed(() => out.match(…))`:
- * `terminalOutput` is mutated on every Comfy stdout chunk (string += in
- * the progress store). A computed would re-scan the *entire* growing
- * buffer per chunk — O(N) per chunk, O(N²) cumulative across a launch.
- * ComfyUI-Manager dumps hundreds of lines while custom nodes load and
- * the buffer easily hits hundreds of KB, so the quadratic shape is real
- * even on a launch the user perceives as a few seconds.
- *
- * Instead, we scan only the *new tail* of stdout, keep a small overlap
- * so a pattern split across the chunk boundary still matches, and short-
- * circuit once every regex has hit (no further work for the rest of the
- * launch).
+ * Latched VRAM and furthest stdout step, maintained by the tail-walking watcher below.
+ * A `computed(() => out.match(…))` would re-scan the whole growing buffer per chunk (O(N²) across a launch), so we scan only the new tail with a small overlap and short-circuit once every regex has hit.
  */
 const vramGb = ref<number | null>(null)
 const stdoutStep = ref(-1)
@@ -297,9 +180,7 @@ function clearCaptionTimer(): void {
 function startCaptionTimer(): void {
   clearCaptionTimer()
   captionTimer = setInterval(() => {
-    // Stop ticking the moment stdout (or op completion) has already
-    // walked us to the last step — saves a per-900ms ref bump after the
-    // server is up and complements the watcher short-circuit above.
+    // Stop ticking once stdout / completion has reached the last step.
     if (
       currentOp.value?.finished ||
       stdoutStep.value >= LAUNCH_STEP_ORDER.length - 1 ||
@@ -312,8 +193,7 @@ function startCaptionTimer(): void {
   }, CAPTION_TICK_MS)
 }
 
-// Reset + (re)arm the caption timer when the brand-launch op changes.
-// Keyed on `displayId` so each launch starts the rolling caption fresh.
+// Reset + re-arm the caption timer on each new launch op (keyed on `displayId`).
 watch(
   () => (isBrandLaunch.value ? displayId.value : null),
   (id) => {
@@ -329,9 +209,7 @@ watch(
   { immediate: true }
 )
 
-// Snap to the terminal caption the moment the op finishes (success or
-// cancel) so the user doesn't see "Mounting model libraries…" hanging
-// after the server is up.
+// Snap to the terminal caption on finish so a mid-pipeline caption doesn't hang after the server is up.
 watch(
   () => currentOp.value?.finished ?? false,
   (finished) => {
@@ -344,8 +222,7 @@ watch(
 
 onBeforeUnmount(clearCaptionTimer)
 
-// Tail-only stdout scanner. Replaces two full-buffer regex computeds
-// (see comment on `vramGb` above for why).
+// Tail-only stdout scanner (see `vramGb` above for why not a computed).
 watch(
   () => (isBrandLaunch.value ? (currentOp.value?.terminalOutput ?? '') : ''),
   (out) => {
@@ -353,7 +230,7 @@ watch(
       lastScanLen = 0
       return
     }
-    // Already at the terminal step — nothing left to detect.
+    // Already at the terminal step.
     if (stdoutStep.value >= LAUNCH_STEP_ORDER.length - 1 && vramGb.value !== null) {
       lastScanLen = out.length
       return
@@ -386,18 +263,12 @@ const launchActiveIndex = computed(() => {
   const op = currentOp.value
   if (!op) return 0
   if (op.finished) return LAUNCH_STEP_ORDER.length - 1
-  // Cap stdout's contribution at floor+1: that's what makes the timer
-  // load-bearing instead of decorative — stdout can fast-forward by at
-  // most one step per tick, so every caption gets its ~900ms of airtime.
+  // Cap stdout at floor+1 so every caption gets its ~900ms of airtime.
   const stdoutClamped = Math.min(stdoutStep.value, captionFloor.value + 1)
   return Math.max(captionFloor.value, stdoutClamped)
 })
 
-/** Single rolling caption — picks the label for the current active step
- *  (or the last one once the op has finished). The unified bar carries
- *  the % story; this just swaps the text as launch phases advance.
- *  Mirrors `friendlyCaption` for non-launch ops; the template picks
- *  one or the other based on `isBrandLaunch`. */
+// Rolling caption for the active launch step. The template picks this or `friendlyCaption` via `isBrandLaunch`.
 const launchCaption = computed<string>(() => {
   if (!isBrandLaunch.value) return ''
   const idx = Math.min(launchActiveIndex.value, LAUNCH_STEP_ORDER.length - 1)
@@ -410,16 +281,7 @@ const launchCaption = computed<string>(() => {
   return t(`launch.steps.${key}`)
 })
 
-/**
- * Wall-clock timestamp the current launch step became active. Used by
- * `launchPercent` to interpolate the bar's fill within its slot so the
- * user sees forward motion between step transitions even though the
- * step itself only advances on the 900ms timer / stdout regex match.
- *
- * `launchStepNow` is a low-frequency reactive clock that re-evaluates
- * `launchPercent` every ~250ms. It only ticks during an in-flight
- * launch op (gated below); other ops bypass `launchPercent` entirely.
- */
+// Timestamp the active launch step became active; `launchStepNow` is a ~250ms clock that drives `launchPercent`'s within-slot interpolation. Ticks only during an in-flight launch.
 const launchStepStartMs = ref(0)
 const launchStepNow = ref(0)
 let launchTickTimer: ReturnType<typeof setInterval> | null = null
@@ -444,10 +306,7 @@ function startLaunchTick(): void {
   }, LAUNCH_TICK_MS)
 }
 
-// Reset the step-elapsed clock whenever the launch op changes or the
-// active step advances. Anchoring on `launchActiveIndex` is what makes
-// the bar's slot-internal interpolation snap forward at each transition
-// instead of carrying stale elapsed-time from the previous step.
+// Reset the step-elapsed clock when the launch op changes or the active step advances, so interpolation snaps forward at each transition.
 watch(
   () => (isBrandLaunch.value ? `${displayId.value}:${launchActiveIndex.value}` : null),
   (key) => {
@@ -464,32 +323,14 @@ watch(
 
 onBeforeUnmount(clearLaunchTick)
 
-/**
- * Launch progress as a 0→100 percent for the unified bar. Maps the
- * 5-step state machine onto `LAUNCH_SLOT_ENDS`:
- *   - Completed steps contribute their full slot.
- *   - Active step interpolates `[slotStart, slotEnd)` by elapsed time
- *     against `LAUNCH_STEP_BUDGET_MS`, capped so we never reach the next
- *     slot before the step itself advances.
- *   - When the final step has fired AND stdout has matched the "server
- *     ready" regex (encoded as `stdoutStep >= 4`), snap to 100.
- *
- * Standalone-launch flows feed this into `unifiedPercent` directly
- * (the launch op carries the whole 0→100 by itself); chained-launch
- * flows feed it through the 70→100 mapping so install+launch read as
- * one journey.
- */
+// Launch progress as 0→100 for the bar: completed steps own their slot, the active step interpolates within its slot, and the final step + server-ready regex snaps to 100. Chained launches remap this to 70→100 downstream.
 const launchPercent = computed<number>(() => {
   if (!isBrandLaunch.value) return 0
   const op = currentOp.value
   if (!op) return 0
   if (op.finished && op.result?.ok) return 100
   const idx = launchActiveIndex.value
-  // Final step reached AND server-ready regex fired → snap to 100. The
-  // regex matching is what set `stdoutStep` to 4 in the first place, so
-  // checking either side is equivalent; we check `stdoutStep` directly
-  // so the bar doesn't sit at 95% while the user waits for the comfy
-  // window to appear.
+  // Snap to 100 once the final step + server-ready regex fired, so the bar doesn't sit at 95% waiting for the window.
   if (idx >= LAUNCH_STEP_ORDER.length - 1 && stdoutStep.value >= LAUNCH_STEP_ORDER.length - 1) {
     return 100
   }
@@ -500,22 +341,7 @@ const launchPercent = computed<number>(() => {
   return slotStart + (slotEnd - slotStart) * ratio
 })
 
-/**
- * Unified 0→100 percent for the bar across an install→launch chain.
- *
- * - `chainSpan === 'install'`: install op's `globalProgress` mapped to
- *   0→70% so the install never visually saturates before the launch
- *   leg begins. The remaining 30% is reserved for the launch.
- * - `chainSpan === 'launch'`: launch op's `launchPercent` mapped to
- *   70→100% so the bar picks up where the install left off.
- * - Standalone launch (`opKind === 'launch'`, no chainSpan): launch
- *   op's `launchPercent` mapped 0→100. Bar moves through all five slots
- *   on its own.
- * - Anything else: pass-through `globalProgress.percent`.
- *
- * Monotonic by construction — install caps at 70 and launch starts at
- * 70, so the seam between the two ops is invisible.
- */
+// Bar percent across an install→launch chain: `install` maps to 0–70%, `launch` to 70–100%, standalone launch to 0–100%, else pass-through. Install caps at 70 and launch starts at 70, so the seam is invisible.
 const unifiedPercent = computed<number>(() => {
   const op = currentOp.value
   if (!op) return 0
@@ -531,11 +357,7 @@ const unifiedPercent = computed<number>(() => {
   return globalProgress.value.percent
 })
 
-/** Whether the bar should render with the indeterminate slide animation
- *  rather than a determinate fill. Launch ops always render determinate
- *  now (the 5-step state machine + `launchPercent` give us a number);
- *  non-launch ops fall back to the existing `globalProgress.indeterminate`
- *  signal. */
+// Launch ops always render determinate (launchPercent gives a number); others fall back to `globalProgress.indeterminate`.
 const unifiedIndeterminate = computed<boolean>(() => {
   if (isBrandLaunch.value) return false
   const op = currentOp.value
@@ -543,16 +365,10 @@ const unifiedIndeterminate = computed<boolean>(() => {
   return globalProgress.value.indeterminate
 })
 
-// Independent of the modal-branch terminal toggle (`terminalExpanded`)
-// so the brand accordion's state doesn't leak into the Tier-2 modal
-// reopen path.
+// Separate from the modal-branch `terminalExpanded` so the brand accordion's state doesn't leak into the modal reopen path.
 const brandLogsExpanded = ref(false)
 const brandTerminalRef = ref<HTMLDivElement | null>(null)
-// Short-circuit the watcher inside `useTerminalScroll` when the
-// accordion is closed: with two `useTerminalScroll` instances live on
-// this surface (brand + modal terminal), every stdout chunk would wake
-// both watchers and post a `nextTick → scrollToBottom` on a `null` ref.
-// Gating the getter elides that fan-out until the disclosure is open.
+// Gate the getter while the accordion is closed so the two live `useTerminalScroll` instances don't both wake on every stdout chunk and scroll a null ref.
 const { isAtBottom: brandIsAtBottom, handleTerminalScroll: handleBrandTerminalScroll } =
   useTerminalScroll(brandTerminalRef, () =>
     brandLogsExpanded.value ? currentOp.value?.terminalOutput : undefined
@@ -562,33 +378,20 @@ function toggleBrandLogs(): void {
   brandLogsExpanded.value = !brandLogsExpanded.value
 }
 
-// Collapse brand logs when the op id changes — each op (launch, delete,
-// update, …) starts with the accordion closed.
+// Each op starts with the logs accordion closed.
 watch(displayId, () => {
   brandLogsExpanded.value = false
   brandIsAtBottom.value = true
 })
 
-/**
- * Cap what we actually render. The store keeps the full unbounded
- * `terminalOutput` string (telemetry / error reports still see the
- * whole thing) but rendering megabytes of text into a single text
- * node — which is what install-class ops can produce — re-layouts the
- * whole takeover. A trailing window is what the user wants anyway when
- * inspecting "what just happened."
- */
+// Render only a trailing window; the store keeps the full buffer for telemetry. Rendering megabytes into one text node re-layouts the whole takeover.
 const MAX_LOG_TAIL_CHARS = 256 * 1024
 const displayedTerminalOutput = computed(() => {
   const s = currentOp.value?.terminalOutput ?? ''
   return s.length > MAX_LOG_TAIL_CHARS ? s.slice(-MAX_LOG_TAIL_CHARS) : s
 })
 
-/** Copy-button getter for the log Copy affordance — returns the FULL
- *  unbounded `terminalOutput` (not the truncated render copy), since
- *  the user copies for sharing and the whole buffer is what they want
- *  in the issue thread / Google query. Wrapped as a function so the
- *  string is materialised at click time instead of on every keystroke
- *  the buffer grows. */
+// Copy returns the FULL buffer (not the truncated render copy); materialised at click time.
 function getTerminalLogText(): string {
   return currentOp.value?.terminalOutput ?? ''
 }
@@ -618,10 +421,7 @@ function startOperation(opts: {
   returnTo?: string
   opKind?: ShowProgressOpts['opKind']
   destroysInstance?: boolean
-  /** Forwarded straight to the store so a host that drives the modal
-   *  via the exposed handle (instead of `handleShowProgress`) can still
-   *  set up an install→launch chain. Without this widening the field
-   *  would be silently dropped — bar resets at the seam. */
+  /** Forwarded to the store so a host driving the modal via the exposed handle can still set up an install→launch chain. */
   chainSpan?: ShowProgressOpts['chainSpan']
   successTerminal?: ShowProgressOpts['successTerminal']
 }): void {
@@ -630,9 +430,7 @@ function startOperation(opts: {
   progressStore.startOperation(opts)
 }
 
-/** True when a successful op is parked on its terminal-choice screen
- *  instead of auto-closing. Drives the footer template swap and the
- *  auto-close gate. */
+// True when a successful op is parked on its terminal-choice screen; gates the footer swap and auto-close.
 const successTerminalActive = computed<boolean>(() => {
   const op = currentOp.value
   if (!op?.finished) return false
@@ -649,11 +447,7 @@ function handleSuccessChoice(actionId: string): void {
   emit('close')
 }
 
-// Auto-close modal on window-mode launch success. Other op kinds are
-// auto-closed via the brand-loader's `handleDone`-driven watcher below
-// (after a short delay so the success banner registers visually).
-// Window-mode launches need to close instantly so the new comfy
-// window can take focus without the takeover lingering.
+// Window-mode launches close instantly so the new comfy window takes focus; other op kinds auto-close via the delayed `handleDone` watcher below.
 watch(
   () => {
     const id = displayId.value
@@ -674,25 +468,18 @@ function handleDone(): void {
   if (!id) return
   const op = progressStore.operations.get(id)
   if (!op?.result) return
-  // Destroy ops: detach the host (no-op if not install-backed) before
-  // closing the takeover, so a delete that finished against the install
-  // currently backing this window doesn't leave the host pointing at a
-  // now-removed install.
+  // Destroy ops: detach the host before closing so it isn't left pointing at a now-removed install.
   if (op.destroysInstance) {
     void window.api.returnToDashboard()
   }
   emit('close')
-  // Copy / copy-update / release-update produced a new install — open
-  // it in its own window. The source host stays where it is so the
-  // user keeps the running session / panel state they had.
+  // copy / copy-update / release-update produced a new install — open it in its own window; the source host stays put.
   const newInstallationId = op.result.newInstallationId
   if (newInstallationId) {
     void window.api.openInstallWindow(newInstallationId)
     return
   }
-  // Guard show-detail against a stale install id — destroy ops (or any
-  // op whose success removes the install from the registry) would
-  // otherwise route to a now-missing detail view.
+  // Guard show-detail against a stale id (destroy ops would route to a missing detail view).
   const installStillExists = !!installationStore.getById(id)
   if (installStillExists && (op.returnTo === 'detail' || op.result.navigate === 'detail')) {
     emit('show-detail', id)
@@ -701,35 +488,24 @@ function handleDone(): void {
   }
 }
 
-/** Return-to-Dashboard from any op state. In-flight runs the
- *  shared confirm (local installs are prompted because returning stops a
- *  running ComfyUI); error / finished states skip the prompt because
- *  the install is already idle. Closes the takeover and, if the
- *  current window is install-backed, flips it back to chooser mode in
- *  place via the panel IPC. */
+// Return-to-Dashboard from any op state. In-flight prompts local installs (returning stops a running ComfyUI); idle states skip it. Flips an install-backed window back to chooser mode in place.
 async function returnToDashboard(reason: ReturnToDashboardReason): Promise<void> {
   const id = displayId.value
   const op = id ? progressStore.operations.get(id) : null
   const installation = id ? (installationStore.getById(id) ?? null) : null
-  // confirmReturnToDashboard is a no-op for the crashed / finished branches —
-  // only the in-flight footer button can actually surface the prompt.
+  // No-op for the finished branches; only the in-flight footer button surfaces the prompt.
   const ok = await confirmReturnToDashboard(installation, reason)
   if (!ok) return
-  // Cancel the in-flight op so it doesn't keep running in the background.
   if (reason === 'in_flight' && op && !op.finished && id) {
     progressStore.cancelOperation(id)
   }
-  emitTelemetryAction('desktop2.instance.return_to_dashboard', { from: 'progress', reason })
+  emitTelemetryAction('comfy.desktop.instance.return_to_dashboard', { from: 'progress', reason })
   emit('close')
-  // No-op when the calling host isn't install-backed (chooser host
-  // launches that errored before the swap).
+  // No-op when the host isn't install-backed (chooser launches that errored before the swap).
   await window.api.returnToDashboard()
 }
 
-/** Re-run the same op that just errored. Mirrors the port-conflict
- *  retry pattern: feed the stored `apiCall` (or, for legacy launch
- *  ops without one, fall back to a fresh `runAction('launch')`) back
- *  into `startOperation`. */
+// Re-run the errored op: feed the stored `apiCall` (or a fresh `runAction('launch')`) back into `startOperation`.
 function handleReboot(): void {
   const id = displayId.value
   if (!id) return
@@ -745,12 +521,7 @@ function handleReboot(): void {
   })
 }
 
-/** Cancel an in-flight destroy op. Gated by the same local-install
- *  confirm helper for consistency (a delete-in-flight cancel still
- *  leaves the install in an unknown partial state, so the prompt is
- *  worth the friction). Closes the takeover after main acknowledges
- *  the cancel — the destroy op leaves the host in its current state
- *  rather than auto-detaching. */
+// Cancel an in-flight destroy op, gated by the local-install confirm (a cancelled delete leaves the install partial). Host stays put rather than auto-detaching.
 async function cancelDestructiveOp(): Promise<void> {
   const id = displayId.value
   if (!id) return
@@ -759,7 +530,7 @@ async function cancelDestructiveOp(): Promise<void> {
   const installation = installationStore.getById(id) ?? null
   const ok = await confirmReturnToDashboard(installation, 'in_flight')
   if (!ok) return
-  emitTelemetryAction('desktop2.instance.return_to_dashboard', {
+  emitTelemetryAction('comfy.desktop.instance.return_to_dashboard', {
     from: 'progress',
     reason: 'in_flight'
   })
@@ -767,12 +538,7 @@ async function cancelDestructiveOp(): Promise<void> {
   emit('close')
 }
 
-/** Auto-close the brand loader on success or cancel so the user
- *  doesn't have to click Done. A short delay (~700 ms) lets the
- *  banner crossfade in long enough to register, then `handleDone`
- *  runs the same navigation logic as the manual click. Errors
- *  don't auto-close — the user needs time to read / copy the
- *  message and pick their next step. */
+// Auto-close on success/cancel after a short delay (lets the banner register), then run `handleDone`. Errors don't auto-close.
 const AUTO_CLOSE_DELAY_MS = 700
 let autoCloseTimer: ReturnType<typeof setTimeout> | null = null
 function clearAutoCloseTimer(): void {
@@ -787,9 +553,7 @@ watch(
     if (!op?.finished) return null
     if (op.error) return null
     if (op.result?.portConflict) return null
-    // successTerminal opt-in parks the modal on a choice screen so the
-    // user explicitly picks the next step. Auto-close would race the
-    // first frame of that screen and dismiss it before it's readable.
+    // successTerminal parks on a choice screen; auto-close would race and dismiss it before it's readable.
     if (successTerminalActive.value) return null
     return displayId.value
   },
@@ -857,11 +621,7 @@ defineExpose({ startOperation, showOperation })
       <div class="brand-progress__stack">
         <ComfyWordmark class="brand-progress__wordmark" />
 
-        <!-- Progress bar — single 0→100% fill that spans the full
-             install→launch journey. `unifiedPercent` maps the install
-             leg into 0–70% and the launch leg into 70–100%; standalone
-             ops just run 0→100 directly. Bar hides once the op finishes
-             so the finished-state banner owns the visual focus. -->
+        <!-- Single bar across the install→launch journey; hides once finished so the banner takes focus. -->
         <template v-if="!currentOp.finished">
           <div class="brand-progress__bar" :class="{ 'is-indeterminate': unifiedIndeterminate }">
             <div class="brand-progress__bar-fill" :style="{ width: `${unifiedPercent}%` }" />
@@ -871,18 +631,7 @@ defineExpose({ startOperation, showOperation })
           </div>
         </template>
 
-        <!-- Finished-state banner — appears in place of the running
-             caption when the op resolves. Success / cancelled auto-
-             close after a short delay (see auto-close watcher); error
-             stays mounted so the user can read and copy the message.
-             Port-conflict ops render their own "Port N is in use…"
-             variant so the footer's Use-Port / Kill-Process actions
-             have matching headline copy — falling through to the
-             generic "Operation failed" banner alongside port-conflict
-             buttons reads as inconsistent.
-             `resolvingConflict` flips back to `false` once the new
-             launch attempt starts, so the in-flight caption block
-             takes over again automatically. -->
+        <!-- Finished-state banner. Error stays mounted to read/copy; success/cancel auto-close. Port-conflict ops get their own banner so it matches the Use-Port / Kill-Process footer. -->
         <Transition name="brand-caption-fade" mode="out-in">
           <div
             v-if="currentOp.finished && isPortConflictOpen"
@@ -921,18 +670,8 @@ defineExpose({ startOperation, showOperation })
             </span>
           </div>
 
-          <!-- Running caption. Launch ops cycle through `launchCaption`
-               (5 narrative + stdout-driven phases). Every other op kind
-               (delete, update, install, snapshot, generic) maps through
-               `friendlyCaption`. The `:key` swap drives a tiny crossfade
-               on text change.
-
-               ⚠️ The key embeds `vramGb` because that's the only
-               *intra-step* dynamic var we want to crossfade on
-               (null → 24). Don't add more parametric vars without
-               thinking — every value change forces a remount + crossfade,
-               which looks like a stutter when the underlying text is
-               identical. -->
+          <!-- Running caption; `:key` swap crossfades on text change.
+               ⚠️ Don't add parametric vars to the key beyond `vramGb` — each value change forces a remount + crossfade, which stutters when the text is identical. -->
           <div
             v-else
             :key="
@@ -947,9 +686,7 @@ defineExpose({ startOperation, showOperation })
           </div>
         </Transition>
 
-        <!-- Success terminal action buttons — centered below the banner,
-             outside the caption Transition so it doesn't count as a
-             second child. Slides in once successTerminalActive. -->
+        <!-- Success terminal actions, outside the caption Transition so it isn't a second child. -->
         <div
           v-if="successTerminalActive && currentOp.successTerminal"
           class="brand-progress__terminal-actions"
@@ -968,11 +705,7 @@ defineExpose({ startOperation, showOperation })
           </button>
         </div>
 
-        <!-- Substatus line — the rich main-side detail string (bytes
-             received / total, MB/s, elapsed, ETA) for stepped phases
-             whose curated label hides those numbers. Launch ops keep
-             it hidden because their rolling launchCaption already
-             cycles through narrative phases. -->
+        <!-- Substatus line: the rich detail (bytes/speed/ETA) for stepped phases whose curated label hides it. Hidden for launch ops. -->
         <div
           v-if="!currentOp.finished && !isBrandLaunch && formattedSubStatus"
           class="brand-progress__substatus"
@@ -981,15 +714,7 @@ defineExpose({ startOperation, showOperation })
           {{ formattedSubStatus }}
         </div>
 
-        <!-- Error / port-conflict detail line beneath the banner.
-             • Generic error: `currentOp.error` is set.
-             • Port conflict: `result.portConflict` set, not mid-
-               resolution. Uses `result.message` (server-side copy
-               with the port number filled in).
-             Body text is selectable; the inline Copy button writes
-             the same string the user could grab manually so the
-             share-to-Google / paste-into-issue-thread flow doesn't
-             require keyboard chording. -->
+        <!-- Error / port-conflict detail beneath the banner. Copy writes the same string shown. -->
         <div v-if="finishedErrorMessage" class="brand-progress__error-row">
           <div class="brand-progress__error-message" :data-testid="TID.progressErrorMessage">
             {{ finishedErrorMessage }}
@@ -1001,12 +726,14 @@ defineExpose({ startOperation, showOperation })
           />
         </div>
 
-        <!-- Error actions — centered in the hero stack, directly below the
-             error message, mirroring the success-terminal action row. Keeps
-             the primary Reboot CTA with the failure context instead of
-             stranding it bottom-left in the footer. -->
+        <!-- Error actions in the hero stack, keeping the Reboot CTA with the failure context. -->
         <div
-          v-if="currentOp.finished && !!currentOp.error && !currentOp.cancelRequested && !isPortConflictOpen"
+          v-if="
+            currentOp.finished &&
+            !!currentOp.error &&
+            !currentOp.cancelRequested &&
+            !isPortConflictOpen
+          "
           class="brand-progress__error-actions"
         >
           <button
@@ -1034,24 +761,7 @@ defineExpose({ startOperation, showOperation })
         </div>
       </div>
     </div>
-    <!-- Footer band — sibling to the centered hero stack so the action
-         row pins to the takeover's bottom edge without crowding the
-         caption / banner area above. Same geometry as
-         InstallWizardModal's Configure footer.
-         • In-flight → Return to Dashboard (shared confirm gates
-           local installs because returning cancels the running op /
-           ComfyUI). Cancels the op then flips the host back to
-           chooser mode in place.
-         • Port conflict → up to two source-driven actions:
-           Use port N (when main suggested a next port) and Kill
-           process (when the offender is itself a ComfyUI process).
-           `handleUseNextPort` / `handleKillProcess` restart the op
-           with the appropriate fix and flip `resolvingConflict`, which
-           collapses the conflict UI back to the running state.
-         • Error → Reboot (re-runs the same `apiCall`) + Return to
-           Dashboard.
-         Success / cancelled auto-close after a short delay so no
-         buttons render then — the band collapses to zero height. -->
+    <!-- Footer band pinned to the takeover's bottom edge. In-flight → Return to Dashboard; port conflict → Use-Port / Kill-Process; error → Reboot + Return. Empty (collapsed) on success/cancel. -->
     <template #footer>
       <div v-if="currentOp" class="brand-progress__footer">
         <!-- Log panel (opens above the footer bar) -->
@@ -1106,17 +816,21 @@ defineExpose({ startOperation, showOperation })
             </template>
             <template v-else-if="isPortConflictOpen && currentOp.result?.portConflict">
               <button
+                type="button"
+                class="brand-ghost brand-progress__footer-btn"
+                @click="returnToDashboard('crashed')"
+              >
+                <ArrowLeft :size="14" />
+                {{ $t('progress.returnToDashboard') }}
+              </button>
+              <button
                 v-if="currentOp.result.portConflict.nextPort"
                 type="button"
                 class="brand-primary brand-progress__footer-btn"
                 :data-testid="TID.progressPortConflictUsePort"
                 @click="handleUseNextPort(currentOp.result.portConflict.nextPort!)"
               >
-                {{
-                  $t('errors.portConflictUsePort', {
-                    port: currentOp.result.portConflict.nextPort
-                  })
-                }}
+                {{ $t('errors.portConflictUsePort') }}
               </button>
               <button
                 v-if="currentOp.result.portConflict.isComfy"
@@ -1244,11 +958,7 @@ defineExpose({ startOperation, showOperation })
   user-select: text;
   -webkit-user-select: text;
 }
-/* Second-line detail under the curated phase headline. Used for the
-   bytes / speed / ETA string main computes for download + extract
-   phases. Tabular numbers keep the digits from jittering as totals
-   tick, and `pre-wrap` + `min-height` prevent reflow when the line
-   collapses between updates. */
+/* Second-line bytes/speed/ETA detail; tabular numbers keep digits from jittering as totals tick. */
 .brand-progress__substatus {
   margin-top: -8px;
   font-size: var(--takeover-fs-caption, 12px);
@@ -1312,11 +1022,7 @@ defineExpose({ startOperation, showOperation })
 .brand-progress__logs-chevron.is-open {
   transform: rotate(0deg);
 }
-/* Log panel that opens above the footer bar. `min-height: 0` lets the
-   accordion shrink within the bounded footer so short windows scroll
-   the log body (capped via the panel's own `max-height`) instead of
-   pushing the footer bar off-screen. Display stays `grid` (set by
-   BaseAccordion) so the 0fr→1fr open/close animation is untouched. */
+/* `min-height: 0` lets the accordion shrink within the footer so short windows scroll the log body instead of pushing the footer off-screen. */
 .brand-progress__logs-wrap {
   border-radius: 10px;
   overflow: hidden;
@@ -1344,10 +1050,7 @@ defineExpose({ startOperation, showOperation })
 }
 .brand-progress__logs {
   width: 100%;
-  /* `max-height` (not a fixed `height`) so the panel shrinks on short
-     windows instead of forcing the footer past the viewport. `25vh`
-     tracks window height; the 88px floor keeps a couple of readable
-     lines even on a very short window, and 260px caps it on tall ones. */
+  /* `max-height` (not fixed) so the panel shrinks on short windows instead of forcing the footer past the viewport. */
   max-height: clamp(88px, 25vh, 260px);
   min-height: 0;
   overflow-y: auto;
@@ -1384,9 +1087,7 @@ defineExpose({ startOperation, showOperation })
   margin-top: 4px;
 }
 
-/* Finished-state banner. Sits in place of the running caption when the
-   op resolves. Icon + label crossfade in via the existing
-   brand-caption-fade transition that wraps both branches. */
+/* Finished-state banner; crossfades in via the wrapping brand-caption-fade transition. */
 .brand-progress__banner {
   display: inline-flex;
   align-items: center;
@@ -1409,8 +1110,6 @@ defineExpose({ startOperation, showOperation })
   color: var(--neutral-300);
 }
 
-/* Success terminal CTAs — centered in the hero stack, directly below
-   the success banner. Matching gap to the stack's natural rhythm. */
 .brand-progress__terminal-actions {
   display: flex;
   flex-direction: row;
@@ -1420,10 +1119,7 @@ defineExpose({ startOperation, showOperation })
   flex-wrap: wrap;
 }
 
-/* Error CTAs — centered in the hero stack under the error message.
-   Back (ghost) sits left, Reboot (primary) right; both flex to equal
-   width within a bounded row so the pair reads as a balanced unit
-   rather than two differently-sized chips. */
+/* Error CTAs: Back (ghost) + Reboot (primary), flexed to equal width so the pair reads as a balanced unit. */
 .brand-progress__error-actions {
   display: flex;
   flex-direction: row;
@@ -1437,12 +1133,7 @@ defineExpose({ startOperation, showOperation })
   justify-content: center;
 }
 
-/* Error detail line beneath the banner. Selectable so users can copy
-   manually. Bounded so a long Python traceback / `uv pip` failure
-   doesn't stretch the takeover past the viewport — chosen slightly
-   shorter than the sibling `.brand-progress__logs` panel so the error
-   reads as visually subordinate to the (more verbose) logs when both
-   are open. */
+/* Error detail beneath the banner. Bounded so a long traceback doesn't stretch the takeover; shorter than the logs panel so it reads as subordinate. */
 .brand-progress__error-message {
   width: 100%;
   max-width: 640px;
@@ -1464,12 +1155,7 @@ defineExpose({ startOperation, showOperation })
   white-space: pre-wrap;
 }
 
-/* Footer — positioned container for the bar + the logs panel above it.
-   `top` is anchored so the block can never grow taller than the gap
-   between the takeover's top padding and its bottom inset — on a short
-   window the logs panel shrinks (see its flexible height + min-height
-   below) instead of overflowing off the top edge and clipping the
-   toggle. `min-height: 0` lets the flex child shrink past its content. */
+/* Footer container, anchored top + bottom so the logs panel shrinks on short windows instead of overflowing the top edge. */
 .brand-progress__footer {
   position: absolute;
   top: clamp(72px, 14vh, 160px);
@@ -1484,8 +1170,7 @@ defineExpose({ startOperation, showOperation })
   min-height: 0;
   pointer-events: none;
 }
-/* Re-enable interaction on the actual content — the container is only a
-   geometric bound, so it stays click-through where it's empty. */
+/* Re-enable interaction on the content; the container is only a geometric bound and stays click-through where empty. */
 .brand-progress__footer > * {
   pointer-events: auto;
 }
@@ -1523,10 +1208,7 @@ defineExpose({ startOperation, showOperation })
     font-size: 12px;
   }
 }
-/* Destructive variant for the port-conflict Kill Process button.
-   Pairs with `.brand-ghost` to keep the chrome consistent — same
-   border/padding as the primary button — but tinted with the
-   semantic danger color so the irreversible action reads as such. */
+/* Danger tint for the Kill Process button; pairs with `.brand-ghost` for consistent chrome. */
 .brand-progress__footer-btn--danger {
   color: var(--semantic-danger, #ff7a7a);
   border-color: color-mix(in srgb, var(--semantic-danger, #ff7a7a) 40%, transparent);

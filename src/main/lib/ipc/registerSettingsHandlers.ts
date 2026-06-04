@@ -18,17 +18,11 @@ import { globalSettingsEvents } from '../globalSettingsEvents'
 import { recordIpcInvocation } from '../e2eOverrides'
 import type { SettingsSection } from '../../../types/ipc'
 
-/** Assemble the App + sources + About sections (Language / Theme /
- *  Telemetry / Cache / Advanced / About) exactly the way the
- *  `'get-settings-sections'` IPC handler returned them. Extracted so
- *  the Global Settings popup snapshot builder can call the same code
- *  path without going through IPC. */
+// Build the App + sources + About settings sections. Shared so the Global
+// Settings popup snapshot can call it without going through IPC.
 export function buildSettingsSections(): SettingsSection[] {
   const s = settings.getAll()
-  // The tooltip (info-icon hover) explains what the toggle does in
-  // either state. The inline description only appears once the toggle
-  // is ON so it reads as "here's what's currently in use", not "here's
-  // what will happen if you flip this".
+  // Inline description only shows when ON so it reads as "currently in use".
   const chineseMirrorsField = {
     id: 'useChineseMirrors',
     label: i18n.t('settings.useChineseMirrors'),
@@ -51,26 +45,17 @@ export function buildSettingsSections(): SettingsSection[] {
           value: s.language || i18n.getLocale(),
           options: i18n.getAvailableLocales()
         },
-        // Theme picker is hidden — the app is dark-only across every
-        // title-bar surface (Vue pills, dropdown popups, tooltips, OS
-        // overlay). The underlying `theme` setting key + the
-        // applySettingSet broadcast + the nativeTheme listener stay
-        // wired so a future re-introduction is just re-adding this
-        // field, with no other plumbing changes.
-        // Issue #488 — auto-check loop always runs; this toggle
-        // controls whether updates install silently vs prompt the
-        // user. The `autoUpdate` key is retained in the schema (no
-        // UI) for a future setting.
+        // Theme picker hidden (app is dark-only); the theme plumbing stays
+        // wired so re-adding this field is the only change needed to restore it.
+        // autoInstallUpdates toggles silent-install vs prompt; the auto-check
+        // loop itself always runs.
         {
           id: 'autoInstallUpdates',
           label: i18n.t('settings.autoInstallUpdates'),
           type: 'boolean',
           value: s.autoInstallUpdates !== false
         },
-        // The `onAppClose` field is hidden while docking-to-tray is
-        // disabled (see main/index.ts createTray()). Restore this
-        // entry — and the 'tray' default in settings.ts — when the
-        // docked-app flow comes back.
+        // onAppClose field hidden while docking-to-tray is disabled.
         ...(isChinese ? [chineseMirrorsField] : [])
       ]
     },
@@ -86,10 +71,6 @@ export function buildSettingsSections(): SettingsSection[] {
       ]
     },
     {
-      // The contents are the on-disk cache (model files, wheels,
-      // GitHub release tarballs, etc.) — blobs the launcher pulls
-      // down on behalf of an install. "Cache" reflects what the
-      // user actually controls here.
       title: i18n.t('settings.cache'),
       fields: [
         {
@@ -151,12 +132,12 @@ export function buildSettingsSections(): SettingsSection[] {
         readonly: true
       }
     ],
-    actions: [{ label: 'GitHub', url: 'https://github.com/Comfy-Org/ComfyUI-Desktop-2.0-Beta' }]
+    actions: [{ label: 'GitHub', url: 'https://github.com/Comfy-Org/Comfy-Desktop' }]
   }
   return [...appSections, ...sourceSections, aboutSection]
 }
 
-/** Models directory payload (truly-global launcher setting). */
+// Models directory payload (truly-global launcher setting).
 export function buildModelsPayload(): { systemDefault: string; sections: SettingsSection[] } {
   const s = settings.getAll()
   return {
@@ -177,7 +158,7 @@ export function buildModelsPayload(): { systemDefault: string; sections: Setting
   }
 }
 
-/** Shared input/output directories. */
+// Shared input/output directories.
 export function buildMediaSections(): SettingsSection[] {
   const s = settings.getAll()
   return [
@@ -205,11 +186,8 @@ export function buildMediaSections(): SettingsSection[] {
   ]
 }
 
-/** Apply a setting write + run all the side-effect branches that the
- *  legacy `'set-setting'` IPC handler performed (theme/locale/telemetry
- *  broadcasts + updater hint + `settings-changed` broadcast). Emits
- *  `globalSettingsEvents.emit('changed')` so the Global Settings popup
- *  rebuilds its snapshot. */
+// Write a setting and run its side-effect branches (theme/locale/telemetry
+// broadcasts, updater hint, settings-changed) plus the Global Settings refresh.
 export function applySettingSet(key: string, value: unknown): void {
   settings.set(key, value)
   if (key === 'theme') {
@@ -224,30 +202,17 @@ export function applySettingSet(key: string, value: unknown): void {
   }
   if (key === 'telemetryEnabled') {
     _broadcastToRenderer('telemetry-setting-changed', value)
-    // Three-state: explicit true => granted, explicit false => denied,
-    // anything else (null / undefined) => undecided. Keeps `null != false`
-    // so a Desktop-1 migrator who has not been prompted yet stays
-    // suppressed instead of being collapsed into "opted in."
+    // Three-state: true => granted, false => denied, null/undefined => undecided
+    // (so an un-prompted migrator isn't collapsed into "opted in").
     const state: mainTelemetry.ConsentState =
       value === true ? 'granted' : value === false ? 'denied' : 'undecided'
     mainTelemetry.setConsentState(state)
   }
   if (key === 'autoInstallUpdates' || key === 'autoUpdate') {
-    // Re-broadcast the cached app-update state so a pending 'ready'
-    // immediately starts reading as auto-on / auto-off — drives the
-    // title-bar pill copy and the click-modal flow without waiting
-    // for the next update-check broadcast. Both keys are watched so
-    // a future re-exposure of the `autoUpdate` toggle still works
-    // without further changes here.
+    // Re-broadcast so a pending 'ready' immediately reads as auto-on/off.
     updater.notifyAutoUpdateChanged()
   }
-  // Notify all renderers (including embedded panel views) so any open
-  // settings UI can refresh and stay in sync. Cheap, fires on every
-  // setting change — listeners should refetch what they care about.
   _broadcastToRenderer('settings-changed', { key })
-  // Mirror the broadcast to the Global Settings popup snapshot
-  // pipeline so the title-popup view re-renders without going through
-  // a separate IPC subscription.
   globalSettingsEvents.emit('changed')
 }
 
@@ -267,20 +232,9 @@ export function registerSettingsHandlers(): void {
 
   ipcMain.handle('get-locale-messages', () => i18n.getMessages())
   ipcMain.handle('get-available-locales', () => i18n.getAvailableLocales())
-  // The first-use takeover (FirstUseTakeover.vue) needs to ask main
-  // for the resolved locale so it can decide whether
-  // to insert the China-mirror sub-step. The renderer's vue-i18n locale
-  // is always 'en' (we deep-merge messages onto the en bundle), so we
-  // can't read it from there — main owns the truth via i18n.getLocale()
-  // (which reflects the user's `language` setting + app.getLocale()
-  // fallback as initialised in main/index.ts).
+  // Main owns the resolved locale; the renderer's vue-i18n locale is always 'en'.
   ipcMain.handle('get-locale', () => i18n.getLocale())
 
-  // The first-use takeover asks for a categorised snapshot of the
-  // persisted installs so it can decide whether to skip the
-  // cloud-vs-local pick (returning user) and whether to surface the
-  // migrate-vs-install-new sub-step on the Local branch (Legacy
-  // Desktop install present). See `firstUseDetection.ts`.
   ipcMain.handle('get-first-use-state', () => detectFirstUseState())
 
   ipcMain.handle('get-resolved-theme', () => resolveTheme())

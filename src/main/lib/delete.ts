@@ -2,12 +2,8 @@ import fs from 'fs'
 import path from 'path'
 import { formatTime } from './util'
 
-// Windows can briefly hold handles on `.git\refs`, `.venv\Lib\site-packages`,
-// and similar after `git` / `uv pip install` exit (antivirus scanners,
-// Search Indexer, the Restart Manager). The handles release within a few
-// hundred ms but the `rmdir` / `unlink` syscall fails with `ENOTEMPTY`,
-// `EBUSY`, `EPERM`, or `EACCES` if it arrives during that window. Retry
-// with short backoff before surfacing the error.
+// Windows briefly holds handles on files after git/uv exit (AV, Search
+// Indexer, Restart Manager), making delete fail transiently; retry with backoff.
 const TRANSIENT_DELETE_ERRORS = new Set(['ENOTEMPTY', 'EBUSY', 'EPERM', 'EACCES'])
 const DELETE_RETRY_DELAYS_MS = [50, 100, 200, 400, 800]
 
@@ -25,8 +21,7 @@ function retryFsOp(
     if (!err || attempt >= DELETE_RETRY_DELAYS_MS.length || !isTransientDeleteError(err)) {
       return cb(err)
     }
-    // Honour cancel between retries — a single hot file could otherwise
-    // keep the retry loop alive for ~1.55s after the user cancels.
+    // Honour cancel between retries so a hot file can't keep the loop alive.
     if (signal?.aborted) return cb(new Error('Delete cancelled'))
     setTimeout(() => {
       if (signal?.aborted) return cb(new Error('Delete cancelled'))
@@ -125,7 +120,7 @@ export async function deleteDir(
   const report = (): void => {
     if (!onProgress) return
     const now = Date.now()
-    // Throttle: only report at most every REPORT_INTERVAL_MS, but always report the final state
+    // Throttle reports, but always emit the final state.
     if (now - lastReportTime < REPORT_INTERVAL_MS && deleted < total) return
     lastReportTime = now
     const elapsedSecs = (now - startTime) / 1000
@@ -196,10 +191,6 @@ export async function deleteDir(
   })
 }
 
-/**
- * Build a formatted status string from a {@link DeleteProgress} update.
- * Used by IPC handlers that pipe delete progress into `sendProgress`.
- */
 export function formatDeleteStatus(p: DeleteProgress, prefix = 'Deleting…'): string {
   const elapsed = formatTime(p.elapsedSecs)
   const eta = p.etaSecs >= 0 ? formatTime(p.etaSecs) : '—'

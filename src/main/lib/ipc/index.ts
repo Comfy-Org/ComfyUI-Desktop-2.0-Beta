@@ -17,6 +17,7 @@ import {
   isEffectivelyEmptyInstallDir,
   UPDATE_CHECK_INTERVAL
 } from './shared'
+import { R2_BASE_URL } from '../r2Mirror'
 import * as releaseCache from '../release-cache'
 import type { RegisterCallbacks } from './shared'
 import { registerAppHandlers } from './registerAppHandlers'
@@ -27,7 +28,6 @@ import { registerSessionHandlers } from './registerSessionHandlers'
 import { registerCrashHandlers } from './registerCrashHandlers'
 import { registerTelemetryHandlers } from './registerTelemetryHandlers'
 
-// Re-export public API from shared
 export {
   getAppVersion,
   stopRunning,
@@ -39,20 +39,11 @@ export {
 } from './shared'
 export type { RegisterCallbacks } from './shared'
 
-/** Idempotent bridge between `releaseCache.onEnriched` (a module-level
- *  event) and `_broadcastToRenderer`. `register()` is called once per
- *  app boot in production, but tests and hot-reload paths can invoke it
- *  again — without this guard we'd subscribe twice and every enrichment
- *  would broadcast twice. */
+// Idempotent guard so a re-run (tests/hot-reload) doesn't double-subscribe.
 let _releaseCacheBridgeWired = false
 function wireReleaseCacheBroadcast(): void {
   if (_releaseCacheBridgeWired) return
   _releaseCacheBridgeWired = true
-  // Fires only when `enrichCommitsAhead` actually writes a new
-  // `commitsAhead` value, so open panels can refresh affected sections
-  // in place (e.g. the Update tab's "Latest from GitHub" card switches
-  // from `tag (sha)` to `tag + N commits (sha)` once enrichment lands
-  // in the background).
   releaseCache.onEnriched((repo) => {
     _broadcastToRenderer('release-cache-enriched', { repo })
   })
@@ -80,7 +71,7 @@ export function register(callbacks: RegisterCallbacks = {}): void {
     status: 'installed'
   })
 
-  // Auto-track Desktop install if detected
+  // Auto-track a detected Legacy Desktop install.
   {
     const desktopInfo = detectDesktopInstall()
     if (desktopInfo) {
@@ -118,14 +109,9 @@ export function register(callbacks: RegisterCallbacks = {}): void {
     } catch {}
   })()
 
-  // Configure git backend.  We default to the bundled bootstrap pygit2 so the
-  // pygit2 code path is always exercised — most developers have system git
-  // installed, which would otherwise mask bugs in the pygit2 path that real
-  // users (without system git) hit on first launch.
-  //
-  // If bootstrap pygit2 is unavailable for any reason we log loudly and fall
-  // back to standalone-install pygit2, then system git.  Set
-  // COMFY_FORCE_BOOTSTRAP_GIT=1 to disable the fallback entirely (for testing).
+  // Default to bundled bootstrap pygit2 so the pygit2 path is always exercised
+  // (system git would otherwise mask bugs real users hit). Falls back to
+  // standalone pygit2 then system git; COMFY_FORCE_BOOTSTRAP_GIT=1 disables that.
   void (async () => {
     const configureGitBackend = async (): Promise<void> => {
       const forceBootstrap = process.env.COMFY_FORCE_BOOTSTRAP_GIT === '1'
@@ -148,9 +134,7 @@ export function register(callbacks: RegisterCallbacks = {}): void {
         return
       }
 
-      // Prefer standalone installation's pygit2 (co-located with ComfyUI env).
-      // Failures listing installations must NOT short-circuit the system-git
-      // fallback below, so this lookup is isolated in its own try/catch.
+      // Isolated try/catch so a listing failure doesn't skip the system-git fallback.
       try {
         const all = await installations.list()
         for (const inst of all) {
@@ -186,11 +170,8 @@ export function register(callbacks: RegisterCallbacks = {}): void {
 
     await configureGitBackend()
 
-    // Pre-warm the latest stable tag cache.  Once a git backend is configured
-    // (bootstrap pygit2 / standalone pygit2 / system git) we can resolve the
-    // upstream ComfyUI tag without any local clone — this makes the New
-    // Install wizard's "Latest Stable" entry display the concrete version
-    // (e.g. v1.19.5) on first open.
+    // Pre-warm the latest stable tag so the New Install wizard shows the
+    // concrete version on first open (no local clone needed).
     try {
       await getLatestStableTag()
     } catch {}
@@ -210,7 +191,7 @@ export function register(callbacks: RegisterCallbacks = {}): void {
   // Pre-warm the ETag cache
   void (async () => {
     try {
-      await fetchJSON('https://desktop-assets.comfy.org/standalone-environments/latest.json')
+      await fetchJSON(`${R2_BASE_URL}/latest.json`)
     } catch {}
   })()
 

@@ -10,26 +10,13 @@ import { useModal } from '../composables/useModal'
 import { dismissPickerModals } from './dismissPickerModals'
 import type { DetailSection, SnapshotListData } from '../types/ipc'
 
-/**
- * Title-bar dropdown popup shell.
- *
- * Hosts every title-bar dropdown (waffle menu, downloads tray, …)
- * inside one transparent `WebContentsView` attached to the host window
- * so we get theme-matched chrome and no clipping by the title-bar
- * view's bounds.
- *
- * The view is reused across opens (created once per parent window,
- * hidden between uses) so opening feels instant after the first paint.
- * Each open arrives as a `comfy-titlepopup:set-config` IPC carrying
- * kind + theme (+ items for the menu kind); the renderer re-renders
- * before main shows the view.
- */
+// Title-bar dropdown popup shell. Hosts every title-bar dropdown in one
+// reused transparent WebContentsView attached to the host window. Each open
+// arrives as a `comfy-titlepopup:set-config` IPC carrying kind + theme.
 
 interface MenuItem {
   id?: string
   label?: string
-  /** Optional vue-i18n key — MenuView resolves it against the
-   *  shared en catalog. */
   labelKey?: string
   checked?: boolean
   kind?: 'separator'
@@ -48,6 +35,7 @@ interface DownloadEntry {
   status: 'pending' | 'downloading' | 'paused' | 'completed' | 'error' | 'cancelled'
   error?: string
   createdAt?: number
+  isImage?: boolean
 }
 
 interface DownloadsState {
@@ -73,8 +61,7 @@ interface PickerStorageDir {
   isDefault: boolean
 }
 
-/** Storage-tab slice main piggy-backs on the picker snapshot. Same
- *  shape as `PickerStorageSlice` in `src/main/popups/titlePopup.ts`. */
+/** Must stay in sync with `PickerStorageSlice` in `src/main/popups/titlePopup.ts`. */
 interface PickerStorageSlice {
   sharedDirectoriesFields: Record<string, unknown>[]
   modelsDirs: PickerStorageDir[]
@@ -85,22 +72,13 @@ interface PickerSnapshot {
   installs: PickerInstall[]
   activeInstallationId: string | null
   runningInstallationIds: string[]
-  /** Installs mid-launch — hydrated into `sessionStore.launchingInstances`
-   *  in the popup because its preload doesn't expose
-   *  `onInstanceLaunching`. Drives the CTA flip during the launching
-   *  window via `useInstallCta`. */
+  /** Installs mid-launch. Hydrated into sessionStore because the popup
+   *  preload doesn't expose onInstanceLaunching. */
   launchingInstallationIds: string[]
-  /** Per-row Settings + Snapshots payload for the picker's right
-   *  pane. Scoped to the picker's currently-selected install (changes
-   *  every time the user clicks a different row; popup tells main via
-   *  `setPickerSelectedInstall` and main rebroadcasts). Null fields
-   *  mean "no selection / no install path / source failure" — the
-   *  picker renders the empty state in that case. */
   selectedInstallationId: string | null
-  /** Bumped only when main intentionally retargets the picker
-   *  selection (open / Manage…). Gates the picker view's "apply
-   *  snapshot selection over my local pick" behaviour so stale
-   *  rebroadcasts can't snap-back after a fast click (issue #788). */
+  /** Bumped only when main intentionally retargets the selection; gates
+   *  the picker view's apply-over-local-pick so stale rebroadcasts can't
+   *  snap back after a fast click. */
   pickerSelectionEpoch?: number
   selectedSettings: DetailSection[] | null
   selectedSnapshots: SnapshotListData | null
@@ -133,6 +111,7 @@ interface GlobalSettingsSnapshot {
   }
   githubUrl: string
   githubStars: number | null
+  githubStarsLoading: boolean
   i18n: {
     overview: string
     updates: string
@@ -173,22 +152,14 @@ interface Bridge {
   onDownloadsChanged(cb: (state: DownloadsState) => void): () => void
   onInstancePickerSnapshot(cb: (snapshot: PickerSnapshot) => void): () => void
   onGlobalSettingsSnapshot(cb: (snapshot: GlobalSettingsSnapshot) => void): () => void
-  /** Ask main to resize the popup view to the given natural content
-   *  height (CSS px). Only meaningful for the `'downloads'` /
-   *  `'instance-picker'` / `'global-settings'` kinds — menu kind is
-   *  sized deterministically from its item list. */
+  /** Resize the popup view to fit the given natural content height (CSS px).
+   *  Menu kind is sized deterministically main-side instead. */
   requestSize(height: number): void
-  /** Per-open notification — fires on every show including the fast
-   *  path that skips `set-config`. Used to bump `openSeq` so popup
-   *  views can reset transient per-open state. */
   onWillShow(
     cb: (info: { kind: 'menu' | 'downloads' | 'instance-picker' | 'global-settings' }) => void
   ): () => void
-  /** Fires when main wants the popup renderer to cancel any open
-   *  `useModal` / `useDialogs` entry — e.g. another title-bar dropdown
-   *  is about to preempt an open picker, and we don't want a half-open
-   *  confirm to survive the kind-switch as orphaned Vue state (issue
-   *  #770). */
+  /** Cancel any open useModal / useDialogs entry so a half-open confirm
+   *  doesn't survive a kind-switch as orphaned Vue state. */
   onDismissModals(cb: () => void): () => void
 }
 
@@ -198,10 +169,8 @@ const kind = ref<'menu' | 'downloads' | 'instance-picker' | 'global-settings'>('
 const items = ref<MenuItem[]>([])
 const themeBg = ref<string>('#262729')
 const themeText = ref<string>('#dddddd')
-/** Latest instance-picker snapshot — owned at the app level so the
- *  initial state from `set-config` AND subsequent live pushes via
- *  `comfy-titlepopup:installs-changed` both land here, regardless of
- *  whether `<InstancePickerView>` is currently mounted. */
+/** App-level so both the initial set-config state and subsequent live
+ *  pushes land here regardless of whether InstancePickerView is mounted. */
 const pickerSnapshot = ref<PickerSnapshot>({
   installs: [],
   activeInstallationId: null,
@@ -213,7 +182,6 @@ const pickerSnapshot = ref<PickerSnapshot>({
   selectedSnapshots: null,
   storage: { sharedDirectoriesFields: [], modelsDirs: [], modelsSystemDefault: '' }
 })
-/** Latest global-settings snapshot — same lifecycle as `pickerSnapshot`. */
 const globalSettingsSnapshot = ref<GlobalSettingsSnapshot>({
   generalFields: [],
   telemetryFields: [],
@@ -234,6 +202,7 @@ const globalSettingsSnapshot = ref<GlobalSettingsSnapshot>({
   },
   githubUrl: '',
   githubStars: null,
+  githubStarsLoading: false,
   i18n: {
     overview: 'General',
     updates: 'Updates',
@@ -243,15 +212,11 @@ const globalSettingsSnapshot = ref<GlobalSettingsSnapshot>({
     sharedDirectories: 'Shared Directories'
   }
 })
-/** Owned at the app level — the listener stays registered for the
- *  popup's entire lifetime so the initial state push from main on a
- *  fresh `'downloads'` open lands even though `<DownloadsView>` is not
- *  mounted yet at that instant (its mount is gated on `kind` flipping
- *  via `set-config`, which arrives after the snapshot push). */
+/** App-level so the initial downloads push lands even though DownloadsView
+ *  isn't mounted yet (its mount is gated on a later set-config). */
 const downloadsState = ref<DownloadsState>({ active: [], recent: [] })
 
-/** Body-luminance test — drives is-light styling (lighter hover state),
- *  matching the convention in TitleBarApp.vue. */
+/** Body-luminance test driving is-light styling; matches TitleBarApp.vue. */
 const isLight = computed(() => {
   const ctx = document.createElement('canvas').getContext('2d')
   if (!ctx) return false
@@ -272,9 +237,8 @@ const { state: modalState } = useModal()
 
 function handleKeydown(event: KeyboardEvent): void {
   if (event.key !== 'Escape') return
-  // Defer to the popup's own ModalDialog when a confirm/alert is open —
-  // otherwise ESC would close the popup and tear the modal down with it,
-  // dropping the in-flight action promise without a user-visible cancel.
+  // Defer to the popup's own ModalDialog when open; otherwise ESC would
+  // close the popup and drop the modal's in-flight action promise.
   if (modalState.visible) return
   event.preventDefault()
   bridge?.close()
@@ -287,33 +251,22 @@ let unsubGlobalSettings: (() => void) | undefined
 let unsubWillShow: (() => void) | undefined
 let unsubDismissModals: (() => void) | undefined
 
-/** Sequence counter — only the rAF closure for the most recently
- *  applied config gets to fire `notifyRendered`. Without this guard,
- *  rapid `set-config` pushes would queue overlapping rAFs that all ack
- *  back to main, generating redundant IPC noise and (worst case)
- *  marking an older config as "synced" if its rAF happens to fire
- *  after main has already advanced `lastConfigJson`. */
+/** Guards `notifyRendered`: only the rAF closure for the most recently
+ *  applied config acks, so an older config can't be marked synced. */
 let renderSeq = 0
 
-/** Measure the popup's natural content height and ask main to size
- *  the WebContentsView to fit. Downloads kind only — menu kind is
- *  sized deterministically main-side from its item list. */
+/** Measure natural content height and ask main to size the view to fit.
+ *  Menu kind is sized deterministically main-side instead. */
 function measureAndRequestSize(): void {
   if (kind.value === 'downloads') {
-    // Header is only rendered when there's something to clear; treat
-    // missing as 0px contribution.
     const headEl = document.querySelector('.downloads-head') as HTMLElement | null
     const listEl = document.querySelector('.downloads-list, .downloads-empty') as HTMLElement | null
     const footEl = document.querySelector('.downloads-foot') as HTMLElement | null
     if (!footEl || !listEl) return
     let listH: number
     if (listEl.classList.contains('downloads-list')) {
-      // `.downloads-list` is `flex: 1 1 auto` so it stretches to fill
-      // the popup body — `scrollHeight` would equal `clientHeight` when
-      // the items fit (per the CSS spec: with no overflow,
-      // `scrollHeight === clientHeight`), reporting the flex-allocated
-      // size instead of the natural content size. Sum the children's
-      // own offset heights to get the unstretched height the list wants.
+      // `.downloads-list` is flex-stretched, so scrollHeight reports the
+      // allocated size; sum children offset heights for the natural height.
       let childrenH = 0
       for (const child of listEl.children) {
         childrenH += (child as HTMLElement).offsetHeight
@@ -321,27 +274,19 @@ function measureAndRequestSize(): void {
       const cs = getComputedStyle(listEl)
       listH = childrenH + parseFloat(cs.paddingTop || '0') + parseFloat(cs.paddingBottom || '0')
     } else {
-      // `.downloads-empty` shrinks to content, so its `offsetHeight` is
-      // already the natural rendered size.
       listH = listEl.offsetHeight
     }
-    // +2 for the .popup card's 1px top + 1px bottom border so the inner
-    // content lands inside the bordered card without clipping the last
-    // row.
+    // +2 for the .popup card's 1px top + bottom border.
     const total = (headEl?.offsetHeight ?? 0) + listH + footEl.offsetHeight + 2
     bridge?.requestSize(total)
     return
   }
   if (kind.value === 'instance-picker') {
-    // Picker measures its rendered root and asks main to size the popup
-    // view to fit. Main clamps to the ceiling band so the popup never
-    // overflows the host window.
     const rootEl = document.querySelector('.picker') as HTMLElement | null
     if (!rootEl) return
     bridge?.requestSize(rootEl.offsetHeight + 2)
   }
-  // global-settings is sized once main-side from host content bounds —
-  // the two-pane card doesn't grow with content. No measure needed.
+  // global-settings is sized once main-side and doesn't grow with content.
 }
 
 onMounted(() => {
@@ -355,20 +300,10 @@ onMounted(() => {
     }
     themeBg.value = cfg.theme.bg
     themeText.value = cfg.theme.text
-    // Do NOT bump openSeq here. Main always sends `will-show` right
-    // after `set-config` on every open, and that handler bumps the
-    // seq. Bumping here too caused a double remount → the popup
-    // animated in, the keyed root tore down, then animated in again
-    // → visible flicker on the first frame of every open.
     const seq = ++renderSeq
-    // Ack after Vue has flushed the DOM update *and* the browser has
-    // had a chance to paint it. Main keeps the popup view hidden until
-    // this ack arrives so the user never sees a frame of the previous
-    // open's content on a new open. The seq guard suppresses stale
-    // rAFs queued by earlier configs. Measure-and-request-size runs
-    // *before* the rendered ack so main has the correct bounds applied
-    // by the time it flips the view visible — without this the popup
-    // would flash up at the previous open's height and then resize.
+    // Ack after Vue flushes the DOM and the browser paints it; main keeps
+    // the view hidden until then so no frame of the previous open shows.
+    // Measure before the ack so main has correct bounds before it reveals.
     void nextTick(() => {
       requestAnimationFrame(() => {
         if (seq !== renderSeq) return
@@ -386,35 +321,22 @@ onMounted(() => {
   unsubGlobalSettings = bridge?.onGlobalSettingsSnapshot((snapshot) => {
     globalSettingsSnapshot.value = snapshot
   })
-  // `onWillShow` fires on every open (including the fast-path reopen
-  // that doesn't re-send `set-config`). We deliberately do NOT bump
-  // a key to re-mount the root here — re-mounting after the
-  // WebContentsView is already visible was the visible flicker on
-  // 2nd+ opens. The picker view's local state (selectedId, accordion
-  // open flags) intentionally persists across reopens of the same
-  // host; transient resets that used to depend on the remount now
-  // ride on `props.snapshot.activeInstallationId` changes via the
-  // existing prop watcher in `InstancePickerView.vue`.
+  // Deliberately does NOT re-key/remount the root: remounting after the
+  // WebContentsView is visible caused flicker on 2nd+ opens. Picker local
+  // state persists across reopens; transient resets ride on the
+  // activeInstallationId prop watcher in InstancePickerView.vue.
   unsubWillShow = bridge?.onWillShow(() => {
-    /* no-op for now — kept registered for forward compatibility */
+    /* kept registered for forward compatibility */
   })
-  // Main fires this when the picker is about to be hidden because
-  // another title-bar dropdown (downloads / waffle / global-settings)
-  // was clicked. Resolve any open useModal / useDialogs entries as a
-  // cancel so the kind-switch doesn't leave a half-open confirm
-  // mounted in the reused WebContentsView.
   unsubDismissModals = bridge?.onDismissModals(() => {
     dismissPickerModals()
   })
   window.addEventListener('keydown', handleKeydown)
-  // Tell main the renderer is mounted and listening — main flushes any
-  // config that was queued before this point.
+  // Tell main the renderer is listening so it flushes any queued config.
   bridge?.ready()
 })
 
-// Re-measure whenever the downloads state changes (entries added /
-// removed / status transitions / dismissals) so the shelf grows and
-// shrinks to fit. Wait one frame so Vue has flushed the DOM update.
+// Re-measure on downloads-state change so the shelf grows/shrinks to fit.
 watch(
   downloadsState,
   () => {
@@ -426,9 +348,7 @@ watch(
   },
   { deep: true }
 )
-// Re-measure when the picker snapshot changes — install added/removed
-// affects the list height, and the row count can flip past the popup
-// ceiling without an open-time `requestSize`.
+// Re-measure on picker-snapshot change so an add/remove can re-clamp height.
 watch(
   pickerSnapshot,
   () => {
@@ -440,9 +360,7 @@ watch(
   },
   { deep: true }
 )
-// global-settings does not re-measure on snapshot change — the popup
-// is pinned to a fluid-clamped size main-side and the right pane
-// scrolls internally instead of growing the popup.
+// global-settings is pinned to a fixed main-side size, so no re-measure.
 onUnmounted(() => {
   unsubConfig?.()
   unsubDownloads?.()
@@ -455,15 +373,9 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <!-- No `:key` on the root.
-       Keying the root by `openSeq` unmounts + remounts the popup on
-       every reopen so the CSS open animation replays — but for a
-       reused WebContentsView that unmount happens AFTER `showOnTop()`
-       has made the view visible, so the user sees the popup appear,
-       its DOM tear down (looks like a close), and the freshly-mounted
-       DOM animate back in. That was the visible "open → close → open"
-       flicker on the 2nd+ click. VS Code / Cursor dropdowns just
-       appear; we do the same — no key, no animation. -->
+  <!-- No `:key` on the root: keying by openSeq remounts on every reopen,
+       which for a reused WebContentsView caused an "open → close → open"
+       flicker on 2nd+ clicks. -->
   <div
     class="popup"
     :class="{
@@ -478,15 +390,9 @@ onUnmounted(() => {
     <DownloadsView v-else-if="kind === 'downloads'" :state="downloadsState" />
     <InstancePickerView v-else-if="kind === 'instance-picker'" :snapshot="pickerSnapshot" />
     <GlobalSettingsView v-else :snapshot="globalSettingsSnapshot" />
-    <!-- Singleton ModalDialog host for `useModal.confirm/alert/select`
-         calls fired by anything inside the popup (per-install settings
-         UI's confirm chains, snapshot prompts, etc.). The panel mounts
-         its own copy; this one keeps `useModal` working inside the
-         popup's separate WebContentsView. -->
+    <!-- Keeps useModal working inside the popup's separate WebContentsView. -->
     <ModalDialog />
-    <!-- Sibling host for the new `useDialogs` API (BasePrompt /
-         BaseActionSheet rendered via BaseModal). Lives alongside
-         `<ModalDialog />` until all useModal types migrate. -->
+    <!-- Host for the useDialogs API; lives alongside ModalDialog until migration. -->
     <DialogHost />
   </div>
 </template>
@@ -512,12 +418,8 @@ onUnmounted(() => {
   box-sizing: border-box;
 }
 
-/* Hamburger menu (kind === 'menu') uses a fixed surface across both
- * the chooser/dashboard host and the install-backed canvas host so the
- * dropdown reads consistently. The per-host title-bar theme still
- * paints the title bar itself; only the popped-out menu is unified.
- * `!important` overrides the inline `background`/`color` applied via
- * `:style="{ background: themeBg, color: themeText }"` on `.popup`. */
+/* `!important` overrides the inline background/color on `.popup` so the
+ * menu surface stays consistent across hosts. */
 .popup.is-menu {
   background: var(--neutral-800) !important;
   color: var(--neutral-100) !important;
@@ -525,11 +427,7 @@ onUnmounted(() => {
   font-size: 13px;
 }
 
-/* Instance picker + Global Settings share one modal-card chrome —
- * `--modal-surface-bg` outer, `--modal-surface-border` hairline, same
- * radius + layered shadow. Keeps both popups visually consistent with
- * in-app modals (DownloadsModal, TermsModal). Menu / downloads kinds
- * keep the legacy lightweight surface. */
+/* Instance picker + Global Settings share the in-app modal-card chrome. */
 .popup.is-picker,
 .popup.is-global-settings {
   background: var(--modal-surface-bg) !important;

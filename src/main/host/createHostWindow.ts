@@ -28,6 +28,7 @@ import {
 } from '../lib/ipc/shared'
 import * as mainTelemetry from '../lib/telemetry'
 import { forwardDatadogError } from '../lib/processErrorHandlers'
+import { isQuitInProgress } from '../lib/quit-state'
 import * as updater from '../lib/updater'
 import { getSavedBounds, getWindowOptions, saveWindowBounds } from '../lib/windowState'
 import { ensureSystemModal } from '../popups/systemModal'
@@ -103,14 +104,30 @@ export function shouldBailAfterCloseConfirm(confirmed: boolean, forceClose: bool
  *  Exit-All) is a different intent: the caller already wants the
  *  window gone, and leaving a stray dashboard window behind after a
  *  swap-installs flow is noise. Force-close therefore skips the
- *  detach branch and falls through to the normal teardown. */
+ *  detach branch and falls through to the normal teardown.
+ *
+ *  Same logic applies when `app.quit()` is in flight (Cmd+Q, app menu
+ *  Quit, electron-updater's `restartAndInstall`): the caller wants the
+ *  process to exit, not the host to flip in place. Detaching here would
+ *  swallow the quit and leave a dashboard window alive after a "Restart
+ *  to install" click — which was exactly bug #(see PR description): the
+ *  first restart click was a no-op because the close handler intercepted
+ *  the quit into a dashboard detach. The second click worked only
+ *  because the window was already on the dashboard by then. */
 export function shouldDetachLastInstallWindowToDashboard(
   isInstallHostWindow: boolean,
   hasEntry: boolean,
   isLastWindow: boolean,
   forceClose: boolean,
+  quitInProgress: boolean,
 ): boolean {
-  return isInstallHostWindow && hasEntry && isLastWindow && !forceClose
+  return (
+    isInstallHostWindow &&
+    hasEntry &&
+    isLastWindow &&
+    !forceClose &&
+    !quitInProgress
+  )
 }
 
 /** Constants reused by both host modes. Defined here because they only
@@ -119,7 +136,7 @@ const APP_ICON = path.join(__dirname, '..', '..', 'assets', 'Comfy_Logo_x256.png
 const APP_VERSION = getAppVersion()
 
 /** Center pill text for install-less host windows (chooser/dashboard). */
-export const CHOOSER_HOST_TITLE_TEXT = 'Desktop 2.0 Beta'
+export const CHOOSER_HOST_TITLE_TEXT = 'Comfy Desktop'
 /** OS-level window title for install-less host windows. */
 export const CHOOSER_HOST_WINDOW_TITLE = `${CHOOSER_HOST_TITLE_TEXT} — v${APP_VERSION}`
 
@@ -192,7 +209,7 @@ const PASSKEY_BANNER_JS =
   `(function(){` +
     `if(document.getElementById('comfy-passkey-banner'))return;` +
     `const b=document.createElement('div');b.id='comfy-passkey-banner';` +
-    `b.textContent='\\u24d8 Passkeys are not supported in Desktop 2.0 on macOS. Please use your password or verification code to sign in.';` +
+    `b.textContent='\\u24d8 Passkeys are not supported in Comfy Desktop on macOS. Please use your password or verification code to sign in.';` +
     `document.body.prepend(b);` +
     `document.body.style.paddingTop=(b.offsetHeight)+'px';` +
     `new MutationObserver(function(){` +
@@ -421,7 +438,7 @@ export interface CreateHostWindowOpts {
   titleBarInstallationIdParam: string
   /**
    * Initial title-bar pill label. Install-backed wrappers pass the
-   * install name; chooser hosts pass `'Desktop 2.0 Beta'`. Stored on
+   * install name; chooser hosts pass `'Comfy Desktop'`. Stored on
    * `entry.titleBarText` so the unified `title-bar-ready` handshake
    * can re-push it without a per-mode callback.
    */
@@ -749,6 +766,12 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
         'comfy-titlebar:preview-mode-changed',
         entry.previewInstallationId !== null,
       )
+      if (!entry.comfyView.webContents.isDestroyed()) {
+        titleBarView.webContents.send(
+          'comfy-titlebar:zoom-changed',
+          entry.comfyView.webContents.getZoomLevel(),
+        )
+      }
     }
     // Both modes get the app-update pill and the downloads tray.
     // The install-update pill is install-backed only — chooser hosts
@@ -870,6 +893,7 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
             !!entryForClose,
             isLastWindow,
             forceClose,
+            isQuitInProgress(),
           )
           && entryForClose
         ) {

@@ -1,21 +1,6 @@
-/**
- * Start-screen behaviour tests for FirstUseTakeover (merged T&C +
- * Cloud-vs-Local picker).
- *
- * Scope:
- *   - Continue button stays disabled until the Terms checkbox is
- *     checked (legally required affirmative-assent gate).
- *   - The two inline links on the Terms row route to the right docs
- *     (`'eula'` and `'tos'`), and the telemetry Learn-more routes to
- *     `'privacy'`. If routing is crossed the user sees the wrong doc
- *     for the link they clicked.
- *
- * Heavy children (BrandTakeoverLayout, ModalShell, TermsModal,
- * WhyTryCloudModal, etc.) are stubbed so the test can focus on the
- * start-step DOM without dragging in their dependencies.
- */
+// Start-screen tests for FirstUseTakeover. Heavy children are stubbed to focus on the start-step DOM.
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { mount, flushPromises } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 
 vi.mock('../lib/telemetry', () => ({
@@ -75,6 +60,11 @@ beforeEach(() => {
     detectGPU: vi.fn().mockResolvedValue(null),
     setFirstUseMode: vi.fn(),
     closeHostWindow: vi.fn().mockResolvedValue(undefined),
+    // Default to undefined so the existing tests exercise the control
+    // branch (Local-default). Tests that need the treatment arm mutate
+    // this per-case before mounting.
+    telemetryGetExperimentFlag: vi.fn().mockResolvedValue(undefined),
+    telemetryRecordExposure: vi.fn(),
   } as unknown as typeof window.api
 })
 
@@ -131,22 +121,22 @@ describe('FirstUseTakeover start step', () => {
     expect(tooltip?.getAttribute('data-text')).toBe('firstUse.whyTryCloud')
   })
 
-  it('Express-install checkbox is hidden on the default Cloud pick and revealed only after Local is picked', async () => {
+  it('Express-install checkbox is visible on the default Local pick and hides only when Cloud is picked', async () => {
     const wrapper = mountTakeover()
     // The row stays mounted (reserved layout space, no jump on swap)
-    // but is visually + a11y hidden until Local is picked.
+    // but is visually + a11y hidden whenever Cloud is the active pick.
     const express = () => wrapper.find('[data-testid="first-use-express-install"]')
     expect(express().exists()).toBe(true)
-    expect(express().classes()).toContain('start-express--hidden')
-    expect(express().attributes('aria-hidden')).toBe('true')
-
-    await wrapper.find('[data-testid="first-use-pick-local"]').trigger('click')
     expect(express().classes()).not.toContain('start-express--hidden')
     expect(express().attributes('aria-hidden')).toBe('false')
 
     await wrapper.find('[data-testid="first-use-pick-cloud"]').trigger('click')
     expect(express().classes()).toContain('start-express--hidden')
     expect(express().attributes('aria-hidden')).toBe('true')
+
+    await wrapper.find('[data-testid="first-use-pick-local"]').trigger('click')
+    expect(express().classes()).not.toContain('start-express--hidden')
+    expect(express().attributes('aria-hidden')).toBe('false')
   })
 
   it('emits `chain-local` with `express: true` when Local is picked with Express on (no legacy desktop)', async () => {
@@ -180,25 +170,7 @@ describe('FirstUseTakeover start step', () => {
     expect(emitted![0]).toEqual([{ express: false }])
   })
 
-  it('Express takes precedence over hasLegacyDesktop — emits `chain-local` with `express: true` instead of opening the localBranch sub-step', async () => {
-    const wrapper = mountTakeover()
-    // Simulate the host telling the takeover that a Legacy Desktop
-    // install was detected (normally plumbed via `getFirstUseState()`).
-    await (wrapper.vm as unknown as { open: (opts: { hasLegacyDesktop: boolean }) => Promise<void> }).open({
-      hasLegacyDesktop: true,
-    })
-    await wrapper
-      .find('[data-testid="first-use-consent-tos"] input[type="checkbox"]')
-      .setValue(true)
-    await wrapper.find('[data-testid="first-use-pick-local"]').trigger('click')
-    await wrapper.find('[data-testid="first-use-continue"]').trigger('click')
-
-    const emitted = wrapper.emitted('chain-local')
-    expect(emitted).toBeTruthy()
-    expect(emitted![0]).toEqual([{ express: true }])
-  })
-
-  it('hasLegacyDesktop + Express OFF routes to the localBranch sub-step (migrate-vs-fresh fork preserved)', async () => {
+  it('hasLegacyDesktop + Express OFF + migrate OFF routes to the localBranch sub-step', async () => {
     const wrapper = mountTakeover()
     await (wrapper.vm as unknown as { open: (opts: { hasLegacyDesktop: boolean }) => Promise<void> }).open({
       hasLegacyDesktop: true,
@@ -210,20 +182,109 @@ describe('FirstUseTakeover start step', () => {
     await wrapper
       .find('[data-testid="first-use-express-install"] input[type="checkbox"]')
       .setValue(false)
+    // Migrate is pre-ticked when legacy is detected; the localBranch
+    // fork is only reachable when the user explicitly opts out of
+    // BOTH express and migrate-existing.
+    await wrapper
+      .find('[data-testid="first-use-migrate-existing"] input[type="checkbox"]')
+      .setValue(false)
     await wrapper.find('[data-testid="first-use-continue"]').trigger('click')
 
     // No chain-local fires — the user lands on the localBranch sub-step
-    // to make the migrate-vs-fresh decision.
+    // to make the migrate-vs-fresh decision manually.
     expect(wrapper.emitted('chain-local')).toBeFalsy()
     expect(wrapper.find('[data-testid="first-use-local-migrate"]').exists()).toBe(true)
   })
 
-  it('emits `complete-cloud` (not `chain-local`) when Cloud is picked, regardless of Express', async () => {
+  it('renders the "Migrate existing install" checkbox only when hasLegacyDesktop is true', async () => {
+    const wrapper = mountTakeover()
+    // Default open() has hasLegacyDesktop = false — the row is not in
+    // the DOM at all (v-if), so no test-id should resolve. With no
+    // legacy install detected, no migrate-related affordance is shown
+    // anywhere on the start screen.
+    expect(wrapper.find('[data-testid="first-use-migrate-existing"]').exists()).toBe(false)
+    // After the host plumbs the detected legacy install in, the
+    // checkbox mounts as a peer of Express. Visibility is then driven
+    // by the Local pick via the hidden-class pattern.
+    await (wrapper.vm as unknown as { open: (opts: { hasLegacyDesktop: boolean }) => Promise<void> }).open({
+      hasLegacyDesktop: true,
+    })
+    expect(wrapper.find('[data-testid="first-use-migrate-existing"]').exists()).toBe(true)
+  })
+
+  it('routes Local + migrate-existing + Express to `chain-migrate` with express: true', async () => {
+    const wrapper = mountTakeover()
+    await (wrapper.vm as unknown as { open: (opts: { hasLegacyDesktop: boolean }) => Promise<void> }).open({
+      hasLegacyDesktop: true,
+    })
+    await wrapper
+      .find('[data-testid="first-use-consent-tos"] input[type="checkbox"]')
+      .setValue(true)
+    await wrapper.find('[data-testid="first-use-pick-local"]').trigger('click')
+    // Migrate AND Express are both pre-ticked on the legacy-desktop
+    // path — just press Continue. The host uses the `express: true`
+    // payload to skip the migrate confirm surface and run preview +
+    // auto-pick + run straight through.
+    await wrapper.find('[data-testid="first-use-continue"]').trigger('click')
+
+    const emitted = wrapper.emitted('chain-migrate')
+    expect(emitted).toBeTruthy()
+    expect(emitted![0]).toEqual([{ express: true }])
+    expect(wrapper.emitted('chain-local')).toBeFalsy()
+    expect(wrapper.emitted('complete-cloud')).toBeFalsy()
+    expect(wrapper.find('[data-testid="first-use-local-migrate"]').exists()).toBe(false)
+  })
+
+  it('routes Local + migrate-existing + Express OFF to `chain-migrate` with express: false (confirm surface still shown by host)', async () => {
+    const wrapper = mountTakeover()
+    await (wrapper.vm as unknown as { open: (opts: { hasLegacyDesktop: boolean }) => Promise<void> }).open({
+      hasLegacyDesktop: true,
+    })
+    await wrapper
+      .find('[data-testid="first-use-consent-tos"] input[type="checkbox"]')
+      .setValue(true)
+    await wrapper.find('[data-testid="first-use-pick-local"]').trigger('click')
+    // Untick Express but leave Migrate on: the user wants migration
+    // but with the confirm surface (not the express-skip path).
+    await wrapper
+      .find('[data-testid="first-use-express-install"] input[type="checkbox"]')
+      .setValue(false)
+    await wrapper.find('[data-testid="first-use-continue"]').trigger('click')
+
+    const emitted = wrapper.emitted('chain-migrate')
+    expect(emitted).toBeTruthy()
+    expect(emitted![0]).toEqual([{ express: false }])
+  })
+
+  it('routes Local + Express + migrate-existing OFF to `chain-local` (fresh express install)', async () => {
+    const wrapper = mountTakeover()
+    await (wrapper.vm as unknown as { open: (opts: { hasLegacyDesktop: boolean }) => Promise<void> }).open({
+      hasLegacyDesktop: true,
+    })
+    await wrapper
+      .find('[data-testid="first-use-consent-tos"] input[type="checkbox"]')
+      .setValue(true)
+    await wrapper.find('[data-testid="first-use-pick-local"]').trigger('click')
+    // Untick the migrate checkbox: returning user explicitly opts out
+    // and wants a clean Standalone install instead.
+    await wrapper
+      .find('[data-testid="first-use-migrate-existing"] input[type="checkbox"]')
+      .setValue(false)
+    await wrapper.find('[data-testid="first-use-continue"]').trigger('click')
+
+    expect(wrapper.emitted('chain-migrate')).toBeFalsy()
+    const emitted = wrapper.emitted('chain-local')
+    expect(emitted).toBeTruthy()
+    expect(emitted![0]).toEqual([{ express: true }])
+  })
+
+  it('emits `complete-cloud` (not `chain-local`) when the user flips to Cloud and presses Continue', async () => {
     const wrapper = mountTakeover()
     await wrapper
       .find('[data-testid="first-use-consent-tos"] input[type="checkbox"]')
       .setValue(true)
-    // Cloud is the default selection — just press Continue.
+    // Local is the default — flip to Cloud, then Continue.
+    await wrapper.find('[data-testid="first-use-pick-cloud"]').trigger('click')
     await wrapper.find('[data-testid="first-use-continue"]').trigger('click')
 
     expect(wrapper.emitted('complete-cloud')).toBeTruthy()
@@ -245,6 +306,32 @@ describe('FirstUseTakeover start step', () => {
     expect(btn.attributes('aria-busy')).toBe('true')
   })
 
+  it('open() resets the Continue spinner so the cancel-and-return path lands on a fresh CTA', async () => {
+    // Reproduces the start → uncheck express → Continue → cancel
+    // mid-chain → open() again loop. `onContinue()` keeps the spinner
+    // flag true past `routePostStart()` (the chain handlers normally
+    // unmount), so on a cancel-and-return the host re-invokes open()
+    // on the still-mounted instance with a stale `isContinuing=true`
+    // — open() must reset it.
+    const wrapper = mountTakeover()
+    await wrapper
+      .find('[data-testid="first-use-consent-tos"] input[type="checkbox"]')
+      .setValue(true)
+    await wrapper.find('[data-testid="first-use-continue"]').trigger('click')
+    // Sanity-check: the Continue button IS in the spinner state right
+    // after click (the chain hasn't unmounted in the isolated test).
+    const btnBusy = wrapper.find('[data-testid="first-use-continue"]')
+    expect(btnBusy.text()).toBe('firstUse.startContinueBusy')
+    expect(btnBusy.attributes('disabled')).toBeDefined()
+
+    await (wrapper.vm as unknown as { open: () => Promise<void> }).open()
+
+    const btnFresh = wrapper.find('[data-testid="first-use-continue"]')
+    expect(btnFresh.text()).toBe('firstUse.startContinue')
+    expect(btnFresh.attributes('disabled')).toBeUndefined()
+    expect(btnFresh.attributes('aria-busy')).toBe('false')
+  })
+
   it('closing the terms modal clears termsDoc (modal unmounts)', async () => {
     const wrapper = mountTakeover()
     await wrapper.find('[data-testid="first-use-eula-link"]').trigger('click')
@@ -255,5 +342,159 @@ describe('FirstUseTakeover start step', () => {
     // termsDoc to null, which unmounts the v-if-gated modal.
     await stub.vm.$emit('close')
     expect(wrapper.find('[data-testid="stub-terms-modal"]').exists()).toBe(false)
+  })
+
+  it('Continue without touching the picker routes to chain-local (Local is the default)', async () => {
+    const wrapper = mountTakeover()
+    await wrapper
+      .find('[data-testid="first-use-consent-tos"] input[type="checkbox"]')
+      .setValue(true)
+    await wrapper.find('[data-testid="first-use-continue"]').trigger('click')
+
+    expect(wrapper.emitted('chain-local')).toBeTruthy()
+    expect(wrapper.emitted('complete-cloud')).toBeFalsy()
+  })
+})
+
+describe('FirstUseTakeover desktop-first-use-fork-default experiment', () => {
+  it('keeps Local as the default when the flag is missing (control / fallback)', async () => {
+    const wrapper = mountTakeover()
+    await flushPromises()
+
+    await wrapper
+      .find('[data-testid="first-use-consent-tos"] input[type="checkbox"]')
+      .setValue(true)
+    await wrapper.find('[data-testid="first-use-continue"]').trigger('click')
+
+    // Local is the resolved default → routed to chain-local without
+    // touching the picker.
+    expect(wrapper.emitted('chain-local')).toBeTruthy()
+    expect(wrapper.emitted('complete-cloud')).toBeFalsy()
+    // Exposure fires with source='fallback' because the flag returned
+    // undefined (no cache, no recognised value).
+    expect(window.api.telemetryRecordExposure).toHaveBeenCalledWith({
+      experimentKey: 'desktop-first-use-fork-default',
+      variant: 'control',
+      source: 'fallback'
+    })
+  })
+
+  it("pre-selects Cloud when the flag returns 'cloud' (cloud-default arm) and fires exposure with source='cache'", async () => {
+    ;(window.api.telemetryGetExperimentFlag as ReturnType<typeof vi.fn>).mockResolvedValue('cloud')
+    const wrapper = mountTakeover()
+    await flushPromises()
+
+    await wrapper
+      .find('[data-testid="first-use-consent-tos"] input[type="checkbox"]')
+      .setValue(true)
+    await wrapper.find('[data-testid="first-use-continue"]').trigger('click')
+
+    // Cloud is now the resolved default → Continue without touching
+    // the picker routes to complete-cloud.
+    expect(wrapper.emitted('complete-cloud')).toBeTruthy()
+    expect(wrapper.emitted('chain-local')).toBeFalsy()
+    expect(window.api.telemetryRecordExposure).toHaveBeenCalledWith({
+      experimentKey: 'desktop-first-use-fork-default',
+      variant: 'cloud-default',
+      source: 'cache'
+    })
+  })
+
+  it("pre-selects nothing when the flag returns 'none' (no-default arm) and disables Continue until a card is picked", async () => {
+    ;(window.api.telemetryGetExperimentFlag as ReturnType<typeof vi.fn>).mockResolvedValue('none')
+    const wrapper = mountTakeover()
+    await flushPromises()
+
+    await wrapper
+      .find('[data-testid="first-use-consent-tos"] input[type="checkbox"]')
+      .setValue(true)
+
+    // Continue stays disabled even with ToS accepted — the no-default
+    // arm requires an explicit pick before commit.
+    const btn = wrapper.find('[data-testid="first-use-continue"]')
+    expect(btn.attributes('disabled')).toBeDefined()
+
+    // Clicking it does nothing — no emit fires.
+    await btn.trigger('click')
+    expect(wrapper.emitted('chain-local')).toBeFalsy()
+    expect(wrapper.emitted('complete-cloud')).toBeFalsy()
+
+    // Pick Local → Continue activates.
+    await wrapper.find('[data-testid="first-use-pick-local"]').trigger('click')
+    expect(btn.attributes('disabled')).toBeUndefined()
+    await btn.trigger('click')
+    expect(wrapper.emitted('chain-local')).toBeTruthy()
+
+    expect(window.api.telemetryRecordExposure).toHaveBeenCalledWith({
+      experimentKey: 'desktop-first-use-fork-default',
+      variant: 'no-default',
+      source: 'cache'
+    })
+  })
+
+  it("treats any other flag value ('control', unknown string, true) as control", async () => {
+    ;(window.api.telemetryGetExperimentFlag as ReturnType<typeof vi.fn>).mockResolvedValue('control')
+    const wrapper = mountTakeover()
+    await flushPromises()
+    await wrapper
+      .find('[data-testid="first-use-consent-tos"] input[type="checkbox"]')
+      .setValue(true)
+    await wrapper.find('[data-testid="first-use-continue"]').trigger('click')
+    expect(wrapper.emitted('chain-local')).toBeTruthy()
+    // 'control' is a string PostHog *might* return, so source is 'cache'
+    // not 'fallback' even though the variant is the same as no-flag.
+    expect(window.api.telemetryRecordExposure).toHaveBeenCalledWith({
+      experimentKey: 'desktop-first-use-fork-default',
+      variant: 'control',
+      source: 'cache'
+    })
+  })
+
+  it('legacy-desktop precedence forces Local even when the cloud-default variant says Cloud', async () => {
+    ;(window.api.telemetryGetExperimentFlag as ReturnType<typeof vi.fn>).mockResolvedValue('cloud')
+    const wrapper = mountTakeover()
+    await (
+      wrapper.vm as unknown as { open: (opts: { hasLegacyDesktop: boolean }) => Promise<void> }
+    ).open({ hasLegacyDesktop: true })
+    await flushPromises()
+
+    // The migrate-existing checkbox renders → user with legacy install
+    // landed on Local even though the cloud-default arm would have
+    // flipped them to Cloud. Precedence holds.
+    expect(wrapper.find('[data-testid="first-use-migrate-existing"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="first-use-express-install"]').classes()).not.toContain(
+      'start-express--hidden'
+    )
+  })
+
+  it('legacy-desktop precedence forces Local even when the no-default variant says pick-nothing', async () => {
+    // Migration flow is the whole reason legacy users exist as a
+    // cohort — we know they want their existing install brought over.
+    // Pre-selecting nothing for them would force an extra click for
+    // zero signal value, so the experiment is bypassed on this path.
+    ;(window.api.telemetryGetExperimentFlag as ReturnType<typeof vi.fn>).mockResolvedValue('none')
+    const wrapper = mountTakeover()
+    await (
+      wrapper.vm as unknown as { open: (opts: { hasLegacyDesktop: boolean }) => Promise<void> }
+    ).open({ hasLegacyDesktop: true })
+    await flushPromises()
+
+    // Continue is immediately actionable — Local is pre-selected.
+    await wrapper
+      .find('[data-testid="first-use-consent-tos"] input[type="checkbox"]')
+      .setValue(true)
+    const btn = wrapper.find('[data-testid="first-use-continue"]')
+    expect(btn.attributes('disabled')).toBeUndefined()
+
+    // Migrate-existing checkbox + Express checkbox both render —
+    // confirms the Local card is the resolved pick (not null).
+    expect(wrapper.find('[data-testid="first-use-migrate-existing"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="first-use-express-install"]').classes()).not.toContain(
+      'start-express--hidden'
+    )
+
+    await btn.trigger('click')
+    // Default opts: Migrate + Express both pre-ticked → chain-migrate.
+    expect(wrapper.emitted('chain-migrate')).toBeTruthy()
   })
 })

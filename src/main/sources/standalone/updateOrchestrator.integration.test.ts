@@ -9,36 +9,24 @@ import type { ChildProcess } from 'child_process'
 import type { Readable } from 'stream'
 import type * as ChildProcessModule from 'child_process'
 
-// ---------------------------------------------------------------------------
-// Sentinel commands returned by the mocked envPaths — used to identify
-// Python/uv subprocesses in the spawn interceptor below.
-// ---------------------------------------------------------------------------
+// Sentinel commands from mocked envPaths, used to identify Python/uv subprocesses below.
 const SENTINEL_PYTHON = '__TEST_MASTER_PY__'
 const SENTINEL_UV_NAME = '__sentinel_uv__'
 const SENTINEL_ACTIVE_PY = '__TEST_ACTIVE_PY__'
 
-// ---------------------------------------------------------------------------
-// State shared between the hoisted mock and the test body.  vi.hoisted()
-// ensures the object exists before any vi.mock factory runs.
-// ---------------------------------------------------------------------------
+// vi.hoisted ensures this exists before any vi.mock factory runs.
 const spawnState = vi.hoisted(() => ({
   pythonHandler: undefined as undefined | ((args: string[]) => ChildProcess),
   uvHandler: undefined as undefined | ((args: string[]) => ChildProcess),
   uvCalls: [] as string[][],
 }))
 
-// ---------------------------------------------------------------------------
-// Mock electron — required by bundledScript, settings, paths
-// ---------------------------------------------------------------------------
 vi.mock('electron', () => ({
   app: { isPackaged: false, getPath: () => '' },
   ipcMain: { handle: vi.fn() },
 }))
 
-// ---------------------------------------------------------------------------
-// Mock snapshots — already has its own unit tests; avoid pulling in
-// scanCustomNodes / pipFreeze / filesystem assumptions.
-// ---------------------------------------------------------------------------
+// Mock snapshots to avoid pulling in scanCustomNodes / pipFreeze / fs assumptions.
 vi.mock('../../lib/snapshots', () => ({
   saveSnapshot: vi.fn(async (_installPath: string, _installation: unknown, trigger: string) =>
     `${trigger}-snap.json`
@@ -47,21 +35,18 @@ vi.mock('../../lib/snapshots', () => ({
   deduplicatePreUpdateSnapshot: vi.fn(async () => false),
 }))
 
-// ---------------------------------------------------------------------------
-// Mock envPaths — return sentinel command strings so we can intercept them
-// in the spawn mock without needing real Python/uv binaries.
-// ---------------------------------------------------------------------------
+// Mock envPaths to return sentinel command strings the spawn mock intercepts.
 vi.mock('./envPaths', () => ({
   getMasterPythonPath: () => SENTINEL_PYTHON,
   getUvPath: (p: string) => path.join(p, SENTINEL_UV_NAME),
+  // Mirror getUvPath with the sentinel so the spawn interceptor still matches.
+  getActiveUvPath: (inst: { installPath: string }) => path.join(inst.installPath, SENTINEL_UV_NAME),
   getActivePythonPath: () => SENTINEL_ACTIVE_PY,
   getVenvDir: (p: string) => path.join(p, 'ComfyUI', '.venv'),
   getVenvPythonPath: (p: string) => path.join(p, 'ComfyUI', '.venv', 'Scripts', 'python.exe'),
 }))
 
-// ---------------------------------------------------------------------------
-// Mock settings — avoid reading real settings.json from disk.
-// ---------------------------------------------------------------------------
+// Mock settings to avoid reading real settings.json from disk.
 vi.mock('../../settings', () => ({
   get: vi.fn((key: string) => {
     if (key === 'pypiMirror') return undefined
@@ -71,24 +56,14 @@ vi.mock('../../settings', () => ({
   getMirrorConfig: vi.fn(() => ({ pypiMirror: undefined, useChineseMirrors: false })),
 }))
 
-// ---------------------------------------------------------------------------
-// Mock bundledScript — return a placeholder path instead of relying on
-// __dirname / electron app layout.
-// ---------------------------------------------------------------------------
 vi.mock('../../lib/bundledScript', () => ({
   getBundledScriptPath: (name: string) => `__BUNDLED__/${name}`,
 }))
 
-// ---------------------------------------------------------------------------
-// Mock macRepair — never actually runs on Windows/Linux CI.
-// ---------------------------------------------------------------------------
 vi.mock('./macRepair', () => ({
   repairMacBinaries: vi.fn(async () => {}),
 }))
 
-// ---------------------------------------------------------------------------
-// Mock i18n — return the key itself so assertions don't depend on locale files.
-// ---------------------------------------------------------------------------
 vi.mock('../../lib/i18n', () => ({
   t: (key: string, params?: Record<string, unknown>) => {
     if (params) return `${key}:${JSON.stringify(params)}`
@@ -96,10 +71,7 @@ vi.mock('../../lib/i18n', () => ({
   },
 }))
 
-// ---------------------------------------------------------------------------
-// Selective child_process.spawn mock: intercept only Python/uv sentinel
-// commands; delegate everything else (git, etc.) to the real implementation.
-// ---------------------------------------------------------------------------
+// Intercept only Python/uv sentinel commands; delegate everything else (git, etc.) to real spawn.
 vi.mock('child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof ChildProcessModule>()
   return {
@@ -117,18 +89,12 @@ vi.mock('child_process', async (importOriginal) => {
   }
 })
 
-// ---------------------------------------------------------------------------
-// Import the SUT *after* all vi.mock declarations.
-// ---------------------------------------------------------------------------
+// Import the SUT after all vi.mock declarations.
 import { runComfyUIUpdate } from './updateOrchestrator'
 import type { UpdateOrchestrationOptions } from './updateOrchestrator'
 import { clearVersionCache } from '../../lib/version-resolve'
 import { formatComfyVersion } from '../../lib/version'
 import type { InstallationRecord } from '../../installations'
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 function isGitAvailable(): boolean {
   try {
@@ -171,8 +137,7 @@ function fakeProc(opts: {
     process.nextTick(() => proc.emit('close', 1, 'SIGTERM'))
     return true
   })
-  // Emit 'close' after stdout/stderr have been consumed.
-  // Guard against double-emit if kill() was called first.
+  // Emit 'close' after streams are consumed; guard against double-emit if kill() ran first.
   process.nextTick(() => {
     process.nextTick(() => {
       if (!proc.killed) {
@@ -282,10 +247,6 @@ function makeBaseOpts(
   }
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 const HAS_GIT = isGitAvailable()
 
 describe.skipIf(!HAS_GIT)('runComfyUIUpdate integration', () => {
@@ -305,10 +266,9 @@ describe.skipIf(!HAS_GIT)('runComfyUIUpdate integration', () => {
     spawnState.uvHandler = undefined
     spawnState.uvCalls = []
 
-    // Create sentinel uv file inside tmpDir so fs.existsSync(getUvPath(...)) passes
+    // Create sentinel uv file so fs.existsSync(getUvPath(...)) passes.
     fs.writeFileSync(path.join(installPath, SENTINEL_UV_NAME), '')
 
-    // Clear version-resolve cache between tests
     clearVersionCache()
   })
 
@@ -316,15 +276,11 @@ describe.skipIf(!HAS_GIT)('runComfyUIUpdate integration', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true })
   })
 
-  // -----------------------------------------------------------------------
-  // 1. PyTorch filtering — real PYTORCH_RE regex on real file content
-  // -----------------------------------------------------------------------
   describe('PyTorch filtering', () => {
     it('excludes PyTorch packages from requirements before installing', async () => {
       spawnState.pythonHandler = makeSuccessfulUpdateHandler(comfyuiDir, repoShas.v2Sha)
 
-      // Capture filtered requirements content inside the uv handler,
-      // before the orchestrator cleans up the temp file.
+      // Capture filtered requirements in the uv handler before the orchestrator cleans up.
       const capturedFilteredContents: string[] = []
       spawnState.uvHandler = (args: string[]) => {
         if (args.includes('pip') && args.includes('install') && args.includes('-r')) {
@@ -355,18 +311,14 @@ describe.skipIf(!HAS_GIT)('runComfyUIUpdate integration', () => {
     })
   })
 
-  // -----------------------------------------------------------------------
-  // 2. Marker parsing — real line-buffer parser against chunked stdout
-  // -----------------------------------------------------------------------
   describe('marker parsing', () => {
     it('parses markers correctly when split across stdout chunks', async () => {
       spawnState.pythonHandler = (_args: string[]) => {
-        // Advance git repo
         execFileSync('git', ['checkout', 'v0.2.0', '--detach'], {
           cwd: comfyuiDir, windowsHide: true, stdio: 'pipe',
         })
 
-        // Emit markers split across chunks to test the line-buffering logic
+        // Split markers across chunks to test the line-buffering logic.
         return fakeProc({
           stdout: [
             '[PRE_UPDATE_HE',           // partial marker line
@@ -384,7 +336,6 @@ describe.skipIf(!HAS_GIT)('runComfyUIUpdate integration', () => {
 
       expect(result.ok).toBe(true)
 
-      // Verify rollback data was parsed from chunked markers
       const updateFn = opts.update as ReturnType<typeof vi.fn>
       const calls = updateFn.mock.calls.map((c: unknown[]) => c[0] as Record<string, unknown>)
       const rollbackCall = calls.find((c) => c.lastRollback !== undefined)
@@ -396,10 +347,6 @@ describe.skipIf(!HAS_GIT)('runComfyUIUpdate integration', () => {
     })
   })
 
-  // -----------------------------------------------------------------------
-  // 3. Cancellation — guards the production bugfix (signal.aborted check
-  //    in spawnUpdateScript)
-  // -----------------------------------------------------------------------
   describe('cancellation', () => {
     it('returns cancelled when signal is already aborted', async () => {
       const controller = new AbortController()
@@ -415,9 +362,6 @@ describe.skipIf(!HAS_GIT)('runComfyUIUpdate integration', () => {
     })
   })
 
-  // -----------------------------------------------------------------------
-  // 4. Version resolution — real git, real tag/commit counting
-  // -----------------------------------------------------------------------
   describe('version resolution', () => {
     let aheadTmpDir: string
     let aheadInstallPath: string

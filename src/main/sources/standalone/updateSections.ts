@@ -6,16 +6,16 @@ import type { ChannelDef } from '../../lib/channel-cards'
 import { formatComfyVersion } from '../../lib/version'
 import type { ComfyVersion } from '../../lib/version'
 import { truncateNotes } from '../../lib/comfyui-releases'
-import { deleteAction, untrackAction, launchAction, openFolderAction } from '../../lib/actions'
+import { deleteAction, untrackAction, launchAction, openFolderAction, renameAction } from '../../lib/actions'
 import { t } from '../../lib/i18n'
-import { buildLaunchSettingsFields, buildSharedPathsField } from '../common/launchSettingsFields'
+import { buildLaunchSettingsFields, buildStorageFields } from '../common/launchSettingsFields'
 import { getVariantLabel, DEFAULT_LAUNCH_ARGS } from './envPaths'
 import type { InstallationRecord } from '../../installations'
 import type { StatusTag } from '../../types/sources'
 
 export const COMFYUI_REPO = 'Comfy-Org/ComfyUI'
 export const RELEASE_REPO = 'Comfy-Org/ComfyUI-Standalone-Environments'
-export const R2_BASE_URL = 'https://desktop-assets.comfy.org/standalone-environments'
+export { R2_BASE_URL } from '../../lib/r2Mirror'
 
 function getChannelDefs(): ChannelDef[] {
   return [
@@ -31,13 +31,10 @@ export function getChannelLabel(channel: string): string {
 
 /**
  * The channel to surface for an install. `installation.updateChannel` is a
- * *declared* preference, written only on in-app update / channel-switch /
- * snapshot-restore — it can drift from the real checkout (e.g. a user runs
- * `git pull` on master outside the app, leaving a `stable` record sitting
- * many commits past its base tag). When the working tree is ahead of its
- * base stable tag the de-facto channel is `latest`, so prefer that for
- * display and picker logic. This never mutates the stored record; the next
- * explicit in-app update reconciles it.
+ * declared preference that can drift from the real checkout (e.g. a `git pull`
+ * outside the app leaves a `stable` record many commits past its base tag), so
+ * when the tree is ahead of its base stable tag the de-facto channel is
+ * `latest`. Never mutates the stored record; the next in-app update reconciles.
  */
 export function getEffectiveChannel(installation: InstallationRecord): string {
   const stored = (installation.updateChannel as string | undefined) || 'stable'
@@ -99,7 +96,7 @@ export function getDetailSections(installation: InstallationRecord): Record<stri
     },
   ]
 
-  // Snapshot tab — minimal section so the tab appears; SnapshotTab.vue handles rendering
+  // Minimal section so the tab appears; SnapshotTab.vue handles rendering.
   if (installed && installation.installPath) {
     sections.push({
       tab: 'snapshots',
@@ -107,11 +104,9 @@ export function getDetailSections(installation: InstallationRecord): Record<stri
     })
   }
 
-  // Updates section
   const hasGit = installed && installation.installPath && fs.existsSync(path.join(installation.installPath, 'ComfyUI', '.git'))
   const channel = getEffectiveChannel(installation)
 
-  // Build per-channel preview info and actions for cards
   const channelDefs = getChannelDefs()
   const baseCards = buildChannelCards(COMFYUI_REPO, channelDefs, installation)
 
@@ -137,10 +132,8 @@ export function getDetailSections(installation: InstallationRecord): Record<stri
         : ''
       const boldInstalled = `**${installedDisplay}**`
       const boldLatest = `**${latestDisplay}**`
-      // A channel switch reads as "Moving to <channel>" rather than the
-      // upgrade/downgrade version diff — when you change channels the
-      // up/down direction is incidental and frames it confusingly (e.g.
-      // "Roll back…" for a stable switch). Same-channel updates keep the
+      // A channel switch reads as "Moving to <channel>"; the up/down direction
+      // is incidental and frames it confusingly. Same-channel updates keep the
       // version-diff / rollback copy.
       const confirmMessage = isSwitching
         ? t('channelCards.movingTo', { channel: `**${card.label}**` })
@@ -154,10 +147,9 @@ export function getDetailSections(installation: InstallationRecord): Record<stri
           : isDowngrade
             ? t('standalone.downgradingTitle', { version: latestDisplay })
             : t('standalone.updatingTitle', { version: latestDisplay }),
-        // Always carry the explicit target channel. The stored
-        // `updateChannel` can be stale (see getEffectiveChannel), so relying
-        // on the action handler's fallback to it would pass `--stable` for a
-        // checkout that is really on latest, silently downgrading it.
+        // Carry the explicit target channel: the stored `updateChannel` can be
+        // stale, which would pass `--stable` for a latest checkout and silently
+        // downgrade it.
         data: {
           channel: card.value,
           isDowngrade,
@@ -216,13 +208,14 @@ export function getDetailSections(installation: InstallationRecord): Record<stri
     },
     {
       tab: 'storage',
-      fields: [buildSharedPathsField(installation)],
+      fields: buildStorageFields(installation),
     },
     {
       title: 'Actions',
       pinBottom: true,
       actions: [
         launchAction(installed, !installed ? t('errors.installNotReady') : undefined),
+        renameAction(installation.name),
         { id: 'copy', label: t('actions.copyInstallation'), style: 'default', enabled: installed,
           showProgress: true, progressTitle: t('actions.copyingInstallation'), cancellable: true,
           prompt: {
@@ -235,7 +228,11 @@ export function getDetailSections(installation: InstallationRecord): Record<stri
           } },
         openFolderAction(installation.installPath),
         { id: 'share', label: t('actions.share'), style: 'default', enabled: installed },
-        untrackAction(),
+        // Adopted installs are non-forgettable: the `.comfyui-desktop-2`
+        // marker on disk would also stop the legacy auto-tracker from
+        // resurfacing them, stranding the user. Matches the same gate in
+        // the chooser context menu (useInstallContextMenu).
+        ...(installation.adopted ? [] : [untrackAction()]),
         deleteAction(installation),
       ],
     },

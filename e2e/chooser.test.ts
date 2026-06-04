@@ -46,7 +46,7 @@ test('chooser body renders on cold start @windows @macos @linux', async () => {
 
 test('title bar shows install-less pill on chooser host @windows @macos @linux', async () => {
   expect(await ctx.titleBar.exists('.title-install-pill.is-install-less')).toBe(true)
-  expect(await ctx.titleBar.textOf('.title-install-name')).toMatch(/Desktop 2\.0/i)
+  expect(await ctx.titleBar.textOf('.title-install-name')).toMatch(/Comfy Desktop/i)
 })
 
 test('clicking New Install tile opens the new-install takeover @windows @macos @linux', async () => {

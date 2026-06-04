@@ -11,10 +11,14 @@
  * Step ordering:
  *   1. `start`   — Merged T&C + Cloud-vs-Local picker on a single page.
  *                  T&C + telemetry checkboxes, an Express-Install
- *                  opt-out modifier, and two radio cards (Cloud
- *                  pre-selected). A single Continue commit persists
- *                  telemetry, fires fork_chosen, and routes to the
- *                  next step. Cancel closes the host window.
+ *                  opt-out modifier, and two radio cards. The
+ *                  pre-selected card is variant-dependent: see
+ *                  `desktop-first-use-fork-default` below — Local
+ *                  (control), Cloud (cloud-default), or neither
+ *                  (no-default, requires explicit click). A single
+ *                  Continue commit persists telemetry, fires
+ *                  fork_chosen, and routes to the next step. Cancel
+ *                  closes the host window.
  *   2. `mirrors` — Only inserted when the resolved locale starts with
  *                  'zh'. Reuses the existing `chineseMirrorsSuggest*`
  *                  copy in en/zh + the `useChineseMirrors` setting; we
@@ -51,6 +55,7 @@ import WhyTryCloudModal from '../components/WhyTryCloudModal.vue'
 import TermsModal from '../components/TermsModal.vue'
 import Tooltip from '../components/ui/Tooltip.vue'
 import BrandTakeoverLayout from '../components/BrandTakeoverLayout.vue'
+import InlineRichText from '../components/InlineRichText.vue'
 import { emitTelemetryAction } from '../lib/telemetry'
 import { useCloudCapacity } from '../composables/useCloudCapacity'
 
@@ -84,17 +89,40 @@ const emit = defineEmits<{
    *  → `runAction('migrate-to-standalone', …)` via `show-progress`)
    *  on the auto-tracked desktop install and marks `firstUseCompleted`
    *  once the migration finishes successfully. Same shape as
-   *  `chain-local` — host owns completion + auto-launch. */
-  'chain-migrate': []
+   *  `chain-local` — host owns completion + auto-launch.
+   *  `express: true` lets the host skip the migrate confirm surface
+   *  (preview + auto-pick + run, no user-confirm step) the same way
+   *  Express skips the Configure screen on chain-local. */
+  'chain-migrate': [{ express: boolean }]
 }>()
 
 const step = ref<Step>('start')
 const telemetryEnabled = ref(true)
 const locale = ref('en')
-/** Cloud-vs-Local selection picked on the merged start screen.
- *  Cloud is the brand-anchor card (glow + beam target) so it ships
- *  pre-selected — users can flip to Local before pressing Continue. */
-const pickedChoice = ref<'cloud' | 'local'>('cloud')
+
+/** A/B/C experiment that varies the pre-selected fork on the merged
+ *  start screen. Multivariate PostHog flag — three equal cohorts
+ *  (33-33-33). Variant strings come straight from the server:
+ *  `'control'` = Local pre-selected (shipped baseline), `'cloud'` =
+ *  Cloud pre-selected, `'none'` = neither card pre-selected (user
+ *  has to actively click one). Any other value (missing cache entry,
+ *  unrecognised string, network failure on first-ever boot) falls
+ *  back to `'control'` so the default remains the Download-Local
+ *  intent we shipped. */
+const FORK_DEFAULT_EXPERIMENT_KEY = 'desktop-first-use-fork-default'
+type ForkVariant = 'control' | 'cloud-default' | 'no-default'
+/** Variant assigned to this install. `null` until the boot-time fetch
+ *  resolves; treat as `'control'` for default-rendering purposes. */
+const forkExperimentVariant = ref<ForkVariant | null>(null)
+
+/** Cloud-vs-Local selection picked on the merged start screen. Local
+ *  is the shipped default — the user got here by clicking
+ *  "Download Local" upstream, so honor that intent unless the
+ *  experiment overrides it: `'cloud-default'` pre-selects Cloud,
+ *  `'no-default'` pre-selects neither (user must click a card before
+ *  Continue activates). Cloud is rendered as an equal-weight peer
+ *  card regardless; users can flip between cards before Continue. */
+const pickedChoice = ref<'cloud' | 'local' | null>('local')
 
 // Capacity-protection switch for Cloud (PostHog flag
 // `desktop-cloud-capacity`). At first-use, we follow the flag
@@ -107,21 +135,94 @@ const cloudCapacity = useCloudCapacity()
 const capacityReady = ref(false)
 /** What the picker rendered as default before the user could interact —
  *  used to split `fork_chosen` conversion by signal-vs-defaulting: a
- *  user keeping the default cloud pick is different from a user
- *  actively flipping local→cloud. Reseeded on every `open()` from the
- *  resolved capacity status. */
-const initialDefaultChoice = ref<'cloud' | 'local'>('cloud')
-function deriveDefaultChoice(): 'cloud' | 'local' {
-  return cloudCapacity.isDisabled() ? 'local' : 'cloud'
+ *  user keeping the default pick is different from a user actively
+ *  flipping the card. `null` for the `'no-default'` variant, where
+ *  Continue is gated on an explicit pick so every commit is signal. */
+const initialDefaultChoice = ref<'cloud' | 'local' | null>('local')
+
+/** Read the experiment variant (boot-time cache, sync once main is
+ *  ready) and decide which card should be the pre-selected default.
+ *  Capacity-disabled and Legacy-Desktop branches still force Local
+ *  ahead of the experiment — see `applyForkExperimentDefault` below. */
+function mapFlagToVariant(flagValue: string | boolean | null | undefined): ForkVariant {
+  if (flagValue === 'cloud') return 'cloud-default'
+  if (flagValue === 'none') return 'no-default'
+  return 'control'
 }
-onMounted(async () => {
-  await cloudCapacity.whenReady()
+async function loadForkExperimentVariant(): Promise<ForkVariant> {
+  let flagValue: string | boolean | null | undefined
+  try {
+    flagValue = await window.api.telemetryGetExperimentFlag(FORK_DEFAULT_EXPERIMENT_KEY)
+  } catch {
+    flagValue = undefined
+  }
+  const variant = mapFlagToVariant(flagValue)
+  // Fire exposure exactly once per process via main's per-session dedup.
+  // Source: 'cache' when the on-disk experiment-flags.json had a value
+  // we recognised, 'fallback' when nothing usable came back (first-ever
+  // boot with no network, network failure, or unrecognised payload).
+  try {
+    window.api.telemetryRecordExposure({
+      experimentKey: FORK_DEFAULT_EXPERIMENT_KEY,
+      variant,
+      source: typeof flagValue === 'string' ? 'cache' : 'fallback'
+    })
+  } catch {
+    // best-effort
+  }
+  return variant
+}
+
+/** Apply the resolved variant to the picker state, respecting the
+ *  hard precedence rules (legacy-desktop > capacity-disabled >
+ *  experiment). Idempotent — safe to call from `onMounted` and from
+ *  `open()` on takeover replay. Always lands on a terminal state for
+ *  both refs so the caller doesn't need to seed defaults first. */
+function applyForkExperimentDefault(variant: ForkVariant): void {
+  // Migration flow always wins. Returning Desktop-1 users land on
+  // Local with the migrate-existing checkbox pre-ticked — that's the
+  // whole point of the legacy-detection branch. The experiment never
+  // overrides it.
+  if (hasLegacyDesktop.value) {
+    pickedChoice.value = 'local'
+    initialDefaultChoice.value = 'local'
+    return
+  }
+  // Capacity kill-switch also forces Local: cloud can't be booked, so
+  // there's no point pre-selecting it.
   if (cloudCapacity.isDisabled()) {
     pickedChoice.value = 'local'
+    initialDefaultChoice.value = 'local'
+    return
   }
-  initialDefaultChoice.value = deriveDefaultChoice()
+  if (variant === 'cloud-default') {
+    pickedChoice.value = 'cloud'
+    initialDefaultChoice.value = 'cloud'
+  } else if (variant === 'no-default') {
+    // Neither card pre-selected. Continue stays disabled until the
+    // user clicks one, so every commit is an explicit signal pick.
+    pickedChoice.value = null
+    initialDefaultChoice.value = null
+  } else {
+    pickedChoice.value = 'local'
+    initialDefaultChoice.value = 'local'
+  }
+}
+
+onMounted(async () => {
+  // Capacity + experiment in parallel; both are best-effort and
+  // fail-closed so the picker still works if either errors.
+  const [variant] = await Promise.all([
+    loadForkExperimentVariant(),
+    cloudCapacity.whenReady()
+  ])
+  forkExperimentVariant.value = variant
+  applyForkExperimentDefault(variant)
   capacityReady.value = true
 })
+// Defensive: if the user manually flipped to Cloud and the kill-switch
+// then transitions to `disabled` mid-flow, snap them back to Local so
+// they can't proceed into a disabled cloud path.
 watch(cloudCapacity.status, (status) => {
   if (status === 'disabled' && pickedChoice.value === 'cloud') {
     pickedChoice.value = 'local'
@@ -136,6 +237,15 @@ const cloudDescriptionKey = computed(() => {
  *  Functional wiring (skipping optional setup steps) lands separately;
  *  for now the value is captured for telemetry only. */
 const expressInstall = ref(true)
+/** Peer modifier alongside Express Install, only rendered when an
+ *  auto-tracked legacy install was detected on the machine. When
+ *  checked, Continue routes straight to chain-migrate so the existing
+ *  install is brought over instead of installing fresh. Pre-ticked so
+ *  returning Desktop users land on the migration path by default. */
+const migrateExisting = ref(true)
+const showMigrateExisting = computed(
+  () => pickedChoice.value === 'local' && hasLegacyDesktop.value
+)
 /** Detected GPU vendor — populated by `window.api.detectGPU()` on
  *  `open()`. Surfaces as an inline confirmation line under the Express
  *  checkbox so users on the wrong hardware can untick Express before
@@ -146,7 +256,7 @@ const detectedGpuLabel = ref<string | null>(null)
 const showGpuHint = computed(
   () => pickedChoice.value === 'local' && expressInstall.value && detectedGpuLabel.value !== null
 )
-/** Funnel-completion bookkeeping for `desktop2.first_use.completed`.
+/** Funnel-completion bookkeeping for `comfy.desktop.first_use.completed`.
  *  `mountedAt` is reset in `open()` so a takeover replay measures
  *  duration from the replay, not from the original mount.
  *  `stepsSeen` is a Set so re-visiting a step (back-navigation, replay)
@@ -163,13 +273,19 @@ function emitCompleted(exitPath: 'cloud' | 'local-new' | 'local-migrate' | 'skip
   // returning-user, and Desktop-1-migrator splits via had_legacy /
   // had_existing_install. Without these, the funnel's drop-off
   // analysis collapses all three audiences into one bucket.
-  emitTelemetryAction('desktop2.first_use.completed', {
+  emitTelemetryAction('comfy.desktop.first_use.completed', {
     exit_path: exitPath,
     steps_seen: stepsSeen.size,
     duration_ms: durationMs,
     duration_seconds: Math.round(durationMs / 1000),
     had_legacy: hasLegacyDesktop.value,
-    had_existing_install: skipPick.value
+    had_existing_install: skipPick.value,
+    // A/B attribution: completion rate IS the experiment's primary
+    // guardrail — if Cloud-default makes users bounce, this drops
+    // even when fork_chosen rate looks better. Carry the same
+    // variant tag through so the funnel can be sliced per arm.
+    experiment_key: FORK_DEFAULT_EXPERIMENT_KEY,
+    experiment_variant: forkExperimentVariant.value
   })
 }
 /** When the host detects prior usage of the launcher (any
@@ -241,6 +357,10 @@ async function onContinue(): Promise<void> {
     nudgeTos()
     return
   }
+  // No-default experiment arm: until the user clicks a card, there's
+  // no pick to commit. The button is already :disabled in this state,
+  // but guard defensively so a programmatic click can't bypass.
+  if (pickedChoice.value === null) return
   // Keep `isContinuing` true past `routePostStart()` because the chain
   // handlers (express prep, cloud auto-launch, new-install swap) all
   // either unmount this takeover or swap to a sub-step within ms. The
@@ -250,12 +370,12 @@ async function onContinue(): Promise<void> {
 
   await window.api.setSetting('telemetryEnabled', telemetryEnabled.value)
 
-  emitTelemetryAction('desktop2.first_use.consent_decision', {
+  emitTelemetryAction('comfy.desktop.first_use.consent_decision', {
     decision: telemetryEnabled.value ? 'accept' : 'decline',
     telemetry_enabled: telemetryEnabled.value,
     locale: locale.value
   })
-  emitTelemetryAction('desktop2.first_use.fork_chosen', {
+  emitTelemetryAction('comfy.desktop.first_use.fork_chosen', {
     choice: pickedChoice.value,
     has_legacy_desktop: hasLegacyDesktop.value,
     express_install: expressInstall.value,
@@ -270,7 +390,13 @@ async function onContinue(): Promise<void> {
     // tier the user would have hit on dashboard / IPP.
     capacity_status: cloudCapacity.status.value,
     was_default: pickedChoice.value === initialDefaultChoice.value,
-    user_tier: cloudCapacity.tier.value
+    user_tier: cloudCapacity.tier.value,
+    // A/B attribution: identify which experiment arm this pick belongs
+    // to so PostHog can compute cloud-pick rate, subscription rate, and
+    // bounce-after-cloud rate per variant. The key is captured too so
+    // future experiments running concurrently can be split apart.
+    experiment_key: FORK_DEFAULT_EXPERIMENT_KEY,
+    experiment_variant: forkExperimentVariant.value
   })
 
   if (isChinese.value) {
@@ -309,7 +435,7 @@ async function routePostStart(): Promise<void> {
       // kill-switch was hard-off (composable returned false directly);
       // `degraded_declined` means the user saw the heavy-load modal
       // and backed out.
-      emitTelemetryAction('desktop2.first_use.cloud_blocked', {
+      emitTelemetryAction('comfy.desktop.first_use.cloud_blocked', {
         reason: cloudCapacity.isDisabled() ? 'disabled' : 'degraded_declined',
         capacity_status: cloudCapacity.status.value,
         user_tier: cloudCapacity.tier.value
@@ -320,10 +446,22 @@ async function routePostStart(): Promise<void> {
     }
     emitCompleted('cloud')
     emit('complete-cloud')
+  } else if (hasLegacyDesktop.value && migrateExisting.value) {
+    // Local + the "Migrate existing install" peer checkbox: route
+    // straight to chain-migrate. The checkbox is only rendered when a
+    // legacy install was detected, so its `true` value is an explicit
+    // opt-in to bring the existing install over instead of installing
+    // fresh. Express applies the same opt-out-of-confirm semantics it
+    // does on chain-local: with both ticked, the host runs the
+    // migration straight through (preview + auto-pick + run) without
+    // surfacing the confirm step.
+    emitTelemetryAction('desktop2.first_use.local_branch_chosen', { choice: 'migrate' })
+    emitCompleted('local-migrate')
+    emit('chain-migrate', { express: expressInstall.value })
   } else if (hasLegacyDesktop.value && !expressInstall.value) {
-    // Express takes precedence: when checked, skip the migrate-vs-fresh
-    // sub-step and head straight to the express Standalone install. Only
-    // surface the localBranch fork when Express is unticked.
+    // Legacy detected but the user opted out of migrate and Express:
+    // surface the localBranch fork so they can still pick migrate-vs-
+    // fresh manually from the more detailed sub-step.
     step.value = 'localBranch'
     isContinuing.value = false
   } else {
@@ -341,23 +479,23 @@ async function chooseMirrors(useMirrors: boolean): Promise<void> {
     window.api.setSetting('useChineseMirrors', useMirrors),
     window.api.setSetting('chineseMirrorsPrompted', true)
   ])
-  emitTelemetryAction('desktop2.first_use.mirrors_chosen', { use_mirrors: useMirrors })
+  emitTelemetryAction('comfy.desktop.first_use.mirrors_chosen', { use_mirrors: useMirrors })
   void routePostStart()
 }
 
 function openWhyCloud(): void {
   whyCloudOpen.value = true
-  emitTelemetryAction('desktop2.first_use.why_cloud_opened', {})
+  emitTelemetryAction('comfy.desktop.first_use.why_cloud_opened', {})
 }
 
 function dismissWhyCloud(action: 'maybe_later' | 'dismiss'): void {
   whyCloudOpen.value = false
-  emitTelemetryAction('desktop2.first_use.why_cloud_action', { action })
+  emitTelemetryAction('comfy.desktop.first_use.why_cloud_action', { action })
 }
 
 function onWhyCloudTryCloud(): void {
   whyCloudOpen.value = false
-  emitTelemetryAction('desktop2.first_use.why_cloud_action', { action: 'try_cloud' })
+  emitTelemetryAction('comfy.desktop.first_use.why_cloud_action', { action: 'try_cloud' })
   // "Try Cloud" inside the explainer modal flips the start-screen
   // selection to Cloud but leaves the user on the screen so they can
   // accept T&C and press Continue. The legal gate is non-negotiable —
@@ -366,25 +504,30 @@ function onWhyCloudTryCloud(): void {
 }
 
 function chooseMigrate(): void {
-  emitTelemetryAction('desktop2.first_use.local_branch_chosen', { choice: 'migrate' })
+  emitTelemetryAction('comfy.desktop.first_use.local_branch_chosen', { choice: 'migrate' })
   emitCompleted('local-migrate')
-  emit('chain-migrate')
+  // localBranch sub-step is only reached when Express was unticked on
+  // the start screen, so this path is never the express-bypass path —
+  // pass `express: false` so the host renders the confirm surface.
+  emit('chain-migrate', { express: false })
 }
 
-/** Radiogroup arrow-key handler for the Cloud/Local cards. WAI-ARIA
- *  APG §3.15: arrow keys cycle the checked radio and move DOM focus
- *  along with it. Without this, keyboard-only users can't switch
- *  between the two cards. */
+/** Radiogroup arrow-key handler for the Cloud / Local cards.
+ *  WAI-ARIA APG §3.15: arrow keys cycle the checked radio and move DOM
+ *  focus along with it. When `pickedChoice` is `null` (the no-default
+ *  experiment arm before the user has touched the picker), arrow-down
+ *  enters at Cloud and arrow-up enters at Local so keyboard users can
+ *  make a pick without reaching for the mouse. */
 function onStartCardsKeydown(e: KeyboardEvent): void {
   const target = e.target as HTMLElement | null
   if (!target?.closest('[role="radio"]')) return
   const order = ['cloud', 'local'] as const
-  const currentIndex = order.indexOf(pickedChoice.value)
+  const currentIndex = pickedChoice.value === null ? -1 : order.indexOf(pickedChoice.value)
   let next: number
   if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
-    next = (currentIndex + 1) % order.length
+    next = currentIndex < 0 ? 0 : (currentIndex + 1) % order.length
   } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
-    next = (currentIndex - 1 + order.length) % order.length
+    next = currentIndex < 0 ? order.length - 1 : (currentIndex - 1 + order.length) % order.length
   } else {
     return
   }
@@ -401,7 +544,7 @@ function onStartCardsKeydown(e: KeyboardEvent): void {
 }
 
 function chooseInstallNew(): void {
-  emitTelemetryAction('desktop2.first_use.local_branch_chosen', { choice: 'install_new' })
+  emitTelemetryAction('comfy.desktop.first_use.local_branch_chosen', { choice: 'install_new' })
   // Skip the dedicated name screen — naming now happens inline on the
   // Configure screen (InstallWizardModal brand-config). Flag the origin so
   // Configure surfaces a Back link returning to localBranch.
@@ -430,13 +573,32 @@ async function open(opts: OpenOpts = {}): Promise<void> {
   whyCloudOpen.value = false
   termsDoc.value = null
   acceptedTos.value = false
-  // Re-derive default pick from current capacity. On first mount the
-  // `onMounted` `whenReady` await handles this; on takeover replay
-  // (capacity already resolved) we apply it inline so a `disabled`
-  // flag isn't clobbered by the reset.
-  pickedChoice.value = deriveDefaultChoice()
-  initialDefaultChoice.value = deriveDefaultChoice()
+  // Safe baseline: Local pre-selected. The variant-aware apply call
+  // below overrides to Cloud (`'cloud-default'` arm) or null
+  // (`'no-default'` arm) when neither hard gate (legacy-desktop,
+  // capacity-disabled) applies. Reset unconditionally first so the
+  // takeover-replay path lands on a clean slate even if the variant
+  // hasn't resolved yet on first mount.
+  pickedChoice.value = 'local'
+  initialDefaultChoice.value = 'local'
+  // Re-apply the experiment variant on every replay so a user who
+  // cancelled mid-flow lands back on the same default they saw the
+  // first time. `forkExperimentVariant.value` is locked at boot — on
+  // first mount it may still be null if `loadForkExperimentVariant`
+  // hasn't resolved yet, which is fine: onMounted applies it once it
+  // does.
+  if (forkExperimentVariant.value) {
+    applyForkExperimentDefault(forkExperimentVariant.value)
+  }
   expressInstall.value = true
+  migrateExisting.value = true
+  // `onContinue` keeps `isContinuing` true past `routePostStart()`
+  // because the chain handlers normally unmount this takeover within
+  // ms — but on the chain-migrate / chain-local cancel-and-return
+  // path, the host re-invokes `open()` on a still-mounted instance
+  // whose Continue spinner is still flagged. Reset here so the
+  // replayed start screen surfaces a fresh, clickable CTA.
+  isContinuing.value = false
   // Reset funnel-completion bookkeeping so a takeover replay measures
   // duration / steps from the replay, not from the original mount.
   mountedAt = Date.now()
@@ -496,7 +658,7 @@ watch(
     const mode = current === 'start' ? 'consent-lockdown' : 'post-consent'
     window.api.setFirstUseMode(mode)
     stepsSeen.add(current)
-    emitTelemetryAction('desktop2.first_use.step_viewed', {
+    emitTelemetryAction('comfy.desktop.first_use.step_viewed', {
       step: current,
       skip_pick: skipPick.value,
       has_legacy_desktop: hasLegacyDesktop.value
@@ -518,7 +680,17 @@ onUnmounted(() => {
   window.api.setFirstUseMode('none')
 })
 
-defineExpose({ open })
+/** Host-callable: clears the Continue-button spinner without resetting
+ *  picker state. Used by chain handlers (most prominently
+ *  `handleFirstUseChainMigrate`) when their post-emit confirm modal
+ *  returns null — the takeover stays mounted on the start step with
+ *  all selections preserved, but the spinner needs to clear so the
+ *  user can retry Continue. */
+function resetContinue(): void {
+  isContinuing.value = false
+}
+
+defineExpose({ open, resetContinue })
 </script>
 
 <template>
@@ -545,7 +717,13 @@ defineExpose({ open })
             :aria-disabled="cloudCapacity.isDisabled() ? true : undefined"
             glow
             :label="$t('cloud.label')"
-            :tagline="cloudCapacity.isDisabled() ? $t('cloud.capacityDisabled') : (cloudCapacity.isDegraded() ? $t('cloud.capacityDegraded') : $t('firstUse.cloudTagline'))"
+            :tagline="
+              cloudCapacity.isDisabled()
+                ? $t('cloud.capacityDisabled')
+                : cloudCapacity.isDegraded()
+                  ? $t('cloud.capacityDegraded')
+                  : $t('firstUse.cloudTagline')
+            "
             :description="$t(cloudDescriptionKey)"
             data-testid="first-use-pick-cloud"
             @click="cloudCapacity.isDisabled() ? null : (pickedChoice = 'cloud')"
@@ -574,6 +752,34 @@ defineExpose({ open })
             @click="pickedChoice = 'local'"
           />
         </div>
+        <!-- Modifier checkboxes (Migrate + Express). Wrapped in a
+             fit-content container so the two labels share the same
+             left edge and read as left-aligned peers — without the
+             wrapper, each label was an `inline-flex` that centered
+             independently, so a longer description text would push
+             one row off-axis from the other. -->
+        <div class="start-modifiers">
+        <label
+          v-if="hasLegacyDesktop"
+          class="brand-checkbox start-migrate-existing"
+          :class="{ 'start-migrate-existing--hidden': !showMigrateExisting }"
+          :aria-hidden="!showMigrateExisting"
+          data-testid="first-use-migrate-existing"
+        >
+          <input
+            v-model="migrateExisting"
+            type="checkbox"
+            :tabindex="showMigrateExisting ? 0 : -1"
+          />
+          <span class="start-migrate-existing__body">
+            <span class="start-migrate-existing__label">
+              {{ $t('firstUse.migrateExistingLine') }}
+            </span>
+            <span class="start-migrate-existing__desc">
+              <InlineRichText :text="$t('firstUse.migrateExistingDesc')" />
+            </span>
+          </span>
+        </label>
         <label
           class="brand-checkbox start-express"
           :class="{ 'start-express--hidden': pickedChoice !== 'local' }"
@@ -602,6 +808,7 @@ defineExpose({ open })
             </span>
           </span>
         </label>
+        </div>
       </div>
       <div class="start-bottom">
         <div class="start-consent-strip">
@@ -655,7 +862,7 @@ defineExpose({ open })
             class="brand-primary start-continue"
             type="button"
             data-testid="first-use-continue"
-            :disabled="isContinuing"
+            :disabled="isContinuing || pickedChoice === null"
             :aria-busy="isContinuing"
             @click="onContinue"
           >
@@ -873,16 +1080,29 @@ defineExpose({ open })
   outline-offset: 2px;
 }
 
+/* Modifier-checkbox container. Both rows (Migrate + Express) live
+ * inside this so they share the same left edge: the wrapper itself is
+ * `width: fit-content` (shrinks to the WIDEST child) and centred in
+ * the start-hero column via `margin-inline: auto`. The labels inside
+ * are then plain block-level rows with no centring of their own, so a
+ * shorter row no longer floats to its own centre — they all start at
+ * the wrapper's left edge. */
+.start-modifiers {
+  display: flex;
+  flex-direction: column;
+  width: fit-content;
+  margin-inline: auto;
+  gap: 8px;
+  margin-top: 4px;
+}
 /* Express Install — intentionally low-weight: left-aligned single
  * line with the standard brand-checkbox box, smaller font + muted
  * text colour so it reads as an opt-out modifier, not a primary
  * decision. */
 .start-express {
   display: inline-flex;
-  align-self: center;
   align-items: flex-start;
   gap: 8px;
-  margin-top: 4px;
   font-size: 13px;
   color: var(--neutral-300);
   opacity: 1;
@@ -925,6 +1145,55 @@ defineExpose({ open })
 }
 @media (prefers-reduced-motion: reduce) {
   .start-express {
+    transition: none;
+  }
+}
+
+/* Peer checkbox sibling of `.start-express`. Rendered ABOVE Express
+ * on the legacy-detected path so the primary action for a returning
+ * Desktop user (bring the existing install over) reads first — and so
+ * Express below it doesn't look like a sub-option being nested under
+ * it. Body has a primary label + a description sub-line mirroring
+ * Express's GPU hint so the two read as a row of equal-weight
+ * modifiers carrying the same amount of detail. */
+.start-migrate-existing {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--neutral-300);
+  opacity: 1;
+  transform: translateY(0);
+  transition:
+    opacity 180ms ease-out,
+    transform 180ms ease-out;
+}
+.start-migrate-existing--hidden {
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
+}
+.start-migrate-existing__body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+}
+.start-migrate-existing__label {
+  line-height: 1.4;
+}
+.start-migrate-existing__desc {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--neutral-400);
+}
+.start-migrate-existing__desc :deep(strong) {
+  color: var(--neutral-100);
+  font-weight: 500;
+}
+@media (prefers-reduced-motion: reduce) {
+  .start-migrate-existing {
     transition: none;
   }
 }

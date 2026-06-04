@@ -12,7 +12,7 @@ import { getBundledScriptPath } from '../../lib/bundledScript'
 import * as settings from '../../settings'
 import * as snapshots from '../../lib/snapshots'
 import { repairMacBinaries } from './macRepair'
-import { getUvPath, getActivePythonPath, getMasterPythonPath } from './envPaths'
+import { getActivePythonPath, getActiveUvPath, getMasterPythonPath } from './envPaths'
 import type { InstallationRecord } from '../../installations'
 
 interface ScriptResult {
@@ -158,10 +158,13 @@ export async function runComfyUIUpdate(opts: UpdateOrchestrationOptions): Promis
   let { installation } = opts
   const sendOutput = opts.sendOutput
   const comfyuiDir = path.join(installPath, 'ComfyUI')
-  const masterPython = getMasterPythonPath(installPath)
+  // Adopted installs run the updater against the legacy `.venv` Python (it has
+  // pygit2 from adoption); `update_comfyui.py` only needs pygit2 + stdlib.
+  const updaterPython = installation.adopted === true
+    ? (installation.adoptedPythonPath as string)
+    : getMasterPythonPath(installPath)
   const channelArgs = channel === 'stable' ? ['--stable'] : []
 
-  // Read pre-update requirements
   const reqPath = path.join(comfyuiDir, 'requirements.txt')
   let preReqs = ''
   try { preReqs = await fs.promises.readFile(reqPath, 'utf-8') } catch {}
@@ -170,7 +173,6 @@ export async function runComfyUIUpdate(opts: UpdateOrchestrationOptions): Promis
   let preMgrReqs = ''
   try { preMgrReqs = await fs.promises.readFile(mgrReqPath, 'utf-8') } catch {}
 
-  // Optional pre-update snapshot
   let preUpdateFilename: string | undefined
   if (preUpdateSnapshot) {
     try {
@@ -182,8 +184,8 @@ export async function runComfyUIUpdate(opts: UpdateOrchestrationOptions): Promis
     }
   }
 
-  // Run the update script (with macOS SIGKILL retry)
-  let result = await spawnUpdateScript(masterPython, comfyuiDir, channelArgs, sendOutput, signal)
+  // Run the update script (with a macOS SIGKILL repair-and-retry).
+  let result = await spawnUpdateScript(updaterPython, comfyuiDir, channelArgs, sendOutput, signal)
 
   if (result.exitCode !== 0 && result.exitSignal === 'SIGKILL' && process.platform === 'darwin') {
     if (sendOutput) {
@@ -191,15 +193,17 @@ export async function runComfyUIUpdate(opts: UpdateOrchestrationOptions): Promis
     } else {
       console.warn('macOS killed update process — attempting binary repair and retry')
     }
-    await repairMacBinaries(installPath, sendProgress, sendOutput)
+    // Recovers a Gatekeeper SIGKILL on either install type: `repairMacBinaries`
+    // picks the right runtime venv via `getActiveVenvDir(installation)`.
+    await repairMacBinaries(installPath, sendProgress, sendOutput, installation)
     if (sendOutput) {
       sendOutput('Repair complete — retrying update…\n\n')
     }
-    result = await spawnUpdateScript(masterPython, comfyuiDir, channelArgs, sendOutput, signal)
+    result = await spawnUpdateScript(updaterPython, comfyuiDir, channelArgs, sendOutput, signal)
   }
 
-  // Check for cancellation before inspecting exit code — aborted processes
-  // typically exit non-zero (SIGTERM) and shouldn't show an error message.
+  // Check cancellation before the exit code — aborted processes exit non-zero
+  // and shouldn't surface an error.
   if (signal?.aborted) return { ok: false, message: 'Cancelled', installation }
 
   if (result.exitCode !== 0) {
@@ -209,9 +213,9 @@ export async function runComfyUIUpdate(opts: UpdateOrchestrationOptions): Promis
       if (detail) {
         message = `${t('standalone.updateFailed', { code: result.exitCode })}\n\n${detail}`
       } else if (result.exitSignal) {
-        message = `${t('standalone.updateFailed', { code: result.exitCode })}\n\nProcess was killed by signal ${result.exitSignal}.\npython: ${masterPython}\nscript: ${getBundledScriptPath('update_comfyui.py')}`
+        message = `${t('standalone.updateFailed', { code: result.exitCode })}\n\nProcess was killed by signal ${result.exitSignal}.\npython: ${updaterPython}\nscript: ${getBundledScriptPath('update_comfyui.py')}`
       } else {
-        message = `${t('standalone.updateFailed', { code: result.exitCode })}\n\nProcess produced no output.\npython: ${masterPython}\nscript: ${getBundledScriptPath('update_comfyui.py')}`
+        message = `${t('standalone.updateFailed', { code: result.exitCode })}\n\nProcess produced no output.\npython: ${updaterPython}\nscript: ${getBundledScriptPath('update_comfyui.py')}`
       }
       return { ok: false, message, installation }
     }
@@ -221,17 +225,15 @@ export async function runComfyUIUpdate(opts: UpdateOrchestrationOptions): Promis
 
   const { markers } = result
 
-  // Install updated requirements if changed
   let postReqs = ''
   try { postReqs = await fs.promises.readFile(reqPath, 'utf-8') } catch {}
 
   if (preReqs !== postReqs && postReqs.length > 0) {
-    const uvPath = getUvPath(installPath)
+    const uvPath = getActiveUvPath(installation)
     const activeEnvPython = getActivePythonPath(installation)
 
     if (fs.existsSync(uvPath) && activeEnvPython) {
       if (dryRunConflictCheck) {
-        // Dry-run conflict detection (actions.ts behavior)
         const filteredReqs = postReqs.split('\n').filter((l) => !PYTORCH_RE.test(l.trim())).join('\n')
         const filteredReqPath = path.join(installPath, '.comfyui-reqs-filtered.txt')
         await fs.promises.writeFile(filteredReqPath, filteredReqs, 'utf-8')
@@ -268,7 +270,6 @@ export async function runComfyUIUpdate(opts: UpdateOrchestrationOptions): Promis
           try { await fs.promises.unlink(filteredReqPath) } catch {}
         }
       } else {
-        // Simple filtered install (install.ts behavior)
         sendProgress('update', { percent: -1, status: 'Installing updated dependencies' })
         const logFn = sendOutput ?? console.log
         const installResult = await installFilteredRequirements(
@@ -284,12 +285,11 @@ export async function runComfyUIUpdate(opts: UpdateOrchestrationOptions): Promis
     sendProgress('deps', { percent: -1, status: t('standalone.updateDepsUpToDate') })
   }
 
-  // Install manager_requirements.txt if changed
   let postMgrReqs = ''
   try { postMgrReqs = await fs.promises.readFile(mgrReqPath, 'utf-8') } catch {}
 
   if (preMgrReqs !== postMgrReqs && postMgrReqs.length > 0) {
-    const uvPath = getUvPath(installPath)
+    const uvPath = getActiveUvPath(installation)
     const activeEnvPython = getActivePythonPath(installation)
 
     if (fs.existsSync(uvPath) && activeEnvPython) {
@@ -314,16 +314,14 @@ export async function runComfyUIUpdate(opts: UpdateOrchestrationOptions): Promis
     }
   }
 
-  // Re-resolve comfyVersion from git state.
-  // Fetch tags so the local repo has all release tags for version resolution
-  // (the update script may only fetch master on the latest channel).
+  // Fetch tags so version resolution sees all release tags (the update script
+  // may only fetch master on the latest channel).
   await fetchTags(comfyuiDir)
   clearVersionCache()
   const checkedOutTag = markers.CHECKED_OUT_TAG || undefined
   const fullPostHead = markers.POST_UPDATE_HEAD || readGitHead(comfyuiDir)
 
-  // Build a latestTagOverride so resolveLocalVersion can use the
-  // tag's SHA directly — matches the background version sync approach.
+  // Pass the tag's SHA directly to resolveLocalVersion.
   let latestTagOverride: LatestTagOverride | undefined
   const latestTag = await findLatestVersionTag(comfyuiDir)
   if (latestTag) {
@@ -367,14 +365,13 @@ export async function runComfyUIUpdate(opts: UpdateOrchestrationOptions): Promis
     installation = { ...installation, comfyVersion } as InstallationRecord
   }
 
-  // Save post-update snapshot
   try {
     const updatedInstallation = { ...installation, updateChannel: channel }
     const filename = await snapshots.saveSnapshot(installPath, updatedInstallation, 'post-update')
     const snapshotCount = await snapshots.getSnapshotCount(installPath)
     await update({ lastSnapshot: filename, snapshotCount })
 
-    // Remove pre-update snapshot if it was identical to the one before it
+    // Prune the pre-update snapshot if identical to the one before it.
     if (preUpdateFilename) {
       const pruned = await snapshots.deduplicatePreUpdateSnapshot(installPath, preUpdateFilename)
       if (pruned) {

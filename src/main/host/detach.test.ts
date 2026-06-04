@@ -113,9 +113,8 @@ describe('closeAllHostWindows', () => {
     const entryB = makeEntry(b)
     comfyWindows.set(entryA.windowKey, entryA)
     comfyWindows.set(entryB.windowKey, entryB)
-    // Simulate a synchronous closed handler that deletes from the map
-    // mid-iteration. Without the Array.from(...) snapshot in the impl,
-    // the second entry would be skipped.
+    // Synchronous closed handler that deletes mid-iteration; without the
+    // snapshot in the impl, the second entry would be skipped.
     a.close = () => {
       a.closed = true
       comfyWindows.delete(entryA.windowKey)

@@ -1,19 +1,11 @@
-/**
- * Shared snapshot helpers used across snapshot-related components and views.
- */
+// Shared snapshot helpers used across snapshot-related components and views.
 
 import type { SnapshotDiffResult, SnapshotListData, SnapshotSummary } from '../types/ipc'
 
 type Translator = (key: string, params?: Record<string, unknown>) => string
 
-/**
- * Session-scoped cache of the snapshot list per installation. The Snapshots
- * tab remounts every time it's opened (it's `v-if`'d per tab), so without a
- * cache each open flashes an empty state and then shifts layout when the
- * async fetch resolves. Seeding from this cache lets a remount paint the
- * last-known list instantly while a background refresh runs. Cleared on app
- * restart; kept intentionally simple (no eviction — one small object per
- * install). */
+// Session-scoped per-install cache so a remounted Snapshots tab paints instantly
+// while a background refresh runs. No eviction — one small object per install.
 const _snapshotListCache = new Map<string, SnapshotListData>()
 export function getCachedSnapshotList(installationId: string): SnapshotListData | null {
   return _snapshotListCache.get(installationId) ?? null
@@ -23,19 +15,9 @@ export function setCachedSnapshotList(installationId: string, data: SnapshotList
 }
 
 /**
- * "Share" a snapshot = export the install's latest (newest) snapshot via the
- * OS save dialog. This is the same operation as the per-row Export button,
- * promoted to a top-level install action so it's reachable from the dashboard
- * context menu and the IPP "More" menu without opening the Snapshots tab.
- *
- * Snapshots come back newest-first, so `[0]` is the current state. Returns a
- * discriminated result so each caller can surface the right feedback in its
- * own dialog system:
- *  - `none`  — the install has no snapshots yet (menu items are gated to
- *              installed local installs, but handle it defensively here too).
- *  - `error` — the export failed with a message (e.g. a write error).
- * A user cancelling the save dialog returns `{ ok: false }` with no message
- * from the IPC, which we treat as a successful no-op (nothing to report).
+ * Export the install's latest snapshot via the OS save dialog. Snapshots come back
+ * newest-first, so `[0]` is the current state. A cancelled save dialog returns
+ * `{ ok: false }` with no message, which is treated as a successful no-op.
  */
 export async function shareLatestSnapshot(
   installationId: string
@@ -126,20 +108,12 @@ export function changeSummary(s: SnapshotSummary, t: Translator): string[] {
   }
   const pipChanges = d.pipsAdded + d.pipsRemoved + d.pipsChanged
   if (pipChanges > 0) {
-    parts.push(`${pipChanges} pkg changes`)
+    parts.push(t('snapshots.pipChanges', { count: pipChanges }))
   }
   return parts
 }
 
-/**
- * Convert a snapshot diff into grouped detail lines for the restore-confirm
- * modal's `messageDetails`. Mirrors what `SnapshotDiffView` renders, but as
- * plain strings the modal can show — so the "Restore this snapshot" confirm
- * shows the concrete version / node / package changes (e.g. "v0.20.1 →
- * v0.22.3") instead of the vague "ComfyUI updated · N pkg changes" summary.
- * Each list is capped so a huge diff (100+ pip changes) can't blow up the
- * modal; the full detail still lives in the expandable accordion on the row.
- */
+/** Convert a snapshot diff into grouped detail lines for the restore-confirm modal, each list capped at `cap`. */
 export function diffToDetailGroups(
   diff: SnapshotDiffResult,
   t: Translator,

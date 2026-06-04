@@ -8,17 +8,10 @@ import { formatRelativeFromMs } from '../../lib/datetime'
 import type { ActionDef, DetailField, DetailFieldOption } from '../../types/ipc'
 import { TID } from '../../../../shared/testIds'
 
-/**
- * Unified update surface: headline status, inset channel card, and
- * compact action row aligned with Global Settings UpdatesSection.
- */
-
 interface Props {
   field: DetailField
   sectionActions?: ActionDef[]
-  /** Inline-action busy set — drives the per-button spinner +
-   *  disabled state so quick actions like Check-for-Update feel
-   *  acknowledged. Passed through from SettingsSectionList. */
+  /** Inline-action busy set driving the per-button spinner + disabled state. */
   runningActionIds?: Set<string>
 }
 
@@ -69,11 +62,8 @@ interface PreviewData {
   lastChecked?: string
   lastCheckedAt?: number
   updateAvailable?: boolean
-  /** True while we know the upstream commit but haven't yet computed
-   *  `commitsAhead` for this install's checkout. Drives the muted
-   *  "Computing commits ahead…" hint so the eventual label swap
-   *  doesn't look like a silent glitch. See `ChannelCardData` in
-   *  `src/main/lib/channel-cards.ts` for derivation. */
+  /** True while `commitsAhead` is still being computed; drives the
+   *  "Computing commits ahead…" hint so the label swap isn't a surprise. */
   enriching?: boolean
 }
 
@@ -90,14 +80,8 @@ const preview = computed<PreviewData | null>(() => {
   }
 })
 
-// Safety net for the `enriching` hint. `commitsAhead` is computed by a
-// background git fan-out (`enrichCommitsAhead`) — on failure (offline,
-// timeout, repo state edge case) the flag stays true forever as far as
-// this component knows. The expected enrichment window is sub-second on
-// a fast link; 10s comfortably covers a slow link and still hides the
-// hint long before the user starts wondering whether something is
-// stuck. Once hidden, the value either upgrades silently (the goal) or
-// stays at the documented `tag (sha)` fallback (acceptable).
+// Safety net: if the background `commitsAhead` enrichment never completes
+// (offline / timeout), hide the hint after 10s so it doesn't hang forever.
 const ENRICHING_HINT_MAX_MS = 10_000
 const enrichingTimedOut = ref(false)
 let enrichingTimer: ReturnType<typeof setTimeout> | null = null
@@ -268,9 +252,7 @@ const showCheckInHeader = computed(
     otherSecondaryActions.value.length === 0
 )
 
-// When an update is already detected, the user can see the new version
-// + Update Now / Copy & Update right above — re-checking is redundant.
-// Only surface the manual check when no update is currently visible.
+// Only surface the manual check when no update is already visible.
 const showCheckUpdateInFooter = computed(
   () =>
     checkUpdateAction.value != null &&
@@ -295,9 +277,7 @@ const footerActions = computed<
   }
 
   for (const action of otherSecondaryActions.value) {
-    // Switch Channel is the primary intent once the user has picked a
-    // different channel card, so style it accent (blue) like Update Now
-    // rather than a muted secondary button.
+    // Switch Channel is the primary intent after picking a channel, so accent it.
     const variant =
       action.id === 'switch-channel'
         ? 'accent'
@@ -369,12 +349,8 @@ const selectOptions = computed<BaseSelectOption[]>(() =>
       </div>
     </dl>
 
-    <!-- Background-enrichment hint: visible while `commitsAhead` is still
-         being computed against the install's local `.git` checkout. The
-         "Latest" value above briefly reads as `tag (sha)` and upgrades
-         to `tag + N commits (sha)` once enrichment lands. The hint is
-         polite (announced once via aria-live) and self-hides after the
-         max display window if enrichment never completes. -->
+    <!-- Hint shown while `commitsAhead` is still being computed; self-hides
+         after the max window if enrichment never completes. -->
     <p
       v-if="showEnrichingHint"
       class="channel-picker-enriching"

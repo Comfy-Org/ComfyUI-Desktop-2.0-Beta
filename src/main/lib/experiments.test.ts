@@ -5,10 +5,8 @@ import path from 'path'
 
 let testUserData = ''
 
-// Per-test temp dir. `configDir()` resolves via paths.ts which on Linux
-// bypasses Electron and reads XDG_CONFIG_HOME directly — that broke CI
-// when we only mocked `electron.app.getPath`. Mock paths.ts directly so
-// the test path is consistent across platforms.
+// Mock paths.ts directly: configDir() reads XDG_CONFIG_HOME on Linux, bypassing
+// the electron.app.getPath mock and breaking CI.
 vi.mock('./paths', () => ({
   configDir: () => testUserData
 }))
@@ -21,7 +19,6 @@ vi.mock('electron', () => ({
   }
 }))
 
-// Captured PostHog calls per the existing telemetry.test.ts pattern.
 interface CapturedCall {
   distinctId: string
   event: string
@@ -100,18 +97,16 @@ describe('experiments', () => {
 
   describe('initExperiments', () => {
     it('loads cache synchronously on init even before the background fetch resolves', async () => {
-      // Pre-seed an on-disk cache.
       fs.writeFileSync(
         path.join(testUserData, 'experiment-flags.json'),
         JSON.stringify({ 'flag.a': 'treatment', 'flag.b': true })
       )
 
-      mockFlagsDelayMs = 100 // ensure the network fetch is in-flight when we check getFlag
+      mockFlagsDelayMs = 100 // keep the fetch in-flight while we check getFlag
       const refresh = experiments.initExperiments({
         distinctId: 'test-distinct-id',
         personProperties: {}
       })
-      // Cache is available synchronously.
       expect(experiments.getFlag('flag.a')).toBe('treatment')
       expect(experiments.getFlag('flag.b')).toBe(true)
       await refresh
@@ -126,12 +121,10 @@ describe('experiments', () => {
     })
 
     it('writes refreshed values to disk for the next boot WITHOUT changing this session', async () => {
-      // Pre-seed disk with the "old" assignments this session should keep.
       fs.writeFileSync(
         path.join(testUserData, 'experiment-flags.json'),
         JSON.stringify({ 'flag.x': 'control', 'flag.y': true })
       )
-      // Refresh returns DIFFERENT values — the new shape PostHog wants.
       mockFlags = { 'flag.x': 'variant_a', 'flag.y': false }
 
       await experiments.initExperiments({
@@ -139,14 +132,11 @@ describe('experiments', () => {
         personProperties: {}
       })
 
-      // In-memory cache is LOCKED to what loaded synchronously at boot.
-      // The session keeps serving the pre-seeded values; a banner that
-      // checks the flag mid-session sees the same variant as one that
-      // checks at boot. No mid-session flips.
+      // In-memory cache stays locked to boot values; no mid-session flips.
       expect(experiments.getFlag('flag.x')).toBe('control')
       expect(experiments.getFlag('flag.y')).toBe(true)
 
-      // Disk reflects the refreshed values — next boot picks them up.
+      // Disk reflects the refreshed values for the next boot.
       const onDisk = JSON.parse(
         fs.readFileSync(path.join(testUserData, 'experiment-flags.json'), 'utf-8')
       )
@@ -154,7 +144,6 @@ describe('experiments', () => {
     })
 
     it('first-boot users (no on-disk cache) stay in fallback for the session even after refresh resolves', async () => {
-      // No pre-seeded cache file. mockFlags will assign treatment.
       mockFlags = { 'flag.x': 'treatment' }
 
       await experiments.initExperiments({
@@ -162,13 +151,9 @@ describe('experiments', () => {
         personProperties: {}
       })
 
-      // Even though the fetch returned 'treatment' and wrote it to disk,
-      // the in-memory cache for THIS session stays empty — first-boot
-      // users always land in fallback control for their first session
-      // and pick up their real assignment on the next launch.
+      // First-boot session stays empty even though the fetch wrote to disk.
       expect(experiments.getFlag('flag.x')).toBeUndefined()
 
-      // Disk is primed for the next boot.
       const onDisk = JSON.parse(
         fs.readFileSync(path.join(testUserData, 'experiment-flags.json'), 'utf-8')
       )
@@ -180,7 +165,7 @@ describe('experiments', () => {
         path.join(testUserData, 'experiment-flags.json'),
         JSON.stringify({ 'flag.a': 'treatment' })
       )
-      mockFlags = {} // simulate timeout/empty response
+      mockFlags = {} // timeout/empty response
       await experiments.initExperiments({
         distinctId: 'test-distinct-id',
         personProperties: {}
@@ -189,7 +174,6 @@ describe('experiments', () => {
     })
 
     it('is idempotent within a process — repeated init is a no-op', async () => {
-      // Pre-seed disk so this session's in-memory cache is non-empty.
       fs.writeFileSync(
         path.join(testUserData, 'experiment-flags.json'),
         JSON.stringify({ 'flag.a': 'treatment' })
@@ -204,20 +188,18 @@ describe('experiments', () => {
         personProperties: {}
       })
       await Promise.all([first, second])
-      // The second init is a no-op — distinctId is intentionally ignored
-      // (variant stability), and the session keeps its boot-loaded
-      // value, NOT the mockFlags refresh value.
+      // Second init is a no-op; the session keeps the boot value.
       expect(experiments.getFlag('flag.a')).toBe('treatment')
     })
   })
 
   describe('recordExposure', () => {
-    it('fires desktop2.experiment.exposed once per (experiment, variant) per session', () => {
+    it('fires comfy.desktop.experiment.exposed once per (experiment, variant) per session', () => {
       experiments.recordExposure('auth_banner_smoketest_v1', 'treatment', 'cache')
       experiments.recordExposure('auth_banner_smoketest_v1', 'treatment', 'cache')
       experiments.recordExposure('auth_banner_smoketest_v1', 'treatment', 'remote')
 
-      const events = captured.filter((c) => c.event === 'desktop2.experiment.exposed')
+      const events = captured.filter((c) => c.event === 'comfy.desktop.experiment.exposed')
       expect(events).toHaveLength(1)
       expect(events[0]?.properties).toMatchObject({
         experiment_key: 'auth_banner_smoketest_v1',
@@ -230,7 +212,7 @@ describe('experiments', () => {
       experiments.recordExposure('auth_banner_smoketest_v1', 'control', 'cache')
       experiments.recordExposure('auth_banner_smoketest_v1', 'treatment', 'cache')
 
-      const events = captured.filter((c) => c.event === 'desktop2.experiment.exposed')
+      const events = captured.filter((c) => c.event === 'comfy.desktop.experiment.exposed')
       expect(events).toHaveLength(2)
     })
   })

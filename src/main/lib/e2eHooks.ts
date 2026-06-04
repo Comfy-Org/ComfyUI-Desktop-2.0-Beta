@@ -1,16 +1,8 @@
 /**
- * Test-only helpers exposed on `globalThis.__e2e` so the Playwright
- * `app.evaluate(...)` bridge can drive main-side state without
- * round-tripping through the production data paths (real GitHub
- * release fetches, real auto-updater HTTP, real downloads).
- *
- * Only loaded + registered when `process.env['E2E'] === '1'` (see
- * `index.ts whenReady`). The implementations live in their owning
- * modules as `_test_*` exports — this module is the single
- * registration point so the surface is greppable as `__e2e:*`.
- *
- * Mirrored test-side by `e2e/support/devHooks.ts`, which exposes a
- * typed wrapper around each helper.
+ * Test-only helpers on `globalThis.__e2e` so the Playwright `app.evaluate(...)` bridge can
+ * drive main-side state without the production data paths. Registered only when
+ * `E2E === '1'`; implementations live in their owning modules as `_test_*` exports. Mirrored
+ * test-side by `e2e/support/devHooks.ts`.
  */
 
 import {
@@ -43,9 +35,8 @@ import {
 export interface RunningSessionSnapshot {
   /** Process pid (null for synthetic seeded sessions with no real proc). */
   pid: number | null
-  /** Wall-clock ms when the session was registered — lets the restart
-   *  cluster assert a `_runningSessions.set(...)` happened between two
-   *  snapshots without needing a real pid delta. */
+  /** Wall-clock ms when the session was registered, so the restart cluster can assert a
+   *  re-registration between two snapshots without a real pid delta. */
   startedAt: number
   port: number
   url: string | undefined
@@ -59,64 +50,34 @@ interface SetInstallUpdateOpts {
 }
 
 export interface E2EHelpers {
-  /** Replace the downloads tray (active + recent) with a snapshot and
-   *  broadcast `tray-state-changed`. */
+  /** Replace the downloads tray with a snapshot and broadcast `tray-state-changed`. */
   seedDownloads(snapshot: DownloadsTrayState): void
   /** Stub the install-update probe for one (or all) installations. */
   setInstallUpdate(opts: SetInstallUpdateOpts): void
-  /** Push an arbitrary `AppUpdateState` through the broadcast pipeline. */
   setAppUpdateState(state: AppUpdateState): void
-  /** Read the bounds of the currently-open title-bar dropdown popup. */
   getTitlePopupBounds(): ReturnType<typeof _test_getOpenTitlePopupBounds>
-  /** Trigger the File menu's "Return to Dashboard" action on the
-   *  first install-backed host window — flips it in place to chooser
-   *  mode without going through the popup. Resolves to the BrowserWindow
-   *  id that was flipped (or null if no install-backed host exists). */
+  /** "Return to Dashboard" on the first install-backed host window. Resolves to the
+   *  BrowserWindow id flipped, or null if none exists. */
   returnFirstInstallHostToDashboard(): Promise<number | null>
-  /** Read the list of recorded invocations for an instrumented IPC
-   *  channel (e.g. `'get-detail-sections'`). Each entry is the first
-   *  argument the handler received. */
+  /** Recorded invocations for an instrumented IPC channel; each entry is the handler's first arg. */
   getIpcInvocations(channel: string): unknown[]
-  /** Clear the recorded invocations for one channel, or all channels
-   *  when called with no argument. Tests call this in `beforeAll` /
-   *  `beforeEach` to assert against deltas rather than cumulative
-   *  state across suites. */
+  /** Clear recorded invocations for one channel, or all when called with no argument. */
   resetIpcInvocations(channel?: string): void
-  /** URLs Electron's `shell.openExternal(...)` was called with via
-   *  the launcher's wrapper. Empty unless the production code recorded
-   *  an external open while `E2E === '1'`. */
+  /** URLs `shell.openExternal(...)` was called with via the launcher's wrapper. */
   getShellOpenExternalCalls(): string[]
-  /** Reset the captured `shell.openExternal` URL list. */
   resetShellOpenExternalCalls(): void
-  /** Register a synthetic running session against `installationId`
-   *  without spawning a real ComfyUI process. Main's REQUIRES_STOPPED
-   *  guard sees the install as running; renderer `sessionStore.isRunning`
-   *  flips true via the `instance-started` broadcast. */
+  /** Register a synthetic running session without spawning a real ComfyUI process. */
   seedRunningSession(opts: { installationId: string; installationName: string }): void
-  /** Drop every synthetic session registered via `seedRunningSession`. */
   clearRunningSessions(): void
-  /** Snapshot the live `_runningSessions` entry for `installationId`
-   *  (real or seeded). Returns `null` when no session is registered.
-   *  Used by the restart cluster to assert a stop→launch chain produced
-   *  a fresh registration (new `startedAt`, new pid). */
+  /** Snapshot the live `_runningSessions` entry (real or seeded), or `null` if none. */
   getRunningSessionSnapshot(installationId: string): RunningSessionSnapshot | null
-  /** Read the `checkedAt` ms timestamp from the shared release cache
-   *  entry for `(repo, channel)`. Returns `null` when no entry exists
-   *  yet. Used by the periodic-poll lifecycle test to observe that the
-   *  background timer ran a real second fetch. */
+  /** `checkedAt` ms from the shared release cache entry, or `null` if absent. */
   getReleaseCacheCheckedAt(repo: string, channel: string): number | null
-  /** Force every entry in the shared release cache to the given
-   *  `checkedAt` timestamp so the renderer-side stale-cache watcher
-   *  in `ComfyUISettingsContent` treats the data as stale and auto-
-   *  fires `check-update` on the next picker open. */
+  /** Force every release-cache entry to `maxCheckedAt` so the renderer's stale-cache watcher
+   *  treats the data as stale. */
   ageReleaseCache(maxCheckedAt: number): void
-  /** Mount the install-backed panelView for `installationId` if it
-   *  doesn't already exist. The chooser-pick attach in `onLaunch`
-   *  drops the chooser PanelApp without remounting a fresh
-   *  install-backed one (production lazily mounts on Settings click /
-   *  comfy-lifecycle body). Tests that need `panel.html` reachable
-   *  immediately after a launch call this to skip the lazy step.
-   *  Returns `true` if the entry exists, `false` otherwise. */
+  /** Mount the install-backed panelView for `installationId` (production mounts it lazily),
+   *  so tests can reach `panel.html` immediately after a launch. Returns whether the entry exists. */
   ensureInstallPanelView(installationId: string): boolean
 }
 

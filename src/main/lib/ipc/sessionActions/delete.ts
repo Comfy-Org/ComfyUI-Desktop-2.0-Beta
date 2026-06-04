@@ -9,9 +9,42 @@ import {
 import type { ActionContext, ActionResult } from './types'
 import { withAbortableSessionAction } from './withAbortable'
 
+// Wipe the launcher-owned parts of an adopted install (.venv + marker) at
+// adoptedBaseDir, leaving the user's data. Best-effort: a locked venv must not
+// block the primary wrapper deletion.
+async function cleanupAdoptedLegacyDir(
+  adoptedBaseDir: string,
+  sendProgress: (phase: string, detail: Record<string, unknown>) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (!fs.existsSync(adoptedBaseDir)) return
+  const venvDir = path.join(adoptedBaseDir, '.venv')
+  if (fs.existsSync(venvDir)) {
+    try {
+      sendProgress('delete', { percent: 0, status: 'Removing legacy venv…' })
+      await deleteDir(venvDir, (p) => {
+        sendProgress('delete', { percent: p.percent, status: formatDeleteStatus(p, 'Removing legacy venv…') })
+      }, { signal })
+    } catch (err) {
+      console.warn('Failed to remove legacy venv at', venvDir, err)
+    }
+  }
+  const adoptMarker = path.join(adoptedBaseDir, MARKER_FILE)
+  if (fs.existsSync(adoptMarker)) {
+    try { await fs.promises.unlink(adoptMarker) } catch {}
+  }
+}
+
 export async function handleDelete(ctx: ActionContext): Promise<ActionResult> {
   const { event, installationId, inst } = ctx
+  const adopted = inst.adopted === true
+  const adoptedBaseDir = adopted ? (inst.adoptedBaseDir as string | undefined) : undefined
   if (!fs.existsSync(inst.installPath)) {
+    // Wrapper already gone; still clean the legacy venv so re-adopt starts fresh.
+    if (adopted && adoptedBaseDir) {
+      const noopProgress = (): void => {}
+      await cleanupAdoptedLegacyDir(adoptedBaseDir, noopProgress)
+    }
     await installations.remove(installationId)
     return { ok: true, navigate: 'list' }
   }
@@ -19,7 +52,7 @@ export async function handleDelete(ctx: ActionContext): Promise<ActionResult> {
   let markerContent: string | null
   try { markerContent = fs.readFileSync(markerPath, 'utf-8').trim() } catch { markerContent = null }
   if (!markerContent) {
-    return { ok: false, message: 'Safety check failed: this directory was not created by ComfyUI Desktop 2.0. Use Forget to remove it from the list, then delete the files manually.' }
+    return { ok: false, message: 'Safety check failed: this directory was not created by Comfy Desktop. Use Forget to remove it from the list, then delete the files manually.' }
   }
   if (markerContent !== inst.id && markerContent !== 'tracked') {
     return { ok: false, message: 'Safety check failed: the marker file does not match this installation. Use Forget instead.' }
@@ -33,11 +66,12 @@ export async function handleDelete(ctx: ActionContext): Promise<ActionResult> {
       await deleteDir(inst.installPath, (p) => {
         sendProgress('delete', { percent: p.percent, status: formatDeleteStatus(p) })
       }, { signal })
+      if (adopted && adoptedBaseDir) {
+        await cleanupAdoptedLegacyDir(adoptedBaseDir, sendProgress, signal)
+      }
     } catch (err) {
-      // Restore the safety marker so a retry still passes the marker check;
-      // mark the install as partially deleted so the dashboard surfaces it.
-      // The error is re-thrown so the wrapper maps it (cancelled → cancelled,
-      // EBUSY/EPERM → the lock-friendly message below).
+      // Restore the marker (so retry passes the check) and flag partial-delete;
+      // re-throw so the wrapper maps the error.
       try {
         fs.mkdirSync(inst.installPath, { recursive: true })
         fs.writeFileSync(markerPath, markerContent)

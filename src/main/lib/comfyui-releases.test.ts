@@ -76,7 +76,6 @@ describe('fetchLatestRelease', () => {
       mockedLsRemoteRef.mockResolvedValue('abc123def456abc123def456abc123def456abc123')
       mockedLsRemoteLatestTag.mockResolvedValue('v0.18.3')
       await fetchLatestRelease('latest')
-      // Verify only git-based functions were called
       expect(mockedLsRemoteRef).toHaveBeenCalled()
       expect(mockedLsRemoteLatestTag).toHaveBeenCalled()
     })
@@ -167,19 +166,13 @@ describe('fetchLatestRelease', () => {
     })
 
     it('a null tag uses the short failure TTL, not the long success TTL', async () => {
-      // A null result (e.g. no git backend configured) used to be cached
-      // for SUCCESS_TTL_MS = 10 min, indistinguishable from a confirmed
-      // empty repo. The post-install update step then read that poisoned
-      // null on every subsequent call within 10 minutes and falsely showed
-      // "Already up to date", stranding new installs on the bundled
-      // ComfyUI version. Pin behavior: a null result must expire on the
-      // failure cadence so the next caller refetches.
+      // A null result must expire on the failure cadence; caching it for the
+      // 10-min success TTL stranded new installs on the bundled version.
       vi.useFakeTimers()
       try {
         mockedLsRemoteLatestTag.mockResolvedValueOnce(undefined).mockResolvedValueOnce('v1.19.5')
         const a = await getLatestStableTag()
-        // Advance past the failure TTL (30 s) but well within the success
-        // TTL (10 min) so we can tell the two apart.
+        // Past the 30s failure TTL but within the 10-min success TTL.
         vi.setSystemTime(Date.now() + 60_000)
         const b = await getLatestStableTag()
         expect(a).toBeNull()

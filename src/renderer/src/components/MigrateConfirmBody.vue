@@ -14,7 +14,7 @@ export interface MigrateCheckbox {
 }
 
 defineProps<{
-  preview: SnapshotDetailData
+  preview: SnapshotDetailData | null
   details: MigrateDetailGroup[]
   checkboxes: MigrateCheckbox[]
 }>()
@@ -31,7 +31,7 @@ function onCheckboxToggle(id: string, event: Event): void {
 
 <template>
   <div class="mig-body">
-    <div class="mig-summary">
+    <div v-if="preview" class="mig-summary">
       <div class="mig-summary__row">
         <span class="mig-summary__label">{{ $t('snapshots.comfyuiVersion') }}</span>
         <span class="mig-summary__value">{{ preview.comfyuiVersion }}</span>

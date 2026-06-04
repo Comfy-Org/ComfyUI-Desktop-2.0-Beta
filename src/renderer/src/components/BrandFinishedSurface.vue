@@ -1,21 +1,7 @@
 <script setup lang="ts">
-/**
- * Crash/error takeover surface for the lifecycle view.
- *
- * Renders the same chrome ProgressModal uses for a finished-error
- * operation — glyph background, wordmark, red X banner, optional
- * crash-detail message with inline Copy, optional logs accordion, and
- * a centered equal-width action pair (Back / Restart) under the
- * message. Used by ComfyLifecycleView to keep the host window alive
- * after ComfyUI exits unexpectedly so the user has somewhere to view
- * logs, return to the dashboard, or restart.
- *
- * Class names mirror ProgressModal's `brand-progress__*` subtree
- * intentionally — visual continuity matters because users can see
- * either surface for the same crash depending on whether they're
- * still looking at the in-flight ProgressModal or have reopened the
- * panel afterwards.
- */
+// Crash/error takeover surface for the lifecycle view. Class names mirror
+// ProgressModal's `brand-progress__*` subtree on purpose so the two surfaces
+// look identical for the same crash; keep them in sync.
 import { ref, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { X, ChevronDown } from 'lucide-vue-next'
@@ -26,19 +12,12 @@ import BaseAccordion from './ui/BaseAccordion.vue'
 import BaseCopyButton from './ui/BaseCopyButton.vue'
 
 interface Props {
-  /** Banner headline. Short — a single line. */
   title: string
-  /** Optional secondary message under the banner (e.g. crash detail
-   *  with exit code). Plain text, selectable, with an inline Copy
-   *  button for the share-to-Discord / paste-into-issue-thread flow. */
   message?: string
-  /** Optional log/stderr block. When set, renders a collapsible
-   *  accordion above the footer with a Copy button for the full text. */
+  /** When set, renders a collapsible logs accordion above the footer. */
   logs?: string
-  /** Override for the "View logs" label / accordion title. Defaults to
-   *  `launch.viewLogs` so it matches the ProgressModal disclosure. */
+  /** Override for the "View logs" label; defaults to `launch.viewLogs`. */
   logsLabel?: string
-  /** Forwarded to BrandTakeoverLayout for screen readers. */
   ariaLabel?: string
 }
 
@@ -51,17 +30,14 @@ const props = withDefaults(defineProps<Props>(), {
 
 const { t } = useI18n()
 const logsExpanded = ref(false)
-// Per-instance unique id so multiple surfaces mounted simultaneously
-// don't collide on `aria-controls`.
+// Per-instance id so simultaneous surfaces don't collide on aria-controls.
 const logsId = useId()
 
 function toggleLogs(): void {
   logsExpanded.value = !logsExpanded.value
 }
 
-// Closure so the BaseCopyButton resolves the full logs string at click
-// time — matches the ProgressModal pattern where the terminal buffer
-// can grow between mount and click.
+// Resolves logs at click time since the terminal buffer can grow after mount.
 function getLogText(): string {
   return props.logs ?? ''
 }
@@ -88,10 +64,8 @@ function getLogText(): string {
             class="brand-progress__error-copy"
           />
         </div>
-        <!-- Actions live in the hero stack (under the message) instead
-             of the footer bar, matching ProgressModal's error finished
-             state: the CTAs sit with the failure context the user is
-             reading instead of being stranded bottom-left. -->
+        <!-- Actions live in the hero stack (under the message), matching
+             ProgressModal, so the CTAs stay with the failure context. -->
         <div v-if="$slots.actions" class="brand-progress__error-actions">
           <slot name="actions" />
         </div>
@@ -140,9 +114,7 @@ function getLogText(): string {
 </template>
 
 <style scoped>
-/* Mirrors ProgressModal's brand-progress error-state subtree.
- * Keep the class names and rules in sync — that's what makes the two
- * surfaces visually indistinguishable for the same crash. */
+/* Mirrors ProgressModal's brand-progress error-state subtree; keep in sync. */
 .brand-progress {
   position: relative;
   align-self: stretch;
@@ -252,10 +224,7 @@ function getLogText(): string {
   white-space: pre-wrap;
 }
 
-/* CTAs — centered in the hero stack under the error message.
- * Back (ghost) sits left, primary (Restart) right; both flex to equal
- * width within a bounded row. Mirrors ProgressModal's
- * `.brand-progress__error-actions` rule — keep the two in sync. */
+/* Mirrors ProgressModal's `.brand-progress__error-actions`; keep in sync. */
 .brand-progress__error-actions {
   display: flex;
   flex-direction: row;
@@ -269,13 +238,9 @@ function getLogText(): string {
   justify-content: center;
 }
 
-/* Footer — only the logs accordion + its toggle live here when logs
- * are present. The action row is in the hero stack above.
- * `top` is anchored so the block can never grow taller than the gap
- * between the takeover's top padding and its bottom inset — on a short
- * window the logs panel shrinks (see its flexible max-height below)
- * instead of overflowing off the top edge and clipping the toggle.
- * Mirrors ProgressModal's `.brand-progress__footer` — keep in sync. */
+/* `top` is anchored so the block can't grow taller than the available gap;
+ * the logs panel shrinks instead of clipping the toggle on short windows.
+ * Mirrors ProgressModal's `.brand-progress__footer`; keep in sync. */
 .brand-progress__footer {
   position: absolute;
   top: clamp(72px, 14vh, 160px);
@@ -290,8 +255,7 @@ function getLogText(): string {
   min-height: 0;
   pointer-events: none;
 }
-/* Re-enable interaction on the actual content — the container is only a
- * geometric bound, so it stays click-through where it's empty. */
+/* Container is a click-through geometric bound; re-enable on content. */
 .brand-progress__footer > * {
   pointer-events: auto;
 }
@@ -302,11 +266,8 @@ function getLogText(): string {
   gap: 12px;
   flex-wrap: wrap;
 }
-/* `:slotted()` mirrors the plain selector so the gap/padding rules
- * reach the consumer's Back / Restart buttons too — Vue 3 scoped
- * styles don't cross slot boundaries by default, and without
- * `:slotted()` the icons crash into the labels in the slotted
- * buttons. Keep the two selector groups in sync. */
+/* `:slotted()` mirrors the plain selector so these rules reach slotted
+ * Back/Restart buttons (scoped styles don't cross slot boundaries). */
 .brand-progress__footer-btn,
 :slotted(.brand-progress__footer-btn) {
   min-width: auto;
@@ -330,7 +291,6 @@ function getLogText(): string {
   }
 }
 
-/* View Logs toggle */
 .brand-progress__logs-toggle {
   gap: 6px;
   border-radius: 6px;
@@ -347,11 +307,8 @@ function getLogText(): string {
 .brand-progress__logs-chevron.is-open {
   transform: rotate(0deg);
 }
-/* Log panel that opens above the footer bar. `min-height: 0` lets the
- * accordion shrink within the bounded footer so short windows scroll the
- * log body (capped via the panel's own `max-height`) instead of pushing
- * the footer bar off-screen. Display stays `grid` (set by BaseAccordion)
- * so the 0fr→1fr open/close animation is untouched. */
+/* `min-height: 0` lets the accordion shrink within the bounded footer so
+ * short windows scroll the log body instead of pushing the footer off-screen. */
 .brand-progress__logs-wrap {
   border-radius: 10px;
   overflow: hidden;
@@ -379,10 +336,7 @@ function getLogText(): string {
 }
 .brand-progress__logs {
   width: 100%;
-  /* `max-height` (not a fixed `height`) so the panel shrinks on short
-   * windows instead of forcing the footer past the viewport. `25vh`
-   * tracks window height; the 88px floor keeps a couple of readable
-   * lines even on a very short window, and 260px caps it on tall ones. */
+  /* max-height (not height) so the panel shrinks on short windows. */
   max-height: clamp(88px, 25vh, 260px);
   min-height: 0;
   overflow-y: auto;

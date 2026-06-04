@@ -3,8 +3,6 @@ import type { Cache } from '../lib/cache'
 import type { DownloadProgress } from '../lib/download'
 import type { ExtractProgress } from '../lib/extract'
 
-// --- Field types ---
-
 export interface SourceField {
   id: string
   label: string
@@ -23,8 +21,6 @@ export interface FieldOption {
   data?: Record<string, unknown>
 }
 
-// --- Launch command ---
-
 export interface LaunchCommand {
   cmd?: string
   args?: string[]
@@ -39,12 +35,9 @@ export interface LaunchCommand {
   /** When true, skip port conflict detection and port readiness waiting.
    *  The session is registered immediately after spawning. */
   skipPortWait?: boolean
-  /** When true, skip injecting shared model/input/output path args.
-   *  Used for external apps that don't accept ComfyUI CLI flags. */
+  /** Skip injecting shared model/input/output args (external apps without ComfyUI flags). */
   skipSharedPaths?: boolean
 }
-
-// --- Install / action tools ---
 
 export interface InstallTools {
   sendProgress: (step: string, data: { percent: number; status: string }) => void
@@ -67,8 +60,6 @@ export interface PostInstallTools {
   signal?: AbortSignal
 }
 
-// --- Action / detail section types ---
-
 export interface ActionResult {
   ok: boolean
   navigate?: string
@@ -78,11 +69,8 @@ export interface ActionResult {
 export interface StatusTag {
   label: string
   style: string
-  /** Raw version string the tag refers to (e.g. an `update`-style tag's
-   *  target release). Surfaces beyond the chooser tile (notably the
-   *  Comfy Instance title-bar install-update pill) want to show a
-   *  bare "Update v1.2.3" label without re-parsing the localised
-   *  `label`, so source plugins now expose the version separately. */
+  /** Raw version the tag refers to, so surfaces like the title-bar update pill can
+   *  show "Update v1.2.3" without re-parsing the localised `label`. */
   version?: string
 }
 
@@ -90,8 +78,6 @@ export interface InstallStep {
   phase: string
   label: string
 }
-
-// --- Source plugin interface ---
 
 export interface SourcePlugin {
   id: string
@@ -127,5 +113,15 @@ export interface SourcePlugin {
     selections: Record<string, FieldOption | undefined>,
     context: Record<string, unknown>
   ): Promise<FieldOption[]>
-  fixupCopy?(srcPath: string, destPath: string): Promise<void>
+  /**
+   * Source-specific post-processing after `performCopy` copies the wrapper tree to
+   * `destPath`: rewrite venv path metadata (pyvenv.cfg, shebangs) and pull in files
+   * outside `inst.installPath` (e.g. an adopted install's legacy venv under `adoptedBaseDir`).
+   */
+  fixupCopy?(
+    inst: InstallationRecord,
+    destPath: string,
+    sendProgress: (phase: string, detail: Record<string, unknown>) => void,
+    signal?: AbortSignal,
+  ): Promise<void>
 }

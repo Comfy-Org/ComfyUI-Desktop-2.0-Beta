@@ -2,39 +2,15 @@ import { computed, ref, watch, type Ref } from 'vue'
 import type { ComfyArgDef } from '../types/ipc'
 import { parseArgs } from '../lib/argsParser'
 
-/**
- * Inline-autocomplete state for the ComfyUI Startup Arguments raw input.
- * Pure logic — no DOM access — so it can be unit-tested without mounting
- * the page. Ports the affordance from the legacy `ArgsBuilder.vue`
- * (`searchQuery`, `autocompleteMatches`, `completeArg`, the keydown
- * keymap) and exposes it as a small reactive API the page wires into a
- * popover next to its text input.
- *
- * Behavior pinned by tests:
- *   - Partial token at the end of `rawValue` (with or without leading
- *     dashes) becomes `searchQuery`.
- *   - Suppressed when the previous token is a `value`-type flag still
- *     awaiting its value — otherwise typing `--port 81` would surface
- *     unrelated flags starting with "81".
- *   - Bare `--` opens the full list of flags not already present.
- *   - `completeArg(name)` replaces the trailing partial with `--name `.
- *   - `acIndex` resets to 0 and `acDismissed` clears whenever matches
- *     change (so Esc only dismisses the *current* set, not future ones).
- */
+/** Inline-autocomplete state for the ComfyUI Startup Arguments raw input.
+ *  Pure logic — no DOM access — so it can be unit-tested. */
 
 interface UseArgsAutocompleteOptions {
-  /** Current value of the raw args text input — typically `localValue`
-   *  in the page. */
   value: Ref<string>
-  /** Loaded arg schema. Empty array is fine — produces no matches. */
   schema: Ref<ComfyArgDef[]>
-  /** True when the raw input is focused. Caller wires this through
-   *  `focus` / `blur` listeners; we gate visibility on it because a
-   *  blurred autocomplete reads as a stale ghost panel. */
+  /** True when the raw input is focused; gates visibility so a blurred
+   *  autocomplete doesn't linger as a stale ghost panel. */
   focused: Ref<boolean>
-  /** Emits the replacement string when the user accepts a suggestion.
-   *  Caller writes it back to `localValue` and propagates to the
-   *  parent (`update` emit). */
   onAccept: (next: string) => void
 }
 
@@ -44,30 +20,23 @@ export function useArgsAutocomplete(opts: UseArgsAutocompleteOptions) {
   const { value, schema, focused, onAccept } = opts
 
   const acIndex = ref(0)
-  // Set true on Esc so the popover stays closed until the matches set
-  // *changes* (next keystroke). Mirrors the legacy modal.
+  // Set true on Esc so the popover stays closed until the matches change.
   const acDismissed = ref(false)
 
   const parsed = computed(() => parseArgs(value.value, schema.value))
 
-  /**
-   * Extracts the partial token the user is currently typing. Returns:
-   *   - '' when not focused / empty / unparseable as a partial
-   *   - '--' for bare `-` or `--` (caller treats this as "show all")
-   *   - the lowercased flag-name fragment otherwise
-   */
+  /** Partial token being typed: '' when none, '--' for bare dashes
+   *  (caller shows all), else the lowercased flag-name fragment. */
   const searchQuery = computed<string>(() => {
     if (!focused.value) return ''
     const val = value.value
     if (!val) return ''
-    // If the user just typed a space, there's no partial — bail.
     if (val.trimEnd() !== val) return ''
     const allTokens = val.split(/\s+/)
     const lastToken = allTokens.pop() ?? ''
     if (!lastToken) return ''
-    // Suppress while filling a required value: previous token is a
-    // `--flag` of `value` type (not `boolean`/`optional-value`) without
-    // an inline `=value`.
+    // Suppress while filling a `value`-type flag's required value, so
+    // `--port 81` doesn't surface flags starting with "81".
     if (!lastToken.startsWith('-') && allTokens.length > 0) {
       const prev = allTokens[allTokens.length - 1]!
       if (prev.startsWith('--') && !prev.includes('=')) {
@@ -81,16 +50,14 @@ export function useArgsAutocomplete(opts: UseArgsAutocompleteOptions) {
     const eqIdx = stripped.indexOf('=')
     const name = eqIdx >= 0 ? stripped.slice(0, eqIdx) : stripped
     if (!name) return ''
-    // Only suppress for exact matches that already have the -- prefix;
-    // bare words like 'port' should still trigger autocomplete so the
-    // user gets the dashes added for them.
+    // Only suppress exact matches that already have the `--` prefix; bare
+    // words like 'port' still autocomplete so the dashes get added.
     if (lastToken.startsWith('-') && schema.value.some((a) => a.name === name)) return ''
     return name.toLowerCase()
   })
 
-  /** Up to 8 schema flags whose name contains the query, excluding any
-   *  already present in `value`. With `searchQuery === '--'` (bare
-   *  dashes) the substring filter is dropped so the full list shows. */
+  /** Up to 8 flags whose name contains the query, excluding those already
+   *  in `value`. `'--'` drops the substring filter to show the full list. */
   const matches = computed<ComfyArgDef[]>(() => {
     const q = searchQuery.value
     if (!q || !schema.value.length) return []
@@ -103,9 +70,7 @@ export function useArgsAutocomplete(opts: UseArgsAutocompleteOptions) {
 
   const visible = computed<boolean>(() => matches.value.length > 0 && !acDismissed.value && focused.value)
 
-  // Reset highlight + dismissal on every matches change. Done with a
-  // shallow watch on the array identity so it fires on insert/remove
-  // but skips no-op recomputes.
+  // Reset highlight + dismissal on every matches change.
   watch(matches, () => {
     acIndex.value = 0
     acDismissed.value = false
@@ -117,12 +82,8 @@ export function useArgsAutocomplete(opts: UseArgsAutocompleteOptions) {
     onAccept(next)
   }
 
-  /**
-   * Keyboard handler — return value indicates whether we consumed the
-   * event so the caller can decide whether to call `preventDefault`.
-   * The legacy modal called `preventDefault` inside the handler; we
-   * keep it pure so the composable stays DOM-free.
-   */
+  /** Return value tells the caller whether to `preventDefault` (kept
+   *  pure so the composable stays DOM-free). */
   function handleKeydown(key: string): 'consumed' | 'pass' {
     if (!visible.value) return 'pass'
     const total = matches.value.length
@@ -147,17 +108,11 @@ export function useArgsAutocomplete(opts: UseArgsAutocompleteOptions) {
   }
 
   return {
-    /** Lowercased partial currently being typed (or '--' for full list). */
     searchQuery,
-    /** Schema flags to surface in the popover (≤8). */
     matches,
-    /** True when the popover should render. */
     visible,
-    /** Highlighted index — mutable so mouse hover can update it. */
     acIndex,
-    /** Replace trailing partial with `--<name> ` and notify caller. */
     completeArg,
-    /** Run a key code through the keymap. */
     handleKeydown,
   }
 }

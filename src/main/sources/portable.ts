@@ -2,7 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import { app } from 'electron'
 import { fetchJSON } from '../lib/fetch'
-import { deleteAction, untrackAction, launchAction, openFolderAction, migrateToStandaloneAction } from '../lib/actions'
+import { deleteAction, untrackAction, launchAction, openFolderAction, migrateToStandaloneAction, renameAction } from '../lib/actions'
 import { downloadAndExtract } from '../lib/installer'
 import { runLoggedProcess, formatProcessError } from '../lib/logged-process'
 import * as releaseCache from '../lib/release-cache'
@@ -11,7 +11,7 @@ import { t } from '../lib/i18n'
 import { fetchLatestRelease, truncateNotes } from '../lib/comfyui-releases'
 import { buildChannelCards, buildChannelLabelMap } from '../lib/channel-cards'
 import type { ChannelDef } from '../lib/channel-cards'
-import { buildLaunchSettingsFields, buildSharedPathsField } from './common/launchSettingsFields'
+import { buildLaunchSettingsFields, buildStorageFields } from './common/launchSettingsFields'
 import type { InstallationRecord } from '../installations'
 import type {
   SourcePlugin,
@@ -139,10 +139,8 @@ export const portable: SourcePlugin = {
       },
     ]
 
-    // Updates section
     const channel = (installation.updateChannel as string | undefined) || 'stable'
 
-    // Build per-channel preview info and actions for cards
     const channelDefs: ChannelDef[] = [
       { value: 'stable', label: t('portable.channelStable'), description: t('portable.channelStableDesc'), recommended: true },
       { value: 'latest', label: t('portable.channelLatest'), description: t('portable.channelLatestDesc') },
@@ -209,13 +207,14 @@ export const portable: SourcePlugin = {
       },
       {
         tab: 'storage',
-        fields: [buildSharedPathsField(installation)],
+        fields: buildStorageFields(installation),
       },
       {
         title: 'Actions',
         pinBottom: true,
         actions: [
           launchAction(installed, !installed ? t('errors.installNotReady') : undefined),
+          renameAction(installation.name),
           openFolderAction(installation.installPath),
           migrateToStandaloneAction(installed),
           untrackAction(),

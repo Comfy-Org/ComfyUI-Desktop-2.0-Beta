@@ -1,14 +1,15 @@
 {
   "name": "comfyui-desktop-2",
-  "version": "0.6.13",
-  "description": "ComfyUI Desktop 2.0",
+  "version": "1.0.4",
+  "description": "Comfy Desktop",
   "author": {
-    "name": "Jedrzej Kosinski",
-    "email": "kosinkadink@users.noreply.github.com"
+    "name": "Comfy Org",
+    "email": "support@comfy.org",
+    "url": "https://www.comfy.org"
   },
-  "repository": "github:Comfy-Org/ComfyUI-Desktop-2.0-Beta",
+  "repository": "github:Comfy-Org/Comfy-Desktop",
   "license": "MIT",
-  "homepage": "https://github.com/Comfy-Org/ComfyUI-Desktop-2.0-Beta",
+  "homepage": "https://github.com/Comfy-Org/Comfy-Desktop",
   "engines": {
     "node": ">=22",
     "pnpm": ">=10"

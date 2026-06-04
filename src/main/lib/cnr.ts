@@ -4,6 +4,7 @@ import os from 'os'
 import { fetchJSON } from './fetch'
 import { download } from './download'
 import { extract } from './extract'
+import * as telemetry from './telemetry'
 
 interface CnrInstallInfo {
   downloadUrl: string
@@ -58,35 +59,68 @@ export async function installCnrNode(
   customNodesDir: string,
   sendOutput: (text: string) => void,
 ): Promise<string[]> {
-  if (!isSafePathComponent(nodeId)) {
-    throw new Error(`Invalid node ID: ${nodeId}`)
-  }
-
-  const info = await getCnrInstallInfo(nodeId, version)
-  if (!info) {
-    throw new Error(`Failed to get install info for ${nodeId}@${version}`)
-  }
-
-  const installPath = path.join(customNodesDir, nodeId)
-  const tmpZip = path.join(os.tmpdir(), `cnr-${nodeId}-${version}-${Date.now()}.zip`)
-
+  const startedAt = Date.now()
+  // Resolved version is unknown until the registry call returns; fall
+  // back to the caller-requested string for failure paths so the event
+  // still names a version.
+  let resolvedVersion = version
+  // Capture telemetry around the entire install — including pre-flight
+  // validation and the registry lookup — so failures that happen before
+  // the tmp-zip allocation still fire `node.installed` with the right
+  // bucket. The actual zip download / extraction still wraps its own
+  // try/finally below for tmpZip cleanup.
   try {
-    sendOutput(`Downloading ${nodeId}@${info.version}...\n`)
-    await download(info.downloadUrl, tmpZip, null)
+    if (!isSafePathComponent(nodeId)) {
+      throw new Error(`Invalid node ID: ${nodeId}`)
+    }
 
-    sendOutput(`Extracting ${nodeId}@${info.version}...\n`)
-    await fs.promises.mkdir(installPath, { recursive: true })
-    await extract(tmpZip, installPath)
+    const info = await getCnrInstallInfo(nodeId, version)
+    if (!info) {
+      throw new Error(`Failed to get install info for ${nodeId}@${version}`)
+    }
+    resolvedVersion = info.version
 
-    const files = walkDir(installPath)
-    await fs.promises.writeFile(path.join(installPath, TRACKING_FILE), files.join('\n') + '\n')
+    const installPath = path.join(customNodesDir, nodeId)
+    const tmpZip = path.join(os.tmpdir(), `cnr-${nodeId}-${version}-${Date.now()}.zip`)
 
-    sendOutput(`Installed ${nodeId}@${info.version}\n`)
-    return files
-  } finally {
     try {
-      await fs.promises.unlink(tmpZip)
-    } catch {}
+      sendOutput(`Downloading ${nodeId}@${info.version}...\n`)
+      await download(info.downloadUrl, tmpZip, null)
+
+      sendOutput(`Extracting ${nodeId}@${info.version}...\n`)
+      await fs.promises.mkdir(installPath, { recursive: true })
+      await extract(tmpZip, installPath)
+
+      const files = walkDir(installPath)
+      await fs.promises.writeFile(path.join(installPath, TRACKING_FILE), files.join('\n') + '\n')
+
+      sendOutput(`Installed ${nodeId}@${info.version}\n`)
+      telemetry.capture('comfy.desktop.node.installed', {
+        node_id: nodeId,
+        version: info.version,
+        action: 'install',
+        result: 'success',
+        duration_ms: Date.now() - startedAt,
+        file_count: files.length
+      })
+      return files
+    } finally {
+      try {
+        await fs.promises.unlink(tmpZip)
+      } catch {}
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    telemetry.capture('comfy.desktop.node.installed', {
+      node_id: nodeId,
+      version: resolvedVersion,
+      action: 'install',
+      result: 'failure',
+      duration_ms: Date.now() - startedAt,
+      error_bucket: telemetry.bucketError(message),
+      error_message: message.slice(0, 500)
+    })
+    throw err
   }
 }
 
@@ -96,77 +130,101 @@ export async function switchCnrVersion(
   nodePath: string,
   sendOutput: (text: string) => void,
 ): Promise<string[]> {
-  const info = await getCnrInstallInfo(nodeId, newVersion)
-  if (!info) {
-    throw new Error(`Failed to get install info for ${nodeId}@${newVersion}`)
-  }
-
-  const trackingPath = path.join(nodePath, TRACKING_FILE)
-  const oldFiles = new Set<string>()
+  const startedAt = Date.now()
+  let resolvedVersion = newVersion
   try {
-    const content = await fs.promises.readFile(trackingPath, 'utf-8')
-    for (const line of content.split('\n')) {
-      const trimmed = line.trim()
-      if (trimmed) oldFiles.add(trimmed)
+    const info = await getCnrInstallInfo(nodeId, newVersion)
+    if (!info) {
+      throw new Error(`Failed to get install info for ${nodeId}@${newVersion}`)
     }
-  } catch {}
+    resolvedVersion = info.version
 
-  const stamp = Date.now()
-  const tmpZip = path.join(os.tmpdir(), `cnr-${nodeId}-${newVersion}-${stamp}.zip`)
-  const tmpExtract = path.join(os.tmpdir(), `cnr-${nodeId}-${newVersion}-${stamp}`)
+    const trackingPath = path.join(nodePath, TRACKING_FILE)
+    const oldFiles = new Set<string>()
+    try {
+      const content = await fs.promises.readFile(trackingPath, 'utf-8')
+      for (const line of content.split('\n')) {
+        const trimmed = line.trim()
+        if (trimmed) oldFiles.add(trimmed)
+      }
+    } catch {}
 
-  try {
-    sendOutput(`Downloading ${nodeId}@${info.version}...\n`)
-    await download(info.downloadUrl, tmpZip, null)
+    const stamp = Date.now()
+    const tmpZip = path.join(os.tmpdir(), `cnr-${nodeId}-${newVersion}-${stamp}.zip`)
+    const tmpExtract = path.join(os.tmpdir(), `cnr-${nodeId}-${newVersion}-${stamp}`)
 
-    // Extract to a temp directory first so we can get the true new file list
-    // before merging into nodePath (walkDir after in-place extraction would
-    // return the union of old+new files, making garbage detection impossible)
-    sendOutput(`Extracting ${nodeId}@${info.version}...\n`)
-    await fs.promises.mkdir(tmpExtract, { recursive: true })
-    await extract(tmpZip, tmpExtract)
+    try {
+      sendOutput(`Downloading ${nodeId}@${info.version}...\n`)
+      await download(info.downloadUrl, tmpZip, null)
 
-    const newFiles = walkDir(tmpExtract)
-    const newFileSet = new Set(newFiles)
+      // Extract to a temp dir first to get the true new file list; in-place
+      // extraction would union old+new files and break garbage detection.
+      sendOutput(`Extracting ${nodeId}@${info.version}...\n`)
+      await fs.promises.mkdir(tmpExtract, { recursive: true })
+      await extract(tmpZip, tmpExtract)
 
-    // Copy extracted files into nodePath (overwriting existing)
-    await fs.promises.mkdir(nodePath, { recursive: true })
-    await fs.promises.cp(tmpExtract, nodePath, { recursive: true, force: true })
+      const newFiles = walkDir(tmpExtract)
+      const newFileSet = new Set(newFiles)
 
-    const garbageFiles: string[] = []
-    const garbageDirs = new Set<string>()
-    for (const oldFile of oldFiles) {
-      if (!newFileSet.has(oldFile)) {
-        garbageFiles.push(oldFile)
-        let dir = oldFile
-        while (true) {
-          const parent = dir.substring(0, dir.lastIndexOf('/'))
-          if (!parent) break
-          garbageDirs.add(parent)
-          dir = parent
+      // Copy extracted files into nodePath (overwriting existing)
+      await fs.promises.mkdir(nodePath, { recursive: true })
+      await fs.promises.cp(tmpExtract, nodePath, { recursive: true, force: true })
+
+      const garbageFiles: string[] = []
+      const garbageDirs = new Set<string>()
+      for (const oldFile of oldFiles) {
+        if (!newFileSet.has(oldFile)) {
+          garbageFiles.push(oldFile)
+          let dir = oldFile
+          while (true) {
+            const parent = dir.substring(0, dir.lastIndexOf('/'))
+            if (!parent) break
+            garbageDirs.add(parent)
+            dir = parent
+          }
         }
       }
+
+      for (const file of garbageFiles) {
+        try {
+          await fs.promises.unlink(path.join(nodePath, file.split('/').join(path.sep)))
+        } catch {}
+      }
+
+      const sortedDirs = [...garbageDirs].sort((a, b) => b.length - a.length)
+      for (const dir of sortedDirs) {
+        try {
+          await fs.promises.rmdir(path.join(nodePath, dir.split('/').join(path.sep)))
+        } catch {}
+      }
+
+      await fs.promises.writeFile(path.join(nodePath, TRACKING_FILE), newFiles.join('\n') + '\n')
+
+      sendOutput(`Switched ${nodeId} to ${info.version}\n`)
+      telemetry.capture('comfy.desktop.node.installed', {
+        node_id: nodeId,
+        version: info.version,
+        action: 'switch',
+        result: 'success',
+        duration_ms: Date.now() - startedAt,
+        file_count: newFiles.length
+      })
+      return newFiles
+    } finally {
+      try { await fs.promises.unlink(tmpZip) } catch {}
+      try { await fs.promises.rm(tmpExtract, { recursive: true, force: true }) } catch {}
     }
-
-    for (const file of garbageFiles) {
-      try {
-        await fs.promises.unlink(path.join(nodePath, file.split('/').join(path.sep)))
-      } catch {}
-    }
-
-    const sortedDirs = [...garbageDirs].sort((a, b) => b.length - a.length)
-    for (const dir of sortedDirs) {
-      try {
-        await fs.promises.rmdir(path.join(nodePath, dir.split('/').join(path.sep)))
-      } catch {}
-    }
-
-    await fs.promises.writeFile(path.join(nodePath, TRACKING_FILE), newFiles.join('\n') + '\n')
-
-    sendOutput(`Switched ${nodeId} to ${info.version}\n`)
-    return newFiles
-  } finally {
-    try { await fs.promises.unlink(tmpZip) } catch {}
-    try { await fs.promises.rm(tmpExtract, { recursive: true, force: true }) } catch {}
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    telemetry.capture('comfy.desktop.node.installed', {
+      node_id: nodeId,
+      version: resolvedVersion,
+      action: 'switch',
+      result: 'failure',
+      duration_ms: Date.now() - startedAt,
+      error_bucket: telemetry.bucketError(message),
+      error_message: message.slice(0, 500)
+    })
+    throw err
   }
 }

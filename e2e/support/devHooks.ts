@@ -1,10 +1,6 @@
 /**
- * Test-side wrappers around the main-process `globalThis.__e2e`
- * helpers registered by `src/main/lib/e2eHooks.ts`. Each helper
- * dispatches via Playwright's `app.evaluate(...)` bridge so tests
- * never hand-roll the bridge boilerplate.
- *
- * The shape mirrors what `e2eHooks.ts` exposes — keep them in sync.
+ * Test-side wrappers around the main-process `globalThis.__e2e` helpers.
+ * Must stay in sync with what `src/main/lib/e2eHooks.ts` exposes.
  */
 
 import type { ElectronApplication } from 'playwright'
@@ -104,9 +100,7 @@ export async function returnFirstInstallHostToDashboard(
   }))
 }
 
-/** Recorded arguments for an instrumented IPC channel since the last
- *  reset. Lets tests assert that a fast-path code path skipped a
- *  costly handler invocation. */
+/** Recorded args for an instrumented IPC channel since the last reset. */
 export async function getIpcInvocations(
   app: ElectronApplication,
   channel: string,
@@ -129,9 +123,7 @@ export async function resetIpcInvocations(
   }, channel))
 }
 
-/** URLs captured by the launcher's `shell.openExternal` wrapper while
- *  E2E mode is active. Used by the cloud-zip test to assert a download
- *  was captured locally instead of bouncing out to the OS browser. */
+/** URLs captured by the launcher's `shell.openExternal` wrapper in E2E mode. */
 export async function getShellOpenExternalCalls(
   app: ElectronApplication,
 ): Promise<string[]> {
@@ -150,9 +142,8 @@ export async function resetShellOpenExternalCalls(app: ElectronApplication): Pro
   }))
 }
 
-/** Register a synthetic running session against `installationId` so the
- *  REQUIRES_STOPPED guard fires (main side) and `sessionStore.isRunning`
- *  flips true (renderer side) without spawning a real ComfyUI process. */
+/** Register a synthetic running session so the REQUIRES_STOPPED guard and
+ *  `sessionStore.isRunning` fire without spawning a real ComfyUI process. */
 export async function seedRunningSession(
   app: ElectronApplication,
   opts: { installationId: string; installationName: string },
@@ -166,12 +157,9 @@ export async function seedRunningSession(
   }, opts))
 }
 
-/** Mount the install-backed panelView for `installationId` if it
- *  doesn't already exist. The chooser-pick attach in main `onLaunch`
- *  drops the chooser PanelApp without remounting a fresh install-backed
- *  one (production lazily mounts on Settings click / comfy-lifecycle
- *  body). Tests that need `panel.html` reachable immediately after a
- *  launch call this to skip the lazy step. */
+/** Mount the install-backed panelView eagerly. Production lazily mounts it
+ *  (on Settings click / comfy-lifecycle body); tests that need `panel.html`
+ *  reachable right after launch call this to skip the lazy step. */
 export async function ensureInstallPanelView(
   app: ElectronApplication,
   installationId: string,
@@ -185,9 +173,8 @@ export async function ensureInstallPanelView(
   }, installationId))
 }
 
-/** Force every release-cache entry's `checkedAt` to `maxCheckedAt`
- *  (ms-since-epoch). Used to drive the renderer's stale-data
- *  auto-refresh watcher without waiting wall-clock minutes. */
+/** Force every release-cache entry's `checkedAt` to `maxCheckedAt` (ms) to
+ *  drive the stale-data auto-refresh watcher without waiting wall-clock. */
 export async function ageReleaseCache(
   app: ElectronApplication,
   maxCheckedAt: number,

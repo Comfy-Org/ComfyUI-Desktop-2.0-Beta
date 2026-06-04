@@ -18,7 +18,7 @@ const emit = defineEmits<{
   'update:modelValue': [value: string]
 }>()
 
-// Local value for immediate UI feedback (parent updates async via IPC)
+// Local value for immediate UI feedback (parent updates async via IPC).
 const localValue = ref(props.modelValue)
 watch(() => props.modelValue, (v) => { if (!inputFocused.value) localValue.value = v })
 
@@ -30,8 +30,7 @@ const loading = ref(false)
 const loadError = ref<string | null>(null)
 const fetched = ref(false)
 
-// --- Fetch schema eagerly (autocomplete + validation work without opening panel) ---
-
+// Fetch schema eagerly so autocomplete + validation work without opening the panel.
 let fetchGeneration = 0
 
 async function fetchSchema(): Promise<void> {
@@ -64,7 +63,7 @@ async function fetchSchema(): Promise<void> {
 
 onMounted(fetchSchema)
 
-// Flush any unsaved text input when the component is about to unmount (e.g. tab switch)
+// Flush unsaved text input on unmount (e.g. tab switch).
 onBeforeUnmount(() => {
   if (localValue.value !== props.modelValue) {
     emit('update:modelValue', localValue.value)
@@ -80,8 +79,6 @@ watch(() => props.installationId, () => {
 function togglePanel(): void {
   expanded.value = !expanded.value
 }
-
-// --- Parsing ---
 
 interface ParsedArgs {
   known: Map<string, string>
@@ -120,7 +117,7 @@ function parseArgs(raw: string): ParsedArgs {
     const token = tokens[i]!
     if (token.startsWith('--')) {
       const raw = token.slice(2)
-      // Support --flag=value syntax
+      // Support --flag=value syntax.
       const eqIdx = raw.indexOf('=')
       const name = eqIdx >= 0 ? raw.slice(0, eqIdx) : raw
       const eqValue = eqIdx >= 0 ? raw.slice(eqIdx + 1) : undefined
@@ -130,11 +127,9 @@ function parseArgs(raw: string): ParsedArgs {
           known.set(name, eqValue ?? '')
           i++
         } else if (eqValue !== undefined) {
-          // --flag=value or --flag= (inline value, possibly empty)
           known.set(name, eqValue)
           i++
         } else {
-          // value or optional-value type
           const next = tokens[i + 1]
           if (next !== undefined && !next.startsWith('--')) {
             known.set(name, next)
@@ -145,7 +140,7 @@ function parseArgs(raw: string): ParsedArgs {
           }
         }
       } else {
-        // Unknown flag — keep in extra, preserving original format
+        // Unknown flag — keep in extra, preserving original format.
         extra.push(token)
         i++
         if (eqValue === undefined && i < tokens.length && !tokens[i]!.startsWith('--')) {
@@ -176,13 +171,11 @@ function serialize(known: Map<string, string>, extra: string[]): string {
 
 const parsed = computed(() => parseArgs(localValue.value))
 
-// --- Unsupported args detection ---
-
 const unsupportedFlags = computed(() => {
   if (!schema.value.length) return []
   const schemaNames = new Set(schema.value.map((a) => a.name))
   const tokens = tokenize(localValue.value)
-  // Exclude the trailing partial token (still being typed) from unsupported check
+  // Exclude the trailing partial token (still being typed).
   const partial = searchQuery.value
   const unsupported: string[] = []
   for (let i = 0; i < tokens.length; i++) {
@@ -191,9 +184,8 @@ const unsupportedFlags = computed(() => {
       const raw = token.slice(2)
       const eqIdx = raw.indexOf('=')
       const name = eqIdx >= 0 ? raw.slice(0, eqIdx) : raw
-      // Skip the last token if it matches the current partial search
+      // Skip the partial last token and bare '--'.
       if (partial && i === tokens.length - 1 && name.toLowerCase() === partial) continue
-      // Skip bare '--' (user is about to type a flag name)
       if (name === '') continue
       if (!schemaNames.has(name)) {
         unsupported.push(name)
@@ -203,19 +195,15 @@ const unsupportedFlags = computed(() => {
   return unsupported
 })
 
-// --- Search / filter ---
-
-/** Extract the partial being typed (last token — with or without leading dashes) */
+/** The partial being typed (last token, with or without leading dashes). */
 const searchQuery = computed(() => {
   if (!inputFocused.value) return ''
   const val = localValue.value
   if (!val) return ''
-  // Find the last token: split on whitespace, take last
   const allTokens = val.trimEnd() === val ? val.split(/\s+/) : []
   const lastToken = allTokens.pop() || ''
   if (!lastToken) return ''
-  // If previous token is a flag that expects a value, the user is filling
-  // in that value — suppress autocomplete so it doesn't interfere.
+  // Suppress autocomplete while filling in a value for a value-expecting flag.
   if (!lastToken.startsWith('-') && allTokens.length > 0) {
     const prev = allTokens[allTokens.length - 1]!
     if (prev.startsWith('--') && !prev.includes('=')) {
@@ -225,13 +213,12 @@ const searchQuery = computed(() => {
     }
   }
   if (lastToken === '-' || lastToken === '--') return '--' // bare - or -- triggers full list
-  // Strip leading dashes to get the name portion
   const stripped = lastToken.replace(/^-{1,2}/, '')
   const eqIdx = stripped.indexOf('=')
   const name = eqIdx >= 0 ? stripped.slice(0, eqIdx) : stripped
   if (!name) return ''
-  // Only suppress for exact matches that already have the -- prefix;
-  // bare words like 'port' should still trigger autocomplete to add the dashes.
+  // Only suppress exact matches that already have the -- prefix; bare words like
+  // 'port' should still autocomplete to add the dashes.
   if (lastToken.startsWith('-') && schema.value.some((a) => a.name === name)) return ''
   return name.toLowerCase()
 })
@@ -251,18 +238,14 @@ watch(autocompleteMatches, () => { acIndex.value = 0; acDismissed.value = false 
 
 const showAutocomplete = computed(() => autocompleteMatches.value.length > 0 && !acDismissed.value)
 
-// --- Active args (currently in the text) pinned to top ---
-
 const activeArgs = computed(() => {
   if (!schema.value.length || !parsed.value.known.size) return []
   return schema.value.filter((a) => parsed.value.known.has(a.name))
 })
 
-// --- Grouped args for the helper panel ---
-
 const groupedArgs = computed(() => {
   const raw = searchQuery.value
-  const q = raw === '--' ? '' : raw // bare -- doesn't filter the panel
+  const q = raw === '--' ? '' : raw // bare -- doesn't filter
   const groups = new Map<string, ComfyArgDef[]>()
   for (const arg of schema.value) {
     if (q && !arg.name.includes(q) && !arg._searchFlag.includes(q) && !arg._searchHelp.includes(q)) {
@@ -274,8 +257,6 @@ const groupedArgs = computed(() => {
   }
   return groups
 })
-
-// --- Structured items per group (exclusive radio clusters + individual args) ---
 
 type GroupItem =
   | { kind: 'arg'; arg: ComfyArgDef }
@@ -290,7 +271,7 @@ const structuredGroups = computed(() => {
       if (arg.exclusiveGroup) {
         if (seenExclusive.has(arg.exclusiveGroup)) continue
         seenExclusive.add(arg.exclusiveGroup)
-        // Always use full schema for siblings so search filtering doesn't break the group
+        // Use full schema for siblings so search filtering doesn't break the group.
         const siblings = schema.value.filter((a) => a.exclusiveGroup === arg.exclusiveGroup)
         if (siblings.length > 1) {
           items.push({ kind: 'exclusive', group: arg.exclusiveGroup, args: siblings })
@@ -306,8 +287,6 @@ const structuredGroups = computed(() => {
   return result
 })
 
-// --- Getters ---
-
 function isActive(name: string): boolean {
   return parsed.value.known.has(name)
 }
@@ -316,15 +295,13 @@ function getValue(name: string): string {
   return parsed.value.known.get(name) ?? ''
 }
 
-// --- Text input live update ---
-
 function onTextInput(value: string): void {
   localValue.value = value
 }
 
 function completeArg(name: string): void {
   const val = localValue.value
-  // Replace the partial token at the end (with or without dashes) with the full flag
+  // Replace the partial token at the end with the full flag.
   const replaced = val.replace(/-{0,2}[\w_-]*$/, `--${name} `)
   localValue.value = replaced
   emit('update:modelValue', replaced)
@@ -350,8 +327,6 @@ function onTextKeydown(event: KeyboardEvent): void {
   }
 }
 
-// --- Mutators ---
-
 function emitUpdate(known: Map<string, string>): void {
   const newValue = serialize(known, parsed.value.extra)
   localValue.value = newValue
@@ -363,7 +338,7 @@ function toggleBoolean(name: string, def: ComfyArgDef): void {
   if (next.has(name)) {
     next.delete(name)
   } else {
-    // Enforce exclusive group: remove siblings
+    // Enforce exclusive group: remove siblings.
     if (def.exclusiveGroup) {
       for (const a of schema.value) {
         if (a.exclusiveGroup === def.exclusiveGroup && a.name !== name) {
@@ -416,8 +391,6 @@ function setOptionalValueText(name: string, value: string): void {
   emitUpdate(next)
 }
 
-// --- Highlighted text display with validation ---
-
 type TokenStatus = 'ok' | 'unsupported' | 'missing-value' | 'awaiting-value' | 'partial'
 
 interface TextToken {
@@ -442,7 +415,6 @@ const textTokens = computed<TextToken[]>(() => {
       const name = eqIdx >= 0 ? raw.slice(0, eqIdx) : raw
       const eqValue = eqIdx >= 0 ? raw.slice(eqIdx + 1) : undefined
       const isLastToken = i === tokens.length - 1
-      // Partial flag being typed (last token)
       if (name === '' || (partial && isLastToken && name.toLowerCase() === partial)) {
         result.push({ text: token, status: 'partial' })
         i++
@@ -450,7 +422,6 @@ const textTokens = computed<TextToken[]>(() => {
       }
       const def = schemaMap.get(name)
       if (!def) {
-        // Unsupported flag
         result.push({ text: token, status: 'unsupported', tooltip: 'Unrecognized argument — will not be passed when launching' })
         i++
         if (i < tokens.length && !tokens[i]!.startsWith('--')) {
@@ -458,7 +429,6 @@ const textTokens = computed<TextToken[]>(() => {
           i++
         }
       } else if (eqValue !== undefined) {
-        // --flag=value or --flag= (inline value)
         if (eqValue === '' && def.type === 'value') {
           result.push({ text: token, status: 'missing-value', tooltip: `Requires a value: ${def.metavar || 'VALUE'}` })
         } else {
@@ -466,14 +436,12 @@ const textTokens = computed<TextToken[]>(() => {
         }
         i++
       } else if (def.type === 'value') {
-        // Required value — check if next token is present and not a flag
         const next = tokens[i + 1]
         if (next !== undefined && !next.startsWith('--')) {
           result.push({ text: token, status: 'ok' })
           result.push({ text: next, status: 'ok' })
           i += 2
         } else if (isLastToken && inputFocused.value) {
-          // User is still in position to type the value — show as info hint
           result.push({ text: token, status: 'awaiting-value', tooltip: `Next: provide ${def.metavar || 'VALUE'}` })
           i++
         } else {
@@ -501,21 +469,21 @@ const textTokens = computed<TextToken[]>(() => {
   return result
 })
 
-/** Args with missing required values (user has moved on) */
+/** Flags with missing required values. */
 const missingValueFlags = computed(() => {
   return textTokens.value
     .filter((t) => t.status === 'missing-value')
     .map((t) => t.text)
 })
 
-/** Bare positional tokens not consumed by any flag */
+/** Bare positional tokens not consumed by any flag. */
 const orphanedTokens = computed(() => {
   return textTokens.value
     .filter((t) => t.status === 'unsupported' && !t.text.startsWith('--'))
     .map((t) => t.text)
 })
 
-/** Arg awaiting a value (user is still in position to type it) */
+/** Arg whose value the user is still in position to type. */
 const awaitingValue = computed(() => {
   const t = textTokens.value.find((t) => t.status === 'awaiting-value')
   return t ? t : null
@@ -524,7 +492,6 @@ const awaitingValue = computed(() => {
 const hasValidationIssues = computed(() => unsupportedFlags.value.length > 0 || missingValueFlags.value.length > 0 || orphanedTokens.value.length > 0)
 const hasAnyIndicators = computed(() => hasValidationIssues.value || awaitingValue.value !== null)
 
-// --- Collapsed groups ---
 const collapsedGroups = ref(new Set<string>())
 
 function toggleGroup(group: string): void {

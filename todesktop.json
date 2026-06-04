@@ -8,13 +8,13 @@
     "!out/**/*.map",
     "!bootstrap-python/**"
   ],
-  "appId": "org.comfy.comfyui-desktop-2",
+  "appId": "com.todesktop.241012ess7yxs0e",
   "icon": "./assets/Comfy_Logo_x512.png",
   "packageManager": "pnpm",
   "pnpmVersion": "10.28.1",
   "packageJson": {
     "extends": "package.json",
-    "productName": "ComfyUI Desktop 2.0",
+    "productName": "Comfy Desktop",
     "devDependencies": {
       "electron": "40.4.1",
       "electron-builder": null
@@ -31,14 +31,25 @@
   ],
   "windows": {
     "icon": "./assets/Comfy_Logo_x256.png",
-    "nsisInclude": "./scripts/installer.nsh",
-    "installerHeader": "./resources/installerHeader.bmp",
-    "installerSidebar": "./resources/installerSidebar.bmp",
-    "uninstallerSidebar": "./resources/uninstallerSidebar.bmp"
+    "nsisInclude": "./scripts/installer.nsh"
   },
   "mac": {
     "icon": "./assets/Comfy_Logo_mac_x1024.png",
     "category": "public.app-category.graphics-design"
+  },
+  "dmg": {
+    "title": "Comfy Desktop",
+    "background": "./resources/dmg/background.tiff",
+    "iconSize": 84,
+    "iconTextSize": 11,
+    "window": {
+      "width": 540,
+      "height": 400
+    },
+    "contents": [
+      { "x": 135, "y": 195 },
+      { "x": 405, "y": 195 }
+    ]
   },
   "linux": {
     "icon": "./assets/Comfy_Logo_x512.png",

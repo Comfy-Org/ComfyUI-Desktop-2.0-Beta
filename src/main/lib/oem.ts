@@ -17,7 +17,9 @@ interface ResolvedOemManifest {
   workflowDirs: string[]
 }
 
-const OEM_DIR_NAME = 'ComfyUI Desktop 2.0'
+// TODO(rename): this %ProgramData% dir name is keyed to the product name; renaming strands
+// OEM partner images keyed to the old path. Add a fallback read from the old path before GA.
+const OEM_DIR_NAME = 'Comfy Desktop'
 const OEM_WORKFLOW_IMPORT_VERSION = 1
 const sourceMap = Object.fromEntries(sources.map((source) => [source.id, source]))
 

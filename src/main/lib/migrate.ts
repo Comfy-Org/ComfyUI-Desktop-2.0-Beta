@@ -53,9 +53,7 @@ export function findComfyUIDir(installPath: string): string | null {
         }
       }
     }
-  } catch {
-    // ignore
-  }
+  } catch {}
   return null
 }
 

@@ -25,9 +25,7 @@ beforeEach(() => {
       getPath: () => userDataPath,
     },
   }))
-  // dataDir() falls through to userData on non-Linux. Force win32 so the
-  // XDG branches in src/main/lib/paths.ts don't kick in even on a Linux
-  // CI runner.
+  // Force win32 so the XDG branches in paths.ts don't kick in on a Linux runner.
   vi.stubGlobal('process', {
     ...process,
     platform: 'win32',
@@ -93,8 +91,8 @@ describe('installations.markLaunched', () => {
     const entry = await installations.add({
       name: 'No Category',
       installPath: path.join(tmpRoot, 'no-cat'),
-      // 'mystery' isn't recognised by resolveCategory, so the resolver
-      // returns undefined and only the global timestamp should be stamped.
+      // Unrecognised source → resolver returns undefined → only the global
+      // timestamp is stamped.
       sourceId: 'mystery',
       status: 'installed',
     })
@@ -167,16 +165,11 @@ describe('installations.markLaunched', () => {
 })
 
 describe('installations.add (id uniqueness)', () => {
-  // Regression — `inst-${Date.now()}` collided whenever two `add()` calls
-  // landed in the same millisecond (CI / fast hardware), aliasing distinct
-  // records under the same id and breaking everything keyed by id
-  // (`getRecent`, `update`, `markLaunched`, …). The fix uses a per-process
-  // counter when the wall clock hasn't ticked between calls.
+  // `inst-${Date.now()}` collided for same-millisecond `add()` calls, aliasing
+  // records under one id; the fix appends a per-process counter.
   it('produces a distinct id for each add(), even back-to-back inside the same millisecond', async () => {
     const installations = await loadInstallations()
-    // Pin Date.now to the same value across all 5 add() calls so we
-    // exercise the same-ms collision path deterministically rather than
-    // relying on a fast machine to repro it.
+    // Pin Date.now so all 5 add() calls hit the same-ms collision path.
     const fixed = 1_700_000_000_000
     vi.spyOn(Date, 'now').mockReturnValue(fixed)
     const records = []
@@ -236,6 +229,102 @@ describe('installations.getRecent', () => {
     const recent = await installations.getRecent()
     expect(recent!.id).toBe(b.id)
     expect(recent!.id).not.toBe(a.id)
+  })
+})
+
+describe('installations.load (useSharedPaths → useSharedModels/useSharedInputOutput migration)', () => {
+  function writeRawInstallations(records: Record<string, unknown>[]): string {
+    // On win32 `dataDir()` is the Electron userData path directly (no `data/`).
+    fs.mkdirSync(userDataPath, { recursive: true })
+    const file = path.join(userDataPath, 'installations.json')
+    fs.writeFileSync(file, JSON.stringify(records))
+    return file
+  }
+
+  it('translates legacy useSharedPaths: true → both new flags true', async () => {
+    writeRawInstallations([
+      {
+        id: 'legacy-on',
+        name: 'Legacy On',
+        installPath: path.join(tmpRoot, 'on'),
+        sourceId: 'standalone',
+        status: 'installed',
+        createdAt: new Date().toISOString(),
+        useSharedPaths: true,
+      },
+    ])
+    const installations = await loadInstallations()
+    const list = await installations.list()
+    const rec = list.find((r) => r.id === 'legacy-on')!
+    expect(rec.useSharedModels).toBe(true)
+    expect(rec.useSharedInputOutput).toBe(true)
+    expect(rec).not.toHaveProperty('useSharedPaths')
+  })
+
+  it('translates legacy useSharedPaths: false → useSharedModels: true, useSharedInputOutput: false', async () => {
+    // The migration forces `useSharedModels: true` regardless of the legacy
+    // value (isolating paths meant input/output, not the model library).
+    writeRawInstallations([
+      {
+        id: 'legacy-off',
+        name: 'Legacy Off',
+        installPath: path.join(tmpRoot, 'off'),
+        sourceId: 'standalone',
+        status: 'installed',
+        createdAt: new Date().toISOString(),
+        useSharedPaths: false,
+      },
+    ])
+    const installations = await loadInstallations()
+    const list = await installations.list()
+    const rec = list.find((r) => r.id === 'legacy-off')!
+    expect(rec.useSharedModels).toBe(true)
+    expect(rec.useSharedInputOutput).toBe(false)
+    expect(rec).not.toHaveProperty('useSharedPaths')
+  })
+
+  it('leaves records without useSharedPaths untouched (no implicit migration)', async () => {
+    // Records already on the new schema must round-trip without the
+    // migration adding fields that weren't there before.
+    writeRawInstallations([
+      {
+        id: 'modern',
+        name: 'Modern',
+        installPath: path.join(tmpRoot, 'modern'),
+        sourceId: 'standalone',
+        status: 'installed',
+        createdAt: new Date().toISOString(),
+        useSharedModels: false,
+      },
+    ])
+    const installations = await loadInstallations()
+    const list = await installations.list()
+    const rec = list.find((r) => r.id === 'modern')!
+    expect(rec.useSharedModels).toBe(false)
+    expect(rec.useSharedInputOutput).toBeUndefined()
+    expect(rec).not.toHaveProperty('useSharedPaths')
+  })
+
+  it('strips legacy useSharedPaths from disk on next write', async () => {
+    const file = writeRawInstallations([
+      {
+        id: 'legacy-strip',
+        name: 'Legacy Strip',
+        installPath: path.join(tmpRoot, 'strip'),
+        sourceId: 'standalone',
+        status: 'installed',
+        createdAt: new Date().toISOString(),
+        useSharedPaths: true,
+      },
+    ])
+    const installations = await loadInstallations()
+    // Update triggers a save, which re-serializes the migrated record.
+    await installations.update('legacy-strip', { name: 'Renamed' })
+    const raw = JSON.parse(fs.readFileSync(file, 'utf-8')) as Record<string, unknown>[]
+    const persisted = raw.find((r) => r['id'] === 'legacy-strip')!
+    expect(persisted).not.toHaveProperty('useSharedPaths')
+    expect(persisted['useSharedModels']).toBe(true)
+    expect(persisted['useSharedInputOutput']).toBe(true)
   })
 })
 
@@ -346,9 +435,8 @@ describe('installations.getRecentByCategory', () => {
 
   it('ignores installs in other categories even when their per-category map mentions ours', async () => {
     const installations = await loadInstallations()
-    // Pathological: a cloud install whose per-category map happens to include
-    // a `local` key (e.g. left over from a category change). The category
-    // resolver says it's a 'cloud' install, so it must be filtered out.
+    // A cloud install whose per-category map has a stray `local` key must still
+    // be filtered out, since the resolver says it's 'cloud'.
     await installations.add({
       name: 'Stray Cloud',
       installPath: path.join(tmpRoot, 'stray'),
@@ -394,5 +482,46 @@ describe('installations.getRecentByCategory', () => {
     // markLaunched(a) should bump A above B.
     await installations.markLaunched(a.id, resolveCategory)
     expect((await installations.getRecentByCategory('local', resolveCategory))!.id).toBe(a.id)
+  })
+})
+
+describe('installations.hasNameConflict', () => {
+  it('is false when no other install shares the name', async () => {
+    const installations = await loadInstallations()
+    const a = await installations.add({
+      name: 'Alpha',
+      installPath: path.join(tmpRoot, 'a'),
+      sourceId: 'standalone',
+      status: 'installed',
+    })
+    expect(await installations.hasNameConflict(a.id, 'Beta')).toBe(false)
+  })
+
+  it('is true when another install already uses the name', async () => {
+    const installations = await loadInstallations()
+    await installations.add({
+      name: 'Taken',
+      installPath: path.join(tmpRoot, 'a'),
+      sourceId: 'standalone',
+      status: 'installed',
+    })
+    const b = await installations.add({
+      name: 'Free',
+      installPath: path.join(tmpRoot, 'b'),
+      sourceId: 'standalone',
+      status: 'installed',
+    })
+    expect(await installations.hasNameConflict(b.id, 'Taken')).toBe(true)
+  })
+
+  it('ignores the install being renamed (renaming to its own name is not a conflict)', async () => {
+    const installations = await loadInstallations()
+    const a = await installations.add({
+      name: 'Self',
+      installPath: path.join(tmpRoot, 'a'),
+      sourceId: 'standalone',
+      status: 'installed',
+    })
+    expect(await installations.hasNameConflict(a.id, 'Self')).toBe(false)
   })
 })

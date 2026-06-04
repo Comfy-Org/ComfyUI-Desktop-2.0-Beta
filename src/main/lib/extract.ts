@@ -25,19 +25,16 @@ function killTree(child: ChildProcess | null): void {
 
 function get7zBin(): string {
   let binPath: string = path7za
-  // In packaged Electron apps, native binaries are in app.asar.unpacked
+  // Packaged apps keep native binaries in app.asar.unpacked.
   binPath = binPath.replace('app.asar', 'app.asar.unpacked')
-  // Ensure execute permission on non-Windows (package managers don't always preserve it)
+  // Package managers don't always preserve the exec bit on non-Windows.
   if (process.platform !== 'win32') {
     try { fs.chmodSync(binPath, 0o755) } catch {}
   }
   return binPath
 }
 
-/**
- * Extract an archive to a destination directory.
- * Uses 7zip-bin which supports .7z, .tar.gz, .tgz, .zip, and more.
- */
+// Extract an archive (7z/tar.gz/tgz/zip/...) to a destination directory.
 export function extract(
   archivePath: string,
   destDir: string,
@@ -97,9 +94,8 @@ export function extract(
       cleanup()
       if (cancelled) { reject(new Error('Extraction cancelled')); return }
       if (code !== 0) {
-        // "Unsupported Method" errors are non-fatal — they only affect files
-        // compressed with filters the bundled 7zip doesn't support (e.g. ARM64
-        // BCJ). If every ERROR line is "Unsupported Method", treat as success.
+        // "Unsupported Method" only affects files using filters the bundled
+        // 7zip lacks (e.g. ARM64 BCJ); if every ERROR is that, treat as success.
         const errorLines = stderr.split(/\r?\n/).filter((l) => l.startsWith('ERROR:'))
         const allUnsupported = errorLines.length > 0 &&
           errorLines.every((l) => l.includes('Unsupported Method'))
@@ -108,7 +104,7 @@ export function extract(
           return
         }
       }
-      // 7zip doesn't always output 100% — emit it on successful completion
+      // 7zip doesn't always emit 100%; emit it on success.
       if (onProgress) {
         const elapsedSecs = (Date.now() - startTime) / 1000
         onProgress({ percent: 100, elapsedSecs, etaSecs: 0 })
@@ -118,9 +114,7 @@ export function extract(
   })
 }
 
-/**
- * Extract a .tar using native tar command (preserves symlinks).
- */
+// Extract a .tar with native tar (preserves symlinks).
 function extractTarNative(
   archivePath: string,
   destDir: string,
@@ -156,12 +150,8 @@ function extractTarNative(
   })
 }
 
-/**
- * Extract an archive, automatically handling nested .tar inside .7z/.gz.
- * After the first extraction, if the result is a single .tar file,
- * extract it in-place and remove it.
- * On non-Windows, uses native tar for the inner .tar to preserve symlinks.
- */
+// Extract an archive, then if the result is a single nested .tar, extract that
+// in place and remove it (native tar on non-Windows to preserve symlinks).
 export async function extractNested(
   archivePath: string,
   destDir: string,
@@ -170,7 +160,6 @@ export async function extractNested(
 ): Promise<void> {
   await extract(archivePath, destDir, onProgress, options)
 
-  // Check if extraction produced a single .tar that needs a second pass
   try {
     const entries = fs.readdirSync(destDir).filter((e) => !e.startsWith('.'))
     if (entries.length === 1 && entries[0]!.endsWith('.tar')) {

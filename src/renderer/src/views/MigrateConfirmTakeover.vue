@@ -23,9 +23,7 @@ const preview = ref<SnapshotDetailData | null>(null)
 const details = ref<MigrateDetailGroup[]>([])
 const checkboxes = ref<MigrateCheckbox[]>([])
 const cancelBtnRef = ref<HTMLButtonElement | null>(null)
-/** Element that owned focus before the takeover opened. Captured at
- *  open() so commit() can restore focus to the original trigger
- *  regardless of close path (Confirm / Cancel / ESC). */
+/** Focus owner before open, restored on commit regardless of close path. */
 let returnFocusTo: HTMLElement | null = null
 
 let resolver: ((value: { confirmed: boolean; checkboxValues: Record<string, boolean> }) => void) | null = null
@@ -34,11 +32,7 @@ function onKeydown(e: KeyboardEvent): void {
   if (e.key === 'Escape' && isOpen.value) commit(false)
 }
 
-/** Wire/unwire the global ESC listener + focus capture/restore in
- *  lockstep with isOpen. The takeover instance is mounted for the life
- *  of the panel host, so we bind/unbind per open() instead of in
- *  onMounted/onUnmounted (where listeners would outlive the visible
- *  surface). */
+// Bind/unbind ESC + focus per open() rather than onMounted, since the instance outlives the visible surface.
 watch(isOpen, async (open) => {
   if (open) {
     document.addEventListener('keydown', onKeydown)
@@ -97,7 +91,7 @@ defineExpose({ open, update, commit })
     <div class="brand-hero migrate-takeover" role="dialog" aria-modal="true" :aria-label="title">
       <h1 class="brand-title">{{ title }}</h1>
       <div class="migrate-takeover__card">
-        <div v-if="loading || !preview" class="migrate-takeover__loading">
+        <div v-if="loading" class="migrate-takeover__loading">
           {{ $t('common.loading') }}
         </div>
         <MigrateConfirmBody
@@ -122,7 +116,7 @@ defineExpose({ open, update, commit })
           type="button"
           class="brand-primary"
           data-testid="migrate-takeover-confirm"
-          :disabled="loading || !preview"
+          :disabled="loading"
           @click="commit(true)"
         >
           {{ confirmLabel }}
