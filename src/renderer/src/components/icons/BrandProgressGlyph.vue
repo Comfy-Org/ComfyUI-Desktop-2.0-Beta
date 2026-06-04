@@ -1,13 +1,4 @@
-<script setup lang="ts">
-/**
- * Decorative outline glyph rendered behind the brand progress bar
- * during the first-use install screen. Intrinsically sized via its
- * viewBox; consumers set width/height on the host element.
- *
- * The glyph carries its own yellow gradient stops baked into the
- * SVG defs since they're brand-locked.
- */
-</script>
+<script setup lang="ts"></script>
 
 <template>
   <svg

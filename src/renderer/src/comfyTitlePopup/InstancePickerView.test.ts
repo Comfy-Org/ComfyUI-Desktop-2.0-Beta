@@ -61,8 +61,7 @@ interface MockSnapshot {
 
 interface BridgeState {
   picks: string[]
-  /** Each entry: `[installationId, opts]` — captures the second arg so
-   *  tests can assert the renderer-confirmed flag reaches the bridge. */
+  /** Captures opts so tests assert the renderer-confirmed flag reaches the bridge. */
   restarts: { id: string; opts?: { confirmed?: boolean } }[]
   newInstallCount: number
   selectedInstallSets: (string | null)[]
@@ -224,9 +223,7 @@ describe('comfyTitlePopup/InstancePickerView', () => {
       expect(bridge.selectedInstallSets.at(-1)).toBe('b')
     })
 
-    // Spec item 2 — "Xh ago" recency is replaced by a "Current" pill on
-    // the install whose host window opened the picker (NOT just the
-    // selected row). Other rows keep their recency labels.
+    // The "Current" pill replaces recency on the active-host install only.
     it('renders the Current pill on the active-host install and only there', async () => {
       const wrapper = await mountPicker({
         installs: [
@@ -245,9 +242,7 @@ describe('comfyTitlePopup/InstancePickerView', () => {
       expect(bravoRow.find('.picker-row-recency').exists()).toBe(true)
     })
 
-    // Spec item 6 — update-available paints the dot orange (overrides
-    // the green running dot when both apply, since update is the more
-    // actionable signal).
+    // Update-available paints the dot orange, overriding the green running dot.
     it('paints the row dot orange when update available, including when also running', async () => {
       const wrapper = await mountPicker({
         installs: [
@@ -263,8 +258,7 @@ describe('comfyTitlePopup/InstancePickerView', () => {
       })
       const rows = wrapper.findAll('.picker-row')
       const alphaRow = rows.find((c) => c.text().includes('Alpha'))!
-      // Orange takes precedence: orange present, green absent on the
-      // same row even though it's also running.
+      // Orange present, green absent even though the row is also running.
       expect(alphaRow.find('.picker-row-update-dot').exists()).toBe(true)
       expect(alphaRow.find('.picker-row-running-dot').exists()).toBe(false)
       const bravoRow = rows.find((c) => c.text().includes('Bravo'))!
@@ -273,10 +267,7 @@ describe('comfyTitlePopup/InstancePickerView', () => {
     })
   })
 
-  // Spec item 10 — Home icon in the chips row dispatches the existing
-  // `return-to-dashboard` menu-item activation through the popup
-  // bridge. Only surfaces on install-hosted pickers, not on the
-  // dashboard chooser's own picker.
+  // Home dispatches `return-to-dashboard`; only on install-hosted pickers.
   describe('home icon', () => {
     it('renders Home only when the picker is hosted by an install', async () => {
       const installHost = await mountPicker({
@@ -411,9 +402,6 @@ describe('comfyTitlePopup/InstancePickerView', () => {
     })
   })
 
-  // Settings pane's primary CTA is the only launch path now — used to
-  // live on the compact row. Cover the pick-vs-restart branch directly
-  // so the regression alarm fires if the dispatch logic drifts.
   describe('primary action dispatch', () => {
     it('dispatches pickInstall when the selected install is not running', async () => {
       const { default: ComfyUISettingsContent } = await import(
@@ -452,8 +440,7 @@ describe('comfyTitlePopup/InstancePickerView', () => {
       expect(dialogs.state.kind).toBe('confirm')
       expect(dialogs.state.confirm.title).toBe('Restart instance?')
       expect(bridge.restarts).toEqual([])
-      // Accept the confirm — bridge fires with `confirmed: true` so
-      // main knows to skip its own system-modal.
+      // Accept — bridge fires `confirmed: true` so main skips its system-modal.
       dialogs.confirmPrimary()
       await flushPromises()
       expect(bridge.restarts).toEqual([{ id: 'a', opts: { confirmed: true } }])
@@ -493,18 +480,14 @@ describe('comfyTitlePopup/InstancePickerView', () => {
       const settings = wrapper.findComponent(ComfyUISettingsContent)
       settings.vm.$emit('primary-action', true)
       await flushPromises()
-      // No confirm parked — restart fires straight through, still with
-      // `confirmed: true` so main keeps a single code path.
+      // No confirm parked — restart fires straight through with `confirmed: true`.
       const dialogs = useDialogs()
       expect(dialogs.state.open).toBe(false)
       expect(bridge.restarts).toEqual([{ id: 'r', opts: { confirmed: true } }])
     })
 
-    // Issue #749 — Cloud + local both open. The footer CTA for an install
-    // running in ANOTHER window must route through pickInstall (whose
-    // main-side focus-existing short-circuit raises that window), NOT
-    // restartInstall. The settings content emits restartInPlace=false for
-    // the running-elsewhere case; verify the picker maps that to pick.
+    // An install running in ANOTHER window must route through pickInstall (which
+    // focuses that window), not restartInstall.
     it('dispatches pickInstall (not restart) for an install running in another window', async () => {
       const { default: ComfyUISettingsContent } = await import(
         '../components/settings/ComfyUISettingsContent.vue'
@@ -514,16 +497,13 @@ describe('comfyTitlePopup/InstancePickerView', () => {
           makeInstall({ id: 'a', name: 'Alpha' }),
           makeInstall({ id: 'b', name: 'Bravo' }),
         ],
-        // Host window is attached to 'a'; the user selected 'b', which is
-        // running in its own separate window.
+        // Host is attached to 'a'; selected 'b' runs in its own window.
         activeInstallationId: 'a',
         selectedInstallationId: 'b',
         runningInstallationIds: ['b'],
       })
       const settings = wrapper.findComponent(ComfyUISettingsContent)
       expect(settings.exists()).toBe(true)
-      // The component decides restartInPlace=false (running elsewhere) and
-      // emits accordingly; assert the picker dispatches pickInstall.
       settings.vm.$emit('primary-action', false)
       await flushPromises()
       expect(bridge.picks).toEqual(['b'])
@@ -531,12 +511,9 @@ describe('comfyTitlePopup/InstancePickerView', () => {
     })
   })
 
-  // The popup's `sessionStore` is hydrated solely from the picker
-  // snapshot — its preload doesn't expose `onInstanceLaunching` /
-  // `onInstanceStarted`. The hydration watcher must fire on launching-
-  // only transitions or `useInstallCta` will keep the CTA on Start
-  // for the entire launching window when the running set hasn't yet
-  // changed (the exact bug #785 fixes).
+  // `sessionStore` is hydrated only from the snapshot (no `onInstanceLaunching`
+  // in the preload), so the watcher must fire on launching-only transitions or
+  // `useInstallCta` keeps the CTA on Start for the whole launching window.
   describe('session-store hydration from snapshot', () => {
     it('hydrates launching ids when only launchingInstallationIds changes', async () => {
       const { useSessionStore } = await import('../stores/sessionStore')
@@ -564,13 +541,9 @@ describe('comfyTitlePopup/InstancePickerView', () => {
       expect(sessionStore.isLaunching('a')).toBe(true)
     })
 
-    // Regression for #788: clicking through rows fast must not snap
-    // back to a previously-selected row when a stale snapshot (carrying
-    // an older `selectedInstallationId`) lands after the local click.
-    // The fix gates snapshot-driven selection updates on a strictly-
-    // increasing `pickerSelectionEpoch` — only `openInstancePickerForHost`
-    // bumps it. Plain live-data rebroadcasts share the same epoch as
-    // the open, so they cannot retarget the picker.
+    // Snapshot-driven selection updates are gated on a strictly-increasing
+    // `pickerSelectionEpoch` (only `openInstancePickerForHost` bumps it), so a
+    // stale same-epoch rebroadcast can't snap a fast local pick back.
     describe('selection epoch gating (#788)', () => {
       it('ignores a stale same-epoch snapshot that would override a local pick', async () => {
         const wrapper = await mountPicker({
@@ -591,13 +564,8 @@ describe('comfyTitlePopup/InstancePickerView', () => {
         expect(bridge.selectedInstallSets.at(-1)).toBe('b')
         const echoCountAfterClick = bridge.selectedInstallSets.length
 
-        // A late live-data snapshot lands carrying the old selection
-        // ('a') and the SAME epoch — represents either an in-flight
-        // broadcast that started before the user's click, or any other
-        // event-driven rebroadcast (installationEvents / session /
-        // download). The view must keep Bravo selected and must NOT
-        // re-echo 'a' back to main (which would otherwise make the
-        // snap-back persistent by overwriting main's pickerSelectedInstallationId).
+        // A late same-epoch snapshot carrying the old selection ('a') must not
+        // re-select 'a' or re-echo it back to main.
         await wrapper.setProps({
           snapshot: {
             installs: [
@@ -638,8 +606,8 @@ describe('comfyTitlePopup/InstancePickerView', () => {
         await bravoRow!.trigger('click')
         await flushPromises()
 
-        // Main retargets to Charlie via a fresh open (e.g. chooser-card
-        // "Manage…" deep-link). Epoch advances → renderer honours.
+        // Main retargets to Charlie via a fresh open; the epoch advances so the
+        // renderer honours it.
         await wrapper.setProps({
           snapshot: {
             installs: [

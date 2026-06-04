@@ -10,29 +10,16 @@ import { useI18n } from 'vue-i18n'
 import { scoreName } from '../utils/fuzzyMatch'
 import type { Installation } from '../types/ipc'
 
-/**
- * Category-filter key. `local` covers both standalone local installs
- * and Legacy Desktop installs (`sourceCategory === 'desktop'`) —
- * Legacy Desktop is the pre-2.0 install kind, conceptually the same
- * family as Local from the user's POV. There is no dedicated Desktop
- * chip so the filter row stays compact.
- */
+// `local` also covers Legacy Desktop installs (`sourceCategory === 'desktop'`),
+// which has no dedicated chip.
 export type FilterKey = 'all' | 'local' | 'cloud' | 'remote'
 
 export interface FilterChip {
   key: FilterKey
-  /** vue-i18n key — resolved by each consuming surface against its
-   *  own catalog. Both ChooserView and the title-bar instance picker
-   *  share the `chooser.*` keys (see `lib/i18nMessages.ts`). */
   labelKey: string
 }
 
-/**
- * Single-source filter chip set. Used by both the ChooserView's
- * (currently hidden) chip row and the title-bar instance picker's
- * chip row, so the two surfaces cannot drift. Order is the order
- * chips render left-to-right.
- */
+// Single-source chip set (render order) shared across surfaces.
 export const FILTER_CHIPS: readonly FilterChip[] = [
   { key: 'all', labelKey: 'chooser.filterAll' },
   { key: 'local', labelKey: 'chooser.filterLocal' },
@@ -41,9 +28,7 @@ export const FILTER_CHIPS: readonly FilterChip[] = [
 ]
 
 export interface UseInstallListOpts {
-  /** The source-of-truth install array. Pass the panel's
-   *  `installationStore.installations` from ChooserView, or the
-   *  snapshot pushed from main from the instance-picker popover. */
+  /** Source-of-truth install array (store list or pushed snapshot). */
   installations: Ref<Installation[]>
 }
 
@@ -61,31 +46,9 @@ export interface UseInstallListApi {
   lastLaunchedShortLabel: (inst: Installation) => string
 }
 
-/**
- * Shared install-list state for the chooser dashboard AND the title-bar
- * instance picker popover. Pure-data composable — no IPC, no Pinia, no
- * DOM. Takes the installation array as a reactive input so the caller
- * controls where the data comes from (Pinia store in the panel, IPC-
- * pushed snapshot in the popover).
- *
- * Owns:
- *   - `searchQuery` + fuzzy `matchesQuery` (shared `scoreName` ranking)
- *   - `activeFilter` (`'all' | 'local' | 'cloud' | 'remote'`) + the
- *     local-includes-desktop grouping rule
- *   - `cloudInstall` vs `nonCloudInstalls` split (Cloud is always
- *     rendered as its own surface, never mixed into the recents list)
- *   - `visibleInstalls` — non-cloud sorted by `lastLaunchedAt` desc
- *     (never-launched at the end), then category-filtered, then
- *     query-filtered
- *   - `showCloudCard` / `showEmptyHint` derived flags
- *   - `lastLaunchedLabel(inst)` formatted via a 1-minute-tick `now`
- *     ref so labels stay fresh while the surface is mounted
- *
- * The 60-second `now` tick is owned here so callers don't each have to
- * manage their own interval; mounting two consumers in parallel is
- * cheap (each owns its own interval, no shared module state) and keeps
- * the composable side-effect-free between mounts.
- */
+// Shared install-list state for the dashboard and the instance picker.
+// Pure-data (no IPC/Pinia/DOM); Cloud is always split out as its own surface.
+// Owns a 60s `now` tick so relative time labels stay fresh.
 export function useInstallList(opts: UseInstallListOpts): UseInstallListApi {
   const { t } = useI18n()
   const { installations } = opts

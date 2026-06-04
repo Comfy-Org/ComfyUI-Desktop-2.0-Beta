@@ -3,13 +3,9 @@ import { useSessionStore } from '../stores/sessionStore'
 import { useProgressStore } from '../stores/progressStore'
 import { useModal } from './useModal'
 
-/**
- * Guard for in-progress operations. Returns true if the action should
- * proceed, false if the user cancelled. The stop-running concern is
- * handled inside each action's own confirm/prompt copy (augmented with
- * `errors.willStopRunning` when relevant) and the apiCall wrapper that
- * stops ComfyUI before running the op — no separate stop-confirm modal.
- */
+// Guard for in-progress operations. Returns true to proceed, false if the
+// user cancelled. Stop-running is handled by each action's own copy + the
+// apiCall wrapper, not a separate stop-confirm modal.
 export function useActionGuard() {
   const { t } = useI18n()
   const sessionStore = useSessionStore()
@@ -31,10 +27,8 @@ export function useActionGuard() {
       })
       if (!confirmed) return false
       await window.api.cancelOperation(installationId)
-      // Wait for the cancelled op to clear instead of guessing how long
-      // teardown takes — mirrors `stopAndWaitForExit`. The deadline is
-      // generous because Windows taskkill / Restart Manager can be slow;
-      // the next action would race the cancel without it.
+      // Wait for the cancelled op to clear so the next action can't race it;
+      // generous deadline because Windows taskkill / Restart Manager is slow.
       const deadline = Date.now() + 10_000
       while (
         (progressStore.getProgressInfo(installationId) !== null || sessionStore.isStopping(installationId)) &&

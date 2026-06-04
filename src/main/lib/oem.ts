@@ -17,11 +17,8 @@ interface ResolvedOemManifest {
   workflowDirs: string[]
 }
 
-// TODO(rename): OEM provisioning dir under %ProgramData% is keyed to the
-// product name. If any OEM partner shipped images keyed to the prior
-// "ComfyUI Desktop 2.0" path, this rename strands their provisioning until
-// they re-image. Coordinate with the OEM rollout owner or add a fallback
-// read from the old path before this rename reaches GA.
+// TODO(rename): this %ProgramData% dir name is keyed to the product name; renaming strands
+// OEM partner images keyed to the old path. Add a fallback read from the old path before GA.
 const OEM_DIR_NAME = 'Comfy Desktop'
 const OEM_WORKFLOW_IMPORT_VERSION = 1
 const sourceMap = Object.fromEntries(sources.map((source) => [source.id, source]))

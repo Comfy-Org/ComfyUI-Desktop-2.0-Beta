@@ -18,11 +18,7 @@ function mountList(fields: DetailField[]) {
 }
 
 describe('SettingsSectionList', () => {
-  // Regression: the Chinese mirrors toggle's description was silently
-  // dropped along the new title-popup pipeline (issue #779). When main
-  // attaches a `description`, the renderer must surface it under the
-  // control. (The OFF/ON gating itself lives main-side in
-  // buildSettingsSections; the renderer just renders what it gets.)
+  // When main attaches a field `description`, the renderer must surface it under the control.
   describe('field descriptions', () => {
     it('renders the description below the control when one is attached', () => {
       const wrapper = mountList([

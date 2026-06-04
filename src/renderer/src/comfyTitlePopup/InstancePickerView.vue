@@ -22,14 +22,6 @@ import type {
   SnapshotListData
 } from '../types/ipc'
 
-/**
- * Instance-picker popover view — persistent master–detail split.
- *
- * Left pane: searchable instance list. Right pane: per-install settings.
- * Row click selects an install and updates the detail pane; Open/Restart
- * lives in the settings footer only.
- */
-
 interface PickerInstall {
   id: string
   name: string
@@ -48,8 +40,7 @@ interface PickerStorageDir {
   isDefault: boolean
 }
 
-/** Storage-tab slice main piggy-backs on the picker snapshot. Matches
- *  `PickerStorageSlice` in `src/main/popups/titlePopup.ts`. */
+/** Must stay in sync with `PickerStorageSlice` in `src/main/popups/titlePopup.ts`. */
 interface PickerStorageSlice {
   sharedDirectoriesFields: Record<string, unknown>[]
   modelsDirs: PickerStorageDir[]
@@ -73,19 +64,13 @@ interface PickerSnapshot {
   installs: PickerInstall[]
   activeInstallationId: string | null
   runningInstallationIds: string[]
-  /** Installs whose `instance-launching` has fired but `instance-started`
-   *  has not. Hydrated into `sessionStore.launchingInstances` because
-   *  the popup preload doesn't expose `onInstanceLaunching`. Drives
-   *  the **Start → Restart / Switch** CTA flip during the launching
-   *  window via `useInstallCta`. */
+  /** Installs launching but not yet started. Hydrated into
+   *  sessionStore because the popup preload has no onInstanceLaunching. */
   launchingInstallationIds: string[]
   selectedInstallationId: string | null
-  /** Monotonic counter bumped only when main intentionally retargets
-   *  the picker selection (open / "Manage…" deep-link). Snapshot
-   *  rebroadcasts from live-data events forward the current value
-   *  unchanged. The view only applies `selectedInstallationId` over a
-   *  local user pick when this advances, so a stale rebroadcast can't
-   *  snap the user back to a previously-selected row (issue #788). */
+  /** Bumped only when main intentionally retargets the selection. The view
+   *  applies selectedInstallationId over a local pick only when this advances,
+   *  so a stale rebroadcast can't snap the user back to a prior row. */
   pickerSelectionEpoch?: number
   selectedSettings: DetailSection[] | null
   selectedSnapshots: SnapshotListData | null
@@ -119,11 +104,8 @@ function hydrateSessionStoreFromSnapshot(): void {
       sessionStore.runningInstances.set(id, placeholder)
     }
   }
-  // The popup preload doesn't expose `onInstanceLaunching`, so the
-  // only path that brings launching state in is this snapshot.
-  // Without this hydration, `sessionStore.isLaunching(id)` would stay
-  // false during the launching window and `useInstallCta` would leave
-  // the CTA on Start (instead of flipping to Restart/Switch).
+  // The snapshot is the only path that brings launching state in (the
+  // popup preload has no onInstanceLaunching).
   const nextLaunching = new Set(props.snapshot.launchingInstallationIds ?? [])
   for (const id of Array.from(sessionStore.launchingInstances.keys())) {
     if (!nextLaunching.has(id)) sessionStore.launchingInstances.delete(id)
@@ -143,13 +125,7 @@ function ensurePanelLocaleMerged(): Promise<void> {
 
 interface PickerBridge {
   platform?: string
-  /** Dispatch a menu-item id through the existing
-   *  `comfy-titlepopup:item-activated` → `activateTitlePopupMenuItem`
-   *  path. The picker's dashboard button reuses this with `'new-window'`
-   *  so we don't add a parallel IPC for the same action. */
   activate?: (id: string) => void
-  /** Dismiss the popup (same as ESC / click-outside). Wired to the
-   *  top-right close button. */
   close?: () => void
   pickInstall: (installationId: string) => void
   openNewInstall: () => void
@@ -205,17 +181,10 @@ const {
   lastLaunchedShortLabel
 } = useInstallList({ installations: installationsRef })
 
-/** Rows for the picker list. Unlike the dashboard (which pins the Cloud
- *  card on top), the IPP folds cloud into the recency-sorted list so it
- *  sorts by its own `lastLaunchedAt` — a local that was opened more
- *  recently sits above it, so cloud no longer "sticks" on top.
- *
- *  Tie-break: when recency is equal (e.g. nothing launched yet), cloud
- *  takes priority and is ordered first. Note this is ordering only — the
- *  auto-*selected* default still favours a real install on a tie (see
- *  `resolvePickerSelectedInstallId` in main), so cloud can lead the list
- *  without being pre-selected for users who never open it.
- *  `showCloudCard` still gates cloud per the active filter / search query. */
+/** Folds cloud into the recency-sorted list (sorted by its own
+ *  lastLaunchedAt). On a recency tie cloud is ordered first, but the
+ *  auto-selected default still favours a real install (see
+ *  `resolvePickerSelectedInstallId` in main). */
 const pickerRows = computed<Installation[]>(() => {
   const rows = [...visibleInstalls.value]
   if (showCloudCard.value && cloudInstall.value) {
@@ -242,15 +211,9 @@ const visibleChips = computed(() => {
   })
 })
 
-/** The install the user most recently launched — the sensible default
- *  selection when the popup opens with no active or explicitly-selected
- *  install.
- *
- *  Tie-break mirrors main's `mostRecentlyLaunchedInstallId`: the always-
- *  seeded "Comfy Cloud" entry must not win the default just by sorting
- *  first. Cloud is the default only when genuinely launched most-recently
- *  (strictly higher `lastLaunchedAt`); on a tie a real install wins, so the
- *  default stays fair for users who never open cloud. */
+/** Default selection when the popup opens with no active/selected install.
+ *  Tie-break mirrors main's `mostRecentlyLaunchedInstallId`: on a tie a real
+ *  install wins so the always-seeded Cloud entry can't claim the default. */
 function mostRecentInstallId(installs: PickerInstall[]): string | null {
   let best: PickerInstall | undefined
   for (const inst of installs) {
@@ -275,31 +238,23 @@ function resolveInitialSelection(snapshot: PickerSnapshot): string | null {
   return mostRecentInstallId(snapshot.installs)
 }
 const selectedId = ref<string | null>(resolveInitialSelection(props.snapshot))
-// Epoch already consumed by the local `selectedId`. Tracks the largest
-// `pickerSelectionEpoch` we've applied; only a strictly-greater snapshot
-// epoch counts as a main-authoritative retarget. Initial mount counts
-// as "applied" — `resolveInitialSelection` above already honoured the
-// snapshot's seed.
+// Largest pickerSelectionEpoch applied so far; only a strictly-greater
+// snapshot epoch counts as a main-authoritative retarget.
 const appliedSelectionEpoch = ref<number>(props.snapshot.pickerSelectionEpoch ?? 0)
 
 watch(
   () => props.snapshot.pickerSelectionEpoch ?? 0,
   (nextEpoch) => {
     if (nextEpoch <= appliedSelectionEpoch.value) return
-    // Main intentionally retargeted (open / "Manage…" deep-link). Adopt
-    // its selection, even if the user had locally clicked something
-    // else in the meantime — a fresh open is a clear user intent that
-    // overrides any prior in-popup selection.
+    // Main intentionally retargeted; a fresh open overrides any local pick.
     appliedSelectionEpoch.value = nextEpoch
     selectedId.value = resolveInitialSelection(props.snapshot)
   }
 )
 
-// Cold-start fallback: if the snapshot first arrives with no installs
-// and a `null` selection, this watcher seeds `selectedId` once installs
-// land. Once a selection exists (whether from user click or initial
-// resolve), live install-list updates must not touch it — they'd
-// otherwise reintroduce the snap-back this fix guards against.
+// Cold-start fallback: seed selectedId once installs land if the snapshot
+// first arrived empty. Once a selection exists, live install-list updates
+// must not touch it (would reintroduce the snap-back).
 watch(
   () => props.snapshot.installs,
   (installs) => {
@@ -321,17 +276,13 @@ const selectedInstall = computed<Installation | null>(() => {
 })
 
 const runningSet = computed(() => new Set(props.snapshot.runningInstallationIds))
-// Optimistic local state — set synchronously on click so the progress view
-// appears instantly, before the IPC round-trip + snapshot broadcast lands.
-// Once the snapshot confirms the op (installOperationStatus has the entry),
-// that takes precedence and the local ref is cleared on the next tick.
+// Optimistic local state set on click so the progress view appears before
+// the IPC round-trip + snapshot lands; cleared once the snapshot confirms.
 const localOperationStatus = ref<Map<string, PickerOperationStatus>>(new Map())
 
 watch(
   () => props.snapshot.installOperationStatus,
   (snapshotOps) => {
-    // When the snapshot starts carrying an op we seeded locally, drop the
-    // local copy so the snapshot's live updates drive the view.
     for (const id of localOperationStatus.value.keys()) {
       if (snapshotOps?.[id]) {
         localOperationStatus.value.delete(id)
@@ -344,12 +295,9 @@ watch(
 const activeOperation = computed<PickerOperationStatus | null>(() => {
   const id = selectedId.value
   if (!id) return null
-  // Prefer the live snapshot; fall back to the optimistic local seed.
   return props.snapshot.installOperationStatus?.[id] ?? localOperationStatus.value.get(id) ?? null
 })
 
-// operatingSet also needs to include locally-seeded ops so the spinner dot
-// appears on the row immediately.
 const effectiveOperatingSet = computed(() => {
   const s = new Set(props.snapshot.operatingInstallationIds ?? [])
   for (const id of localOperationStatus.value.keys()) s.add(id)
@@ -364,9 +312,7 @@ function isRowCurrent(inst: Installation): boolean {
   return !!props.snapshot.activeInstallationId && inst.id === props.snapshot.activeInstallationId
 }
 
-/** Update available — mirrors the `showUpdateBadge` check in
- *  `ComfyUISettingsContent.vue` so the picker row dot and the Update
- *  tab badge share one source of truth. */
+/** Must mirror the `showUpdateBadge` check in `ComfyUISettingsContent.vue`. */
 function isRowUpdateAvailable(inst: Installation): boolean {
   const tagged = inst as Installation & { statusTag?: { style?: string }; status?: string }
   return tagged.statusTag?.style === 'update' || tagged.status === 'update-available'
@@ -384,15 +330,10 @@ function handleClose(): void {
   bridge?.close?.()
 }
 
-/** Picker hosted by an install (vs the chooser/dashboard itself).
- *  Drives whether the dashboard button is offered — pointless to
- *  surface on a picker already shown from the dashboard. */
 const isInstallHost = computed(() => !!props.snapshot.activeInstallationId)
 
-/** Open the dashboard. Routes through `new-window` (a fresh chooser
- *  host) rather than `return-to-dashboard` — the latter detaches the
- *  install, which STOPS the running instance. The user wants to view the
- *  dashboard without killing what's running, so we open it alongside. */
+/** Routes through `new-window` rather than `return-to-dashboard`: the latter
+ *  detaches the install, which stops the running instance. */
 function handleOpenDashboard(): void {
   bridge?.activate?.('new-window')
 }
@@ -404,11 +345,8 @@ watch(
   }
 )
 
-// Install-less host (chooser/dashboard): when the picker opens with
-// no explicit user pick and no host install, `resolveInitialSelection`
-// falls back to `installs[0]`. The reactive watcher above only fires
-// on *change*, so the initial fallback never reaches main. Persist
-// once on mount so main owns the selection from the first frame.
+// On an install-less host the initial fallback selection never reaches main
+// via the change-only watcher above, so persist it once on mount.
 if (
   selectedId.value &&
   !props.snapshot.selectedInstallationId &&
@@ -421,13 +359,9 @@ const initialExpandedTab = computed<PickerTab>(() =>
   resolvePickerTab(props.snapshot.initialTab, 'update')
 )
 
-// Both lifecycle id arrays must be watched — the popup's preload
-// has no `instance-launching` / `instance-started` IPC listeners, so
-// the snapshot is the sole source of truth for `sessionStore`. Watching
-// only `runningInstallationIds` would miss the launching-only
-// transitions this drawer relies on to flip the CTA from Start to
-// Restart/Switch mid-launch. NUL-joined so an id containing a comma
-// can't collide a unique boundary.
+// Both lifecycle id arrays must be watched: the snapshot is the sole source
+// of truth for sessionStore, and watching only runningInstallationIds would
+// miss launching-only transitions. NUL-joined to avoid comma collisions.
 watch(
   [
     () => props.snapshot.runningInstallationIds.join('\0'),
@@ -443,12 +377,8 @@ onMounted(() => {
 
 function handleSettingsShowProgress(opts: ShowProgressOpts): void {
   if (!opts.actionId) return
-  // `opts.actionData` originates as a Vue reactive proxy when the action
-  // came off a sections payload (e.g. ChannelPicker's per-channel
-  // `update-comfyui` / `copy-update` carrying `{ channel }`). Reactive
-  // proxies can't cross the contextBridge structured-clone boundary —
-  // `ipcRenderer.send` would throw synchronously, silently swallowing
-  // the show-progress hand-off. Deep-clone to a plain object first.
+  // opts.actionData may be a Vue reactive proxy, which can't cross the
+  // contextBridge structured-clone boundary; deep-clone to a plain object.
   const rawActionData = opts.actionData
     ? JSON.parse(JSON.stringify(opts.actionData)) as Record<string, unknown>
     : undefined
@@ -457,11 +387,9 @@ function handleSettingsShowProgress(opts: ShowProgressOpts): void {
     props.snapshot.activeInstallationId
   )
   if (routing === 'inline-picker') {
-    // Seed optimistic local state immediately so the progress view appears
-    // before the IPC round-trip + snapshot broadcast lands. For snapshot
-    // restore, seed the same first-tick status string that main emits
-    // (`Loading snapshot…`) so the inline status line doesn't briefly
-    // flash the "Working…" fallback.
+    // Seed optimistic local state so the progress view appears before the
+    // IPC round-trip lands. Seed main's first-tick status for snapshot
+    // restore so the line doesn't flash the "Working…" fallback.
     localOperationStatus.value.set(opts.installationId, {
       percent: -1,
       status: opts.actionId === 'snapshot-restore' ? 'Loading snapshot…' : '',
@@ -473,9 +401,7 @@ function handleSettingsShowProgress(opts: ShowProgressOpts): void {
       actionId: opts.actionId,
       actionData: rawActionData,
     })
-    // Select the target row so the right pane switches immediately.
     selectedId.value = opts.installationId
-    // Fire the actual op — main will start feeding the snapshot loop.
     bridge?.pickerStartBackgroundOp({
       installationId: opts.installationId,
       actionId: opts.actionId,
@@ -529,38 +455,21 @@ function handleSettingsNavigateList(): void {
   selectedId.value = null
 }
 
-/** Footer primary CTA dispatch. `restartInPlace` is true only when the
- *  selected install is running in THIS host window — then we stop +
- *  relaunch in place via `restartInstall`. Otherwise (not running, or
- *  running in another window — issue #749) we route to `pickInstall`,
- *  whose main-side focus-existing short-circuit raises the already-open
- *  window rather than restarting it. */
-// Capacity-protection switch (PostHog flag `desktop-cloud-capacity`).
-// When `disabled`, the primary action no-ops for a cloud install so the
-// user can't enter cloud during an outage. A visual "Heavy usage" /
-// "Temporarily unavailable" chip on the cloud row itself is a follow-up
-// (the row's a child component `InstanceRow.vue`).
+// Capacity-protection switch (PostHog flag `desktop-cloud-capacity`):
+// when disabled, the primary action no-ops for a cloud install.
 const cloudCapacity = useCloudCapacity()
 const dialogs = useDialogs()
-/** Tier-aware capacity status passed down to per-row chips so a paid
- *  user doesn't see "Temporarily unavailable" on a row they can still
- *  click through. Mirrors what `confirmEntry()` will do. */
 const ippCapacityStatus = computed(() => cloudCapacity.effectiveStatus())
 
 async function handleExpandedPrimaryAction(restartInPlace: boolean): Promise<void> {
   const inst = selectedInstall.value
   if (!inst) return
-  // Cloud capacity gate. `normal` resolves instantly; `degraded`
-  // shows a confirm modal (user can back out); `disabled` resolves
-  // false. Matches the ChooserView path so the two can't diverge.
+  // Cloud capacity gate; matches the ChooserView path so the two can't diverge.
   if (inst.sourceCategory === 'cloud' && !(await cloudCapacity.confirmEntry())) return
   if (restartInPlace) {
-    // Confirm in-drawer for local restarts before crossing the bridge.
-    // Cloud / remote restarts have no local process to kill (matches
-    // main-side `shouldConfirmKillForEntry`), so they skip the prompt.
-    // Doing the confirm here keeps it visually consistent with Update /
-    // Stop / etc. — the drawer stays open during the prompt instead of
-    // dismissing first and reopening as a system-modal over the host.
+    // Confirm in-drawer for local restarts (cloud/remote have no local
+    // process to kill); keeps the drawer open instead of reopening as a
+    // system-modal over the host.
     if (inst.sourceCategory === 'local') {
       const result = await dialogs.confirm({
         title: 'Restart instance?',
@@ -579,10 +488,8 @@ async function handleExpandedPrimaryAction(restartInPlace: boolean): Promise<voi
       })
       if (result !== 'primary') return
     }
-    // `confirmed: true` tells main to skip its own system-modal — the
-    // renderer already handled the prompt. Main keeps the modal as a
-    // safety net for any future caller that fires the IPC without
-    // confirming first.
+    // `confirmed: true` tells main to skip its own system-modal since the
+    // renderer already prompted.
     bridge?.restartInstall(inst.id, { confirmed: true })
   } else {
     bridge?.pickInstall(inst.id)
@@ -601,9 +508,6 @@ async function handleExpandedPrimaryAction(restartInPlace: boolean): Promise<voi
       >
         <template #leading><Search :size="20" class="picker-search-icon" /></template>
       </BaseInput>
-      <!-- Explicit close affordance — users couldn't tell how to dismiss
-           the popup (ESC / click-outside weren't discoverable). The search
-           field shrinks to make room. -->
       <button
         type="button"
         class="picker-close"
@@ -742,8 +646,6 @@ async function handleExpandedPrimaryAction(restartInPlace: boolean): Promise<voi
   padding: 0;
   gap: 8px;
 }
-/* Top-right close button. Flush to the search row so the field shrinks to
-   make room. Accessibility-first: an explicit, obvious way to dismiss. */
 .picker-close {
   flex: 0 0 auto;
   display: inline-flex;
@@ -803,11 +705,6 @@ async function handleExpandedPrimaryAction(restartInPlace: boolean): Promise<voi
   flex-wrap: wrap;
   min-width: 0;
 }
-/* Open Dashboard — naked icon + label button. The vertical divider
- * that follows it does the visual separation work; a pill border
- * would compete with the chip pills and read as another filter.
- * Hover lifts both icon and label to full text colour without
- * painting a background. */
 .picker-home {
   flex: 0 0 auto;
   display: inline-flex;
@@ -833,9 +730,6 @@ async function handleExpandedPrimaryAction(restartInPlace: boolean): Promise<voi
   color: var(--text);
   outline: none;
 }
-/* Vertical hairline between Home and the filter chips so the eye
- * groups them as "navigation | filters". Matches the chip border
- * token so all the dividers in the row pull from the same well. */
 .picker-chips-divider {
   flex: 0 0 auto;
   display: inline-block;

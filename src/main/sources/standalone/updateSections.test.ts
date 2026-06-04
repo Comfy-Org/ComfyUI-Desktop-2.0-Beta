@@ -16,14 +16,9 @@ vi.mock('electron', () => ({
 }))
 
 /**
- * `getDetailSections` action-payload shape for `update-comfyui` — locks
- * the downgrade-vs-update branch.
- *
- * The full function reads from the file system (.git probe) and the
- * release-cache, so we mock both. Main-side `t()` returns the bare key
- * when no locale is initialized, which means we can assert against the
- * i18n key (e.g. `'standalone.downgradingTitle'`) — exactly what we
- * want to lock.
+ * Locks the `update-comfyui` action-payload's downgrade-vs-update branch. The
+ * function reads the FS (.git probe) and release-cache, both mocked. `t()`
+ * returns the bare i18n key (no locale), so we assert against the key.
  */
 
 vi.mock('../../lib/release-cache', () => ({
@@ -75,11 +70,8 @@ describe('updateSections — update-comfyui action payload', () => {
   beforeEach(() => {
     vi.mocked(releaseCache.getEffectiveInfo).mockReset()
     vi.mocked(releaseCache.isUpdateAvailable).mockReset().mockReturnValue(true)
-    // `getDetailSections` probes `<installPath>/ComfyUI/.git` for the
-    // `hasGit` flag. The downstream action push lives behind it — return
-    // true so the actions are emitted.
+    // hasGit is gated on a `.git` probe; return true so the actions are emitted.
     vi.spyOn(fs, 'existsSync').mockReturnValue(true)
-    // Default to a populated effective-info so cards have data.
     vi.mocked(releaseCache.getEffectiveInfo).mockImplementation((_repo, channel) => ({
       installedTag: 'v0.3.20',
       commitSha: 'def5678cafebabe',
@@ -92,17 +84,15 @@ describe('updateSections — update-comfyui action payload', () => {
   })
 
   it('frames a stable target as a channel switch (not a downgrade) when the install is effectively on latest', () => {
-    // commitsAhead > 0 on a stored-stable install => getEffectiveChannel
-    // reports `latest`, so picking the `stable` card is a channel switch.
+    // commitsAhead > 0 makes getEffectiveChannel report `latest`, so picking the
+    // `stable` card is a channel switch.
     const action = getUpdateAction(
       baseInstall({ comfyVersion: { commit: 'abc1234', baseTag: 'v0.3.20', commitsAhead: 5 } } as Partial<InstallationRecord>),
       'stable'
     )
     expect(action).toBeDefined()
-    // The backend still rolls back (flag preserved)...
+    // Backend still rolls back, but the copy is "Switching to", not "Downgrading".
     expect(action!.data?.isDowngrade).toBe(true)
-    // ...but the user-facing copy is "Switching to", not "Downgrading" —
-    // changing channels shouldn't surface up/down direction.
     expect(action!.progressTitle).toBe('channelCards.switchingToTitle')
   })
 
@@ -143,17 +133,14 @@ describe('updateSections — update-comfyui action payload', () => {
   })
 
   it('still carries actionData.channel when switching channels (regression guard for lifecycle:705)', () => {
-    // Install on `stable`, drafting `latest` → isSwitching=true → channel
-    // must be on the action payload (so main can flip updateChannel).
     const action = getUpdateAction(baseInstall({ updateChannel: 'stable' }), 'latest')
     expect(action!.data?.channel).toBe('latest')
     expect(action!.data?.isDowngrade).toBe(false)
   })
 
   it('always carries actionData.channel, even on a same-channel update', () => {
-    // The action must carry the explicit target channel so the handler never
-    // falls back to the stored `updateChannel` (which can be stale and would
-    // pass `--stable` for a checkout that is really on latest).
+    // The explicit target channel must be carried so the handler never falls back
+    // to a stale stored `updateChannel`.
     const action = getUpdateAction(baseInstall({ updateChannel: 'stable' }), 'stable')
     expect(action!.data?.channel).toBe('stable')
     expect(action!.data?.isDowngrade).toBeDefined()
@@ -169,8 +156,7 @@ describe('getEffectiveChannel — de-facto channel from git state', () => {
   })
 
   it('reports `latest` for a stored-`stable` install whose checkout is ahead of its base tag', () => {
-    // The bug: user pulled master outside the app, leaving updateChannel
-    // stuck on `stable` while the working tree ran 59 commits ahead.
+    // e.g. a `git pull` outside the app leaves updateChannel stale on `stable`.
     expect(getEffectiveChannel(baseInstall({
       updateChannel: 'stable',
       comfyVersion: { commit: 'abc1234', baseTag: 'v0.22.3', commitsAhead: 59 },

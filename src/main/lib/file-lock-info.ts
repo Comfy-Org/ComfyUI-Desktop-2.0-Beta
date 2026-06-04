@@ -7,10 +7,7 @@ export interface LockingProcess {
 
 const TIMEOUT_MS = 10000
 
-/**
- * Best-effort attempt to identify which processes hold a lock on `filePath`.
- * Returns an empty array if detection fails or times out.
- */
+// Best-effort: processes holding a lock on `filePath`; empty on failure/timeout.
 export function findLockingProcesses(filePath: string): Promise<LockingProcess[]> {
   if (process.platform === 'win32') {
     return findLockingProcessesWindows(filePath)
@@ -18,13 +15,9 @@ export function findLockingProcesses(filePath: string): Promise<LockingProcess[]
   return findLockingProcessesUnix(filePath)
 }
 
-/**
- * Windows: use PowerShell + Restart Manager API via inline C# to query which
- * processes hold handles on the given file. This is a built-in Windows API —
- * no third-party tools required.
- */
+// Windows: query the built-in Restart Manager API via inline C# in PowerShell.
 function findLockingProcessesWindows(filePath: string): Promise<LockingProcess[]> {
-  // Escape single quotes for PowerShell string embedding
+  // Escape single quotes for PowerShell string embedding.
   const escaped = filePath.replace(/'/g, "''")
   const script = `
 $code = @'
@@ -109,12 +102,8 @@ Add-Type -TypeDefinition $code
   })
 }
 
-/**
- * Linux / macOS: use lsof -F pc for machine-readable output.
- * Each record is a pair of lines: "p<pid>\n" followed by "c<command>\n".
- * This avoids the column-width parsing issues of the default human-readable
- * format (process names with spaces would shift the PID column).
- */
+// Linux/macOS: `lsof -F pc` gives machine-readable "p<pid>" / "c<command>"
+// line pairs, avoiding the column-shift parsing issues of the default format.
 function findLockingProcessesUnix(filePath: string): Promise<LockingProcess[]> {
   return new Promise((resolve) => {
     execFile(

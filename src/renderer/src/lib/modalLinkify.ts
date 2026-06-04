@@ -1,10 +1,4 @@
-/**
- * Shared markdown-lite formatter for modal copy: escapes HTML, turns
- * `https://…` runs into clickable anchors that route through
- * `window.api.openExternal`, and renders `**bold**` as `<strong>`.
- * Used by `ModalDialog`, `BasePrompt`, and `BaseSelect` so prompt /
- * select / confirm bodies share identical link + emphasis behavior.
- */
+// Markdown-lite formatter for modal copy: escapes HTML, linkifies URLs, renders **bold**.
 
 function escapeHtml(text: string): string {
   const div = document.createElement('div')

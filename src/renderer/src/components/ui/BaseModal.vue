@@ -3,21 +3,9 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { X } from 'lucide-vue-next'
 import { useModalOverlay } from '../../composables/useModalOverlay'
 
-/**
- * Reusable modal primitive (shadcn-style). Parent controls `open`;
- * the primitive owns teleport, transition, dismiss behavior, focus
- * capture+restore, body scroll lock, and a11y attrs so consumers can't
- * forget any of them.
- *
- * One of `aria-label` / `aria-labelledby` is required — the primitive
- * is the modal element for assistive tech, so it must always have an
- * accessible name. We warn loudly in dev rather than throwing so a
- * mis-wired modal still renders in prod.
- *
- * Sits at z-index 60 (below context menus, above the settings drawer).
- * Overlay backdrop blur is opt-in via `blurOverlay` so unrelated modal
- * consumers don't pay the GPU cost on every dialog.
- */
+// Reusable modal primitive. Owns teleport, dismiss, focus capture/restore,
+// body scroll lock, and a11y attrs. One of aria-label / aria-labelledby is
+// required (it is the modal element for assistive tech).
 
 type Size = 'sm' | 'md' | 'lg' | 'xl'
 
@@ -26,19 +14,12 @@ interface Props {
   size?: Size
   ariaLabel?: string
   ariaLabelledby?: string
-  /** Dismiss when Escape is pressed. Default true. */
   dismissOnEscape?: boolean
-  /** Dismiss when the backdrop is clicked. Default true. */
   dismissOnOutside?: boolean
-  /** Render a top-right ✕ close affordance inside the panel. Default true. */
   showCloseButton?: boolean
-  /** Lock body scroll while open. Default true. */
   preventScroll?: boolean
-  /** Apply a backdrop-filter blur to the overlay. Opt-in because
-   *  backdrop-filter is GPU-bound and noticeable on Electron + older
-   *  hardware — only enable on modals where the design calls for it. */
+  /** Opt-in: backdrop-filter is GPU-bound and costly on Electron. */
   blurOverlay?: boolean
-  /** Optional class hook on the inner panel for consumer-specific overrides. */
   contentClass?: string | string[] | Record<string, boolean>
 }
 
@@ -63,16 +44,13 @@ if (!props.ariaLabel && !props.ariaLabelledby) {
 }
 
 const closeBtnRef = ref<HTMLButtonElement | null>(null)
-/** Pre-mount focus owner; restored on close so keyboard users return
- *  to the trigger (matches `TermsModal`'s pattern). */
+// Pre-open focus owner, restored on close so focus returns to the trigger.
 let returnFocusTo: HTMLElement | null = null
-/** Snapshot of the body's prior `overflow` so unmount restores any
- *  value the host page had set rather than clobbering it to empty. */
+// Prior body `overflow`, restored so we don't clobber a host-set value.
 let previousBodyOverflow: string | null = null
 
 const { handleOverlayMouseDown, handleOverlayClick } = useModalOverlay(
-  // ESC fires through the composable's keydown listener; the closure
-  // re-checks the dismiss-on-escape prop so a same-tick flip still wins.
+  // Re-checks the prop so a same-tick dismiss flip still wins.
   () => props.open && props.dismissOnEscape,
   () => emit('close')
 )
@@ -108,19 +86,16 @@ function captureAndFocus(): void {
 }
 
 function restoreFocus(): void {
-  // The original trigger may have been removed from the DOM while the
-  // modal was open (rare but possible with dynamic lists).
   try {
     returnFocusTo?.focus()
   } catch {
-    /* original trigger detached — nothing to restore to */
+    // Original trigger may have been removed from the DOM while open.
   }
   returnFocusTo = null
 }
 
-// Open / close lifecycle: the Transition handles fade-out, but focus
-// and scroll-lock have to flip synchronously here so they don't leak
-// past dismiss or overlap an immediate re-open.
+// Focus + scroll-lock flip synchronously (not via the Transition) so they
+// don't leak past dismiss or overlap an immediate re-open.
 watch(
   () => props.open,
   (isOpen, wasOpen) => {
@@ -136,8 +111,7 @@ watch(
 )
 
 onBeforeUnmount(() => {
-  // Defensive: parent v-if-unmounted us while still open. Don't leave
-  // the body locked or focus stranded.
+  // Defensive: parent may unmount us while still open.
   unlockBodyScroll()
   restoreFocus()
 })
@@ -223,9 +197,7 @@ const sizeClass = computed(() => `is-size-${props.size}`)
 }
 .base-modal-panel.is-size-sm {
   --base-modal-width: var(--base-modal-width-sm);
-  /* Small dialogs (prompts, action sheets) hug their content — the tall
-     shared min-height is meant for large modals (diff, migrate, terms)
-     and would otherwise leave dead space below a short prompt. */
+  /* Small dialogs hug their content instead of the tall shared min-height. */
   min-height: auto;
 }
 .base-modal-panel.is-size-md {

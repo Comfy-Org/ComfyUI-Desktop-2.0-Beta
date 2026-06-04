@@ -37,22 +37,9 @@ interface UpdatePillsApi {
 }
 
 /**
- * Title-bar status pills.
- *
- * The app-update pill (right of the hamburger) shows when the
- * auto-updater has either downloaded an update (`'ready'`, prompts
- * Restart-to-update via the popover) or detected one is available
- * (`'available'`, prompts Download via the popover). State is pushed
- * from main on `comfy-titlebar:app-update-state-changed`; the pill
- * disappears entirely when `kind` is `null` so the title bar reads
- * clean in the steady state.
- *
- * The install-update pill (right of the install pill in the center)
- * fires when the active install's `statusTag.style === 'update'` —
- * the same signal the chooser tile's "Update" pill consumes. State is
- * pushed from main on `comfy-titlebar:install-update-changed` and is
- * gated on `!isInstallLess` (install-less hosts have no install backing
- * the window, so an install-scoped pill is meaningless there).
+ * Title-bar status pills. The app-update pill shows on `ready`/`available`/`downloading`
+ * (hidden when `kind` is null). The install-update pill fires on the active install's
+ * update status tag, gated on `!isInstallLess`.
  */
 export function useUpdatePills(opts: UseUpdatePillsOpts): UpdatePillsApi {
   const { t } = useI18n()
@@ -67,14 +54,11 @@ export function useUpdatePills(opts: UseUpdatePillsOpts): UpdatePillsApi {
     if (!s.kind) return null
     if (s.kind === 'ready') return t('titleBar.desktopUpdateReady')
     if (s.kind === 'downloading') return t('titleBar.desktopUpdateDownloading')
-    // 'available' — only fires with auto-updates OFF (main suppresses
-    // it when ON and triggers the download itself).
+    // 'available' only fires with auto-updates OFF.
     return t('titleBar.desktopUpdateAvailable')
   })
 
-  /** Augments the pill label with the version when one is known, so
-   *  the compact pill stays scan-friendly while the full "Desktop
-   *  Update Ready (v1.2.3)" detail is one hover away. */
+  /** Adds the version to the tooltip when known, keeping the pill itself compact. */
   const appUpdatePillTooltip = computed<string>(() => {
     const label = appUpdatePillLabel.value
     if (!label) return ''
@@ -84,9 +68,7 @@ export function useUpdatePills(opts: UseUpdatePillsOpts): UpdatePillsApi {
       : label
   })
 
-  /** Mirrors the app-update pill's "Update {version}" format when
-   *  main carries a target version through the install's status tag,
-   *  falling back to the generic "Update available" label. */
+  /** "Update {version}" when a target version is known, else generic "Update available". */
   const installUpdatePillLabel = computed<string>(() => {
     const v = installUpdateState.value.version
     return v

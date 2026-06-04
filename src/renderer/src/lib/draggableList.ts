@@ -1,10 +1,4 @@
-/*
-  Pointer-based drag-to-reorder for a vertical item list.
-  Adapted from TahaSh/drag-to-reorder (MIT License).
-
-  Items animate into position via CSS transitions on the `is-idle` class;
-  the actively-dragged item is lifted with the `is-draggable` class.
-*/
+// Pointer-based drag-to-reorder for a vertical item list. Adapted from TahaSh/drag-to-reorder (MIT License).
 
 export interface DraggableListOptions {
   onReorder?: (oldIndex: number, newIndex: number) => void
@@ -48,8 +42,6 @@ export class DraggableList {
     document.addEventListener('mouseup', this.boundDragEnd)
   }
 
-  // --- Item queries ---
-
   private getAllItems(): HTMLElement[] {
     if (!this.items.length) {
       this.items = Array.from(this.container.querySelectorAll(this.itemSelector))
@@ -70,8 +62,6 @@ export class DraggableList {
     return item.hasAttribute('data-is-toggled')
   }
 
-  // --- Scroll parent ---
-
   private findScrollParent(): HTMLElement {
     let el = this.container.parentElement
     while (el) {
@@ -81,8 +71,6 @@ export class DraggableList {
     }
     return document.documentElement
   }
-
-  // --- Drag lifecycle ---
 
   private dragStart(e: MouseEvent): void {
     if (e.button !== 0) return
@@ -102,8 +90,7 @@ export class DraggableList {
     this.initDraggableItem()
     this.initItemsState()
 
-    // Snapshot the dragged item's original top and the full list extent before
-    // any transforms are applied, so clamping stays stable throughout the drag.
+    // Snapshot top + list extent before transforms so clamping stays stable through the drag.
     const dragRect = item.getBoundingClientRect()
     this.dragStartTop = dragRect.top
     this.dragHeight = dragRect.height
@@ -132,8 +119,6 @@ export class DraggableList {
     this.lastClientY = e.clientY
 
     // Auto-scroll when pointer is outside the scroll parent.
-    // The drag clamp prevents the dragged item from extending the container,
-    // so simple scroll-room checks are sufficient here.
     if (this.scrollParent) {
       const scrollRect = this.scrollParent.getBoundingClientRect()
       if (e.clientY > scrollRect.bottom && this.scrollParent.scrollTop < this.scrollParent.scrollHeight - this.scrollParent.clientHeight) {
@@ -157,8 +142,7 @@ export class DraggableList {
     const offsetX = this.lastClientX - this.pointerStartX
     let offsetY = this.lastClientY - this.pointerStartY - scrollOffset
 
-    // Clamp vertical offset so the dragged item stays within the list bounds.
-    // Uses positions snapshotted at drag start so swap animations don't shift the clamp.
+    // Clamp Y to list bounds using drag-start snapshots so swap animations don't shift the clamp.
     const minY = this.listMinY - this.dragStartTop - this.dragHeight / 2
     const maxY = this.listMaxY - this.dragStartTop - this.dragHeight / 2
     offsetY = Math.max(minY, Math.min(maxY, offsetY))
@@ -172,8 +156,6 @@ export class DraggableList {
     this.applyNewItemsOrder()
     this.cleanup()
   }
-
-  // --- Setup helpers ---
 
   private setItemsGap(): void {
     const idle = this.getIdleItems()
@@ -201,13 +183,10 @@ export class DraggableList {
     }
   }
 
-  // --- Position updates ---
-
   private updateIdleItemsStateAndPosition(): void {
     const dragRect = this.draggableItem!.getBoundingClientRect()
     const dragY = dragRect.top + dragRect.height / 2
 
-    // Update toggled state based on midpoint crossing
     for (const item of this.getIdleItems()) {
       const itemRect = item.getBoundingClientRect()
       const itemY = itemRect.top + itemRect.height / 2
@@ -227,7 +206,7 @@ export class DraggableList {
       }
     }
 
-    // Translate toggled items to make room
+    // Translate toggled items to make room.
     for (const item of this.getIdleItems()) {
       if (this.isItemToggled(item)) {
         const direction = this.isItemAbove(item) ? 1 : -1
@@ -237,8 +216,6 @@ export class DraggableList {
       }
     }
   }
-
-  // --- Reorder computation ---
 
   private applyNewItemsOrder(): void {
     const allItems = this.getAllItems()
@@ -270,8 +247,6 @@ export class DraggableList {
       this.onReorder(oldPosition, newPosition)
     }
   }
-
-  // --- Cleanup ---
 
   private cleanup(): void {
     if (this.draggableItem) {

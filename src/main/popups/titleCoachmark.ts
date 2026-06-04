@@ -4,36 +4,26 @@ import { TITLEBAR_HEIGHT } from '../lib/titleBarOverlay'
 import { EmbeddedPopupView } from './embeddedPopupView'
 
 /**
- * First-instance onboarding coachmark popup (issue #701). A sticky card
- * with an upward beak pointing at the centre title-bar pill.
- *
- * Reuses the `comfyTitleTooltip` popup renderer (same clip-escaping
- * `WebContentsView` and render-ack protocol — issue #514); the
- * `variant: 'coachmark'` config switches the renderer to the beak +
- * accent + dismiss-button card. Owns a popup view separate from the
- * hover tooltip's so its sticky lifecycle (no auto-hide on blur — the
- * dismiss button needs focus) doesn't fight the tooltip's auto-dismiss.
+ * First-instance onboarding coachmark popup: a sticky card with an upward beak
+ * pointing at the centre title-bar pill. Reuses the `comfyTitleTooltip` renderer
+ * (the `variant: 'coachmark'` config switches it to the beak/accent/dismiss card)
+ * but owns a separate popup view so its sticky lifecycle (no auto-hide on blur,
+ * since the dismiss button needs focus) doesn't fight the tooltip's auto-dismiss.
  */
 
 const COACHMARK_POPUP_INITIAL_WIDTH = 300
 const COACHMARK_POPUP_INITIAL_HEIGHT = 96
-/** Vertical gap (px) between the pill's bottom edge and the card's top
- *  edge — leaves room for the beak. */
+/** Gap (px) between the pill bottom and card top, leaving room for the beak. */
 export const COACHMARK_VERTICAL_GAP = 10
-/** Side/top gutter (px) reserved for the card's box-shadow + beak so
- *  neither gets clipped against the popup view's bounds. */
+/** Gutter (px) reserved for the card's box-shadow + beak so neither gets clipped. */
 export const COACHMARK_SHADOW_GUTTER = 18
-/** Fallback render-ack timeout (ms) — show at last-known size if the
- *  renderer's `:rendered` ack is slow, so the coachmark never sticks
- *  invisible. */
+/** Fallback show timeout (ms) if the renderer's `:rendered` ack is slow. */
 const COACHMARK_RENDER_ACK_TIMEOUT_MS = 120
 
 export interface CoachmarkTheme {
   bg: string
   text: string
   border: string
-  /** Brand-yellow accent for the beak + title — what visually marks
-   *  this as onboarding rather than a neutral tooltip. */
   accent: string
 }
 
@@ -46,15 +36,11 @@ export interface CoachmarkConfig {
   configToken: string
 }
 
-/** Hardcoded mirror of the brand tokens (`--brand-accent` neutral ramp)
- *  so the popup renderer — which has no app stylesheet — matches the
- *  in-app coachmark accent. */
+/** Hardcoded mirror of the brand tokens; the popup renderer has no app stylesheet. */
 function resolveCoachmarkTheme(): CoachmarkTheme {
   return { bg: '#211927', text: '#ffffff', border: '#38303d', accent: '#e3ff3c' }
 }
 
-/** Pure: assemble the coachmark config the renderer paints. Extracted so
- *  the variant stamp + copy wiring is unit-testable without a window. */
 export function buildCoachmarkConfig(opts: {
   title: string
   body: string
@@ -71,9 +57,7 @@ export function buildCoachmarkConfig(opts: {
   }
 }
 
-/** Pure: compute the popup view bounds that center the card under the
- *  pill and offset it below, clamped to the parent content area.
- *  Extracted for unit testing. */
+/** Compute popup bounds centering the card under the pill, clamped to the parent. */
 export function positionCoachmark(opts: {
   anchor: { leftX: number; rightX: number; bottomY: number }
   bubble: { width: number; height: number }
@@ -207,14 +191,10 @@ export function openCoachmarkPopup(opts: {
   })
 }
 
-/** Wire the coachmark IPC. Shares the tooltip's `:ready` / `:rendered`
- *  channels (same renderer entry), disambiguated by webContents id so
- *  only acks from a coachmark popup view land here. */
+/** Wire the coachmark IPC. Shares the tooltip's `:ready` / `:rendered` channels,
+ *  disambiguated by webContents id so only coachmark-popup acks land here. */
 export function registerTitleCoachmarkIpc(opts: {
   findParentByTitleBarSender: (wc: WebContents) => BrowserWindow | null
-  /** Resolve a host BrowserWindow back to its title-bar webContents so
-   *  the popup's dismiss button can tell the title-bar renderer to flip
-   *  the once-ever flag. `null` if the window has no live title bar. */
   findTitleBarByParent: (parent: BrowserWindow) => WebContents | null
 }): void {
   ipcMain.on('comfy-titletooltip:ready', (event) => {
@@ -258,8 +238,7 @@ export function registerTitleCoachmarkIpc(opts: {
       const title = typeof payload?.title === 'string' ? payload.title : ''
       const body = typeof payload?.body === 'string' ? payload.body : ''
       if (!title && !body) return
-      // Renderer supplies the i18n label; main only forwards it (the
-      // renderer's own `cmDismissLabel` default covers an empty value).
+      // Renderer supplies the i18n label; main only forwards it.
       const dismissLabel = typeof payload?.dismissLabel === 'string' ? payload.dismissLabel : ''
       const leftX = typeof payload?.leftX === 'number' ? payload.leftX : 0
       const rightX = typeof payload?.rightX === 'number' ? payload.rightX : leftX
@@ -282,8 +261,8 @@ export function registerTitleCoachmarkIpc(opts: {
     hideCoachmarkPopup(coachmarkPopupsByParent.get(parent.id))
   })
 
-  // Dismiss fires from the popup's own webContents: hide it and tell the
-  // title-bar renderer to flip the once-ever flag (it owns persistence).
+  // Dismiss fires from the popup's webContents; the title-bar renderer owns the
+  // once-ever flag persistence, so tell it to flip.
   ipcMain.on('comfy-titlecoachmark:dismiss', (event) => {
     const entry = coachmarkPopupsByWebContents.get(event.sender.id)
     if (!entry) return

@@ -13,10 +13,7 @@ vi.stubGlobal('window', {
   }
 })
 
-// useLauncherPrefs has module-level shared state (firstUseCompleted,
-// loadPromise) that must be reset between tests via the test-only
-// `__resetLauncherPrefsForTest` helper.
-
+// Module-level shared state must be reset between tests.
 import { useLauncherPrefs, __resetLauncherPrefsForTest } from './useLauncherPrefs'
 
 describe('useLauncherPrefs', () => {

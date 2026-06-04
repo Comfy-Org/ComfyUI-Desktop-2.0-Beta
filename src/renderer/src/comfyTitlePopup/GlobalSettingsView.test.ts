@@ -130,9 +130,7 @@ describe('GlobalSettingsView', () => {
     expect(bridge.openExternalCalls).toEqual(['https://github.com/comfyanonymous/ComfyUI'])
   })
 
-  // Storage tab — shares `GlobalStorageSections` with the per-instance
-  // StoragePane. Tab-presence + bridge-wiring is the surface owned by
-  // this view; rendering behavior is covered by `StoragePane.test.ts`.
+  // Storage tab shares `GlobalStorageSections`; rendering is covered by StoragePane.test.ts.
   it('Storage tab routes a make-primary click through the bridge', async () => {
     const bridge = installMockBridge()
     const wrapper = mountView()
@@ -161,9 +159,7 @@ describe('GlobalSettingsView', () => {
     expect(bridge.openPathCalls).toEqual(['/home/u/ComfyUI/models'])
   })
 
-  // Covers the Shared Directories half of GlobalStorageSections —
-  // a SettingsSectionList field write routes through
-  // `globalSettingsUpdateField`, not just the model-dir actions.
+  // Covers the Shared Directories field-write path, not just the model-dir actions.
   it('Storage tab routes a Shared Directories field update through the bridge', async () => {
     const bridge = installMockBridge()
     const snapshot = makeSnapshot({

@@ -1,12 +1,2 @@
-/**
- * Cross-process strings used by background-op status reporting.
- *
- * `MSG_CANCELLED` is the single user-cancel string written by both the
- * session-action wrapper (`withAbortableSessionAction`) and the picker's
- * outer-catch mapper in `src/main/index.ts`, and matched verbatim by
- * the renderer's inline progress card (`PickerInlineProgress.vue`) to
- * render the cancelled banner. Keep all writers and matchers using
- * this constant — drift between sites (e.g. `'Cancelled'` vs
- * `'Cancelled.'`) silently breaks the cancel UI.
- */
+// Single user-cancel string written and matched verbatim across main + renderer. All writers/matchers must use this constant or the cancel UI silently breaks.
 export const MSG_CANCELLED = 'Cancelled.'

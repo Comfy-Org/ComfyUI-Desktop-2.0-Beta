@@ -4,7 +4,7 @@ import { type Ref, ref, watch, nextTick } from 'vue'
  * Shared terminal scroll behavior: auto-scroll to bottom, expand/collapse toggle.
  *
  * @param terminalRef - Template ref for the terminal scroll container.
- * @param getOutput - A getter that returns the current terminal output string.
+ * @param getOutput - Getter returning the current terminal output string.
  */
 export function useTerminalScroll(
   terminalRef: Ref<HTMLDivElement | null>,

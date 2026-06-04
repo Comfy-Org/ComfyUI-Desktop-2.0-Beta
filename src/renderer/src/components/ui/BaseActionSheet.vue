@@ -2,23 +2,13 @@
 import { nextTick, ref, watch } from 'vue'
 import BaseModal from './BaseModal.vue'
 
-/**
- * Action-sheet primitive — title, optional message, vertical list of
- * action choices, Cancel in the footer. Composes `BaseModal` for the
- * shell. Use for any "pick how to proceed" affordance previously
- * routed through `useModal().select()` (e.g. the "Instance Already
- * Running" Proceed / Replace dialog).
- *
- * Not to be confused with `BaseSelect.vue`, which is the inline
- * combobox/dropdown used inside forms.
- */
+// Action-sheet primitive: title, message, list of choices, Cancel footer.
+// Not BaseSelect.vue, which is the inline form combobox.
 
 export interface ActionSheetItem {
   value: string
   label: string
   description?: string
-  /** Visual treatment for destructive choices (e.g. "Replace running
-   *  instance"). Maps to the global `.danger-solid` button style. */
   tone?: 'default' | 'danger'
 }
 

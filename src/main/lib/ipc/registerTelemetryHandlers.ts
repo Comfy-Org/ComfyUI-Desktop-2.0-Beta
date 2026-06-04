@@ -1,20 +1,6 @@
-/**
- * IPC handlers for renderer-originated telemetry events.
- *
- * Part of the SDK consolidation: the renderer no longer talks to
- * PostHog directly. It calls `window.api.captureTelemetry(...)` which fires
- * `ipcRenderer.send('telemetry:*')`. Main routes the call through
- * `mainTelemetry.*` so identity (one `distinctId`), consent (one gate), and
- * dedup all live in one place.
- *
- * All three messages are fire-and-forget (`ipcMain.on`, not `handle`) — the
- * renderer does not await delivery, matching the previous direct-SDK ergonomics.
- *
- * Note on the `from-main` direction: events that ORIGINATE in main and need
- * to fan out to renderer-side Datadog RUM still use the existing
- * `telemetry-action-from-main` IPC + relay-target registry (see
- * `telemetry.forwardToRenderer`). That path is unchanged here.
- */
+// IPC for renderer-originated telemetry: the renderer routes through main so
+// identity, consent, and dedup live in one place. Capture messages are
+// fire-and-forget (ipcMain.on).
 import { ipcMain } from 'electron'
 import * as mainTelemetry from '../telemetry'
 import {
@@ -48,19 +34,8 @@ function isTelemetryValue(v: unknown): v is mainTelemetry.TelemetryValue {
   )
 }
 
-/**
- * Filter an IPC payload down to the TelemetryValue contract. Renderer
- * payloads cross a trust boundary — a buggy or compromised renderer
- * could send nested objects, functions, Symbols, etc. We drop anything
- * that doesn't fit the primitive shape rather than ship a lying cast
- * and hope PostHog Node copes downstream.
- *
- * Per-key filter (not whole-payload reject) so one bad value doesn't
- * lose the whole event's metadata. Arrays are dropped — IPC telemetry
- * call sites construct scalar property bags only, and `bindUserId` /
- * `registerPersonProperties` (which share this helper) expect scalar
- * person-property values.
- */
+// Per-key filter to the TelemetryValue contract; renderer payloads cross a
+// trust boundary, so non-primitives (incl. arrays) are dropped per-key.
 function asProps(value: unknown): Record<string, mainTelemetry.TelemetryValue> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
   const out: Record<string, mainTelemetry.TelemetryValue> = {}
@@ -92,23 +67,11 @@ export function registerTelemetryHandlers(): void {
   ipcMain.on('telemetry:registerProperties', (_event, properties: unknown) => {
     const props = asProps(properties)
     if (Object.keys(props).length === 0) return
-    // Person-property update: re-identify with $set semantics. mainTelemetry's
-    // identify() takes a distinctId argument; we ride on the existing bound id.
-    // If distinctId hasn't been bound yet (early renderer call before main's
-    // boot identify), the call inside mainTelemetry.identify becomes a no-op
-    // beyond caching props for deferred flush — acceptable.
     mainTelemetry.registerPersonProperties(props)
   })
 
-  /**
-   * Identity lifecycle (auth landing). The renderer's auth UI calls this
-   * when a login succeeds; main aliases the anonymous installation_id into
-   * the new user_id, sets `is_authenticated: true`, and fires
-   * `app:user_logged_in`. See the telemetry design docs
-   *
-   * Renderer is still responsible for `datadogRum.setUser({ id })` on its
-   * own SDK side — Datadog is browser-only.
-   */
+  // On login: alias the anonymous installation_id into the user_id. Renderer
+  // still owns datadogRum.setUser (Datadog is browser-only).
   ipcMain.on('telemetry:bindUserId', (_event, payload: unknown) => {
     if (!payload || typeof payload !== 'object') return
     const userId = asString((payload as Record<string, unknown>).userId)
@@ -117,21 +80,13 @@ export function registerTelemetryHandlers(): void {
     mainTelemetry.bindUserId(userId, properties)
   })
 
-  /**
-   * Logout: switch distinct_id back to the anonymous installation_id.
-   * NOT `posthog.reset()` (which would clobber installation_id and
-   * download_token). See the telemetry design docs corrected.
-   */
+  // Logout: switch distinct_id back to the anonymous installation_id (NOT
+  // posthog.reset(), which would clobber installation_id + download_token).
   ipcMain.on('telemetry:unbindUserId', () => {
     mainTelemetry.unbindUserId()
   })
 
-  /**
-   * Cache-first synchronous flag lookup for renderer A/B branches.
-   * Returns the cached value or `null` if the flag is not present (caller
-   * defaults to the control branch on `null`). See `experiments.ts` for
-   * the cache lifecycle.
-   */
+  // Cache-first flag lookup for renderer A/B branches; null → control.
   ipcMain.handle('telemetry:getExperimentFlag', (_event, key: unknown) => {
     const flagKey = asString(key)
     if (!flagKey) return null
@@ -139,10 +94,7 @@ export function registerTelemetryHandlers(): void {
     return value === undefined ? null : value
   })
 
-  /**
-   * Renderer-driven exposure event. Per-session dedup is enforced
-   * main-side so multiple renderer subscribers can call this safely.
-   */
+  // Exposure event; per-session dedup is enforced main-side.
   ipcMain.on('telemetry:recordExposure', (_event, payload: unknown) => {
     if (!payload || typeof payload !== 'object') return
     const p = payload as Record<string, unknown>

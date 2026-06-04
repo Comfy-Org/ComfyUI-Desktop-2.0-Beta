@@ -1,11 +1,6 @@
 import type { ComposerTranslation } from 'vue-i18n'
 
-/**
- * Raw status strings emitted by the main process during background ops,
- * mapped to friendlier user-facing copy. Shared by the Update overlay
- * (`ComfyUISettingsContent.vue`) and the Snapshots row status line
- * (`SnapshotsView.vue`) so the two surfaces never drift.
- */
+// Raw main-process status strings mapped to friendlier UI copy.
 const OP_STATUS_MAP: Record<string, string> = {
   'Fetching latest stable version': 'Checking for latest version…',
   'Fetching version tags…': 'Checking for latest version…',
@@ -26,11 +21,6 @@ export function humanizeOpStatus(raw: string | null | undefined, t: TLike): stri
   return (t as (k: string, fb?: string) => string)('instancePicker.progressWorking', 'Working…')
 }
 
-/**
- * Minimum shape needed to derive a per-action progress label. Picker's
- * `PickerOperationStatus` and the settings overlay's `ActiveOperation`
- * both satisfy this.
- */
 export interface OperationLabelDescriptor {
   actionId: string
   actionData?: Record<string, unknown> | null
@@ -41,12 +31,7 @@ function isDowngrade(op: OperationLabelDescriptor): boolean {
   return (op.actionData as { isDowngrade?: boolean } | null | undefined)?.isDowngrade === true
 }
 
-/**
- * In-flight progress title for a background op, keyed by `actionId` so
- * the picker overlay says "Copying…" / "Deleting…" / "Restoring
- * snapshot…" instead of a one-size-fits-all "Updating…". `update-comfyui`
- * keeps the existing `isDowngrade` branch.
- */
+/** In-flight progress title for a background op, keyed by `actionId`. */
 export function operationInflightLabel(op: OperationLabelDescriptor, t: TLike): string {
   const tt = t as (k: string, fb?: string) => string
   switch (op.actionId) {
@@ -75,11 +60,7 @@ export function operationInflightLabel(op: OperationLabelDescriptor, t: TLike): 
   }
 }
 
-/**
- * Success heading for a completed background op — symmetric with
- * `operationInflightLabel` so a successful Copy reads "Copy complete"
- * instead of "Update complete".
- */
+/** Success heading for a completed background op, keyed by `actionId`. */
 export function operationSuccessLabel(op: OperationLabelDescriptor, t: TLike): string {
   const tt = t as (k: string, fb?: string) => string
   switch (op.actionId) {

@@ -1,22 +1,7 @@
-/**
- * Shopping-list chain steps shared by every `runAction` dispatcher
- * (`useComfyUISettings.runAction`, `DetailModal.runAction`, and any
- * future caller). Each helper:
- *   - reads `action.<chain>` and optionally drives a modal,
- *   - returns the new `ActionDef` (with merged `data` and any narrowed
- *     fields) when the chain step completed,
- *   - returns `null` when the user cancelled or the prerequisites
- *     failed (caller must short-circuit).
- *
- * The helpers DO NOT manage `wasRunning`, `requiresStoppedGuard`,
- * `showProgress` orchestration, telemetry, or post-result navigation —
- * those stay in the caller because they need install-store / progress-
- * store / emit access that varies per surface (panel vs. legacy modal).
- *
- * Extracting these eliminated ~270 lines of near-verbatim copy/paste
- * between `useComfyUISettings.runAction` and `DetailModal.runAction`
- * (audit annoying gap #4).
- */
+// Shopping-list chain steps shared by every `runAction` dispatcher. Each
+// helper drives a modal step and returns the updated `ActionDef`, or `null`
+// when the user cancelled or prerequisites failed (caller short-circuits).
+// Orchestration (guards, progress, telemetry, navigation) stays in callers.
 
 import type { useModal } from './useModal'
 import type { useDialogs } from './useDialogs'
@@ -24,9 +9,6 @@ import type { ActionDef, DiskSpaceInfo, FieldOption, Installation } from '../typ
 
 type Modal = ReturnType<typeof useModal>
 type Dialogs = ReturnType<typeof useDialogs>
-/** Subset of `vue-i18n`'s `t` that the chain helpers need — keeping it
- *  loose-typed avoids pulling the full I18n type just to translate a
- *  handful of error / disk-space strings. */
 type Translate = (key: string, payload?: Record<string, unknown>) => string
 
 function formatBytes(bytes: number): string {
@@ -41,9 +23,8 @@ function formatBytes(bytes: number): string {
   return `${n.toFixed(n >= 10 || i === 0 ? 0 : 1)} ${units[i]}`
 }
 
-/** Drive `action.fieldSelects` — each step opens a `modal.select` whose
- *  options come from a main-side source (`getFieldOptions`). The user's
- *  pick feeds the next step AND lands on `action.data[fs.field]`. */
+// Drive `action.fieldSelects`: each step picks from a main-side source and
+// feeds both the next step and `action.data[fs.field]`.
 export async function runFieldSelectsChain(
   action: ActionDef,
   driver: Modal | Dialogs,
@@ -87,11 +68,8 @@ export async function runFieldSelectsChain(
   return next
 }
 
-/** `useDialogs` exposes `actionSheet`; the legacy `useModal` exposes
- *  `select`. Both resolve to `string | null` for the picked value. The
- *  helpers below normalise around whichever driver the caller passed,
- *  so `useComfyUISettings` (BaseModal-shell dialogs) and `DetailModal`
- *  (legacy modal host) can share the chain code unchanged. */
+// `useDialogs` exposes `actionSheet`; legacy `useModal` exposes `select`.
+// These normalise around whichever driver the caller passed.
 function isDialogs(driver: Modal | Dialogs): driver is Dialogs {
   return typeof (driver as Dialogs).actionSheet === 'function'
 }
@@ -106,9 +84,8 @@ function pickPrompt(driver: Modal | Dialogs) {
   return (opts: Parameters<Modal['prompt']>[0]): Promise<string | null> => driver.prompt(opts)
 }
 
-/** Drive `action.select` — a single named-source pick (currently only
- *  `'installations'` is wired; expandable later). Lands the selected id
- *  on `action.data[action.select.field]`. */
+// Drive `action.select`: a single named-source pick onto
+// `action.data[action.select.field]`.
 export async function runSelectChain(
   action: ActionDef,
   ownerInstallationId: string,
@@ -147,8 +124,7 @@ export async function runSelectChain(
   return { ...action, data: { ...action.data, [action.select.field]: selected } }
 }
 
-/** Drive `action.prompt` — free-form text input (e.g. "Copy to new
- *  install name"). Lands the value on `action.data[action.prompt.field]`. */
+// Drive `action.prompt`: free-form text onto `action.data[action.prompt.field]`.
 export async function runPromptChain(
   action: ActionDef,
   driver: Modal | Dialogs,
@@ -168,12 +144,9 @@ export async function runPromptChain(
   return { ...action, data: { ...action.data, [action.prompt.field]: value } }
 }
 
-/** Drive `action.confirm`. Routes the plain-confirm path through
- *  `dialogs.confirm` (BaseModal-shell) when a dialogs driver is
- *  supplied; falls back to `modal.confirm` otherwise. The
- *  checkbox-confirm path (`confirm.options`) always uses
- *  `modal.confirmWithOptions` — `useDialogs` has no equivalent yet.
- *  The caller is responsible for skipping migrate-to-standalone. */
+// Drive `action.confirm`. Plain confirm uses `dialogs.confirm` when given,
+// else `modal.confirm`; the checkbox path always uses `confirmWithOptions`
+// since `useDialogs` has no equivalent.
 export async function runConfirmChain(
   action: ActionDef,
   modal: Modal,
@@ -212,11 +185,8 @@ export async function runConfirmChain(
   return confirmed ? action : null
 }
 
-/** Disk-space sanity check for the `copy` / `copy-update` /
- *  `release-update` write-heavy actions. Pre-fetched
- *  `installationSizeBytes` (when present) skips the IPC round-trip
- *  needed by the on-the-fly fallback. Returns `false` when the user
- *  declined the over-quota prompt. */
+// Disk-space check for write-heavy actions; returns `false` when the user
+// declines the over-quota prompt.
 export async function runDiskSpaceCheck(
   action: ActionDef,
   installation: Installation,

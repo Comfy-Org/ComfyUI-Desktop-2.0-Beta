@@ -29,19 +29,10 @@ function pickGPU(hasNvidia: boolean, hasAmd: boolean, hasIntel: boolean): GpuId 
 }
 
 /**
- * Detect GPU type on the current system (async).
- * Returns { id, label } or null if no supported GPU is found.
- *
- * Detection order (Windows):
- *   1. WMI query — parses PCI vendor IDs from Win32_VideoController
- *   2. nvidia-smi — fallback for NVIDIA driver detection
- *
- * Detection order (Linux / WSL):
- *   1. lspci — parses PCI vendor IDs from VGA/3D controllers
- *   2. /sys/class/drm — reads vendor IDs from sysfs
- *   3. nvidia-smi — fallback for NVIDIA (especially useful on WSL)
- *
- * macOS returns "mps" for Apple Silicon, null for Intel.
+ * Detect GPU type, or null if no supported GPU is found.
+ *   Windows: WMI vendor IDs, then nvidia-smi.
+ *   Linux/WSL: lspci, then /sys/class/drm, then nvidia-smi.
+ *   macOS: "mps" for Apple Silicon, null for Intel.
  */
 async function detectGPU(): Promise<GpuInfo | null> {
   let id: GpuId | null = null
@@ -156,17 +147,10 @@ async function detectMacGPU(): Promise<GpuId | null> {
   })
 }
 
-/**
- * Minimum NVIDIA driver version for PyTorch 2.10 with CUDA 13.0 (cu130).
- * Matches desktop's NVIDIA_DRIVER_MIN_VERSION.
- * See: https://docs.nvidia.com/cuda/cuda-toolkit-release-notes/
- */
+/** Minimum NVIDIA driver for PyTorch 2.10 / CUDA 13.0 (cu130); matches desktop's value. */
 const NVIDIA_DRIVER_MIN_VERSION = "580"
 
-/**
- * Compare two dotted version strings numerically.
- * Returns negative if a < b, positive if a > b, 0 if equal.
- */
+/** Compare dotted version strings numerically: negative if a<b, positive if a>b, 0 if equal. */
 function compareVersions(a: string, b: string): number {
   const pa = a.split(".").map(Number)
   const pb = b.split(".").map(Number)
@@ -179,19 +163,13 @@ function compareVersions(a: string, b: string): number {
   return 0
 }
 
-/**
- * Parse the NVIDIA driver version from nvidia-smi standard output.
- * Matches "Driver Version: XXX.XX" from the table header.
- */
+/** Parse "Driver Version: XXX.XX" from nvidia-smi standard output. */
 export function parseNvidiaDriverVersion(output: string): string | undefined {
   const match = output.match(/driver version\s*:\s*([\d.]+)/i)
   return match?.[1]
 }
 
-/**
- * Query nvidia-smi for the driver version using the structured CSV flag.
- * Works on both Windows and Linux.
- */
+/** Query nvidia-smi for the driver version using the structured CSV flag. */
 function getNvidiaDriverVersionQuery(): Promise<string | undefined> {
   return new Promise((resolve) => {
     execFile(
@@ -210,9 +188,7 @@ function getNvidiaDriverVersionQuery(): Promise<string | undefined> {
   })
 }
 
-/**
- * Fallback: parse driver version from plain nvidia-smi output.
- */
+/** Fallback: parse driver version from plain nvidia-smi output. */
 function getNvidiaDriverVersionFallback(): Promise<string | undefined> {
   return new Promise((resolve) => {
     execFile(
@@ -226,11 +202,7 @@ function getNvidiaDriverVersionFallback(): Promise<string | undefined> {
   })
 }
 
-/**
- * Check whether the installed NVIDIA driver meets the minimum version.
- * Returns null if no NVIDIA driver is detected (e.g. AMD/Intel/macOS).
- * Works on Windows and Linux.
- */
+/** Check whether the installed NVIDIA driver meets the minimum version; null if none detected. */
 async function checkNvidiaDriver(): Promise<NvidiaDriverCheck | null> {
   if (process.platform === "darwin") return null
 
@@ -245,11 +217,7 @@ async function checkNvidiaDriver(): Promise<NvidiaDriverCheck | null> {
   }
 }
 
-/**
- * Validate system hardware requirements for standalone ComfyUI installation.
- * Mirrors the desktop app's validateHardware() — rejects Intel Macs since
- * the MPS backend requires Apple Silicon.
- */
+/** Validate hardware for standalone install. Rejects Intel Macs (MPS needs Apple Silicon). */
 async function validateHardware(): Promise<HardwareValidation> {
   if (process.platform === "darwin") {
     const gpu = await detectMacGPU()

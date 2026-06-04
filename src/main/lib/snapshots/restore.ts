@@ -16,17 +16,7 @@ import type { InstallationRecord } from '../../installations'
 import type { ComfyVersion } from '../version'
 import * as settings from '../../settings'
 
-// --- Pip Restore ---
-
-/**
- * Protected packages that should not be modified during snapshot restore.
- * Matches Manager's skip list plus core tooling.
- *
- * TODO: Expand by detecting packages from the PyTorch index URL rather than
- * hardcoded names. This would automatically cover new CUDA packages without
- * maintaining a list. Also consider computing transitive dependencies of
- * protected packages to avoid breaking their dep chains.
- */
+/** Packages never modified during snapshot restore (Manager's skip list plus core tooling). */
 const PROTECTED_EXACT = new Set(['pip', 'setuptools', 'wheel', 'uv'])
 const PROTECTED_PREFIXES = ['torch', 'nvidia', 'triton', 'cuda']
 
@@ -47,8 +37,8 @@ function findDistInfoDir(sitePackages: string, packageName: string): string | nu
   try {
     for (const entry of fs.readdirSync(sitePackages)) {
       if (!entry.endsWith('.dist-info')) continue
-      // dist-info format: {normalized_name}-{version}.dist-info
-      // Normalized name uses _ not -, so first '-' separates name from version
+      // Format {normalized_name}-{version}.dist-info; normalized name uses _, so the first
+      // '-' separates name from version.
       const stem = entry.slice(0, -'.dist-info'.length)
       const dashIdx = stem.indexOf('-')
       if (dashIdx < 0) continue
@@ -61,10 +51,7 @@ function findDistInfoDir(sitePackages: string, packageName: string): string | nu
   return null
 }
 
-/**
- * Find all directories/files in site-packages belonging to a package.
- * Uses the RECORD file from dist-info to identify top-level entries.
- */
+/** Find all site-packages entries belonging to a package, via the dist-info RECORD file. */
 function findPackageEntries(sitePackages: string, packageName: string): string[] {
   const entries: string[] = []
   const distInfo = findDistInfoDir(sitePackages, packageName)
@@ -90,7 +77,7 @@ function findPackageEntries(sitePackages: string, packageName: string): string[]
       }
     }
   } catch {
-    // Fallback: look for common name patterns
+    // Fallback: common name patterns
     const normalized = normalizeDistInfoName(packageName)
     for (const suffix of ['', '.py', '.libs', '.data']) {
       const candidate = normalized + suffix
@@ -103,10 +90,7 @@ function findPackageEntries(sitePackages: string, packageName: string): string[]
   return entries
 }
 
-/**
- * Create a targeted backup of specific packages from site-packages.
- * Only backs up directories/files that belong to the listed packages.
- */
+/** Back up only the site-packages entries belonging to `packageNames`. */
 async function createTargetedBackup(sitePackages: string, packageNames: string[]): Promise<string> {
   const backupDir = path.join(path.dirname(sitePackages), `.restore-backup-${Date.now()}`)
   await fs.promises.mkdir(backupDir, { recursive: true })
@@ -160,14 +144,9 @@ async function restoreFromBackup(backupDir: string, sitePackages: string): Promi
   }
 }
 
-// Re-export shared runUvPip under local name for existing call sites
 const runUvPip = sharedRunUvPip
 
-/**
- * Restore the ComfyUI version to match a target snapshot.
- * Compares the current HEAD against the snapshot's commit and checks out
- * the target commit if they differ.
- */
+/** Restore the ComfyUI version to the snapshot's commit, checking it out if HEAD differs. */
 export async function restoreComfyUIVersion(
   installPath: string,
   targetSnapshot: Snapshot,
@@ -211,12 +190,9 @@ export async function restoreComfyUIVersion(
 }
 
 /**
- * Build the installation state update to apply after a snapshot restore.
- * Always updates updateChannel and lastRollback so the release cache sees
- * accurate channel state. When the ComfyUI version was successfully restored,
- * also updates version and updateInfoByChannel to match the snapshot.
- * When the version restore failed, uses the current installed state so that
- * the next update check correctly detects a version mismatch.
+ * Build the installation-state update to apply after a restore. Always updates updateChannel
+ * + lastRollback; updates version + updateInfoByChannel to the snapshot when the version
+ * restore succeeded, else keeps current state so the next update check detects the mismatch.
  */
 export function buildPostRestoreState(
   targetSnapshot: Snapshot,
@@ -263,11 +239,7 @@ export function buildPostRestoreState(
   return state
 }
 
-/**
- * Restore pip packages to match a target snapshot.
- * Creates a targeted backup of affected packages before making changes.
- * On failure, reverts from backup.
- */
+/** Restore pip packages to the snapshot, backing up affected packages first and reverting on failure. */
 export async function restorePipPackages(
   installPath: string,
   installation: InstallationRecord,
@@ -308,7 +280,7 @@ export async function restorePipPackages(
       }
       continue
     }
-    // Skip non-standard versions (editable installs, direct references)
+    // Skip editable installs and direct references.
     if (version.startsWith('-e ') || version.includes('://')) continue
 
     if (!(name in currentPips)) {
@@ -329,9 +301,8 @@ export async function restorePipPackages(
     }
   }
 
-  // Identify truly new packages (not in the current env) upfront so we can
-  // uninstall them on revert even if a bulk install was killed mid-way and
-  // result.installed was never populated.
+  // Identify truly-new packages upfront so revert can uninstall them even if a bulk install
+  // was killed mid-way before result.installed was populated.
   const newPkgNames = toInstall
     .filter((p) => !result.changed.some((c) => c.name === p.name))
     .map((p) => p.name)
@@ -358,7 +329,7 @@ export async function restorePipPackages(
   let envDir = getActiveVenvDir(installation)
   let sitePackages = findSitePackages(envDir)
   if (!sitePackages) {
-    // Fallback: legacy envs/default/ layout (pre-migration)
+    // Fallback: legacy envs/default/ layout (pre-migration).
     envDir = path.join(installPath, 'envs', 'default')
     sitePackages = findSitePackages(envDir)
   }
@@ -455,10 +426,8 @@ export async function restorePipPackages(
         await restoreFromBackup(backupDir, sitePackages)
       }
 
-      // Uninstall any packages that were new (not in the pre-restore env).
-      // Use the pre-computed newPkgNames rather than result.installed, because
-      // a killed bulk install may have partially installed packages without
-      // populating result.installed.
+      // Use pre-computed newPkgNames (not result.installed): a killed bulk install may have
+      // partially installed packages without populating result.installed.
       if (newPkgNames.length > 0) {
         await runUvPip(
           uvPath, ['pip', 'uninstall', ...newPkgNames, '--python', pythonPath], installPath, sendOutput
@@ -485,8 +454,6 @@ export async function restorePipPackages(
 
   return result
 }
-
-// --- Custom Node Restore ---
 
 function isManagerNode(node: ScannedNode): boolean {
   return node.id.toLowerCase().includes('comfyui-manager')

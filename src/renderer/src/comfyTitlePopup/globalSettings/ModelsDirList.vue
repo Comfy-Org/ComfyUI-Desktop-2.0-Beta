@@ -88,12 +88,8 @@ function handleRemove(index: number): void {
   emit('remove', index)
 }
 
-/** Path of the row that was most recently promoted to primary. Drives
- *  a brief highlight pulse on the row so the user can't miss that
- *  their click landed — without it, the only signal is the `PRIMARY`
- *  pill swapping rows, which is easy to overlook when the paths look
- *  similar. Cleared by a timer; the row is keyed by `path` so the
- *  same DOM node moves with the data and the class stays attached. */
+/** Path most recently promoted to primary, driving a brief highlight pulse.
+ *  Keyed by `path` so the class rides the row as Vue reorders the list. */
 const justPromotedPath = ref<string | null>(null)
 const justPromotedTimer = ref<ReturnType<typeof setTimeout> | null>(null)
 
@@ -234,12 +230,7 @@ const rows = computed(() =>
   border-top: none;
 }
 
-/* Make-primary feedback: brief yellow pulse on the row that just
- * moved to position 0. Keyed by `path` so the highlight rides the
- * same DOM node when Vue reorders the list. Ramp-in is fast (~10%)
- * to feel responsive, hold for ~20%, then ease back to transparent —
- * standard "flash to confirm" pattern from Material list-item
- * activation. Token-driven; `--neutral-50` is the brand yellow. */
+/* Make-primary feedback: brief yellow pulse on the just-promoted row. */
 .models-dir-row.is-just-promoted {
   animation: models-dir-promote 1200ms ease-out;
 }

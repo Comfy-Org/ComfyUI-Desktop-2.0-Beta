@@ -90,11 +90,6 @@ export type {
   FeatureFlagRegistry,
 }
 
-// ── Constants ──
-
-// Re-export the cross-process cancel string so main-side handlers can
-// pull it from this barrel alongside the other constants. See
-// `src/shared/operationStatus.ts` for the canonical definition.
 export { MSG_CANCELLED } from '../../../shared/operationStatus'
 
 export const MARKER_FILE = '.comfyui-desktop-2'
@@ -104,8 +99,6 @@ export const IGNORE_FILES = new Set([MARKER_FILE, '.DS_Store', 'Thumbs.db', 'des
 export const ALL_UPDATE_CHANNELS = ['stable', 'latest']
 export const RESERVED_ENV_VARS = new Set(['PYTHONIOENCODING', '__COMFY_CLI_SESSION__', 'CM_USE_PYGIT2'])
 export const SENSITIVE_ARG_RE = /^--(api[-_]?key|token|secret|password|auth)$/i
-
-// ── Types ──
 
 export interface SessionInfo {
   proc: ChildProcess | null
@@ -152,16 +145,12 @@ export interface RegisterCallbacks {
   onComfyRestarted?: RestartCallback
   onModelFolderRelaunch?: ModelFolderRelaunchCallback
   onLocaleChanged?: LocaleCallback
-  /** Fires when the resolved theme flips (setting change OR OS-level
-   *  dark-mode flip while setting is `'system'`). Index repaints
-   *  install-less host title bars + OS overlays; install-backed comfy
-   *  windows track ComfyUI's own theme observer instead. */
+  /** Fires when the resolved theme flips. Index repaints install-less host title bars +
+   *  OS overlays; install-backed comfy windows track ComfyUI's own theme observer. */
   onThemeChanged?: ThemeChangedCallback
 }
 
 export type CopyReason = 'copy' | 'copy-update'
-
-// ── Module-level mutable state ──
 
 export const sourceMap: Record<string, SourcePlugin> = Object.fromEntries(sources.map((s) => [s.id, s]))
 
@@ -179,27 +168,15 @@ export const _runningSessions = new Map<string, SessionInfo>()
 export const _pendingPorts = new Map<number, string>()
 
 /**
- * Installation IDs that are mid-launch — between `instance-launching`
- * (port reserved, child spawned) and `instance-started` (live, in
- * `_runningSessions`) or `instance-launch-failed`. Mirrors the
- * renderer-side `sessionStore.launchingInstances` so the picker
- * popup — which can't subscribe to `instance-launching` itself
- * (different preload, no `window.api`) — can be hydrated from a
- * snapshot field instead.
- *
- * Kept as an internal Set so the producer/consumer/cleanup sites
- * (`_markLaunching` / `_clearLaunching` / `_addSession` / launch
- * teardown) can't drift apart. Read via `_getLaunchingInstallationIds`.
+ * Installation IDs mid-launch (between `instance-launching` and `instance-started` /
+ * `instance-launch-failed`). Mirrors the renderer's `sessionStore.launchingInstances` so the
+ * picker popup, which can't subscribe to `instance-launching` itself, hydrates from a snapshot.
  */
 const _launchingInstallationIds = new Set<string>()
 
 /**
- * Internal bus for session lifecycle changes — emitted whenever the
- * launching set or `_runningSessions` mutates. The picker popup
- * subscribes via `titlePopup.ts` to rebroadcast its snapshot so the
- * "Current" pill / CTA / running-dot flip live during the launching
- * window without waiting for the install-record `markLaunched` round-
- * trip at `instance-started` time.
+ * Internal bus emitted whenever the launching set or `_runningSessions` mutates, so the
+ * picker popup repaints its "Current" pill / running-dot live during the launching window.
  */
 export const sessionLifecycleEvents = new EventEmitter()
 
@@ -207,12 +184,7 @@ export function _getLaunchingInstallationIds(): string[] {
   return Array.from(_launchingInstallationIds)
 }
 
-/**
- * Mark `installationId` as mid-launch, broadcast `instance-launching`,
- * and notify subscribers so the picker repaints. Idempotent — a
- * duplicate mark for the same id is a no-op (no spurious snapshot
- * churn). Called from `launch.ts` right after reserving the port.
- */
+/** Mark `installationId` mid-launch and broadcast `instance-launching`. Idempotent. */
 export function _markLaunching(installationId: string, installationName: string): void {
   const wasNew = !_launchingInstallationIds.has(installationId)
   _launchingInstallationIds.add(installationId)
@@ -220,12 +192,8 @@ export function _markLaunching(installationId: string, installationName: string)
   if (wasNew) sessionLifecycleEvents.emit('changed')
 }
 
-/**
- * Symmetric clear for `_markLaunching` on the failure path —
- * broadcasts `instance-launch-failed`. The success path goes through
- * `_addSession` which clears the set inline before broadcasting
- * `instance-started`.
- */
+/** Failure-path clear for `_markLaunching`; broadcasts `instance-launch-failed`. The success
+ *  path clears inline in `_addSession`. */
 export function _clearLaunchingFailed(installationId: string): void {
   const had = _launchingInstallationIds.delete(installationId)
   _broadcastToRenderer('instance-launch-failed', { installationId })
@@ -254,9 +222,8 @@ export interface PickerOperationStatus {
   actionData?: Record<string, unknown>
 }
 
-/** Per-install operation state driven by background (cross-instance) picker ops.
- *  Pushed into `InstancePickerSnapshot.installOperationStatus` on every update
- *  so the picker renderer gets live progress without needing its own IPC listener. */
+/** Per-install state for background picker ops, pushed into the picker snapshot so the
+ *  renderer gets live progress without its own IPC listener. */
 export const _activeOperationStatus = new Map<string, PickerOperationStatus>()
 
 export function setCallbacks(callbacks: RegisterCallbacks): void {
@@ -276,8 +243,6 @@ export function setGpuPromise(p: Promise<GpuInfo | null> | null): void {
 export function getGpuPromise(): Promise<GpuInfo | null> | null {
   return _gpuPromise
 }
-
-// ── Utility functions ──
 
 export async function syncOemSeedBestEffort(): Promise<void> {
   try {
@@ -322,9 +287,7 @@ export function getAppVersion(): string {
   let version = app.getVersion()
   if (!app.isPackaged) {
     try {
-      // Restrict to release tags (`v0.5.0`, etc.) so unrelated tags like
-      // `bootstrap-v1` from the bootstrap-python build don't bleed into the
-      // launcher's displayed version.
+      // Restrict to release tags so unrelated tags (e.g. `bootstrap-v1`) don't bleed in.
       version = execFileSync('git', ['describe', '--tags', '--always', '--match', 'v[0-9]*'], { cwd: __dirname, encoding: 'utf8' }).trim() || version
     } catch {}
   }
@@ -396,14 +359,9 @@ export async function performCopy(
       ...inherited
     } = inst
 
-    // Adopted copies are self-contained after `fixupCopy` deep-copied the
-    // legacy venv + workspace data into the new install. Re-home all
-    // adopted-* fields to point at the new install instead of the original
-    // legacy workspace so adopted-aware code (launch, snapshot restore,
-    // dep installs) keeps working from the copy. The metadata-only
-    // "where did this come from" fields (legacy version, GPU, source mode,
-    // migration tag) describe the original adoption event and are dropped
-    // since they no longer apply to a derived copy.
+    // Adopted copies are self-contained after `fixupCopy`. Re-home adopted-* fields to the
+    // new install so adopted-aware code keeps working; drop the metadata-only "where did
+    // this come from" fields since they describe the original adoption, not the copy.
     let recordData: Record<string, unknown> = {
       ...inherited,
       name: '',  // overwritten below
@@ -437,9 +395,8 @@ export async function performCopy(
         adoptedAt: new Date().toISOString(),
         adoptedBaseDir: newComfyUI,
         adoptedPythonPath: newAdoptedPython,
-        // Workspace data was deep-copied into the new install — point
-        // per-install I/O at the copies so launches don't keep writing
-        // to the legacy workspace.
+        // Point per-install I/O at the deep-copied data so launches don't write to the
+        // legacy workspace.
         useSharedInputOutput: false,
         inputDir: path.join(newComfyUI, 'input'),
         outputDir: path.join(newComfyUI, 'output'),
@@ -497,8 +454,6 @@ export function checkRebootMarker(sessionPath: string): boolean {
   return false
 }
 
-// ── Session state helpers ──
-
 export function _reservePort(port: number, installationName: string): void {
   _pendingPorts.set(port, installationName)
 }
@@ -507,24 +462,18 @@ export function _releasePort(port: number): void {
   _pendingPorts.delete(port)
 }
 
-// Re-exported from ./broadcast so leaf modules (e.g. popup primitives) can
-// register without importing the rest of this file's IPC handler universe.
-// `_broadcastToRenderer` itself is also imported at the top of this file
-// for internal use; the named re-export keeps the long-standing
-// `from './shared'` consumers working.
+// Re-exported from ./broadcast so leaf modules can register without importing this file's
+// whole IPC handler universe.
 export { _registerExtraBroadcastTarget, _unregisterExtraBroadcastTarget, _broadcastToRenderer } from './broadcast'
 
 export function _addSession(installationId: string, { proc, port, url, mode, installationName }: Omit<SessionInfo, 'startedAt'>, bootTimeMs?: number): void {
   _runningSessions.set(installationId, { proc, port, url, mode, installationName, startedAt: Date.now() })
-  // Clear the launching marker first so the lifecycle-event
-  // subscribers see a coherent snapshot (running set ∪ launching set
-  // never double-counts an id across the transition).
+  // Clear the launching marker first so subscribers never double-count this id across the
+  // transition.
   _launchingInstallationIds.delete(installationId)
   _broadcastToRenderer('instance-started', { installationId, port, url, mode, installationName, bootTimeMs })
   sessionLifecycleEvents.emit('changed')
-  // Stamps `lastLaunchedAt` + `lastLaunchedAtByCategory[category]` so
-  // per-category recency surfaces don't scan every record. Resolver
-  // runs inside `markLaunched`'s lock to avoid an extra read.
+  // Stamps lastLaunchedAt + per-category recency so those surfaces needn't scan every record.
   installations.markLaunched(installationId, (inst) => sourceMap[inst.sourceId]?.category)
     .then(() => _broadcastToRenderer('installations-changed', {}))
     .catch((err) => {
@@ -551,8 +500,6 @@ export function _getPublicSessions(): Record<string, unknown>[] {
     startedAt: s.startedAt,
   }))
 }
-
-// ── Version resolution helpers ──
 
 export async function _fetchAndResolveLatestTags(
   installs: Array<{ comfyuiDir: string }>
@@ -582,11 +529,8 @@ export async function _fetchAndResolveLatestTags(
   return result
 }
 
-// Scheduling guard for the fire-and-forget background resolver invoked from
-// `get-installations`.  Renderer mounts / refreshes used to spawn a fresh
-// pygit2 burst on every call.  Now we coalesce overlapping invocations
-// (single-flight) and rate-limit subsequent runs (TTL) so repeated UI
-// fetches don't churn the bundled Python interpreter.
+// Single-flight + TTL guard for the background resolver invoked from `get-installations`, so
+// repeated UI fetches don't churn the bundled Python interpreter with pygit2 bursts.
 let _resolveVersionsInFlight: Promise<void> | null = null
 let _lastResolveVersionsAt = 0
 const RESOLVE_VERSIONS_TTL_MS = 10 * 60 * 1000
@@ -618,21 +562,14 @@ export async function _resolveAndBroadcastVersions(list: InstallationRecord[]): 
     const origin = readGitRemoteUrl(comfyuiDir)
     const override = origin ? tagOverrides.get(origin) : undefined
     try {
-      // Read actual HEAD — it may differ from cv.commit if the user
-      // made external changes (manual git pull, checkout, etc.).
+      // Read actual HEAD; it may differ from cv.commit after external changes (manual pull, checkout).
       const actualHead = readGitHead(comfyuiDir) || cv.commit
 
       const resolved = await resolveLocalVersion(comfyuiDir, actualHead, undefined, override)
 
-      // Guard a one-way downgrade ratchet: tag-resolution can fail
-      // transiently (pygit2 mismatch, network blip, missing remote /
-      // git), returning a bare `{ commit }`. Persisting it would clobber
-      // a populated `{ commit, baseTag, commitsAhead }` and downgrade
-      // the chooser tile to a bare SHA — nothing else writes baseTag
-      // back for installs whose HEAD isn't on a tag (the entire
-      // 'latest' channel). Bail when the new resolution would strictly
-      // lose info for the same commit; a genuinely-new commit still
-      // writes through because commit-equality fails.
+      // Downgrade ratchet: tag-resolution can transiently fail and return a bare `{ commit }`.
+      // Persisting it would clobber a populated `{ commit, baseTag, commitsAhead }` for the
+      // same commit, so bail; a genuinely-new commit still writes through.
       if (cv?.baseTag && !resolved.baseTag && resolved.commit === cv.commit) {
         return
       }
@@ -671,8 +608,6 @@ export async function _resolveAndBroadcastVersions(list: InstallationRecord[]): 
     _broadcastToRenderer('installations-versions-updated', { updates })
   }
 }
-
-// ── Startup helpers ──
 
 export async function migrateDefaults(): Promise<void> {
   const all = await installations.list()
@@ -715,9 +650,8 @@ export function resolveTheme(): ResolvedTheme {
   return theme === 'system' ? (nativeTheme.shouldUseDarkColors ? 'dark' : 'light') : theme
 }
 
-// Single-flight guard: overlapping calls await the same in-flight run rather
-// than triggering parallel bursts of git / pygit2 work.  Boot + periodic
-// timer + manual refresh all share one execution.
+// Single-flight: overlapping calls (boot, periodic timer, manual refresh) share one run
+// rather than firing parallel git/pygit2 bursts.
 let _checkInstallationUpdatesInFlight: Promise<void> | null = null
 
 export function checkInstallationUpdates(): Promise<void> {
@@ -768,8 +702,6 @@ export function makeSendOutput(sender: Electron.WebContents, installationId: str
     try { if (!sender.isDestroyed()) sender.send('comfy-output', { installationId, text }) } catch {}
   }
 }
-
-// ── Exported session lifecycle helpers ──
 
 export async function stopRunning(installationId?: string): Promise<void> {
   if (installationId) {
@@ -837,14 +769,9 @@ export async function getActiveDetails(): Promise<QuitActiveItem[]> {
   return items
 }
 
-/** Test-only: register a synthetic running session for an install
- *  without spawning a real ComfyUI process. Mirrors the side effects
- *  of `_addSession` (renderer `instance-started` broadcast →
- *  `sessionStore.isRunning(id)` flips true; main `_runningSessions`
- *  populated so the REQUIRES_STOPPED guard in `registerSessionHandlers`
- *  fires). `stopRunning` handles the null `proc` case cleanly so the
- *  panel's stop-confirm chain resolves end-to-end. Only called via
- *  `__e2e.seedRunningSession` and gated behind `process.env.E2E === '1'`. */
+/** Test-only: register a synthetic running session without spawning ComfyUI. Mirrors
+ *  `_addSession`'s side effects so the REQUIRES_STOPPED guard fires; `stopRunning` handles
+ *  the null `proc`. Called only via `__e2e.seedRunningSession`. */
 export function _test_addRunningSession(
   installationId: string,
   installationName: string,
@@ -866,9 +793,7 @@ export function _test_addRunningSession(
   })
 }
 
-/** Test-only: drop every synthetic session registered via
- *  `_test_addRunningSession`. Broadcasts `instance-stopped` per entry
- *  so renderer sessionStore mirrors main. */
+/** Test-only: drop every synthetic session, broadcasting `instance-stopped` per entry. */
 export function _test_clearRunningSessions(): void {
   const ids = Array.from(_runningSessions.keys())
   _runningSessions.clear()

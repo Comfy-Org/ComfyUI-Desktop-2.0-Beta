@@ -1,27 +1,9 @@
 <script setup lang="ts">
-/**
- * BaseAccordion — smooth height-animated disclosure primitive.
- *
- * Mirrors shadcn's Radix-based Accordion behavior using a CSS-only
- * `grid-template-rows: 0fr → 1fr` transition. No JS height measurement,
- * no layout thrash, no fixed `max-height` cap — content of any size
- * expands from 0 to its natural height and back, smoothly.
- *
- * Consumers control state via the `open` prop. The component renders no
- * trigger / header chrome — pair it with whatever expansion button the
- * surrounding UI already has (chevron, row click target, etc.).
- *
- * Why grid-template-rows over max-height: max-height needs a guessed
- * cap (too low = clip, too high = laggy late-stage easing). The grid
- * trick transitions between two intrinsic states (0fr and 1fr) so the
- * animation always covers the exact content height at the exact pace.
- */
+// Height-animated disclosure via a CSS `grid-template-rows: 0fr → 1fr`
+// transition, which covers the exact content height without a max-height cap.
 
 interface Props {
-  /** When true, content is revealed at its natural height. */
   open: boolean
-  /** Transition duration in ms. Defaults to 220ms — matches the rest
-   *  of the drawer's motion rhythm. */
   duration?: number
 }
 
@@ -55,10 +37,7 @@ withDefaults(defineProps<Props>(), { duration: 220 })
   grid-template-rows: 1fr;
 }
 
-/* The inner wrapper needs `min-height: 0` so the grid track can
- * actually collapse to 0fr (Firefox quirk). `overflow: hidden` clips
- * content during the transition so partially-collapsed text doesn't
- * leak below the row. */
+/* `min-height: 0` lets the grid track collapse to 0fr (Firefox quirk). */
 .ui-accordion-inner {
   min-height: 0;
   overflow: hidden;

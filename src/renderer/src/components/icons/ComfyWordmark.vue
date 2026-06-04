@@ -1,11 +1,4 @@
-<script setup lang="ts">
-/**
- * "Comfy" stylized wordmark. Rendered centered above the brand
- * progress bar on the first-use install screen. The path is
- * intrinsically sized; consumers should set `width` / `height`
- * via CSS on the host element.
- */
-</script>
+<script setup lang="ts"></script>
 
 <template>
   <svg xmlns="http://www.w3.org/2000/svg" width="100" height="23" viewBox="0 0 100 23" fill="none">

@@ -1,22 +1,9 @@
 // @vitest-environment node
 /**
- * Integration test: standalone source `migrate-from` handler.
- *
- * No UI surface dispatches `migrate-from` directly today — the renderer
- * never builds an action entry for it. The handler is only reachable
- * programmatically through `handleReleaseUpdate`, which chains it after
- * the post-install bootstrap. That makes a full @lifecycle Playwright
- * test the wrong shape (no user click flow to validate) — but the merge
- * primitives the handler composes (`listCustomNodes`, `mergeDirFlat`,
- * `copyDirWithProgress`) are shared with the release-update path and
- * worth pinning at the handler boundary.
- *
- * Drives `handleAction('migrate-from', ...)` directly with a real
- * temporary filesystem source/destination pair. Electron, settings,
- * installations, i18n, pip, and envPaths are mocked so the test does
- * not need a real ComfyUI install on disk.
- *
- * Mirrors `updateOrchestrator.integration.test.ts` for the mock layout.
+ * Integration test for the standalone `migrate-from` handler. No UI dispatches it
+ * directly (it's only reachable via `handleReleaseUpdate`), so a Playwright test is
+ * the wrong shape; this drives `handleAction` against a real temp filesystem with
+ * Electron/settings/installations/i18n/pip/envPaths mocked.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import fs from 'fs'
@@ -60,17 +47,14 @@ vi.mock('../../lib/pip', () => ({
   installFilteredRequirements: vi.fn(async () => 0),
 }))
 
-// `installations.get(sourceId)` is the only entry point handleMigrateFrom
-// uses on this module. State is reset per test via beforeEach.
+// `installations.get` is the only entry point handleMigrateFrom uses here.
 const installationsStore: Record<string, InstallationRecord> = {}
 vi.mock('../../installations', () => ({
   get: vi.fn(async (id: string) => installationsStore[id] ?? null),
 }))
 
-// Source / destination dirs are isolated per test, so `settings.get`
-// for shared paths is never invoked when both shared toggles are off on
-// the destination — but stub it anyway so any future drift surfaces
-// the missing field instead of crashing.
+// Shared paths are never read with both toggles off, but stub anyway so future drift
+// surfaces a missing field instead of crashing.
 vi.mock('../../settings', () => ({
   get: vi.fn(() => undefined),
   defaults: { modelsDirs: ['/unused-test-models-dir'], inputDir: '/unused-test-input-dir', outputDir: '/unused-test-output-dir' },

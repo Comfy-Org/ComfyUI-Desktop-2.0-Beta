@@ -1,8 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-// Stub the parts of electron that shared.ts touches at module load time.
-// We only test the broadcast registry — none of the heavyweight session/lifecycle
-// helpers — so an empty BrowserWindow.getAllWindows is enough.
+// Stub the electron parts shared.ts touches at load; we only test the registry.
 vi.mock('electron', () => ({
   app: {
     isPackaged: false,
@@ -26,9 +24,7 @@ import {
 interface FakeWebContents {
   isDestroyed: () => boolean
   send: ReturnType<typeof vi.fn>
-  // Subset of the Electron type used by the registry.
   once: (event: string, cb: () => void) => void
-  // Populated by tests that exercise the destroyed listener.
   __destroy?: () => void
 }
 
@@ -43,9 +39,7 @@ function makeFakeWc(opts: { destroyed?: boolean } = {}): FakeWebContents {
   return wc
 }
 
-afterEach(() => {
-  // Best-effort cleanup of any leftover registered targets across tests.
-})
+afterEach(() => {})
 
 describe('_broadcastToRenderer extra target registry', () => {
   it('forwards broadcasts to a registered WebContents', () => {

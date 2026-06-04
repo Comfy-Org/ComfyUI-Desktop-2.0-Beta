@@ -2,10 +2,8 @@ import { describe, it, expect, vi } from 'vitest'
 import fs from 'fs'
 import path from 'path'
 
-// The bundled output lands in out/main/index.js, so __dirname at runtime
-// is always <projectRoot>/out/main.  The dev-mode formula must resolve
-// from there to <projectRoot>/lib/<script>.
-
+// At runtime __dirname is <projectRoot>/out/main, so the dev-mode formula must
+// resolve from there to <projectRoot>/lib/<script>.
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..', '..')
 
 /** Simulate the dev-mode path resolution as it runs inside the bundle. */

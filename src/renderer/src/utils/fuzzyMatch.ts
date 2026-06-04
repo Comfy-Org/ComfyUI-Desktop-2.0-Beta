@@ -1,26 +1,7 @@
 /**
- * Shared fuzzy-matching primitive used by surfaces that filter a list
- * of named items by a user-typed needle (chooser dashboard search,
- * Comfy args builder flag search, …).
- *
- * Both inputs are expected lowercased by the caller. Returns a positive
- * score on a hit, 0 on miss, and 1 on empty needle (so callers can use
- * `score > 0` as "matches" and a stable positive value for sort ties).
- *
- * Tiers:
- *   - Exact match            (1000)
- *   - Whole-string prefix    (900 - len penalty)
- *   - Word-prefix elsewhere  (800)   e.g. "device" → "cuda-device"
- *   - Contiguous substring   (600 - position penalty)
- *   - Acronym hit            (400)   e.g. "cd" → "cuda-device"
- *   - Tight subsequence      (50-200, span ≤ 2× needle)
- *
- * Loose subsequence matches are explicitly NOT allowed — they were the
- * root cause of "cuda" matching `--enable-cors-header` via c…r…s.
- *
- * Word boundaries: hyphens, underscores, AND whitespace — so it works
- * for both hyphenated flag names ("cuda-device") and space-separated
- * install names ("ComfyUI Legacy Desktop").
+ * Fuzzy-match a lowercased needle against a lowercased name. Returns >0 on hit, 0 on miss, 1 on empty needle.
+ * Tiers: exact (1000), whole-string prefix (900−len), word-prefix (800), substring (600−pos), acronym (400), tight subsequence (50–200, span ≤ 2× needle).
+ * Loose subsequence is rejected on purpose (it made "cuda" match `--enable-cors-header`). Word boundaries are hyphen, underscore, and whitespace.
  */
 export function scoreName(needle: string, name: string): number {
   if (!needle) return 1

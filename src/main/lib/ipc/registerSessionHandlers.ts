@@ -60,11 +60,8 @@ export function registerSessionHandlers(): void {
       return { ok: false, message: i18n.t('errors.stopRequired'), running: true }
     }
     if (REQUIRES_STOPPED.has(actionId) && _operationAborts.has(installationId)) {
-      // The string has an `{operation}` placeholder — substitute it with
-      // the localized action label when we have one, falling back to the
-      // raw action id so the user at least sees *something* (and the
-      // renderer never paints the raw `{operation}` template, which was
-      // the regression here).
+      // Substitute the `{operation}` placeholder with the localized label, falling back to
+      // the raw action id so the renderer never paints the bare template.
       const labelKey = `actions.${actionId}`
       const label = i18n.t(labelKey)
       const operation = label === labelKey ? actionId : label

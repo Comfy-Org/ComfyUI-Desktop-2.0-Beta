@@ -158,9 +158,6 @@ describe('useLocalInstanceGuard', () => {
 
     const result = await guard.checkBeforeLaunch('target')
 
-    // stopComfyUI awaits the process kill (port free for the new launch);
-    // closeComfyWindow then retires the host window so the user isn't
-    // left on a stopped surface they didn't choose to revisit.
     expect(window.api.stopComfyUI).toHaveBeenCalledWith('other')
     expect(window.api.closeComfyWindow).toHaveBeenCalledWith('other', { skipConfirm: true })
     expect(result).toBe(true)

@@ -14,32 +14,18 @@ export interface KnownSettings {
   outputDir: string
   language?: string
   theme?: string
-  /**
-   * Legacy "Check for updates on startup" toggle. Issue #488 split this
-   * into "always auto-check" (no longer gated by a setting) and
-   * `autoInstallUpdates` (new toggle for silent install vs prompt).
-   * The key stays in the schema so existing settings.json files don't
-   * lose data; a future setting may re-expose it.
-   */
+  /** Legacy "check for updates on startup" toggle. No longer gated on a setting;
+   *  kept in the schema so existing settings.json files don't lose data. */
   autoUpdate?: boolean
-  /**
-   * Issue #488 — when true (default), Desktop app updates download
-   * silently in the background and are installed silently on the next
-   * relaunch (or when the user clicks the "Desktop Update Ready" pill).
-   * When false, the user is prompted before any download / install.
-   */
+  /** When true (default), Desktop updates download and install silently; when
+   *  false, the user is prompted before any download/install. */
   autoInstallUpdates?: boolean
   pypiMirror?: string
   useChineseMirrors?: boolean
   chineseMirrorsPrompted?: boolean
   telemetryEnabled?: boolean
-  /**
-   * `true` once the user has finished the first-use takeover (T&C +
-   * telemetry consent + locale-conditional China mirror prompt +
-   * Cloud/Local pick). Persists across launches so the takeover only
-   * shows on the very first run. Mid-flow cancel does NOT flip this —
-   * the takeover replays from step 1 next launch.
-   */
+  /** `true` once the first-use takeover is finished. Mid-flow cancel does NOT
+   *  flip this, so the takeover replays from step 1 next launch. */
   firstUseCompleted?: boolean
   oemManagedModelDirs?: string[]
   oemWorkflowImportVersion?: number
@@ -98,10 +84,7 @@ function isNullableKnownSettingKey(key: KnownSettingKey): key is NullableKnownSe
 export const defaults: SettingsDefaults = {
   cacheDir: path.join(cacheDir(), "download-cache"),
   maxCachedFiles: 5,
-  // Docking-to-tray is disabled while the unified-window flow is being
-  // rebuilt — see main/index.ts (createTray() is a no-op for now).
-  // When docking comes back, default this to 'tray' again and restore
-  // the settings UI field in registerSettingsHandlers.ts.
+  // Docking-to-tray is disabled (createTray() is currently a no-op).
   onAppClose: "quit",
   modelsDirs: [path.join(SHARED_ROOT, "models")],
   inputDir: path.join(SHARED_ROOT, "input"),
@@ -164,8 +147,7 @@ function sanitizeModelsDirs(value: unknown, currentDefault: string): string[] {
     result.push(candidate)
   }
 
-  // Ensure the system default is present, but preserve user ordering.
-  // Append (don't prepend) so the user's chosen primary path stays at [0].
+  // Append (don't prepend) the system default so the user's primary stays at [0].
   const resolvedDefault = path.resolve(currentDefault)
   if (!seen.has(resolvedDefault)) {
     result.push(resolvedDefault)
@@ -174,26 +156,20 @@ function sanitizeModelsDirs(value: unknown, currentDefault: string): string[] {
   return result
 }
 
-/**
- * E2E-only: write the contents of `E2E_SETTINGS_SEED` to settings.json
- * before the first read. Avoids the harness having to guess the
- * platform-specific `userData` path (especially on macOS where
- * Application Support is rooted at the real pw_dir, ignoring HOME).
- * Runs at most once per process.
- */
+/** E2E-only: write `E2E_SETTINGS_SEED` to settings.json before the first read,
+ *  so the harness needn't guess the platform-specific `userData` path. Runs at
+ *  most once per process. */
 let e2eSeedApplied = false
 function maybeSeedFromEnv(): void {
   if (e2eSeedApplied) return
   e2eSeedApplied = true
-  // Hard guard: never run in production builds, even if a malicious
-  // env var sneaks in.
+  // Hard guard: never run in production builds.
   if (app.isPackaged) return
   if (process.env['E2E'] !== '1') return
   const seed = process.env['E2E_SETTINGS_SEED']
   if (!seed) return
-  // Drop the env var immediately so it doesn't leak into child
-  // processes (Python, ComfyUI server) — the JSON payload may carry
-  // sensitive test fixtures we don't want exposed beyond this process.
+  // Drop the env var so the (possibly sensitive) payload doesn't leak into child
+  // processes (Python, ComfyUI server).
   delete process.env['E2E_SETTINGS_SEED']
   try {
     JSON.parse(seed) // validate before writing
@@ -226,9 +202,7 @@ function load(): Settings {
   const result: Settings = { ...defaults, ...(parsed || {}) }
   let changed = false
 
-  // Drop legacy pin-related keys (`primaryInstallId`, `pinnedInstallIds`)
-  // that no longer back any UI affordance. Purely advisory, so dropping
-  // them on first load is sufficient.
+  // Drop legacy pin keys that no longer back any UI.
   for (const key of ['primaryInstallId', 'pinnedInstallIds']) {
     if (Object.prototype.hasOwnProperty.call(result, key)) {
       delete result[key]
@@ -236,12 +210,9 @@ function load(): Settings {
     }
   }
 
-  // Drop a legacy `onAppClose: 'tray'` value while docking-to-tray is
-  // disabled. The setting is still in the schema (and the tray-aware
-  // close path will come back), but until then a stale `'tray'` value
-  // would silently take effect the moment docking is restored. Dropping
-  // only the `'tray'` value preserves an explicit `'quit'` choice the
-  // user may have set.
+  // Drop a stale `onAppClose: 'tray'` while docking is disabled, else it would
+  // silently take effect the moment docking is restored. Preserves a `'quit'`
+  // choice.
   if (result.onAppClose === 'tray') {
     delete (result as Record<string, unknown>).onAppClose
     changed = true
@@ -277,7 +248,7 @@ function load(): Settings {
     }
   }
 
-  // Ensure modelsDirs is a valid array of non-empty strings; inject system default only as a fallback
+  // Keep modelsDirs a valid array of non-empty strings; inject system default as fallback.
   if (Array.isArray(result.modelsDirs)) {
     const before = result.modelsDirs.length
     result.modelsDirs = result.modelsDirs.filter((d): d is string => typeof d === 'string' && d.trim() !== '')
@@ -290,14 +261,12 @@ function load(): Settings {
     result.modelsDirs.push(systemDefault)
     changed = true
   }
-  // Create the system default directory and model subdirectories on disk
   try {
     fs.mkdirSync(systemDefault, { recursive: true })
     for (const folder of MODEL_FOLDER_TYPES) {
       fs.mkdirSync(path.join(systemDefault, folder), { recursive: true })
     }
   } catch {}
-  // Create shared input/output directories
   try {
     for (const key of ["inputDir", "outputDir"] as const) {
       const dir = (result[key] as string | undefined) || defaults[key]
@@ -326,9 +295,8 @@ export function set<K extends string>(
   value: K extends KnownSettingKey ? KnownSettings[K] | undefined : unknown
 ): void {
   const settings = load()
-  // `undefined` is the canonical "unset/default" value in settings.
-  // For known non-nullable keys, treat `null` the same way.
-  // For string keys in EMPTY_STRING_MEANS_UNSET, treat '' / whitespace as unset.
+  // `undefined` = unset/default; for non-nullable known keys treat `null` the
+  // same, and for EMPTY_STRING_MEANS_UNSET keys treat '' / whitespace as unset.
   if (
     value === undefined
     || (value === null && isKnownSettingKey(key) && !isNullableKnownSettingKey(key))
@@ -347,21 +315,12 @@ export function getAll(): Settings {
 }
 
 /**
- * Returns `true` iff `key` looks like a user-chosen value — i.e. it's
- * explicitly persisted in `settings.json` as a non-null value AND, for
- * defaulted keys, differs from the built-in default. Required so the
- * legacy-adopt carry can apply the "v2 user choice wins" rule without
- * being fooled by defaults that get persisted as a side effect of any
- * `set()` call (the merged-result write in `load()` re-serializes the
- * full `{ ...defaults, ...parsed }` object on first save).
- *
- * Edge case: a user who explicitly picks a value identical to the
- * default will be mis-classified as "not set" and have legacy values
- * carried over them. That's accepted — they wanted the default anyway,
- * and the legacy value either also matches (no-op) or replaces it with
- * something they'll see and can change.
- *
- * Returns `false` on parse errors or when the file is missing.
+ * `true` iff `key` looks user-chosen: persisted in settings.json as non-null
+ * AND, for defaulted keys, differing from the built-in default. The
+ * default-comparison guards against `load()`'s merged write persisting defaults
+ * as a side effect, which would otherwise fool the legacy-adopt carry. A user
+ * who explicitly picks the default value is misclassified as "not set"
+ * (accepted). Returns `false` on parse errors or a missing file.
  */
 export function has(key: string): boolean {
   const raw = readFileSafe(dataPath)

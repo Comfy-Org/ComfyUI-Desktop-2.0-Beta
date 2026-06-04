@@ -18,19 +18,9 @@ export interface ListActionCallbacks {
   onNavigate?: (result: ActionResult, action: ListAction) => void | Promise<void>
 }
 
-/**
- * Per-call hooks for an `executeAction` invocation.
- *
- * `onGuardsPassed` fires exactly once, after every cancel-path
- * (disabled-message alert, busy guard, confirm modal, local-instance
- * guard) has resolved positively but BEFORE the action is actually
- * dispatched (either through `callbacks.showProgress` or the inline
- * `runAction` path). The chooser-host pick flow uses this to stake the
- * in-place attach claim only when the launch will really proceed —
- * staking earlier (before the guard) would cross-window overwrite a
- * sibling chooser's existing claim and leave the wrong window with the
- * preview / claim if the user cancels.
- */
+// `onGuardsPassed` fires once after all cancel-paths pass but before the
+// action dispatches, so the chooser stakes its attach claim only when the
+// launch will really proceed (staking earlier would clobber a sibling's claim).
 export interface ListActionInvocationHooks {
   onGuardsPassed?: () => Promise<void> | void
 }
@@ -61,10 +51,7 @@ export function useListAction(uiSurface: string, callbacks: ListActionCallbacks)
       REQUIRES_STOPPED.has(action.id) && action.id !== 'migrate-to-standalone'
     const wasRunning = sessionStore.isRunning(inst.id)
 
-    // Busy guard fires for every list-action runner so non-REQUIRES_STOPPED
-    // entries (e.g. `launch`, `restart`, source-delegated actions) can't
-    // race an in-flight op on the same install. The guard no-ops when
-    // nothing is running.
+    // Busy guard runs for every action so none can race an in-flight op.
     if (!(await actionGuard.checkBeforeAction(inst.id, action.label))) return
 
     if (action.confirm || (requiresStoppedGuard && wasRunning)) {
@@ -104,12 +91,9 @@ export function useListAction(uiSurface: string, callbacks: ListActionCallbacks)
       }
     }
 
-    // Launch on a not-yet-adopted Legacy Desktop install funnels through
-    // a migrate-then-launch chain instead — adoption is the prerequisite
-    // for ComfyUI to actually run under Desktop 2.0. This path has its own
-    // confirm + showProgress + early return, and skips onGuardsPassed
-    // because the eventual launch is against a freshly-adopted
-    // newInstallationId rather than this inst.id.
+    // Launching a not-yet-adopted Legacy Desktop install runs a
+    // migrate-then-launch chain (adoption is the prerequisite). Skips
+    // onGuardsPassed since the launch targets the freshly-adopted install.
     if (action.id === 'launch' && inst.sourceId === 'desktop' && !inst.adopted) {
       const confirmed = await modal.confirm({
         title: t('desktop.migrateBeforeLaunchTitle'),
@@ -136,8 +120,7 @@ export function useListAction(uiSurface: string, callbacks: ListActionCallbacks)
         apiCall: async () => {
           const migrateResult = await window.api.runAction(inst.id, 'migrate-to-standalone')
           if (!migrateResult.ok || !migrateResult.newInstallationId) return migrateResult
-          // Hand off to the freshly-adopted install in the same overlay
-          // so the user sees one continuous "migrate → launch" flow.
+          // Launch the adopted install in the same overlay (continuous flow).
           return window.api.runAction(migrateResult.newInstallationId, 'launch')
         },
         cancellable: true,
@@ -147,9 +130,7 @@ export function useListAction(uiSurface: string, callbacks: ListActionCallbacks)
       return
     }
 
-    // All cancel-paths have committed to running. Side effects that
-    // must NOT survive a cancel (chooser in-place attach claim +
-    // title-bar preview) belong in this hook.
+    // Past all cancel-paths; cancel-sensitive side effects go in this hook.
     if (hooks?.onGuardsPassed) await hooks.onGuardsPassed()
 
     sessionStore.clearErrorInstance(inst.id)
@@ -163,10 +144,8 @@ export function useListAction(uiSurface: string, callbacks: ListActionCallbacks)
     const isRunning = (): boolean => sessionStore.isRunning(inst.id)
 
     if (action.showProgress) {
-      // Tag launch / restart so PanelApp's `handleShowProgress` installs
-      // the chooser-host close-on-instance-started subscription AND
-      // routes through the brand-chrome takeover when the source is an
-      // install-less chooser host. Mirrors DetailModal's flag.
+      // Tag launch/restart so the host installs the close-on-instance-started
+      // subscription and routes through the brand-chrome takeover.
       const triggersInstanceStart =
         action.id === 'launch' || action.id === 'restart' || wantsRelaunch
       const apiCall = needsSelfStop

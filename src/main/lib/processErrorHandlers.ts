@@ -36,21 +36,15 @@ export function forwardDatadogError(payload: DatadogForwardedError): void {
     ...payload,
     message: scrubAll(payload.message),
     stack: payload.stack ? scrubAll(payload.stack) : undefined,
-    // Mark this error as already captured by main-process PostHog so the
-    // renderer's `onDatadogError` listener routes it to Datadog only and
-    // we don't double-count exceptions in PostHog.
+    // Mark as already captured by main-process PostHog so the renderer routes it to Datadog
+    // only and we don't double-count in PostHog.
     skipPostHog: true,
   }
-  // Broadcast to any open panel renderer so its `onDatadogError`
-  // listener can forward the error to Datadog RUM (the panel
-  // renderer hosts the telemetry bootstrap). When no panel is open
-  // the broadcast is a no-op and we still capture below via PostHog
-  // Node.
+  // Broadcast to any open panel renderer to forward to Datadog RUM; no-op when none is open.
   try {
     _broadcastToRenderer('dd-error', scrubbed)
   } catch {}
-  // Also surface to PostHog Node so we don't lose the error if no renderer is
-  // listening (render-process-gone, before-quit shutdown, no panel open yet).
+  // Also capture via PostHog Node so the error isn't lost when no renderer is listening.
   try {
     const err = new Error(scrubbed.message)
     if (scrubbed.stack) err.stack = scrubbed.stack

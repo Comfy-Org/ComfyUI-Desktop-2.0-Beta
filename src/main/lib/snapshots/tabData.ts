@@ -4,7 +4,6 @@ import type { SnapshotSummary, SnapshotDetailData, SnapshotDiffData } from './ty
 
 export async function getSnapshotListData(installPath: string): Promise<{ snapshots: SnapshotSummary[]; totalCount: number }> {
   const entries = await listSnapshots(installPath)
-  // Resolve versions for all unique commits in parallel (cache makes dupes free)
   const versionPromises = entries.map((entry) =>
     resolveSnapshotVersion(installPath, entry.snapshot.comfyui, 'short')
   )
@@ -20,12 +19,11 @@ export async function getSnapshotListData(installPath: string): Promise<{ snapsh
       nodeCount: s.customNodes.length,
       pipPackageCount: Object.keys(s.pipPackages).length,
     }
-    // Diff against the next entry (which is the previous snapshot, since sorted newest-first)
+    // Entries are sorted newest-first, so the next entry is the previous snapshot.
     if (i < entries.length - 1) {
       const prev = entries[i + 1]!.snapshot
       const diff = diffSnapshots(prev, s)
       const ds = summarizeDiff(diff)
-      // Only include if there are actual changes
       if (ds.comfyuiChanged || ds.updateChannelChanged || ds.nodesAdded || ds.nodesRemoved || ds.nodesChanged ||
           ds.pipsAdded || ds.pipsRemoved || ds.pipsChanged) {
         summary.diffVsPrevious = ds
@@ -58,7 +56,7 @@ export async function getSnapshotDiffVsPrevious(installPath: string, filename: s
   const idx = entries.findIndex((e) => e.filename === filename)
   if (idx < 0) throw new Error(`Snapshot not found: ${filename}`)
   if (idx >= entries.length - 1) {
-    // This is the oldest snapshot — no previous to diff against
+    // Oldest snapshot — no previous to diff against.
     return {
       mode: 'previous',
       baseLabel: '',

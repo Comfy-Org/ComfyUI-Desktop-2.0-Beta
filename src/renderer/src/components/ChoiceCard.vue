@@ -8,15 +8,10 @@ withDefaults(
     description: string
     tagline?: string
     disabled?: boolean
-    /** Adds a soft plum glow behind the card content. Opt-in for the
-     *  Cloud option on the first-use pick step — Local stays plain. */
     glow?: boolean
-    /** Renders the card as a radio option: indicator on the left, no
-     *  trailing arrow. The card click becomes "select", not "commit" —
-     *  the parent owns the commit step via a separate Continue button. */
+    /** Renders as a radio option (left indicator, no arrow); click selects
+     *  rather than commits, leaving the commit to a parent Continue button. */
     selectable?: boolean
-    /** Whether this radio card is the currently-picked option. Only
-     *  meaningful when `selectable` is true. */
     selected?: boolean
   }>(),
   {
@@ -78,11 +73,8 @@ defineEmits<{ click: [] }>()
   padding: 0;
   border: 1px solid var(--brand-surface-border);
   border-radius: 10px;
-  /* Resting bg lifted from `--brand-surface-bg` (5% gray) to the
-   * hover token so the cards visibly separate from the takeover
-   * surface even at rest. Hover then steps to a brighter `border`
-   * tone (~18% white) instead of a barely-different bg — keeps the
-   * resting state legible AND gives hover a real lift. */
+  /* Resting bg uses the hover token so cards separate from the takeover
+   * surface even at rest. */
   background: var(--brand-surface-bg-hover);
   backdrop-filter: blur(var(--brand-surface-blur));
   color: var(--neutral-100);
@@ -95,9 +87,6 @@ defineEmits<{ click: [] }>()
   font: inherit;
 }
 .choice-card:hover:not(:disabled) {
-  /* Border steps up to give the hover a clear edge cue; bg stays in
-   * the same gray family as resting and lifts by ~3% so the surface
-   * doesn't flash white-bright on hover. */
   border-color: var(--brand-surface-border-hover);
   background: rgba(137, 137, 137, 0.13);
 }
@@ -116,10 +105,8 @@ defineEmits<{ click: [] }>()
   opacity: 0.5;
   cursor: not-allowed;
 }
-/* Selectable variant: card acts as a radio option. Selected state
- * lifts the border to the brand blue (--accent-primary) — yellow is
- * reserved for the CTA so the radio doesn't compete with the
- * Continue button for primary attention. */
+/* Selected uses brand blue, not yellow, so the radio doesn't compete with
+ * the yellow Continue CTA for attention. */
 .choice-card--selected {
   border-color: color-mix(in oklab, var(--accent-primary) 60%, transparent);
   background: color-mix(in oklab, var(--accent-primary) 6%, var(--brand-surface-bg-hover));
@@ -162,10 +149,8 @@ defineEmits<{ click: [] }>()
   font-weight: 500;
   line-height: normal;
   color: var(--neutral-100);
-  /* Stronger gradient + thin bottom rule so the tagline reads as a
-   * distinct header band, not a watermark on the card surface. The
-   * previous 7% white left edge was so close to the card bg that the
-   * band visually disappeared. */
+  /* Gradient + bottom rule so the tagline reads as a header band, not a
+   * watermark on the card surface. */
   background: linear-gradient(90deg, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0.02) 100%);
   border-bottom: 1px solid var(--brand-surface-border);
 }
@@ -221,10 +206,7 @@ defineEmits<{ click: [] }>()
   color: var(--neutral-100);
   font-weight: 400;
 }
-/* Trailing arrow — the card IS the trigger (single-action button, no
- * confirm step), so the arrow signals "this commits" the way a row
- * affordance does in Linear / Arc. Resting state is muted + nudged
- * left so the reveal-on-hover reads as a slide-in, not a recolour. */
+/* Resting state is muted + nudged left so hover reads as a slide-in. */
 .choice-card__arrow {
   flex: 0 0 auto;
   color: var(--neutral-100);

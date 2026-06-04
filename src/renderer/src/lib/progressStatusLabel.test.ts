@@ -5,14 +5,6 @@ import {
   operationSuccessLabel,
 } from './progressStatusLabel'
 
-/**
- * `humanizeOpStatus` maps the raw status strings emitted by main during
- * background ops into friendlier UI copy, and falls back to a localized
- * "Working…" when there is no status yet. Both the Update overlay and
- * the snapshots top-card render through this util — the test locks
- * the map so the two surfaces can't drift.
- */
-
 const t = ((key: string, fb?: string) => fb ?? key) as unknown as Parameters<typeof humanizeOpStatus>[1]
 
 describe('humanizeOpStatus', () => {
@@ -41,12 +33,6 @@ describe('humanizeOpStatus', () => {
   )
 })
 
-/**
- * Per-action title helpers — the picker's progress overlay used to
- * hardcode "Updating…" / "Update complete" for every actionId. These
- * tests lock the mapping so future actions get an explicit label or
- * fall back through the documented chain (op.title → "Working…").
- */
 describe('operationInflightLabel', () => {
   it.each([
     [{ actionId: 'update-comfyui',        actionData: {} },                       'Updating…'],

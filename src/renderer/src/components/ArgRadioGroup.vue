@@ -20,12 +20,11 @@ const emit = defineEmits<{
 
 function selectArg(arg: ComfyArgDef): void {
   if (arg.name === props.activeArg) {
-    // Deselect
     if (arg.type === 'boolean') emit('toggleBoolean', arg.name, arg)
     else if (arg.type === 'optional-value') emit('toggleOptionalValue', arg.name, arg)
     else emit('setValueArg', arg.name, '', arg)
   } else {
-    // Select (the parent's toggle/set functions handle removing siblings via exclusiveGroup)
+    // Parent's toggle/set handlers remove exclusiveGroup siblings.
     if (arg.type === 'boolean') emit('toggleBoolean', arg.name, arg)
     else emit('toggleOptionalValue', arg.name, arg)
   }
@@ -35,7 +34,6 @@ function selectArg(arg: ComfyArgDef): void {
 <template>
   <div class="arg-radio-group">
     <div v-for="arg in props.args" :key="arg.name" class="args-row">
-      <!-- Bare label when no inline input needed (matches ArgRow) -->
       <template v-if="arg.type === 'boolean' || arg.name !== props.activeArg">
         <label class="args-check-row">
           <input type="checkbox" :checked="arg.name === props.activeArg" @change="selectArg(arg)">
@@ -46,7 +44,6 @@ function selectArg(arg: ComfyArgDef): void {
           <InfoTooltip :text="arg.help" />
         </label>
       </template>
-      <!-- Active non-boolean: flex row with inline input (matches ArgRow) -->
       <template v-else>
         <div class="args-inline-row">
           <label class="args-check-row">

@@ -1,27 +1,7 @@
-/**
- * Canonical structured-data for the four legal documents rendered
- * inside `TermsModal.vue`: the EULA, the Terms of Service, the
- * Privacy Policy, and the Third-Party Notices. This is the source of
- * truth — what the app actually displays.
- *
- * Kept in source (not i18n) because legal text shouldn't be machine-
- * translated and the consent step needs the exact wording the user is
- * agreeing to. The English text is shown to all locales — standard for
- * EULA / privacy surfaces in desktop installers.
- *
- * `LEGAL_DOCS` is the lookup the consent flow uses via the modal's
- * `doc` prop. The individual `EULA`, `TOS`, `PRIVACY_POLICY`, and
- * `THIRD_PARTY_NOTICES` exports are convenience handles for direct
- * imports.
- */
+// Canonical structured data for the legal docs in TermsModal. Kept in source
+// (not i18n) so the consent step shows the exact wording the user agrees to.
 
 export interface LegalDocBlock {
-  /** Visual hierarchy:
-   *   - 'h2'   — top-level section heading
-   *   - 'h3'   — subsection heading
-   *   - 'p'    — paragraph (supports inline **bold** with `*`)
-   *   - 'ul'   — unordered list; `items` carries the bullet strings
-   */
   kind: 'h2' | 'h3' | 'p' | 'ul'
   text?: string
   items?: string[]
@@ -35,10 +15,6 @@ export interface LegalDoc {
 
 /** Doc ids surfaced by `TermsModal`'s `doc` prop. */
 export type LegalDocId = 'eula' | 'tos' | 'privacy' | 'notices'
-
-/* ============================================================
- * EULA — End-User License Agreement
- * ============================================================ */
 
 export const EULA: LegalDoc = {
   effectiveDate: '2026-05-19',
@@ -237,15 +213,6 @@ export const EULA: LegalDoc = {
   ]
 }
 
-/* ============================================================
- * Terms of Service
- *
- * The EULA above governs the binary distribution (license grant,
- * restrictions on the binary, third-party components). The Terms of
- * Service here govern how you USE the Desktop App — acceptable use,
- * user obligations, content policy, and dispute resolution.
- * ============================================================ */
-
 export const TOS: LegalDoc = {
   effectiveDate: '2026-05-19',
   appliesTo: 'Comfy Desktop',
@@ -347,10 +314,6 @@ export const TOS: LegalDoc = {
     }
   ]
 }
-
-/* ============================================================
- * Privacy Policy
- * ============================================================ */
 
 export const PRIVACY_POLICY: LegalDoc = {
   effectiveDate: '2026-05-19',
@@ -517,10 +480,6 @@ export const PRIVACY_POLICY: LegalDoc = {
   ]
 }
 
-/* ============================================================
- * Third-Party Notices
- * ============================================================ */
-
 export const THIRD_PARTY_NOTICES: LegalDoc = {
   effectiveDate: '2026-05-19',
   appliesTo: 'Comfy Desktop',
@@ -632,10 +591,6 @@ export const THIRD_PARTY_NOTICES: LegalDoc = {
     }
   ]
 }
-
-/* ============================================================
- * Lookup map for `TermsModal`'s `doc` prop.
- * ============================================================ */
 
 export const LEGAL_DOCS: Record<LegalDocId, LegalDoc> = {
   eula: EULA,
