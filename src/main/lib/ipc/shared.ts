@@ -434,12 +434,21 @@ export function sanitizeEnvVars(raw: unknown): Record<string, string> {
   return result
 }
 
+// Well-known HuggingFace mirror used by the community for regions with restricted GitHub/HF
+// access. Keeps the user-set `HF_ENDPOINT` (if any) wins; only injected when the user opted
+// into mirrors and has no explicit override.
+const HF_MIRROR_URL = 'https://hf-mirror.com'
+
 export function buildLaunchEnv(inst: InstallationRecord, sessionPath?: string): Record<string, string | undefined> {
   const userEnvVars = sanitizeEnvVars(inst.envVars)
+  const useChineseMirrors = settings.get('useChineseMirrors') === true
+  const hasUserHfEndpoint =
+    typeof process.env.HF_ENDPOINT === 'string' && process.env.HF_ENDPOINT.length > 0
   return {
     ...process.env,
     ...userEnvVars,
     PYTHONIOENCODING: 'utf-8',
+    ...(useChineseMirrors && !hasUserHfEndpoint ? { HF_ENDPOINT: HF_MIRROR_URL } : {}),
     ...(sessionPath ? { __COMFY_CLI_SESSION__: sessionPath } : {}),
     ...(inst.sourceId === 'standalone' ? { CM_USE_PYGIT2: '1' } : {}),
   }
