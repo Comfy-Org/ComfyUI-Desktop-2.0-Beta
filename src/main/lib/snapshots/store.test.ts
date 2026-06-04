@@ -15,7 +15,7 @@ vi.mock('../pip', () => ({
 }))
 
 vi.mock('../pythonEnv', () => ({
-  getUvPath: vi.fn(() => '/fake/uv'),
+  getActiveUvPath: vi.fn(() => '/fake/uv'),
   getActivePythonPath: vi.fn(() => null)
 }))
 
@@ -51,6 +51,8 @@ import fs from 'fs'
 import path from 'path'
 import { readGitHead } from '../git'
 import { scanCustomNodes } from '../nodes'
+import { pipFreeze } from '../pip'
+import { getActiveUvPath, getActivePythonPath } from '../pythonEnv'
 import { captureState, saveSnapshot, captureSnapshotIfChanged } from './store'
 import * as telemetry from '../telemetry'
 import type { InstallationRecord } from '../../installations'
@@ -174,6 +176,41 @@ describe('captureState commit-matching guard', () => {
     expect(state.comfyui.commit).toBe('deadbeef')
     expect(state.comfyui.baseTag).toBe('v0.18.0')
     expect(state.comfyui.commitsAhead).toBe(0)
+  })
+
+  it('freezes packages via the adopted-aware uv path so adopted installs do not snapshot 0 packages', async () => {
+    // Regression for issue #855: adopted Legacy Desktop installs have no
+    // managed standalone-env, so `getUvPath(installPath)` resolved to a
+    // file that doesn't exist and the freeze was silently skipped.
+    // `captureState` must now consult `getActiveUvPath(installation)`,
+    // which returns the uv pip-installed into the legacy `.venv`.
+    mockedReadGitHead.mockReturnValue('abc1234')
+    vi.mocked(getActiveUvPath).mockReturnValue('/legacy/.venv/bin/uv')
+    vi.mocked(getActivePythonPath).mockReturnValue('/legacy/.venv/bin/python3')
+    vi.mocked(fs.existsSync).mockImplementation(
+      (p) => String(p) === '/legacy/.venv/bin/uv'
+    )
+    vi.mocked(pipFreeze).mockResolvedValue({ torch: '2.4.0', numpy: '1.26.4' })
+
+    const installation = {
+      id: 'adopted',
+      name: 'ComfyUI',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      installPath: '/installs/adopted',
+      sourceId: 'standalone',
+      adopted: true,
+      adoptedBaseDir: '/legacy',
+      adoptedPythonPath: '/legacy/.venv/bin/python3'
+    } as unknown as InstallationRecord
+
+    const state = await captureState('/installs/adopted', installation)
+
+    expect(getActiveUvPath).toHaveBeenCalledWith(installation)
+    expect(pipFreeze).toHaveBeenCalledWith(
+      '/legacy/.venv/bin/uv',
+      '/legacy/.venv/bin/python3'
+    )
+    expect(Object.keys(state.pipPackages).length).toBe(2)
   })
 
   it('leaves baseTag undefined when readGitHead returns null', async () => {

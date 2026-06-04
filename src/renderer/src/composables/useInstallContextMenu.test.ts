@@ -365,6 +365,26 @@ describe('useInstallContextMenu — untrack confirm-then-remove', () => {
 
     expect(apiMock.runAction).not.toHaveBeenCalled()
   })
+
+  // Adopted (legacy-desktop) installs hide the Forget item: the
+  // `.comfyui-desktop-2` marker on disk also makes the legacy
+  // auto-tracker stop surfacing the install, so forgetting strands
+  // the user with no path back. Delete still appears (real disposal).
+  it('hides the Forget item for adopted installs but keeps Delete', () => {
+    const inst = makeInstall({ adopted: true } as Partial<Installation>)
+    const { menu } = mountHarness(inst)
+    const items = menu.ctxMenuItems.value
+    expect(findItem(items, 'untrack')).toBeUndefined()
+    expect(findItem(items, 'delete')).toBeTruthy()
+  })
+
+  it('shows the Forget item for non-adopted installs', () => {
+    const inst = makeInstall()
+    const { menu } = mountHarness(inst)
+    const items = menu.ctxMenuItems.value
+    expect(findItem(items, 'untrack')).toBeTruthy()
+    expect(findItem(items, 'delete')).toBeTruthy()
+  })
 })
 
 describe('useInstallContextMenu — share (export latest snapshot)', () => {

@@ -132,19 +132,24 @@ export function useInstallContextMenu(opts: {
     }
 
     // Destructive bucket — Untrack (registry only) + Delete (also wipes
-    // disk) share one separator group.
+    // disk) share one separator group. Untrack is hidden for adopted
+    // installs since the legacy marker would re-track them anyway and
+    // their legacy launch args wouldn't survive re-adoption.
     if (isInstalled(inst) && isLocalLikeInstall(inst)) {
-      items.push({
-        id: 'untrack',
-        label: t('actions.untrack'),
-        separator: items.length > 0,
-        style: 'danger',
-      })
+      if (!inst.adopted) {
+        items.push({
+          id: 'untrack',
+          label: t('actions.untrack'),
+          separator: items.length > 0,
+          style: 'danger',
+        })
+      }
       items.push({
         id: 'delete',
         label: t('chooser.menuDelete'),
         disabled: stoppedActionGated,
         title: gatedTitle,
+        separator: !inst.adopted ? false : items.length > 0,
         style: 'danger',
       })
     }

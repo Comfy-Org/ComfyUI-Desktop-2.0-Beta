@@ -340,7 +340,17 @@
       "migration": "Migrating your Legacy Desktop install…",
       "restore-nodes": "Restoring custom nodes from your snapshot…",
       "restore-pip": "Reinstalling Python packages from your snapshot…",
-      "launch": "Starting ComfyUI…"
+      "launch": "Starting ComfyUI…",
+      "backup": "Backing up Legacy Desktop state…",
+      "tcc": "Checking folder access…",
+      "venv": "Validating Legacy Python environment…",
+      "snapshot": "Capturing a forensic snapshot…",
+      "allocate": "Allocating install folder…",
+      "source": "Staging ComfyUI source…",
+      "comfy-update": "Updating ComfyUI to the latest stable release…",
+      "requirements": "Installing Python requirements…",
+      "settings": "Carrying over Legacy Desktop settings…",
+      "register": "Registering the adopted installation…"
     }
   },
 
@@ -702,7 +712,17 @@
     "adoptPromptSourceMissingTitle": "ComfyUI source unavailable",
     "adoptPromptSourceMissingMessage": "Could not source ComfyUI from the staged copy or git. Switch to a managed environment (full reinstall) or retry.",
     "adoptPromptSwitchToManaged": "Switch to managed env",
-    "adoptPromptRetry": "Retry"
+    "adoptPromptRetry": "Retry",
+    "adoptStepBackup": "Back up legacy state",
+    "adoptStepTcc": "Check folder access",
+    "adoptStepVenv": "Validate Python environment",
+    "adoptStepSnapshot": "Capture snapshot",
+    "adoptStepAllocate": "Allocate install folder",
+    "adoptStepSource": "Stage ComfyUI source",
+    "adoptStepComfyUpdate": "Update ComfyUI",
+    "adoptStepRequirements": "Install requirements",
+    "adoptStepSettings": "Carry over settings",
+    "adoptStepRegister": "Register installation"
   },
 
   "standalone": {

@@ -467,6 +467,25 @@ describe('ProgressModal — brand branch state transitions', () => {
     expect(body.text()).not.toContain('Security scan')
   })
 
+  it('uses registered step label as the headline and hides the substatus when no rich detail was sent', async () => {
+    // Adopt/migration flow path: main registers steps with friendly
+    // labels but emits `sendProgress(phase, { percent })` without a
+    // `status` string. Without this guard the headline fell through to
+    // the raw phase id ("source") and the substatus duplicated it.
+    const { body } = await mountWithOp('inst-1', {
+      opKind: 'install',
+      steps: [{ phase: 'source', label: 'Stage ComfyUI source' }],
+      activePhase: 'source',
+      activePercent: 10,
+      // progressStore writes `data.status || data.phase`, so the raw id
+      // is what lands here when main sends no status string.
+      lastStatus: { source: 'source' },
+    })
+
+    expect(body.text()).toContain('Stage ComfyUI source')
+    expect(body.exists('.brand-progress__substatus')).toBe(false)
+  })
+
   it('surfaces the rich main-side detail as a substatus under the curated headline', async () => {
     const { body } = await mountWithOp('inst-1', {
       opKind: 'install',

@@ -3,7 +3,7 @@ import path from 'path'
 import { readGitHead } from '../git'
 import { scanCustomNodes, nodeKey } from '../nodes'
 import { pipFreeze } from '../pip'
-import { getUvPath, getActivePythonPath } from '../pythonEnv'
+import { getActiveUvPath, getActivePythonPath } from '../pythonEnv'
 import * as telemetry from '../telemetry'
 import type { Snapshot, SnapshotEntry } from './types'
 import type { InstallationRecord } from '../../installations'
@@ -87,7 +87,13 @@ export async function captureState(
   const customNodes = await scanCustomNodes(comfyuiDir)
 
   let pipPackages: Record<string, string> = {}
-  const uvPath = getUvPath(installPath)
+  // `getActiveUvPath` is adopted-aware: returns the uv pip-installed
+  // into the legacy `.venv` for adopted installs, and the standalone-env
+  // uv otherwise. Using the plain `getUvPath(installPath)` here meant
+  // adopted installs (which have no standalone-env) failed `fs.existsSync`
+  // and skipped the freeze, leaving every boot snapshot with `0 packages`
+  // in the UI for freshly-migrated installs (issue #855).
+  const uvPath = getActiveUvPath(installation)
   const pythonPath = getActivePythonPath(installation)
   if (fs.existsSync(uvPath) && pythonPath) {
     try {

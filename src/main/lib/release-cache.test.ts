@@ -138,6 +138,37 @@ describe('isUpdateAvailable', () => {
     expect(isUpdateAvailable(installation, 'stable', info)).toBe(false)
   })
 
+  // v-prefix tolerance: legacy code paths (notably the legacy-desktop
+  // adoption pre-fix) persisted bare version strings like "0.24.0" via
+  // installation.version while GitHub tag names are "v"-prefixed. The
+  // comparison must treat them as equal.
+  it('returns false when installedTag is bare and latestTag is "v"-prefixed', () => {
+    const installation = {}
+    const info: ReleaseCacheEntry = { latestTag: 'v0.24.0', installedTag: '0.24.0' }
+    expect(isUpdateAvailable(installation, 'stable', info)).toBe(false)
+  })
+
+  it('returns false when installedTag is "v"-prefixed and latestTag is bare', () => {
+    const installation = {}
+    const info: ReleaseCacheEntry = { latestTag: '0.24.0', installedTag: 'v0.24.0' }
+    expect(isUpdateAvailable(installation, 'stable', info)).toBe(false)
+  })
+
+  it('still detects real updates across v-prefix variants', () => {
+    const installation = {}
+    const info: ReleaseCacheEntry = { latestTag: 'v0.25.0', installedTag: '0.24.0' }
+    expect(isUpdateAvailable(installation, 'stable', info)).toBe(true)
+  })
+
+  it('returns false cross-channel when displayVersion is bare and latestTag is "v"-prefixed', () => {
+    const installation = {
+      comfyVersion: { commit: 'abc1234def5678', baseTag: '0.14.2', commitsAhead: 0 },
+      lastRollback: { channel: 'latest', postUpdateHead: 'abc1234' },
+    }
+    const info: ReleaseCacheEntry = { latestTag: 'v0.14.2', releaseName: 'v0.14.2', installedTag: '0.14.2' }
+    expect(isUpdateAvailable(installation, 'stable', info)).toBe(false)
+  })
+
   it('returns false for latest channel when commit SHA matches even if installedTag differs from latestTag', () => {
     const fullSha = 'abc123def456abc123def456abc123def456abc123'
     const installation = {
