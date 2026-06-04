@@ -23,7 +23,7 @@ const commonParserOptions = {
 
 export default defineConfig([
   {
-    ignores: ['out/*', 'dist/*', 'node_modules/*', '.claude/**']
+    ignores: ['out/*', 'dist/*', 'node_modules/*', '.claude/**', '.worktrees/**']
   },
   {
     files: ['./**/*.{ts,mts}'],
