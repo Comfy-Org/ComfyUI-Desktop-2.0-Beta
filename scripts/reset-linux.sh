@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ComfyUI Desktop 2.0 -- Linux reset script
+# Comfy Desktop -- Linux reset script
 #
 # Wipes app settings, caches, and the Chromium profile for the current build
 # AND for the older beta names (ComfyUI Launcher / comfyui-launcher), in case
@@ -81,7 +81,7 @@ for t in "${TARGETS[@]}"; do
 done
 
 if [ ${#EXISTING[@]} -eq 0 ]; then
-  echo "Nothing to remove. No ComfyUI Desktop 2.0 / Launcher data found."
+  echo "Nothing to remove. No Comfy Desktop / Launcher data found."
   exit 0
 fi
 
@@ -110,6 +110,6 @@ for t in "${EXISTING[@]}"; do
 done
 
 echo
-echo "Done. Reinstall ComfyUI Desktop 2.0 from the latest .AppImage or .deb"
+echo "Done. Reinstall Comfy Desktop from the latest .AppImage or .deb"
 echo "if you haven't already, then launch it. The app should come up with a"
 echo "clean profile."
