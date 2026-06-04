@@ -132,16 +132,41 @@ const LAUNCH_STEP_BUDGET_MS = 4_000
  * Flat ops: pass through `flatStatus` — chooser-launch overrides this
  * anyway via the existing `launchCaption` branch.
  */
+/**
+ * Friendly label for the current step registered by main via
+ * `sendProgress('steps', { steps: [{ phase, label }, ...] })` (e.g. the
+ * legacy-desktop adopt flow). Trimmed so a stray empty string doesn't
+ * count as "have a label".
+ */
+const activeStepLabel = computed<string | null>(() => {
+  const op = currentOp.value
+  if (!op?.steps || !op.activePhase) return null
+  return op.steps.find((s) => s.phase === op.activePhase)?.label?.trim() || null
+})
+
+/** Trimmed raw status string main pushed for the active phase. */
+const activePhaseStatus = computed<string | null>(() => {
+  const op = currentOp.value
+  if (!op?.steps || !op.activePhase) return null
+  return op.lastStatus[op.activePhase]?.trim() || null
+})
+
 const friendlyCaption = computed<string>(() => {
   const op = currentOp.value
   if (!op) return t('progress.starting')
   if (op.steps && op.activePhase) {
+    // 1. Curated renderer i18n table (existing install/update copy).
     const key = `progress.phaseLabel.${op.activePhase}`
     const friendly = t(key)
-    // vue-i18n returns the key itself when missing — fall back to the raw
-    // status string so the UI never shows the dotted key.
     if (friendly !== key) return friendly
-    return op.lastStatus[op.activePhase] || op.activePhase
+    // 2. Step label registered over IPC (adopt/migration flows).
+    if (activeStepLabel.value) return activeStepLabel.value
+    // 3. Real status detail main pushed (skip the raw-phase-id fallback
+    //    progressStore writes when `data.status` is omitted).
+    const raw = activePhaseStatus.value
+    if (raw && raw !== op.activePhase) return raw
+    // 4. Last resort so we never render blank.
+    return op.activePhase
   }
   return op.flatStatus || t('progress.starting')
 })
@@ -168,10 +193,14 @@ const friendlyCaption = computed<string>(() => {
  * the headline.
  */
 const subStatus = computed<string | null>(() => {
-  const op = currentOp.value
-  if (!op?.steps || !op.activePhase) return null
-  const raw = op.lastStatus[op.activePhase]
+  const raw = activePhaseStatus.value
   if (!raw) return null
+  const op = currentOp.value
+  // Never let the raw phase id (the fallback progressStore writes when
+  // main omits `status`) leak through as a sub-label — it's the same
+  // dev-y slug we already promote to the headline as a last resort.
+  if (op?.activePhase && raw === op.activePhase) return null
+  if (raw === activeStepLabel.value) return null
   if (raw === friendlyCaption.value) return null
   return raw
 })
