@@ -245,9 +245,13 @@ export function setPortArg(launchCmd: LaunchCmd, port: number): void {
 
 /**
  * Whether a TCP connect to `host:port` succeeds within `timeoutMs`. Used as
- * a positive proof that something is listening — bind probes alone aren't
+ * positive proof that something is listening — bind probes alone aren't
  * reliable on Windows because Winsock can let a `127.0.0.1` bind succeed
  * while another process owns the same port via `0.0.0.0` / `::`.
+ *
+ * Loopback only: never connect to a non-loopback address, both because we
+ * don't want to touch arbitrary remote hosts and because loopback connects
+ * never trigger Windows Defender / macOS firewall prompts.
  */
 function canConnect(port: number, host: string, timeoutMs: number = 250): Promise<boolean> {
   return new Promise((resolve) => {
@@ -272,30 +276,29 @@ function canConnect(port: number, host: string, timeoutMs: number = 250): Promis
 }
 
 /**
- * Whether a server can bind `host:port`. Returns `true` when the bind
- * succeeds (port appears free on that interface), `false` when the bind
- * fails with `EADDRINUSE` / `EACCES` (port owned by something), and
- * `null` when the address family itself is unavailable
- * (`EAFNOSUPPORT` / `EADDRNOTAVAIL` — e.g. probing `::` on a host with
- * IPv6 disabled). Callers ignore `null` results so an IPv6-disabled box
- * doesn't mark every port busy.
+ * Whether a server can bind `host:port`. Resolves `true` on successful
+ * bind, `false` on `EADDRINUSE` / `EACCES`. Other errors (address family
+ * unavailable, etc.) resolve `false` too — the caller treats "couldn't
+ * bind for any reason" as "don't try to launch here."
+ *
+ * Never binds a non-loopback / non-requested address: a bind on `0.0.0.0`
+ * or `::` would trigger the OS firewall ("allow incoming connections?")
+ * prompt the first time the app runs, which is a poor first-launch
+ * experience just to probe a port. The loopback connect probe in
+ * `isPortListening` already catches the wildcard-peer case we'd otherwise
+ * want this for.
  */
-function canBind(port: number, host: string): Promise<boolean | null> {
+function canBind(port: number, host: string): Promise<boolean> {
   return new Promise((resolve) => {
     const server = net.createServer()
-    server.once('error', (err: NodeJS.ErrnoException) => {
-      if (err.code === 'EADDRINUSE' || err.code === 'EACCES') return resolve(false)
-      // EAFNOSUPPORT / EADDRNOTAVAIL / EINVAL: address family / address
-      // not usable on this host — not a signal about the port itself.
-      return resolve(null)
-    })
+    server.once('error', () => resolve(false))
     try {
       server.listen(port, host, () => {
         server.once('close', () => resolve(true))
         server.close()
       })
     } catch {
-      resolve(null)
+      resolve(false)
     }
   })
 }
@@ -307,24 +310,21 @@ function canBind(port: number, host: string): Promise<boolean | null> {
  *
  *  1. TCP connect to loopback (`127.0.0.1`, `::1`) — positive proof that
  *     a listener is reachable, regardless of which interface it bound.
- *  2. Bind probe across `host`, `127.0.0.1`, `0.0.0.0`, `::` — catches
- *     non-listening reservations and ports owned by other users that
+ *     A peer on `0.0.0.0:N` or `[::]:N` answers loopback connects too, so
+ *     we don't need to bind-probe the wildcard ourselves (which would
+ *     trigger the OS firewall prompt).
+ *  2. Bind probe on the requested host — catches non-listening
+ *     reservations and ports owned by other users that
  *     `lsof` / `findPidsByPort` can't see on Linux.
  *
- * Either probe reporting "busy" wins. `null` bind results (address family
- * unsupported) are ignored.
+ * Either probe reporting "busy" wins.
  */
 export async function isPortListening(port: number, host: string = '127.0.0.1'): Promise<boolean> {
   const connectHosts = ['127.0.0.1', '::1']
   const connectResults = await Promise.all(connectHosts.map((h) => canConnect(port, h)))
   if (connectResults.some(Boolean)) return true
 
-  const bindHosts = Array.from(new Set([host, '127.0.0.1', '0.0.0.0', '::']))
-  for (const bindHost of bindHosts) {
-    const result = await canBind(port, bindHost)
-    if (result === false) return true
-  }
-  return false
+  return !(await canBind(port, host))
 }
 
 export async function findAvailablePort(host: string, startPort: number, endPort: number, excludePorts?: ReadonlySet<number>): Promise<number> {
