@@ -95,17 +95,12 @@ const emit = defineEmits<{
 const step = ref<Step>('start')
 const telemetryEnabled = ref(true)
 const locale = ref('en')
-/** Host platform exposed synchronously by the preload (`process.platform`).
- *  Used to bias the default fork pick: Mac users land on Cloud (strong
- *  observed conversion + the bulk of Mac hardware can't run local models
- *  reliably), every other platform lands on Local (matches the explicit
- *  "download local" intent that brought them here). */
-const isMacHost = window.api?.platform === 'darwin'
-/** Cloud-vs-Local selection picked on the merged start screen. Initial
- *  value mirrors `deriveDefaultChoice` so a slow-resolving capacity
- *  fetch doesn't flash the wrong card; the post-mount derive call only
- *  flips on `disabled` capacity or detected legacy install. */
-const pickedChoice = ref<'cloud' | 'local'>(isMacHost ? 'cloud' : 'local')
+/** Cloud-vs-Local selection picked on the merged start screen. Local
+ *  is the default everywhere — the user got here by clicking
+ *  "Download Local" upstream, so honor that intent. Cloud is still
+ *  rendered as an equal-weight peer card; users can flip to it before
+ *  pressing Continue. */
+const pickedChoice = ref<'cloud' | 'local'>('local')
 
 // Capacity-protection switch for Cloud (PostHog flag
 // `desktop-cloud-capacity`). At first-use, we follow the flag
@@ -118,33 +113,16 @@ const cloudCapacity = useCloudCapacity()
 const capacityReady = ref(false)
 /** What the picker rendered as default before the user could interact —
  *  used to split `fork_chosen` conversion by signal-vs-defaulting: a
- *  user keeping the default pick is different from a user actively
- *  flipping the card. Reseeded on every `open()` from the resolved
- *  capacity status + platform. */
-const initialDefaultChoice = ref<'cloud' | 'local'>(isMacHost ? 'cloud' : 'local')
-function deriveDefaultChoice(): 'cloud' | 'local' {
-  // Precedence: disabled > legacy > platform.
-  //   - `disabled` cloud: no viable cloud path, pre-select Local.
-  //   - Legacy Desktop detected: migrate-existing is the obvious next
-  //     step for a returning user — pre-select Local so Continue just
-  //     runs the migration.
-  //   - Otherwise: Mac users default to Cloud (the bulk of Mac hardware
-  //     can't run local models reliably, and observed conversion is
-  //     strong); every other platform defaults to Local — that's the
-  //     "download local" intent we want to honor as the obvious primary
-  //     path, with Cloud still surfaced as the equal-weight peer.
-  if (cloudCapacity.isDisabled()) return 'local'
-  if (hasLegacyDesktop.value) return 'local'
-  return isMacHost ? 'cloud' : 'local'
-}
+ *  user keeping the default Local pick is different from a user
+ *  actively flipping to Cloud. */
+const initialDefaultChoice = ref<'cloud' | 'local'>('local')
 onMounted(async () => {
   await cloudCapacity.whenReady()
-  if (cloudCapacity.isDisabled()) {
-    pickedChoice.value = 'local'
-  }
-  initialDefaultChoice.value = deriveDefaultChoice()
   capacityReady.value = true
 })
+// Defensive: if the user manually flipped to Cloud and the kill-switch
+// then transitions to `disabled` mid-flow, snap them back to Local so
+// they can't proceed into a disabled cloud path.
 watch(cloudCapacity.status, (status) => {
   if (status === 'disabled' && pickedChoice.value === 'cloud') {
     pickedChoice.value = 'local'
@@ -479,12 +457,11 @@ async function open(opts: OpenOpts = {}): Promise<void> {
   whyCloudOpen.value = false
   termsDoc.value = null
   acceptedTos.value = false
-  // Re-derive default pick from current capacity. On first mount the
-  // `onMounted` `whenReady` await handles this; on takeover replay
-  // (capacity already resolved) we apply it inline so a `disabled`
-  // flag isn't clobbered by the reset.
-  pickedChoice.value = deriveDefaultChoice()
-  initialDefaultChoice.value = deriveDefaultChoice()
+  // Local is the default everywhere. Cloud-disabled and Legacy-Desktop-
+  // detected used to flip the default to Local; both now collapse into
+  // the same default, so the reset is unconditional.
+  pickedChoice.value = 'local'
+  initialDefaultChoice.value = 'local'
   expressInstall.value = true
   migrateExisting.value = true
   // `onContinue` keeps `isContinuing` true past `routePostStart()`
