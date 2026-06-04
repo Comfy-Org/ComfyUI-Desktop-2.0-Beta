@@ -285,10 +285,29 @@ function load(): Settings {
     changed = true
   }
 
-  // Only create the system-default tree on disk when the user is
-  // actually using it. Otherwise a user who has moved their models
-  // elsewhere ends up with an empty ~/ComfyUI-Shared that gets
-  // recreated on every settings load.
+  // If none of the user's model directories exist on disk anymore (e.g.
+  // the primary was deleted by the user or a system tool), restore the
+  // shared default as the primary entry so the app is never left without
+  // a usable, non-deletable models directory.
+  const anyModelsDirExists = result.modelsDirs.some(
+    (d): d is string => typeof d === 'string' && fs.existsSync(path.resolve(d))
+  )
+  if (!anyModelsDirExists) {
+    const others = result.modelsDirs.filter((d) => path.resolve(d) !== path.resolve(systemDefault))
+    const restored = [systemDefault, ...others]
+    if (
+      restored.length !== result.modelsDirs.length
+      || restored.some((d, i) => d !== result.modelsDirs[i])
+    ) {
+      result.modelsDirs = restored
+      changed = true
+    }
+  }
+
+  // Create the shared default models tree whenever it's part of the list
+  // (the user chose it, or we just restored it above). A user who moved
+  // their models elsewhere and still has those paths keeps an untouched
+  // ~/ComfyUI-Shared.
   const usesSystemDefault = result.modelsDirs.some(
     (d): d is string => typeof d === 'string' && path.resolve(d) === path.resolve(systemDefault)
   )
@@ -300,24 +319,26 @@ function load(): Settings {
       }
     } catch {}
   }
-  // Create shared input/output directories only when the user has them
-  // pointed at a path they actually want. Windows's
-  // sanitizeUserDefaultPath above replaces an undefined inputDir /
-  // outputDir with `defaults[key]`, so a non-empty value alone isn't a
-  // signal that the user explicitly chose the default — compare against
-  // `defaults[key]` and only mkdir the default location when the user
-  // is also using the default modelsDirs. A custom user path (any value
-  // not equal to the default) is always created.
-  try {
-    for (const key of ["inputDir", "outputDir"] as const) {
-      const userSet = result[key] as string | undefined
-      if (!userSet || userSet.trim() === '') continue
-      const isDefaultPath = path.resolve(userSet) === path.resolve(defaults[key])
-      if (!isDefaultPath || usesSystemDefault) {
-        fs.mkdirSync(userSet, { recursive: true })
-      }
+
+  // inputDir/outputDir must always point at a folder that exists. If the
+  // designated folder is gone, fall back to the safe shared default
+  // (which is always OK to recreate) and surface that in the setting —
+  // we don't resurrect a vanished custom path.
+  for (const key of ["inputDir", "outputDir"] as const) {
+    const designated = result[key] as string | undefined
+    const exists =
+      typeof designated === 'string'
+      && designated.trim() !== ''
+      && fs.existsSync(path.resolve(designated))
+    if (exists) continue
+    if (result[key] !== defaults[key]) {
+      result[key] = defaults[key]
+      changed = true
     }
-  } catch {}
+    try {
+      fs.mkdirSync(defaults[key], { recursive: true })
+    } catch {}
+  }
   if (changed) save(result)
   return result
 }
