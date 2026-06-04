@@ -380,18 +380,33 @@ function readLegacyAppVersion(executablePath: string | null): string | null {
 
 /**
  * Compute the cross-install model dirs to register in `settings.modelsDirs`
- * for the adopted record. Dedupes against the caller's existing list.
+ * for the adopted record.
+ *
+ * Always carries `<basePath>/models` (the legacy install's own folder).
+ *
+ * For each `base_path:` value in the legacy `extra_models_config.yaml`,
+ * carries `<base_path>/models` ONLY if that subdirectory actually exists.
+ * The bare base_path is never carried: in extra-model YAMLs it's the root
+ * of another tool whose model files live under `<base_path>/<per-folder>`,
+ * which doesn't match v2's "each modelsDirs entry is a ComfyUI-style models
+ * folder" contract. ComfyUI-style siblings (a second ComfyUI install) get
+ * picked up via the `/models` probe; other tools (A1111 etc.) whose layout
+ * differs are silently skipped — users can re-add them manually in v2.
+ *
+ * Dedupes against the caller's existing list.
  */
 export function computeModelsDirsToCarry(
   basePath: string,
   extraYamlContent: string | null,
   existing: string[]
 ): string[] {
-  const candidates: string[] = []
-  candidates.push(path.join(basePath, 'models'))
+  const candidates: string[] = [path.join(basePath, 'models')]
   if (extraYamlContent) {
-    for (const dir of parseExtraModelsYaml(extraYamlContent)) {
-      candidates.push(dir)
+    for (const yamlBase of parseExtraModelsYaml(extraYamlContent)) {
+      const probe = path.join(yamlBase, 'models')
+      if (fs.existsSync(probe) && fs.statSync(probe).isDirectory()) {
+        candidates.push(probe)
+      }
     }
   }
   const seen = new Set(existing.map((d) => path.resolve(d)))
@@ -672,9 +687,11 @@ interface CarryReport {
  * so built-in defaults don't masquerade as user choices.
  *
  * Carries:
- *   - `modelsDirs`           ← `<basePath>/models` + every `base_path`
- *                              from `extra_models_config.yaml`
- *                              (always appended; never blocked).
+ *   - `modelsDirs`           ← `<basePath>/models` + `<yamlBase>/models`
+ *                              for every `base_path` in
+ *                              `extra_models_config.yaml` whose
+ *                              `/models` subfolder actually exists
+ *                              (ComfyUI-style siblings). Always appended.
  *   - `telemetryEnabled`     ← `Comfy-Desktop.SendStatistics`
  *   - `autoInstallUpdates`   ← force `true`. Adoption ships as an
  *                              in-place app update of Legacy Desktop;
