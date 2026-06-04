@@ -100,6 +100,7 @@ export interface PopupGlobalSettingsSnapshot {
   }
   githubUrl: string
   githubStars: number | null
+  githubStarsLoading: boolean
   i18n: {
     overview: string
     updates: string

@@ -111,6 +111,7 @@ interface GlobalSettingsSnapshot {
   }
   githubUrl: string
   githubStars: number | null
+  githubStarsLoading: boolean
   i18n: {
     overview: string
     updates: string
@@ -201,6 +202,7 @@ const globalSettingsSnapshot = ref<GlobalSettingsSnapshot>({
   },
   githubUrl: '',
   githubStars: null,
+  githubStarsLoading: false,
   i18n: {
     overview: 'General',
     updates: 'Updates',
