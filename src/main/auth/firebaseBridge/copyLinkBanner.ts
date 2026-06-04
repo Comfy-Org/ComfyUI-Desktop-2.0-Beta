@@ -1,15 +1,26 @@
 /**
- * Sign-in "copy login link" card injected into the embedded Cloud view when
- * the loopback login URL opens in the user's default browser (which may not
- * be where they're signed into the IdP). Lets them finish sign-in elsewhere.
- * The URL is string-baked via `JSON.stringify` so a hostile URL can't break
- * the Cloud page. Copy stays in-page; only "Open again" reaches main.
+ * Sign-in "copy login link" card.
+ *
+ * When `handleFirebasePopup` opens the loopback login URL in the user's
+ * DEFAULT browser, that browser may not be where they're signed into
+ * Google/GitHub. We inject a small floating card into the embedded Cloud
+ * view (the surface the user is looking at) offering "Copy link" / "Open
+ * again" so they can finish sign-in in a browser of their choice — the
+ * same affordance Notion / Claude / Zoom provide.
+ *
+ * Injected with `insertCSS` + `executeJavaScript`, like
+ * `injectMacPasskeyWarning`. The URL is string-baked via `JSON.stringify`
+ * so a hostile URL can't break the Cloud page. Copy stays in-page; only
+ * "Open again" reaches main (see `OPEN_LINK_SENTINEL`).
  */
 
 export const COPY_LINK_BANNER_ID = 'comfy-copy-login-banner'
 
-/** Sentinel for "Open again" → main, the only page→main channel; re-opens
- *  only our own URL via `shell.openExternal`. */
+/**
+ * Open-again → main, so it can `shell.openExternal` (page JS can't). The
+ * only page→main channel — copy stays in-page so a remote page can't
+ * drive a no-gesture clipboard write — and it re-opens only our own URL.
+ */
 export const OPEN_LINK_SENTINEL = '__comfyOpenLoginLink'
 
 export interface CopyLinkBannerLabels {
@@ -21,8 +32,9 @@ export interface CopyLinkBannerLabels {
 }
 
 export const COPY_LINK_BANNER_CSS =
-  // Width hugs the content but is capped at the viewport, so the card grows
-  // toward full-width as the window shrinks instead of wrapping the message.
+  // Width hugs the content (so the message stays on one line) but is
+  // capped at the viewport, so as the window shrinks the card grows
+  // toward full-width instead of wrapping the text.
   `#${COPY_LINK_BANNER_ID}{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);` +
   `z-index:2147483647;display:flex;align-items:center;gap:10px;` +
   `width:max-content;max-width:calc(100vw - 32px);` +
@@ -39,8 +51,11 @@ export const COPY_LINK_BANNER_CSS =
   `#${COPY_LINK_BANNER_ID} button.ccl-close{border:none;background:transparent;color:#6b7280;` +
   `padding:4px 6px;font-size:16px;line-height:1;}`
 
-/** Build the page-context IIFE that renders the card. Every interpolated
- *  value is `JSON.stringify`-escaped, so it's safe even for hostile input. */
+/**
+ * Build the page-context IIFE that renders the card. Every interpolated
+ * value (the URL and each label) is escaped via `JSON.stringify`, so the
+ * script is safe to hand to `executeJavaScript` even for hostile input.
+ */
 export function buildCopyLinkBannerScript(url: string, labels: CopyLinkBannerLabels): string {
   const u = JSON.stringify(url)
   const id = JSON.stringify(COPY_LINK_BANNER_ID)
@@ -57,8 +72,9 @@ export function buildCopyLinkBannerScript(url: string, labels: CopyLinkBannerLab
     var existing=document.getElementById(ID);
     if(existing){existing.__cclUrl=URL;return;}
     var bar=document.createElement('div');bar.id=ID;bar.__cclUrl=URL;
-    // Lucide icons inlined as path data (no asset load). Trusted static
-    // constants set via innerHTML; user labels stay in textContent spans.
+    // Lucide icons (copy / check / external-link), inlined as exact path
+    // data — no asset/font load, identical on every OS. Static trusted
+    // constants, set via innerHTML; user labels stay in textContent spans.
     function svg(p){return '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+p+'</svg>';}
     var ICON_COPY=svg('<rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>');
     var ICON_TICK=svg('<path d="M20 6 9 17l-5-5"/>');

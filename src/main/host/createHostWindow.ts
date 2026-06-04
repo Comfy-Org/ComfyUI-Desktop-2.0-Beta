@@ -49,22 +49,36 @@ import {
 } from './registry'
 import type { ComfyWindowEntry, ComfyPanelKey } from './registry'
 
-/** Default size for a freshly-spawned host window when a sibling of the same
- *  identity is already open. Matches the no-saved-bounds default in `getWindowOptions()`. */
+/** Default size for a freshly-spawned host window when an existing
+ *  host of the same identity is already open. Matches the
+ *  no-saved-bounds default in `getWindowOptions()` so File → New
+ *  Window opens at a clean canonical size instead of inheriting the
+ *  drift of whichever window happened to be the most recent. */
 const DEFAULT_HOST_WIDTH = 1280
 const DEFAULT_HOST_HEIGHT = 900
 
+/** Result of the panel-renderer close consult. See
+ *  {@link HostWindowFactories.consultPanelRendererClose}. */
 export type CloseConsultResult = 'cleared' | 'aborted' | 'defer'
 
-/** A `forceClose` (caller pre-cleared) overrides a renderer-side cancel: launch-guard
- *  eviction and bulk Exit-All consent at a higher level and must not be stalled. */
+/** Should the close handler bail after the renderer consult?
+ *
+ *  A `forceClose` snapshot (caller pre-cleared via `preClearedClose`)
+ *  overrides a renderer-side cancel — launch-guard eviction and bulk
+ *  Exit-All gather user consent at a higher level and must not be
+ *  stalled by an unrelated per-window cancel-prompt the user happens
+ *  to have open. */
 export function shouldBailAfterConsult(consult: CloseConsultResult, forceClose: boolean): boolean {
   return consult === 'aborted' && !forceClose
 }
 
-/** Fires only when the renderer deferred, the host would kill a local process, and the
- *  caller hasn't pre-cleared. Cloud/remote-backed windows skip it (closing never kills
- *  a local ComfyUI); the entry-exists check is folded into `killsLocalSession`. */
+/** Should the install-host close-confirm modal run? Only fires when
+ *  the renderer deferred (no overlay), the host would kill a local
+ *  process, and the caller hasn't pre-cleared. Cloud/remote-backed
+ *  windows skip the modal (issue #654) — closing them never kills a
+ *  local ComfyUI. The "entry still exists" check is folded into
+ *  `killsLocalSession` (its `shouldConfirmKillForEntry` source rejects
+ *  a missing entry). */
 export function shouldShowInstallCloseConfirm(
   consult: CloseConsultResult,
   killsLocalSession: boolean,
@@ -73,13 +87,23 @@ export function shouldShowInstallCloseConfirm(
   return consult === 'defer' && killsLocalSession && !forceClose
 }
 
+/** Should the close handler bail after the install-host close-confirm
+ *  modal? Same force-close override as {@link shouldBailAfterConsult}
+ *  — a pre-cleared close lands mid-modal must still proceed. */
 export function shouldBailAfterCloseConfirm(confirmed: boolean, forceClose: boolean): boolean {
   return !confirmed && !forceClose
 }
 
-/** The OS ✕ on the last install window flips to chooser mode in place so the app stays
- *  alive on the dashboard. Force-close skips the detach: the caller wants the window gone
- *  and a stray dashboard window after a swap-installs flow is noise. */
+/** Should the close handler detach the last install-backed window to
+ *  the dashboard instead of tearing it down?
+ *
+ *  The OS ✕ on the last install window flips the host to chooser mode
+ *  in place so the app stays alive on the dashboard — that's why
+ *  `isLastWindow` exists. A force-close (launch-guard eviction, bulk
+ *  Exit-All) is a different intent: the caller already wants the
+ *  window gone, and leaving a stray dashboard window behind after a
+ *  swap-installs flow is noise. Force-close therefore skips the
+ *  detach branch and falls through to the normal teardown. */
 export function shouldDetachLastInstallWindowToDashboard(
   isInstallHostWindow: boolean,
   hasEntry: boolean,
@@ -89,23 +113,32 @@ export function shouldDetachLastInstallWindowToDashboard(
   return isInstallHostWindow && hasEntry && isLastWindow && !forceClose
 }
 
+/** Constants reused by both host modes. Defined here because they only
+ *  matter in the context of host-window construction. */
 const APP_ICON = path.join(__dirname, '..', '..', 'assets', 'Comfy_Logo_x256.png')
 const APP_VERSION = getAppVersion()
 
 /** Center pill text for install-less host windows (chooser/dashboard). */
 export const CHOOSER_HOST_TITLE_TEXT = 'Comfy Desktop'
+/** OS-level window title for install-less host windows. */
 export const CHOOSER_HOST_WINDOW_TITLE = `${CHOOSER_HOST_TITLE_TEXT} — v${APP_VERSION}`
 
-/** Shared by all install-less hosts so the JSON cache holds at most one chooser entry. */
+/** Bounds-persistence key for install-less host windows. All chooser
+ *  hosts share the same key so the JSON cache holds at most one
+ *  chooser bounds entry, and bounds restore works across sessions
+ *  for chooser hosts. */
 const CHOOSER_HOST_BOUNDS_KEY = 'chooser'
 
-/** Late-bound dependencies on host machinery still living in `index.ts`. Set once
+/** Late-bound dependencies on host machinery that still lives in
+ *  `index.ts` (or other modules pending later extractions). Set once
  *  at the top of `whenReady` via `setHostWindowFactories(...)`. */
 export interface HostWindowFactories {
-  /** Async beforeunload-style consult through the panel renderer:
+  /** Async beforeunload-style consult through the panel renderer. Only
+   *  resolves the in-flight Tier 2/3 overlay cancel-prompt:
    *    - `cleared`  — no overlay / user confirmed cancelling one → proceed
    *    - `aborted`  — user dismissed the cancel-prompt → keep window open
-   *    - `defer`    — no overlay; main owns the close-window confirm */
+   *    - `defer`    — no overlay; main owns the close-window confirm
+   *  Falls back to `defer` when the renderer is unreachable. */
   consultPanelRendererClose: (
     panelView: WebContentsView | null | undefined,
   ) => Promise<'cleared' | 'aborted' | 'defer'>
@@ -116,8 +149,12 @@ export interface HostWindowFactories {
     isLastWindow: boolean,
     theme: { bg: string; text: string },
   ) => Promise<boolean>
+  /** Detach the install currently bound to a host entry (in-place flip). */
   detachInstallImpl: (entry: ComfyWindowEntry) => void
+  /** WeakSet of host windows whose close was pre-cleared by the
+   *  consult-once-and-confirm path. */
   preClearedClose: WeakSet<BrowserWindow>
+  /** Compute whether an install has a pending in-app update. */
   computeInstallUpdateAvailable: (
     installationId: string,
   ) => Promise<{ available: boolean; version?: string }>
@@ -136,8 +173,11 @@ function getFactories(): HostWindowFactories {
   return factories
 }
 
-// Electron's macOS WebAuthn/passkey support is broken, so inject a banner into auth
-// popups telling users to use password + OTP instead.
+/**
+ * On macOS, Electron's WebAuthn/passkey support is broken (electron#24573).
+ * Inject a fixed warning banner into auth popups (Google, GitHub) so users
+ * know to use password + OTP instead of passkeys.
+ */
 const PASSKEY_BANNER_PREFIXES = [
   'https://accounts.google.com/',
   'https://github.com/login',
@@ -178,8 +218,12 @@ function injectMacPasskeyWarning(childWindow: BrowserWindow): void {
   childWindow.webContents.on('did-navigate-in-page', inject)
 }
 
-/** Credits-checkout popup sizing: a landscape rectangle scaled to the parent display's
- *  work area, clamped to a min/max band and a max aspect ratio. */
+/** Credits-checkout popup sizing. A landscape rectangle scaled to the
+ *  parent display's work area: most of the width, a shorter height, so
+ *  the checkout reads as a wide app-sized surface rather than a tall
+ *  dialog. Clamped to a min/max band and to a max aspect ratio so it
+ *  stays horizontal on a large monitor and never shrinks below what the
+ *  checkout content needs on a laptop. */
 const CHECKOUT_MIN_WIDTH = 720
 const CHECKOUT_MAX_WIDTH = 1280
 const CHECKOUT_MIN_HEIGHT = 560
@@ -190,9 +234,13 @@ const CHECKOUT_HEIGHT_FRACTION = 0.82
 const CHECKOUT_MIN_ASPECT = 1.4
 
 /**
- * Compute centered, work-area-fitted bounds for the checkout popup on the parent's
- * display. `screen.workArea` already excludes the macOS menu bar / Dock and the
- * Windows taskbar.
+ * Compute centered, work-area-fitted bounds for the checkout popup on
+ * whichever display the parent window currently sits on. Width is a
+ * large fraction of the work area, height a smaller one, both clamped to
+ * the min/max band; then width is widened (within the band) so the
+ * window stays a landscape rectangle. Centered over the parent.
+ * Cross-platform: `screen.workArea` already excludes the macOS menu bar
+ * / Dock and the Windows taskbar.
  */
 function checkoutPopupBounds(parent: BrowserWindow): Electron.Rectangle {
   const parentBounds = parent.getBounds()
@@ -219,13 +267,15 @@ function checkoutPopupBounds(parent: BrowserWindow): Electron.Rectangle {
   return { x, y, width, height }
 }
 
-/** Max wait for the host reload to paint before closing the popup anyway, so a
- *  stalled reload can't trap the user on checkout. */
+/** Max wait for the host reload to paint before closing the popup
+ *  anyway, so a stalled reload can't trap the user on checkout. */
 const CHECKOUT_RELOAD_TIMEOUT_MS = 4000
 
 /**
- * Wire the credits-checkout popup's lifecycle: dim backdrop, close affordances
- * (scrim click, Esc, ✕ overlay), and auto-close/return handling.
+ * Wire the credits-checkout popup's lifecycle. The window is frameless
+ * on Windows/Linux and chrome-light on macOS, so we own the dim
+ * backdrop, the close affordances (scrim click, Esc, the ✕ overlay),
+ * and the auto-close/return handling below.
  */
 function wireCheckoutPopup(
   childWindow: BrowserWindow,
@@ -256,9 +306,11 @@ function wireCheckoutPopup(
       close()
       return
     }
-    // Reload the host underneath the still-open popup to clear the cloud "Upgrade" modal
-    // (lives in that page's DOM, out of reach) and refresh the balance, then close only
-    // once the fresh frame paints so the stale modal is never flashed.
+    // Reload the host (clears the cloud "Upgrade" modal that launched
+    // checkout — it lives in that page's DOM, out of our reach — and
+    // refreshes the balance) underneath the still-open popup + backdrop,
+    // then close only once its fresh frame paints, so the stale modal is
+    // never flashed.
     let done = false
     const finish = (): void => {
       if (done) return
@@ -274,14 +326,18 @@ function wireCheckoutPopup(
   childWindow.webContents.on('did-navigate', closeOnReturn)
 }
 
-/** Inline ✕ button overlaid on the frameless checkout popup, which has no OS close
- *  control. */
+/** Inline ✕ button overlaid on the (frameless) checkout popup. The
+ *  checkout page renders its own back/✕ for in-flow navigation, but a
+ *  frameless window has no OS close control, so we float our own in the
+ *  top-right corner that closes the window on click. */
 const CHECKOUT_CLOSE_BUTTON_HTML = `<!doctype html>
 <html><head><meta charset="utf-8"><style>
-  /* Body ignores pointer events so only the button is clickable; the rest of the
-     strip passes clicks through to the checkout page underneath. */
+  /* Body ignores pointer events so only the button itself is clickable —
+     the rest of this overlay strip lets the checkout page underneath
+     receive clicks. */
   html,body{margin:0;width:100%;height:100%;background:transparent;overflow:hidden;pointer-events:none}
-  /* Tuned for the checkout's white right pane: dark glyph on a faint chip. */
+  /* The checkout's right pane is white, so the close chip is tuned for a
+     light background: dark glyph on a faint dark chip, deepening on hover. */
   button{position:fixed;top:10px;right:10px;width:28px;height:28px;border:0;border-radius:8px;cursor:pointer;
     pointer-events:auto;display:grid;place-items:center;color:rgba(0,0,0,0.55);background:rgba(0,0,0,0.06);font:16px/1 system-ui}
   button:hover{background:rgba(0,0,0,0.12);color:rgba(0,0,0,0.85)}
@@ -326,31 +382,55 @@ function attachCheckoutCloseButton(childWindow: BrowserWindow, onClose: () => vo
 }
 
 /**
- * Single shared constructor for host windows (install-backed and install-less).
- * Builds the BrowserWindow + titleBarView + comfyView, wires layoutViews, macOS
- * fullscreen forwarding, bounds-save, close/closed handlers, and the
- * title-bar-ready handshake, and registers the entry into `comfyWindows`.
+ * Single shared constructor for host windows (install-backed and
+ * install-less). Builds the BrowserWindow + titleBarView +
+ * comfyView, wires `layoutViews` + macOS fullscreen forwarding +
+ * bounds-save listeners + the close / closed handlers + the
+ * title-bar-ready handshake, and registers the entry into the
+ * `comfyWindows` map.
  *
- * Mode-specific wiring (comfyContents listeners, download handler, install-record
- * `'updated'` handler, the chooser-only eager `ensurePanelView`) is layered on AFTER
- * this returns by the two wrapper paths.
+ * Mode-specific wiring is layered on AFTER this returns by the two
+ * thin wrapper paths (`onLaunch` for install-backed; the body of
+ * `openChooserHostWindow` for install-less) — comfyContents
+ * listeners (theme observer, content script, fail-retry,
+ * render-process-gone), `attachSessionDownloadHandler`, the
+ * install-record `'updated'` handler, and the chooser-only eager
+ * `ensurePanelView('chooser')` all live in the wrappers.
  */
 export interface CreateHostWindowOpts {
+  /** Initial OS-level window title (full string, including app-version suffix). */
   windowTitle: string
+  /** Bounds-persistence cache key. */
   boundsKey: string
+  /** Initial entry theme — title-bar background + descrip text colour. */
   initialTheme: { bg: string; text: string }
-  /** Per-platform `titleBarOverlay`; `undefined` on darwin (uses `trafficLightPosition`). */
+  /**
+   * Per-platform `titleBarOverlay` constructor option. Pass `undefined`
+   * on darwin (we use `trafficLightPosition` instead).
+   */
   titleBarOverlay: Electron.TitleBarOverlay | undefined
-  /** Install-backed gets comfyPreload + per-install partition; install-less gets minimal
-   *  prefs (the dummy view never loads a URL). */
+  /**
+   * comfyView WebPreferences. Install-backed gets the comfyPreload +
+   * per-install browser partition; install-less gets minimal prefs (no
+   * preload, default partition — the dummy view never loads a URL).
+   */
   comfyWebPreferences: Electron.WebPreferences
-  /** Pre-paint colour for the title-bar view, avoiding a first-paint flash. */
+  /** Background colour to pre-paint the title-bar view with (avoids first-paint flash). */
   titleBarBackground: string
-  /** `installationId` query param for the title-bar HTML load (empty for chooser hosts). */
+  /** `installationId` query param for the title-bar HTML load (empty string for chooser hosts). */
   titleBarInstallationIdParam: string
-  /** Initial title-bar pill label, stored on `entry.titleBarText` for the handshake replay. */
+  /**
+   * Initial title-bar pill label. Install-backed wrappers pass the
+   * install name; chooser hosts pass `'Comfy Desktop'`. Stored on
+   * `entry.titleBarText` so the unified `title-bar-ready` handshake
+   * can re-push it without a per-mode callback.
+   */
   initialTitleBarText: string
-  /** Initial install-type icon category; `null` for chooser hosts. */
+  /**
+   * Initial install-type icon category. Install-backed wrappers pass
+   * the resolved `sourceMap[].category`; chooser hosts pass `null`
+   * (no icon).
+   */
   initialSourceCategory: string | null
   /** Construct hidden; caller owns the reveal (see `coldStartPendingReveal`). */
   initiallyHidden?: boolean
@@ -366,11 +446,19 @@ export interface CreateHostWindowResult {
   layoutViews: () => void
 }
 
+/** Per-step cascade in screen pixels — matches the macOS / Windows
+ *  default for OS-level "open new window" cascading. */
 const CASCADE_STEP_PX = 30
 
-/** Offset by one cascade step per live host already at the same x/y, so a freshly-spawned
- *  host doesn't land directly on an existing one. Only applies with explicit (x, y) from
- *  saved bounds; without them Electron centers the window itself. */
+/** Offset `windowOptions` by `(CASCADE_STEP_PX, CASCADE_STEP_PX)` for every
+ *  live host window already at the same x/y, so a freshly-spawned host
+ *  doesn't land directly on top of an existing one (which made the new
+ *  window look like the old one had simply re-rendered).
+ *
+ *  Only applies when `getWindowOptions()` returned an explicit (x, y) — i.e.
+ *  there were saved bounds. Without saved bounds Electron centers the
+ *  window itself, and we leave that path alone.
+ */
 export function cascadeOffsetForCollisions(
   windowOptions: Partial<Electron.BrowserWindowConstructorOptions>,
   existingOrigins: ReadonlyArray<{ x: number; y: number }>,
@@ -379,7 +467,9 @@ export function cascadeOffsetForCollisions(
     return windowOptions
   }
   let { x, y } = windowOptions
-  // Re-check after each bump to catch chains (windows already cascaded from each other)
+  // Walk the existing-windows list: each live host whose origin matches
+  // our current target bumps us by one cascade step. Re-checking after
+  // each bump catches chains (windows already cascaded from each other)
   // so we land beyond the deepest overlap.
   let bumped = true
   while (bumped) {
@@ -396,8 +486,9 @@ export function cascadeOffsetForCollisions(
   return { ...windowOptions, x, y }
 }
 
-/** Snapshot the origins of every live host window for the cascade collision check.
- *  Excludes destroyed (not-yet-GC'd) windows so they don't cause a phantom offset. */
+/** Snapshot the origins of every live host window, for the cascade
+ *  collision check. Excludes destroyed windows so a not-yet-GC'd
+ *  closed entry doesn't cause a phantom offset. */
 function liveHostOrigins(): { x: number; y: number }[] {
   const origins: { x: number; y: number }[] = []
   for (const [, entry] of comfyWindows) {
@@ -408,16 +499,22 @@ function liveHostOrigins(): { x: number; y: number }[] {
   return origins
 }
 
-/** Identity-driven bounds-persistence key: `'chooser'` for install-less hosts, the
- *  `installationId` otherwise. A host that flips identity in place saves under the slot
- *  matching what it currently IS, not the slot it was constructed as. */
+/** Identity-driven bounds-persistence key for an entry — `'chooser'`
+ *  for install-less hosts, the `installationId` for install-backed
+ *  hosts. Used by the resize/move save listeners so a host that
+ *  flips identity (chooser → install via in-place attach, or back
+ *  via Return to Dashboard) saves its bounds under the slot that
+ *  matches what it currently IS, not the slot it was constructed as. */
 function liveBoundsKeyFor(entry: ComfyWindowEntry): string {
   return entry.installationId ?? CHOOSER_HOST_BOUNDS_KEY
 }
 
-/** Origin of the first live host whose runtime identity matches `boundsKey`, or `null`.
- *  A spawned host with a live sibling opens at a clean default size instead of
- *  inheriting possibly-drifted saved bounds. */
+/** Find the origin of a live host whose runtime identity matches
+ *  `boundsKey` — used to decide that a freshly-spawned host should
+ *  open at a clean default size rather than inheriting the saved
+ *  bounds (which may have drifted from another session). Returns the
+ *  first matching live host's bounds origin, or `null` when none
+ *  exists. */
 function findLiveSiblingOrigin(boundsKey: string): { x: number; y: number } | null {
   for (const [, entry] of comfyWindows) {
     if (entry.window.isDestroyed()) continue
@@ -432,12 +529,22 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
   const fx = getFactories()
   const windowKey = nextWindowKey()
   const isChooserKey = opts.boundsKey === CHOOSER_HOST_BOUNDS_KEY
-  // Chooser hosts always open at the canonical default size (the dashboard is a launcher,
-  // not a customized workspace). Install-backed hosts restore saved bounds on first spawn.
+  // Chooser hosts always open at the canonical default size: the
+  // dashboard isn't a workspace the user customizes — it's a launcher
+  // surface, so persisting last-session bounds across cold starts
+  // (and especially across in-place flips that drifted the slot)
+  // makes the dashboard feel like it inherited an unrelated window's
+  // shape. Install-backed hosts still restore their saved bounds on
+  // first spawn so users keep the size they prefer for that install.
   const saved = isChooserKey ? undefined : getSavedBounds(opts.boundsKey)
-  // With a live sibling of the same identity, open at the default size offset from the
-  // sibling's origin rather than restoring saved bounds (which would size+place the new
-  // window identically, making it look like the existing one re-rendered).
+  // Sibling-aware initial bounds: if a live host of the same identity
+  // already exists (e.g. File → New Window with a chooser already open),
+  // open at the canonical default size offset from the sibling's origin
+  // instead of restoring the saved bounds — saved bounds inheritance
+  // there would size + place the new window identically to the live
+  // one, making it look like the existing window had simply re-rendered.
+  // For install-backed first-spawn (no sibling), restore saved bounds
+  // so app relaunches land at the user's preferred size for that install.
   const sibling = findLiveSiblingOrigin(opts.boundsKey)
   const initialOptions = sibling
     ? { x: sibling.x, y: sibling.y, width: DEFAULT_HOST_WIDTH, height: DEFAULT_HOST_HEIGHT }
@@ -464,18 +571,32 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
   })
   comfyWindow.setMenuBarVisibility(false)
 
-  // Pre-warm the title-bar dropdown popup here (not from `title-bar-ready`) so its
-  // WebContentsView + bundle load in parallel with the title-bar renderer; the user can
-  // click the pill before the title-bar paints. Idempotent.
+  // Pre-warm the title-bar dropdown popup (file menu / downloads tray /
+  // instance picker) as early as possible — fired here rather than from
+  // the `title-bar-ready` handler so the popup's WebContentsView + HTML/JS
+  // bundle starts loading in parallel with the title-bar renderer rather
+  // than after it. Cold-start cost is ~150-200ms; the user can click the
+  // pill before the title-bar even finishes painting, so every millisecond
+  // of head-start matters. `ensureTitlePopup` is idempotent so any later
+  // accidental call from the same parent is a no-op.
   prewarmTitlePopup(comfyWindow)
 
+  // Title bar view — bounded to TITLEBAR_HEIGHT, isolated from the body.
+  // Uses the comfyTitleBarPreload bridge regardless of mode (panel switch
+  // buttons, theme updates, downloads tray, etc.).
   const titleBarView = new WebContentsView({
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      // comfyTitleBarPreload imports the shared window.api bridge, which Rollup emits as
-      // a separate chunk; a sandboxed preload can't require() it, leaving window.api
-      // undefined and blanking the renderer. contextIsolation keeps renderer JS Node-free.
+      // sandbox: false — comfyTitleBarPreload imports the shared
+      // src/preload/api.ts (window.api bridge), which Rollup emits as a
+      // separate chunk under out/preload/chunks/. Sandboxed preloads can
+      // only require() from electron/events/timers/url, so the chunk
+      // require would fail silently and leave window.api undefined,
+      // which historically blanked the title-bar renderer and broke
+      // renderer-side telemetry. contextIsolation + nodeIntegration:false
+      // remain on, so renderer JS still has no Node access.
+      // Tracked: issue #521 (build-time chunk inlining to re-enable sandbox).
       sandbox: false,
       preload: path.join(__dirname, '../preload/comfyTitleBarPreload.js'),
     },
@@ -484,11 +605,17 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
   loadTitleBarUrl(titleBarView, opts.titleBarInstallationIdParam)
   comfyWindow.contentView.addChildView(titleBarView)
   _registerExtraBroadcastTarget(titleBarView.webContents)
-  // Title bar is the always-alive renderer per host window, so it's the canonical telemetry
-  // relay target (the panelView is torn down in steady-state `comfy` mode). Exactly one
-  // relay target per window prevents Datadog double-counting.
+  // Title bar is the always-alive renderer per host window — register it as
+  // the canonical telemetry relay target so main-emitted events reach
+  // Datadog RUM regardless of whether the panelView is currently mounted
+  // (steady-state `comfy` mode tears the panel down). Exactly one relay
+  // target per host window prevents Datadog double-counting; PostHog is
+  // already captured by the Node SDK in main and suppressed in the relay
+  // payload (`mainAlreadyCaptured: true`).
   mainTelemetry.registerTelemetryRelayTarget(titleBarView.webContents)
 
+  // Body view. Install-less leaves it dummy and zero-sized; install-backed
+  // loads the URL via attachInstall.
   const comfyView = buildComfyView(comfyWindow, opts.comfyWebPreferences, windowKey)
   comfyWindow.contentView.addChildView(comfyView)
 
@@ -503,16 +630,25 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
     const bodyRect = { x: 0, y: titleBarTotal, width, height: bodyHeight }
     titleBarView.setBounds({ x: 0, y: 0, width, height: titleBarTotal })
 
-    // Read comfyView off the live entry: rebuildComfyViewIfNeeded swaps it during the
-    // chooser-pick in-place attach onto a unique-partition install, after which the
-    // captured `comfyView` would point at a destroyed view.
+    // Read comfyView off the live entry — `rebuildComfyViewIfNeeded`
+    // swaps it during the chooser-pick in-place attach onto a unique-
+    // partition install (Standalone / Portable). The captured `comfyView`
+    // would point at an already-destroyed view, leaving the freshly-built
+    // one with default bounds and invisible — ComfyUI loads but never paints.
     const activeComfyView = entry?.comfyView ?? comfyView
 
+    // The Comfy pill maps to the live ComfyUI view *or* a panel
+    // (lifecycle / chooser / settings / etc.) depending on mode.
+    // `computeBodyMode` already returns `'chooser'` for install-less
+    // hosts, so the install-backed visibility branch handles both.
     const mode = entry ? computeBodyMode(entry) : 'comfy'
     const showPanel = mode !== 'comfy'
-    // Overlay modes mount their modal over the live ComfyUI canvas, so comfyView stays
-    // visible underneath at full bodyRect; the panel renderer paints itself transparent
-    // except for the modal + backdrop.
+    // `'downloads-v2'` and `'feedback'` are overlay modes — their modal
+    // mounts over the live ComfyUI canvas, so unlike other panel modes
+    // we keep `comfyView` visible underneath at full bodyRect. The
+    // panel renderer paints itself transparent (see `PanelApp.vue`'s
+    // `panel-overlay-mode` body class) except for the modal + dim
+    // backdrop, so the canvas composites through on macOS CALayers.
     const isOverlayMode = mode === 'downloads-v2' || mode === 'feedback'
     if (showPanel && entry?.panelView) {
       entry.panelView.setBounds(bodyRect)
@@ -538,8 +674,8 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
 
   if (saved?.maximized) comfyWindow.maximize()
 
-  // On macOS fullscreen the traffic-light buttons vanish, so the title bar drops its
-  // left padding for that period.
+  // On macOS fullscreen the traffic-light buttons disappear, so the title bar
+  // should drop its 78px left padding for that period.
   if (process.platform === 'darwin') {
     const sendFullscreen = (fullscreen: boolean): void => {
       if (titleBarView.webContents.isDestroyed()) return
@@ -549,9 +685,15 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
     comfyWindow.on('leave-full-screen', () => sendFullscreen(false))
   }
 
-  // Save under the LIVE identity, not the construction-time key: a host that flips
-  // identity in place must persist under the slot it currently IS. Chooser hosts skip
-  // persistence entirely (the dashboard always opens at the default size).
+  // Save under the LIVE identity, not the construction-time `opts.boundsKey`.
+  // A chooser host that flips to install-backed in place via the chooser-pick
+  // claim path needs to save its bounds under the install id from then on,
+  // and back to skipping persistence if detached via Return to Dashboard.
+  // Using the captured construction key would persist the install-mode user
+  // adjustments under the chooser slot (and vice versa).
+  //
+  // Chooser hosts skip persistence entirely: the dashboard always opens at
+  // the canonical default size, so there's nothing to remember.
   const persistBounds = (): void => {
     const live = comfyWindows.get(windowKey)
     if (!live || isChooserHost(live)) return
@@ -560,9 +702,12 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
   comfyWindow.on('resize', persistBounds)
   comfyWindow.on('move', persistBounds)
 
-  // Track the most recently focused install id (by id, not windowKey, so it survives a
-  // detach + re-launch) so the dock-icon / second-instance hooks prefer it over an
-  // arbitrary pick. Chooser hosts have their own path via findPreferredChooserHostWindow().
+  // Track the most recently focused install id so the dock-icon /
+  // second-instance re-launch hooks can pick that install over an
+  // arbitrary insertion-order pick when several are open. Tracking by
+  // id (not by windowKey) survives a detach + re-launch into a fresh
+  // host window. Chooser hosts are excluded — they have their own
+  // selection path via findPreferredChooserHostWindow().
   comfyWindow.on('focus', () => {
     const entry = comfyWindows.get(windowKey)
     if (entry?.installationId) {
@@ -570,8 +715,15 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
     }
   })
 
-  // Push the initial state once the title bar's preload signals readiness. Filter to
-  // this title bar's WebContents to avoid cross-talk between windows.
+  // Push the initial state once the title bar's preload signals readiness.
+  // Filter to this title bar's WebContents to avoid cross-talk between windows.
+  //
+  // The install-update pill + source-category icon are resolved off
+  // the entry: the title text and source-category come from
+  // `entry.titleBarText` / `entry.sourceCategory` (set by
+  // `attachInstall()` for install-backed, by the chooser-host
+  // wrapper for install-less); the install-update pill is computed
+  // from `entry.installationId` when non-null.
   const onTitleBarReadyHandler = (event: Electron.IpcMainEvent): void => {
     if (event.sender !== titleBarView.webContents) return
     if (titleBarView.webContents.isDestroyed()) return
@@ -581,13 +733,18 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
       titleBarView.webContents.send('comfy-titlebar:theme-changed', entry.lastTheme)
       titleBarView.webContents.send('comfy-titlebar:title-changed', entry.titleBarText)
       titleBarView.webContents.send('comfy-titlebar:source-category-changed', entry.sourceCategory)
-      // Authoritative push: the title bar no longer reloads across attach/detach, so the
-      // URL query param is only a cold-boot seed for the initial `isInstallLess` paint.
+      // Authoritative installation-id push — the title bar is now a
+      // long-lived view that doesn't reload across attach / detach
+      // (see `loadTitleBarUrl` callers); the URL `installationId`
+      // query param is only a cold-boot seed for the renderer's
+      // initial `isInstallLess` paint.
       titleBarView.webContents.send(
         'comfy-titlebar:installation-id-changed',
         entry.installationId,
       )
-      // Replay preview-mode so a re-mount mid-preview keeps showing the previewed identity.
+      // Replay preview-mode so a re-mount during an in-progress preview
+      // keeps showing the install-type icon next to the previewed name
+      // instead of the bare chooser-host identity.
       titleBarView.webContents.send(
         'comfy-titlebar:preview-mode-changed',
         entry.previewInstallationId !== null,
@@ -599,8 +756,9 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
         )
       }
     }
-    // Both modes get the app-update pill and downloads tray; the install-update pill is
-    // install-backed only.
+    // Both modes get the app-update pill and the downloads tray.
+    // The install-update pill is install-backed only — chooser hosts
+    // (and detached install-backed hosts) skip it cleanly.
     titleBarView.webContents.send(
       'comfy-titlebar:app-update-state-changed',
       updater.getCurrentUpdateState(),
@@ -613,16 +771,31 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
         titleBarView.webContents.send('comfy-titlebar:install-update-changed', state)
       })
     }
-    // Pre-warm the system-modal popup so the first shell-modal trigger doesn't pay the
-    // load cost.
+    // Pre-warm the system-modal popup so the user's first app-update
+    // pill click (or any other shell-modal trigger) doesn't pay the
+    // load cost — the modal needs to feel as instant as the pill click.
+    // (Title-popup prewarm runs earlier, right after BrowserWindow
+    // construction, so the popup webContents has the longest possible
+    // head start before the user's first click.)
     ensureSystemModal(comfyWindow)
   }
   ipcMain.on('comfy-window:title-bar-ready', onTitleBarReadyHandler)
 
-  // Async close: preventDefault, consult the panel renderer, run the install's
-  // `_installCleanup` if any, then destroy. `closingInFlight` guards re-entry on rapid
-  // OS-close clicks while the consult is pending. detachWindowDownloads stays outside
-  // `_installCleanup` because it survives mode flips and only dies with the BrowserWindow.
+  // Close handler is async: preventDefault, consult the panel
+  // renderer (so a Tier 2/3 op can prompt the user), run the
+  // attached install's symmetric cleanup if any, and only then
+  // destroy. The `closingInFlight` guard prevents re-entry on rapid
+  // clicks of the OS close button while the consult is pending.
+  //
+  // Pre-teardown work (detachWindowDownloads + ipc.stopRunning +
+  // install-keyed map cleanup + installationEvents unsubscribe) is
+  // consolidated on `entry._installCleanup`, which `attachInstall()`
+  // sets and `detachInstall()` / window close both invoke.
+  // Per-window cleanup (`detachWindowDownloads`) lives outside
+  // `_installCleanup` because it survives mode flips — the
+  // per-window download routing is attached at session level when
+  // the install does, and only needs to be torn down when the
+  // BrowserWindow itself goes away.
   let closingInFlight = false
   comfyWindow.on('close', (e) => {
     e.preventDefault()
@@ -632,24 +805,40 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
       try {
         const entry = comfyWindows.get(windowKey)
         const skipConsult = fx.preClearedClose.has(comfyWindow)
-        // The OS ✕ must never quit the app. As the last live window, an install-backed
-        // host returns to the dashboard instead of being destroyed; a chooser host is
-        // destroyed and the app quits via `window-all-closed` (the one sanctioned exit).
+        // The OS ✕ must never quit the app. When this is the only live
+        // host window, an install-backed host returns to the dashboard
+        // (stop the instance, flip in place) instead of being destroyed;
+        // a chooser host is destroyed and the app quits via
+        // `window-all-closed`, which is the one sanctioned exit. The
+        // renderer also uses `isLastWindow` to tailor its close-confirm
+        // copy.
         const isLastWindow =
           Array.from(comfyWindows.values()).filter((e) => !e.window.isDestroyed()).length <= 1
-        // Hide any open title-bar popup first: it's a sibling WebContentsView stacked above
-        // the panel view, so a modal would otherwise sit behind the opaque popup.
+        // Hide any open title-bar popup before any confirm fires. The
+        // popup is a sibling WebContentsView stacked above the panel view
+        // in the same BrowserWindow, so a modal would otherwise sit behind
+        // the (visually opaque) popup and be unreachable.
         if (!skipConsult) hideTitlePopupForParent(comfyWindow)
-        // Step 1: let the renderer handle any in-flight overlay cancel-prompt. With no
-        // overlay it returns `defer` and main owns the confirm (a running instance's panel
-        // view is hidden behind ComfyUI and can't surface a prompt). Every renderer-cancel
-        // path below re-checks `preClearedClose` so a force-close landing mid-consult wins.
+        // Step 1 — let the renderer handle any in-flight Tier 2/3 overlay
+        // (its cancel-prompt). With no overlay it returns `defer`: the
+        // close-window confirm is main's job, because a running instance's
+        // panel view is hidden behind the ComfyUI view and can't be relied
+        // on to surface a prompt (the ✕ was closing silently for exactly
+        // that reason). `skipConsult` (the menu pre-cleared this close) and
+        // chooser hosts skip straight through.
+        //
+        // Every renderer-cancel path below re-checks `preClearedClose`
+        // before bailing — a force-close (launch-guard eviction, bulk
+        // Exit-All) can land mid-consult/mid-confirm, and the explicit
+        // caller-side consent must override a per-window cancel so the
+        // caller's awaiting flow can move on.
         const consult: CloseConsultResult = skipConsult
           ? 'cleared'
           : await fx.consultPanelRendererClose(entry?.panelView)
         if (shouldBailAfterConsult(consult, fx.preClearedClose.has(comfyWindow))) return
-        // Step 2: for an install-backed host with no overlay, main shows the same Close
-        // Window confirm as the menu item. The dashboard closes with no prompt.
+        // Step 2 — for an install-backed host with no overlay, main shows
+        // the same Close Window confirm as the menu item. The dashboard
+        // closes with no prompt.
         const entryForClose = comfyWindows.get(windowKey)
         const isInstallHostWindow = !!entryForClose && !isChooserHost(entryForClose)
         if (
@@ -667,14 +856,20 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
           )
           if (shouldBailAfterCloseConfirm(confirmed, fx.preClearedClose.has(comfyWindow))) return
         }
-        // Capture force-close intent before draining the flag: the initial snapshot or a
-        // late-arriving pre-clear both mark this as caller-driven.
+        // Capture the force-close intent before we drain the flag.
+        // Either the initial snapshot (`skipConsult`) or a late-arriving
+        // pre-clear (force-close that landed mid-consult/mid-modal) is
+        // enough to mark this as caller-driven.
         const forceClose = skipConsult || fx.preClearedClose.has(comfyWindow)
         fx.preClearedClose.delete(comfyWindow)
         if (comfyWindow.isDestroyed()) return
-        // Last install-backed window returns to the dashboard rather than tearing down.
-        // `detachInstall` runs the same `_installCleanup` then flips to chooser mode in
-        // place. Force-close skips this (the caller wants the window gone).
+        // Last install-backed window → return to the dashboard rather
+        // than tear down + quit. `detachInstall` runs the same
+        // `_installCleanup` (stopRunning, listeners off) the teardown
+        // below would, then flips the window to chooser mode in place.
+        // Force-close skips this — the caller wants the window gone
+        // (e.g. launch-guard swapping installs shouldn't leave a stray
+        // dashboard window behind).
         if (
           shouldDetachLastInstallWindowToDashboard(
             isInstallHostWindow,
@@ -687,9 +882,16 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
           entryForClose.detachInstall()
           return
         }
-        // Wrap each cleanup step so a single throw can't skip the final destroy() and
-        // leave the window alive forever (observed when a reused comfyView's webContents
-        // came back undefined after navigation churn). Errors forward to Datadog.
+        // Each cleanup step is wrapped via `safeTeardown` so a single
+        // throw can't skip the BrowserWindow.destroy() at the end.
+        // Without this, an exception in (e.g.) the comfy webContents
+        // close — observed in the in-place attach path where the
+        // chooser's reused comfyView's `.webContents` can come back
+        // undefined after the install's navigation churn — left the
+        // host window alive forever, with ComfyUI still loaded.
+        // Errors are forwarded to Datadog so silent teardown failures
+        // stay visible in telemetry instead of being swallowed by the
+        // safety net.
         const safeTeardown = (source: string, fn: () => void): void => {
           try {
             fn()
@@ -713,8 +915,11 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
           () => _unregisterExtraBroadcastTarget(titleBarView.webContents))
         safeTeardown('host-window-close-unregister-telemetry-relay',
           () => mainTelemetry.unregisterTelemetryRelayTarget(titleBarView.webContents))
-        // Re-read from the live registry: rebuildComfyViewIfNeeded may have swapped
-        // `entry.comfyView`, so the captured one could point at a destroyed view.
+        // Re-read the entry from the live registry: rebuildComfyViewIfNeeded
+        // can have swapped `entry.comfyView` since the closure was captured
+        // (in-place attach onto a chooser host with a different partition),
+        // so the captured `comfyView` would point at an already-destroyed
+        // WebContentsView and `.webContents.close()` would throw.
         const liveEntry = comfyWindows.get(windowKey)
         const activeComfyView = liveEntry?.comfyView ?? comfyView
         if (liveEntry) {
@@ -723,8 +928,10 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
         safeTeardown('host-window-close-title-bar-webcontents-close',
           () => titleBarView.webContents.close())
         safeTeardown('host-window-close-comfy-webcontents-close', () => {
-          // `webContents` can come back undefined on a reused chooser comfyView after
-          // navigation churn; the optional chain avoids a TypeError on expected teardowns.
+          // `webContents` can come back undefined on a reused chooser
+          // comfyView after the install's navigation churn — the optional
+          // chain avoids a TypeError that would needlessly spam Datadog
+          // during otherwise expected teardowns.
           if (activeComfyView.webContents && !activeComfyView.webContents.isDestroyed()) {
             activeComfyView.webContents.close()
           }
@@ -738,10 +945,15 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
 
   comfyWindow.on('closed', () => {
     ipcMain.off('comfy-window:title-bar-ready', onTitleBarReadyHandler)
+    // Unregister via the primary windowKey AND the secondary
+    // install-id index.
     const closedEntry = comfyWindows.get(windowKey)
     if (closedEntry) unregisterHostEntry(closedEntry)
-    // Drop any pending attach claim targeting THIS window, else stale entries pile up and
-    // can be silently consumed by an unrelated future onLaunch().
+    // Drop any pending attach claim whose target is THIS window.
+    // Without this, stale entries pile up over the app's lifetime
+    // AND can be silently consumed by an unrelated future
+    // `onLaunch()` (the consumer's destroyed-window check rejects
+    // them, but the side-effect `delete` still fires).
     dropAttachClaimsForWindow(windowKey)
   })
 
@@ -755,8 +967,14 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
     lastTheme: opts.initialTheme,
     layoutViews,
     comfyUrl: '',
-    // ALWAYS install-less at construction; `attachInstall()` (called right after) is the
-    // only place that populates `installationId` and the secondary index.
+    // ALWAYS install-less at construction. The install-backed wrapper
+    // calls `attachInstall()` immediately after this returns, which is
+    // the only place that populates `installationId` (and the secondary
+    // index). Pre-fix this field was seeded from `opts.installationId`,
+    // which made `attachInstall()` throw on its already-attached guard
+    // for every install-backed launch that fell past the existing-entry
+    // and claim branches in `onLaunch()` — broken for unique-partition
+    // installs (Standalone / Portable) launched from a chooser host.
     installationId: null,
     constructedPartition:
       typeof opts.comfyWebPreferences.partition === 'string'
@@ -771,7 +989,9 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
     // Bound below so it can self-reference the freshly-created entry.
     detachInstall: () => {},
   }
-  // Bound post-literal so the closure captures the registered entry by reference.
+  // Bind the detach method to the freestanding impl. Done
+  // post-literal so the closure captures the registered entry by
+  // reference, not by a copy at literal-build time.
   entry.detachInstall = () => fx.detachInstallImpl(entry)
   registerHostEntry(entry)
 
@@ -779,12 +999,26 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
 }
 
 /**
- * (Re)load the title-bar webContents at the URL for `installationId` (empty for chooser
- * hosts). Re-mounting the Vue app is what flips `isInstallLess` and the install-pill
- * identity (the renderer reads `installationId` once at startup from the URL).
+ * (Re)load the title-bar webContents at the URL for `installationId`
+ * (empty string for chooser hosts). Used by `createHostWindow()`
+ * for the initial mount and by `attachInstall` / `_detachInstallImpl`
+ * to swap the URL in place when a host flips between chooser and
+ * install-backed mode — re-mounting the Vue app is what flips
+ * `isInstallLess` and the install-pill identity (the title-bar
+ * renderer reads `installationId` once at startup from the URL).
  *
- * IMPORTANT: this navigation drops every cached renderer message, so any new piece of
- * title-bar state must also be re-pushed by `onTitleBarReadyHandler` in `createHostWindow()`.
+ * The `comfy-window:title-bar-ready` handshake re-fires after the
+ * navigation lands and re-pushes title text, source category, theme,
+ * panel state, and the install-update pill from `entry.*` — so
+ * callers don't need to re-emit those events themselves.
+ *
+ * IMPORTANT: any new piece of title-bar renderer state must also be
+ * re-pushed by the `onTitleBarReadyHandler` in `createHostWindow()`
+ * — the navigation here drops every cached message the renderer was
+ * holding. The current contract covers: panel-changed,
+ * theme-changed, title-changed, source-category-changed,
+ * fullscreen-changed (macOS), app-update-state-changed,
+ * downloads-changed, install-update-changed (install-backed only).
  */
 export function loadTitleBarUrl(
   titleBarView: WebContentsView,
@@ -803,9 +1037,14 @@ export function loadTitleBarUrl(
 }
 
 /**
- * Resolve the comfyView session partition for an install. Unique-partition installs get
- * their own `persist:${id}` bucket so cookies / IndexedDB / Service Workers don't leak
- * across siblings; everything else shares `persist:shared`.
+ * Resolve the comfyView session partition an install must be loaded
+ * into. Unique-partition installs (`browserPartition === 'unique'`)
+ * get their own `persist:${id}` bucket so cookies / IndexedDB /
+ * Service Workers don't leak across sibling installs; everything
+ * else shares `persist:shared`. Used by both the install-backed
+ * wrapper (constructing a fresh comfyView) and `rebuildComfyViewIfNeeded`
+ * to flip a chooser host's view onto a partition that matches the
+ * install being attached in place.
  */
 export function expectedPartitionFor(installation: InstallationRecord): string {
   return (installation.browserPartition as string | undefined) === 'unique'
@@ -823,8 +1062,10 @@ export function buildComfyView(
   webPreferences: Electron.WebPreferences,
   windowKey: number,
 ): WebContentsView {
-  // Map the `monospace` generic to a real face; Electron leaves it unmapped, so ComfyUI's
-  // prompt textarea would otherwise render proportional on Desktop.
+  /**
+   * Map the `monospace` generic to a real face. Electron leaves it unmapped,
+   * so ComfyUI's prompt textarea renders proportional on Desktop (monospace on web).
+   */
   const defaultFontFamily: Electron.WebPreferences['defaultFontFamily'] = {
     ...webPreferences.defaultFontFamily,
     monospace:
@@ -840,12 +1081,16 @@ export function buildComfyView(
   comfyView.setBackgroundColor(COMFY_BG)
 
   const comfyContents = comfyView.webContents
-  // Attach the will-download handler eagerly so downloads flow through the launcher's tray
-  // instead of the browser. Idempotent.
+  // Eagerly attach the will-download handler to the comfy view's
+  // session so any `session.downloadURL(...)` call below — or a server-
+  // initiated `Content-Disposition: attachment` response — flows
+  // through the launcher's downloads tray instead of falling back to
+  // the browser. `attachSessionDownloadHandler` is idempotent.
   attachSessionDownloadHandler(comfyContents.session)
 
-  // Set by the window-open handler immediately before the matching `did-create-window`
-  // (synchronous pairing), then reset there so it can't leak to a later non-checkout popup.
+  // Set by the window-open handler immediately before the matching
+  // `did-create-window` fires (synchronous pairing), then reset there so
+  // it can never leak to a later non-checkout popup.
   let nextPopupIsCheckout = false
 
   comfyContents.on('did-create-window', (childWindow) => {
@@ -857,8 +1102,12 @@ export function buildComfyView(
     if (isCheckout) wireCheckoutPopup(childWindow, comfyWindow, comfyContents)
   })
   comfyContents.setWindowOpenHandler(({ url: childUrl }) => {
-    // Intercept Firebase auth popups and reroute sign-in through the bridge so passkeys
-    // and saved-password autofill work.
+    // Intercept Firebase auth popups (`<authDomain>/__/auth/handler?...`)
+    // and reroute sign-in through the user's system browser so passkeys
+    // and saved-password autofill work. The bridge picks a per-provider
+    // flow: Google takes a server-side raw-OAuth path (zero clicks),
+    // GitHub takes a client-side popup-bridge path (1-2 clicks) because
+    // its OAuth App allows only a single Authorization Callback URL.
     if (isFirebaseAuthHandlerUrl(childUrl)) {
       void handleFirebasePopup(childUrl, comfyContents, {
         parentWindow: comfyWindow,
@@ -874,9 +1123,13 @@ export function buildComfyView(
       return { action: 'deny' }
     }
     if (isCheckoutUrl(childUrl)) {
-      // `checkout.comfy.org` forbids iframing, so checkout is a real popup styled to read
-      // as in-app. Frameless on Windows/Linux only: a frameless macOS `window.open` child
-      // can't be dragged/closed reliably, so it keeps its frame.
+      // `checkout.comfy.org` forbids iframing, so checkout has to be a
+      // real popup — styled to read as in-app (parented, centered, sized
+      // to the work area) and wired up in `wireCheckoutPopup`. Frameless
+      // on Windows/Linux only: there the checkout page's own ✕/back is
+      // enough, but a frameless `window.open` child on macOS can't be
+      // dragged/closed reliably, so it keeps its frame. preload:
+      // undefined strips our title-bar bridge.
       nextPopupIsCheckout = true
       const bounds = checkoutPopupBounds(comfyWindow)
       return {
@@ -895,13 +1148,20 @@ export function buildComfyView(
       }
     }
     if (shouldOpenInPopup(childUrl)) {
-      // preload: undefined strips the title-bar bridge so popups can't reach file-menu IPCs.
+      // preload: undefined strips our title-bar bridge so OAuth/cloud-login
+      // popups can't reach the file menu IPCs.
       return { action: 'allow', overrideBrowserWindowOptions: { webPreferences: { preload: undefined } } }
     }
-    // The cloud "Download zip" button is a `window.open(zipUrl)` with no `<a download>`, so
-    // Electron reports disposition `'foreground-tab'` (indistinguishable from a normal link).
-    // Match on the pathname extension and route through `session.downloadURL` so it lands in
-    // the downloads tray instead of leaking to the system browser.
+    // Capture downloads that the previous unconditional
+    // `shell.openExternal` branch was leaking to the system browser.
+    // The cloud "Download zip" button renders as a `window.open(zipUrl)`
+    // (no `<a download>` attribute), so Electron reports disposition
+    // `'foreground-tab'` — indistinguishable from a normal external
+    // link by disposition alone. We match on the URL's pathname
+    // extension via `isLikelyDownloadUrl` (archive / installer / model
+    // weights) and route the request through `session.downloadURL`,
+    // which fires the `will-download` listener attached above and
+    // surfaces the download in the launcher's downloads tray.
     if (isLikelyDownloadUrl(childUrl)) {
       comfyContents.session.downloadURL(childUrl)
       return { action: 'deny' }
@@ -950,17 +1210,25 @@ export function rebuildComfyViewIfNeeded(
   entry.constructedPartition = expectedPartition
 }
 
-/** Launcher-theme background + symbol colours for install-less hosts, which have no
- *  ComfyUI frontend feeding their theme. Maps `titleBarOverlayForTheme` to the
- *  `{ bg, text }` shape TitleBarApp.vue consumes. */
+/** Resolve the launcher-theme-driven background + symbol colours used
+ *  by install-less host windows. Install-less hosts have no ComfyUI
+ *  frontend feeding their theme so the title-bar Vue header and the
+ *  OS-level window-controls overlay both track `--titlebar-bg` from
+ *  main.css. `titleBarOverlayForTheme` returns the matching
+ *  `--titlebar-bg` values (#171718 dark / #e9e9e9 light) so this helper
+ *  is a thin wrapper that maps them to the `comfy-titlebar:theme-changed`
+ *  `{ bg, text }` shape consumed by TitleBarApp.vue. */
 export function getChooserHostTheme(): { bg: string; text: string } {
   const overlay = titleBarOverlayForTheme(resolveTheme() === 'dark')
   return { bg: overlay.color ?? TITLEBAR_BG, text: overlay.symbolColor ?? '#dddddd' }
 }
 
-/** Repaint a single install-less host's title bar + OS overlay to the current launcher
- *  theme. Driven by the launcher setting (or OS dark-mode flip on `'system'`) rather than
- *  ComfyUI's in-page theme observer. */
+/** Repaint a single install-less host window's title bar + OS overlay
+ *  to match the current launcher theme. Mirrors `applyComfyTheme` for
+ *  install-backed windows, but driven by the launcher setting (or
+ *  OS-level dark-mode flip on `'system'`) rather than ComfyUI's
+ *  in-page theme observer — install-less hosts have no ComfyUI
+ *  frontend feeding them. */
 export function applyChooserHostTheme(entry: ComfyWindowEntry): void {
   if (isInstallHost(entry)) return
   if (entry.window.isDestroyed()) return
@@ -973,13 +1241,18 @@ export function applyChooserHostTheme(entry: ComfyWindowEntry): void {
     try {
       entry.window.setTitleBarOverlay({ color: theme.bg, symbolColor: theme.text })
     } catch {
-      // setTitleBarOverlay throws if the window was created without `titleBarOverlay`.
+      // No-op — setTitleBarOverlay throws if the window was created
+      // without `titleBarOverlay`, which install-less hosts always set.
     }
   }
 }
 
-/** Repaint every install-less host's title bar to the current launcher theme, so flipping
- *  the Theme setting (or OS dark-mode on `'system'`) refreshes all chooser hosts live. */
+/** Walk every install-less host window and repaint its title bar to
+ *  the current launcher theme. Hooked into the settings handler's
+ *  `onThemeChanged` callback so flipping the Theme setting (or the
+ *  OS-level dark-mode preference while the setting is `'system'`)
+ *  refreshes every open chooser host live, instead of only repainting
+ *  the panel body inside it. */
 export function applyChooserHostThemeToAll(): void {
   for (const [, entry] of comfyWindows) {
     if (isChooserHost(entry)) {
@@ -988,14 +1261,32 @@ export function applyChooserHostThemeToAll(): void {
   }
 }
 
-/** Open a fresh install-less host window: same shape as an install-backed comfy window
- *  but with no installation backing the entry. The Comfy pill resolves to the chooser body
- *  via `computeBodyMode()` and the user picks an install there. The comfyView still exists
- *  (so `layoutViews` needn't special-case its absence) but stays zero-sized and hidden. */
+/** Open a fresh install-less host window. Same shape as an install-
+ *  backed comfy window — title bar pills + body area — but with no
+ *  installation backing the entry. The Comfy pill resolves to the
+ *  chooser body via `computeBodyMode()`; the user picks an install
+ *  from there. Skips the install-backed extras (comfy URL load, theme
+ *  observer, download wiring, failure retry) since none of them apply.
+ *  The comfyView still exists so `layoutViews` doesn't have to
+ *  special-case its absence, but is sized to zero and never made
+ *  visible. */
 export function openChooserHostWindow(initialPanel: ComfyPanelKey = 'comfy'): BrowserWindow {
-  // Chooser-only extras over `createHostWindow()`: a header label override and an eager
-  // `ensurePanelView` so the panel body paints on the first frame. The title-bar / overlay
-  // colors are driven by the launcher theme (refreshed via `applyChooserHostTheme`).
+  // Install-less wrapper. The shared `createHostWindow()` builds
+  // the BrowserWindow + 2 views skeleton, layoutViews, macOS
+  // fullscreen, bounds-save listeners, close / closed handlers,
+  // and title-bar-ready handshake. The chooser-only extras live
+  // here: a title-bar header label override and an eager
+  // `ensurePanelView('chooser')` so the panel body paints on the
+  // first frame instead of after the next layout tick.
+  //
+  // Install-less host windows have no ComfyUI frontend feeding
+  // their theme, so the chooser's title bar / overlay colors are
+  // driven by the launcher theme (resolved here and refreshed via
+  // `applyChooserHostTheme` when the theme setting or OS-level
+  // dark-mode preference flips). Both the Vue `<header>` and the
+  // OS overlay paint `getChooserHostTheme().bg` (the launcher
+  // renderer's `--surface`) so the seam between them stays
+  // invisible.
   const initialChooserTheme = getChooserHostTheme()
 
   const { comfyWindow, entry, titleBarView } = createHostWindow({
@@ -1004,13 +1295,22 @@ export function openChooserHostWindow(initialPanel: ComfyPanelKey = 'comfy'): Br
     initialTheme: initialChooserTheme,
     titleBarOverlay: process.platform === 'darwin'
       ? undefined
-      // Every host uses the same overlay (TITLEBAR_BG) so the window-controls region
-      // matches the Vue title bar above it; it never adapts to ComfyUI's in-page theme.
+      // Every host — install-less chooser AND install-backed instance —
+      // uses the same `titleBarOverlayForTheme` (TITLEBAR_BG) for the OS
+      // overlay so the close/min/max region matches the Vue title bar
+      // above it. The overlay never adapts to ComfyUI's in-page theme.
       : titleBarOverlayForTheme(resolveTheme() === 'dark'),
-    // Dummy comfyView, kept so layoutViews needn't special-case the install-less branch.
-    // Same preload + `persist:shared` partition as the install-backed default, so a
-    // chooser-pick attach can navigate it in place. Unique-partition installs instead get
-    // a fresh window via `createHostWindow()`.
+    // Dummy comfyView. Kept so layoutViews doesn't have to special-
+    // case the install-less branch — its body always resolves to
+    // the panelView. Uses the same comfy preload + `persist:shared`
+    // partition the install-backed default uses, so a chooser-pick
+    // `attachInstall()` can navigate this view in place to the
+    // install's URL without rebuilding the WebContentsView. The
+    // preload + partition are no-ops on the idle view (nothing
+    // loads it before attach). Unique-partition installs
+    // (`browserPartition === 'unique'`) still need a fresh window —
+    // the in-place attach falls through to `createHostWindow()`
+    // for that case.
     comfyWebPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -1018,8 +1318,13 @@ export function openChooserHostWindow(initialPanel: ComfyPanelKey = 'comfy'): Br
       partition: 'persist:shared',
     },
     titleBarBackground: initialChooserTheme.bg,
-    // Empty param puts the title-bar Vue in install-less mode (no icon, dashboard label).
+    // Empty installationId URL param tells the title-bar Vue to enter
+    // install-less mode (no install-type icon, dashboard pill label).
     titleBarInstallationIdParam: '',
+    // Initial title-bar pill text + source-category are stored on
+    // the entry; the unified title-bar-ready handshake re-pushes
+    // from the entry. Install-less hosts have no install backing
+    // so the source-category icon stays unset.
     initialTitleBarText: CHOOSER_HOST_TITLE_TEXT,
     initialSourceCategory: null,
     initiallyHidden: true,
@@ -1027,7 +1332,9 @@ export function openChooserHostWindow(initialPanel: ComfyPanelKey = 'comfy'): Br
 
   entry.coldStartPendingReveal = true
 
-  // "+ New Instance" passes 'new-install' so the window boots straight into the wizard.
+  // Seed the requested initial panel (default 'comfy' → chooser body for
+  // an install-less host). "+ New Instance" passes 'new-install' so the
+  // fresh window boots straight into the wizard with no dashboard flash.
   entry.activePanel = initialPanel
   ensurePanelView(entry.windowKey, entry, computeBodyMode(entry))
 
@@ -1035,14 +1342,23 @@ export function openChooserHostWindow(initialPanel: ComfyPanelKey = 'comfy'): Br
 
   const revealKey = entry.windowKey
 
-  // Reveal on the title-bar's `dom-ready` (its ~25 KB bundle paints far sooner than the
-  // ~585 KB panel bundle) so the chrome shows fast; the panel body underneath paints its
-  // background colour until Vue mounts. `ensurePanelView`'s `did-finish-load` is the
-  // fallback if the title bar loads slower than the panel.
+  // Fast-path reveal: the title-bar bundle is ~25 KB and finishes its
+  // first paint in well under 200 ms even on a Windows cold start,
+  // versus ~700-1000 ms for the 585 KB panel bundle. Revealing on the
+  // titlebar's `dom-ready` lets the user see a fully chrome'd window
+  // (file menu, install pill, downloads icon) almost immediately
+  // after clicking File → New Window; the panel body underneath
+  // paints the chooser surface colour via its `setBackgroundColor`
+  // until panel.html finishes booting and Vue mounts. The
+  // panelView's `did-finish-load` handler in `ensurePanelView` is
+  // the fallback if titlebar load is delayed past the panel's.
   titleBarView.webContents.once('dom-ready', () => revealColdStartHostIfPending(revealKey))
 
-  // Backstop: if both views fail to load, force a reveal so the window isn't invisible
-  // forever. Cleared on close so a fast-close window doesn't leave the closure pending.
+  // Final backstop: if both views somehow fail to load, force a
+  // reveal so the window doesn't stay invisible forever. 2 s is
+  // generous relative to observed cold-start times but well short
+  // of the user noticing the window is missing. Cleared on close
+  // so a fast-close window doesn't leave the closure pending.
   const backstopTimer = setTimeout(() => revealColdStartHostIfPending(revealKey), 2_000)
   comfyWindow.once('closed', () => clearTimeout(backstopTimer))
 

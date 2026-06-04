@@ -1,17 +1,26 @@
 /**
- * Build the JS string that writes the captured Firebase user into the embedded
- * view's IndexedDB and reloads so Firebase's SDK rehydrates from persistence
- * and fires `onAuthStateChanged` (same path as a normal popup sign-in).
+ * Build the JavaScript string passed to `comfyContents.executeJavaScript`
+ * to write the captured Firebase user into the embedded view's IndexedDB
+ * and reload the page so Firebase's SDK rehydrates from persistence.
  *
  * Schema (stable across Firebase JS SDK v9-v11):
- *   - DB `firebaseLocalStorageDb`, store `firebaseLocalStorage`, keyPath
- *     `fbase_key`, key `firebase:authUser:<apiKey>:[DEFAULT]`.
+ *   - DB:     `firebaseLocalStorageDb`
+ *   - Store:  `firebaseLocalStorage`
+ *   - KeyPath:`fbase_key`
+ *   - Key:    `firebase:authUser:<apiKey>:[DEFAULT]`
+ *   - Value:  `{ fbase_key, value: <user.toJSON()> }`
+ *
+ * After the write, `location.reload()` triggers Firebase's persistence
+ * read on init, which fires `onAuthStateChanged(user)` and lets the
+ * cloud frontend's existing `useSessionCookie.createSession()` flow
+ * post the ID token to `/auth/session` — same path as a normal popup
+ * sign-in.
  */
 export function buildIndexedDbInjectScript(user: Record<string, unknown>, apiKey: string): string {
   const userJson = JSON.stringify(user)
   const apiKeyJson = JSON.stringify(apiKey)
-  // IIFE resolves once the IDB transaction commits, so the returned Promise
-  // tracks the actual write.
+  // Wrapped in an IIFE that resolves once the IDB transaction commits
+  // (so `executeJavaScript`'s returned Promise tracks the actual write).
   return `(async () => {
   const userValue = ${userJson};
   const apiKey = ${apiKeyJson};
@@ -34,8 +43,9 @@ export function buildIndexedDbInjectScript(user: Record<string, unknown>, apiKey
       store.put({ fbase_key: storageKey, value: userValue });
     };
   });
-  // Signals attach.ts's dom-ready patch to briefly hide documentElement so the
-  // login page doesn't flash between rehydrate and redirect-to-workspace.
+  // Tell the next page-load (handled by attach.ts's dom-ready patch) to
+  // hide documentElement briefly so the cloud login page doesn't flash
+  // between Firebase rehydrating and the FE redirecting to the workspace.
   try { sessionStorage.setItem('__comfyDesktopPostSignin', '1'); } catch (_) {}
   location.reload();
 })()`

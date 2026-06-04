@@ -1,8 +1,16 @@
 /**
- * Bridge-page HTML rendered to the user's system browser. Google uses a
- * server-driven raw OAuth flow (browser sees only a terminal state); GitHub
- * uses a client-driven popup bridge because its OAuth Apps allow only a single
- * Authorization Callback URL, so the loopback raw-OAuth flow can't be used.
+ * Bridge-page HTML rendered to the user's system browser. Two flows
+ * share these helpers depending on provider:
+ *
+ *  - Google: server-driven raw OAuth (`createAuthUri` → HTTP 302 →
+ *    provider → 302 back to `signInWithIdp`). The user's browser only
+ *    sees a terminal state — "Signed in" or "Sign-in failed".
+ *
+ *  - GitHub: client-driven popup bridge — the page initialises Firebase
+ *    JS SDK and calls `signInWithPopup` (gated behind a button click so
+ *    popup-blockers can't fire). Used because GitHub OAuth Apps only
+ *    permit a single Authorization Callback URL (reserved for web
+ *    sign-in), so the loopback raw-OAuth flow can't be used.
  */
 
 import type { FirebaseProjectConfig } from './config'
@@ -186,8 +194,14 @@ function shell(title: string, body: string): string {
 </html>`
 }
 
-/** Terminal success page. The countdown is synchronised with the server-side
- *  `POST_SIGNIN_HOLD_MS` hold so focus shifts only after it reaches zero. */
+/**
+ * Terminal success page shown when the OAuth callback completes and
+ * the user has been injected into the Desktop view. Renders a
+ * countdown synchronised with the server-side `POST_SIGNIN_HOLD_MS`
+ * delay so the page doesn't disappear out from under the user the
+ * instant Google completes — focus only shifts after the counter
+ * reaches zero.
+ */
 export function renderDoneHtml(): string {
   return shell(
     "You're signed in — Comfy Desktop",
@@ -203,8 +217,11 @@ export function renderDoneHtml(): string {
           n -= 1;
           if (n <= 0) {
             el.textContent = 'Returning to Comfy Desktop…';
-            // Best-effort tab close; browsers may block window.close on tabs
-            // not opened by window.open().
+            // Best-effort tab close. Browsers block window.close on tabs
+            // that weren't opened by window.open() — but Chrome / Safari
+            // increasingly allow it when the tab originated from an
+            // external-app deep link (shell.openExternal). If blocked,
+            // the user just keeps seeing this page until they close it.
             setTimeout(function(){ try { window.close() } catch (_) {} }, 250);
             return;
           }
@@ -217,7 +234,11 @@ export function renderDoneHtml(): string {
   )
 }
 
-/** Terminal error page for IdP-denied or Firebase-exchange failures. */
+/**
+ * Terminal error page for IdP-denied or Firebase-exchange failures.
+ * The user can retry by returning to Comfy Desktop and clicking
+ * Sign in again.
+ */
 export function renderErrorHtml(message: string): string {
   return shell(
     'Sign-in failed — Comfy Desktop',
@@ -229,10 +250,16 @@ export function renderErrorHtml(message: string): string {
 }
 
 /**
- * Provider-bridge page for IdPs that can't use the raw OAuth loopback flow
- * (today: GitHub). Initialises the Firebase JS SDK and runs `signInWithPopup`
- * from a user gesture, then POSTs `auth.currentUser.toJSON()` to `/callback`
- * (same payload shape the IndexedDB injection script expects).
+ * Provider-bridge page used for IdPs that can't use the raw OAuth
+ * loopback flow (today: GitHub — its OAuth Apps allow only a single
+ * Authorization Callback URL, reserved for web). The page initialises
+ * Firebase JS SDK and runs `signInWithPopup` from a user gesture (the
+ * "Continue with X" button — gated so popup-blockers don't fire).
+ * Auto-attempt on load handles browsers that allow external-app-opened
+ * tabs to popup once without explicit interaction.
+ *
+ * On success the page POSTs `auth.currentUser.toJSON()` to `/callback`
+ * — same payload shape the IndexedDB injection script expects.
  */
 export function renderPopupBridgeHtml(
   firebaseConfig: FirebaseProjectConfig,
@@ -384,10 +411,13 @@ export function renderPopupBridgeHtml(
       if (!resp.ok) throw new Error('Callback responded ' + resp.status)
     }
 
-    // Auto-attempt on load: an externally-opened tab often has transient
-    // activation and allows one popup; falls back to the manual button if
-    // blocked. Check getRedirectResult first to handle Firebase's internal
-    // popup-to-redirect fallback.
+    // Auto-attempt on load: a tab opened by shell.openExternal often
+    // has transient activation in Chrome and allows one popup. Falls
+    // back to the manual button when the browser blocks it. We also
+    // handle Firebase's internal popup-to-redirect fallback by first
+    // checking for a redirect result — when the URL has code+state
+    // from an in-flight Firebase redirect, getRedirectResult resolves
+    // with the user even though we never explicitly called signInWithRedirect.
     async function autoAttempt() {
       renderWorking()
       try {
