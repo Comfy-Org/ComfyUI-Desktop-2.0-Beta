@@ -147,6 +147,8 @@ export interface PopupDownloadEntry {
   /** First-seen timestamp (ms), stable across status transitions so terminal
    *  entries keep their slot in a single insertion-ordered list. */
   createdAt?: number
+  /** Set on a completed image asset; the popup lazily requests a thumbnail. */
+  isImage?: boolean
 }
 
 export interface PopupDownloadsState {
@@ -204,6 +206,9 @@ export interface ComfyTitlePopupBridge {
    *  `{ confirmed: true }` when an in-drawer confirm already ran so main skips
    *  its system-modal. */
   restartInstall(installationId: string, opts?: { confirmed?: boolean }): void
+  /** Downscaled `data:` URL preview of a completed image download (the popup
+   *  has no `window.api`); null for non-images / unreadable files. */
+  getDownloadThumbnail(savePath: string): Promise<string | null>
   /** Cloud capacity status; the popup has no `window.api`, so this gives
    *  `useCloudCapacity` an equivalent read path. */
   getCloudCapacity(): Promise<'normal' | 'degraded' | 'disabled'>
@@ -518,6 +523,8 @@ const bridge: ComfyTitlePopupBridge = {
       confirmed: opts?.confirmed === true,
     })
   },
+  getDownloadThumbnail: (savePath: string) =>
+    ipcRenderer.invoke('download-thumbnail', { savePath }),
   getCloudCapacity: async () => {
     // Reuses the panel's `get-cloud-capacity` handler, which awaits the boot
     // fetch so the first call doesn't race the network.

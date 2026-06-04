@@ -12,6 +12,7 @@ import {
   XCircle,
 } from 'lucide-vue-next'
 import { BaseModal } from './ui'
+import DownloadThumbnail from './DownloadThumbnail.vue'
 import { useDownloadStore } from '../stores/downloadStore'
 import { isTerminalModelDownloadStatus } from '../lib/telemetry'
 import {
@@ -137,6 +138,16 @@ watch(visibleFilters, (next) => {
 function isTerminal(status: ModelDownloadStatus): boolean {
   return isTerminalModelDownloadStatus(status)
 }
+
+const fetchThumbnail = (savePath: string): Promise<string | null> =>
+  window.api.getDownloadThumbnail(savePath)
+
+/** A completed image asset reserves the enlarged rounded preview box (the
+ *  thumbnail itself may still fail to load, in which case the status icon
+ *  fallback fills the same box). */
+function isCompletedImage(download: ModelDownloadProgress): boolean {
+  return download.isImage === true && download.status === 'completed'
+}
 </script>
 
 <template>
@@ -186,17 +197,23 @@ function isTerminal(status: ModelDownloadStatus): boolean {
         :class="statusKindClass(d)"
       >
         <div class="dlm-item-row">
-          <CheckCircle2
-            v-if="d.status === 'completed'"
-            :size="14"
-            class="dlm-icon ok"
-          />
-          <XCircle
-            v-else-if="d.status === 'error' || d.status === 'cancelled'"
-            :size="14"
-            class="dlm-icon bad"
-          />
-          <ArrowDownToLine v-else :size="14" class="dlm-icon" />
+          <span :class="['dlm-leading', { 'dlm-thumb': isCompletedImage(d) }]">
+            <DownloadThumbnail :entry="d" :fetcher="fetchThumbnail">
+              <template #fallback>
+                <CheckCircle2
+                  v-if="d.status === 'completed'"
+                  :size="14"
+                  class="dlm-icon ok"
+                />
+                <XCircle
+                  v-else-if="d.status === 'error' || d.status === 'cancelled'"
+                  :size="14"
+                  class="dlm-icon bad"
+                />
+                <ArrowDownToLine v-else :size="14" class="dlm-icon" />
+              </template>
+            </DownloadThumbnail>
+          </span>
           <span class="dlm-name" :title="fileLabel(d)">{{ fileLabel(d) }}</span>
           <button
             v-if="isTerminal(d.status)"
@@ -336,6 +353,22 @@ function isTerminal(status: ModelDownloadStatus): boolean {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.dlm-leading {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+/* A completed image asset grows the leading box into a rounded preview; the
+ * status-icon fallback (file moved/deleted) centers in the same box. */
+.dlm-thumb {
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: color-mix(in oklab, var(--neutral-100) 6%, transparent);
 }
 
 .dlm-icon {

@@ -114,7 +114,8 @@ export const en = {
     showInFolder: 'Show in Finder',
     remove: 'Remove from list',
     viewAllInSettings: 'View All Downloads',
-    completed: 'Completed'
+    completed: 'Completed',
+    thumbnailAlt: 'Thumbnail of {name}'
   },
   downloadsTab: {
     title: 'Downloads',

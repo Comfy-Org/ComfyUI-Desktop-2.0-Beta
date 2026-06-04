@@ -35,6 +35,7 @@ interface DownloadEntry {
   status: 'pending' | 'downloading' | 'paused' | 'completed' | 'error' | 'cancelled'
   error?: string
   createdAt?: number
+  isImage?: boolean
 }
 
 interface DownloadsState {
