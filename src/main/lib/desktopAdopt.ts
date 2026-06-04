@@ -9,7 +9,17 @@ import {
   type DesktopInstallInfo
 } from './desktopDetect'
 import { defaultInstallDir, allocateUniqueDir, sanitizeDirName } from './paths'
-import { gitClone, gitCheckoutCommit } from './git'
+import {
+  gitClone,
+  gitCheckoutCommit,
+  readGitHead,
+  fetchTags,
+  isGitAvailable,
+  isPygit2Configured,
+  tryConfigurePygit2Fallback
+} from './git'
+import { resolveLocalVersion } from './version-resolve'
+import type { ComfyVersion } from './version'
 import { getComfyUIRemoteUrl } from './github-mirror'
 import { getLatestStableTag } from './comfyui-releases'
 import { installFilteredRequirements, runUvPip, getPipIndexArgs } from './pip'
@@ -17,6 +27,7 @@ import * as installations from '../installations'
 import type { InstallationRecord } from '../installations'
 import * as settings from '../settings'
 import * as telemetry from './telemetry'
+import * as i18n from './i18n'
 
 const MARKER_FILE = ADOPT_MARKER_FILE
 const STAGED_SOURCE_REL = path.join('legacy-staging', 'comfyui')
@@ -857,6 +868,26 @@ async function runAdoption(
   const { sendProgress, sendOutput, signal } = tools
   const timestamp = deps.now().toISOString().replace(/[:.]/g, '-')
 
+  // Register human-readable step labels for the progress UI. Without
+  // this the renderer falls back to displaying the raw phase id
+  // ("source", "venv", …) since the labels are otherwise undefined.
+  sendProgress('steps', {
+    steps: [
+      { phase: 'backup', label: i18n.t('desktop.adoptStepBackup') },
+      ...(process.platform === 'darwin'
+        ? [{ phase: 'tcc', label: i18n.t('desktop.adoptStepTcc') }]
+        : []),
+      { phase: 'venv', label: i18n.t('desktop.adoptStepVenv') },
+      { phase: 'snapshot', label: i18n.t('desktop.adoptStepSnapshot') },
+      { phase: 'allocate', label: i18n.t('desktop.adoptStepAllocate') },
+      { phase: 'source', label: i18n.t('desktop.adoptStepSource') },
+      { phase: 'comfy-update', label: i18n.t('desktop.adoptStepComfyUpdate') },
+      { phase: 'requirements', label: i18n.t('desktop.adoptStepRequirements') },
+      { phase: 'settings', label: i18n.t('desktop.adoptStepSettings') },
+      { phase: 'register', label: i18n.t('desktop.adoptStepRegister') }
+    ]
+  })
+
   sendProgress('backup', { percent: 0 })
   await telemetry.trackedStep('comfy.desktop.adopt.backup', {}, async () => {
     await backupLegacyState(info.configDir, timestamp, sendOutput)
@@ -970,6 +1001,34 @@ async function runAdoption(
     }
   )
 
+  // Resolve a real {commit, baseTag, commitsAhead} from the freshly
+  // checked-out source so the release-cache compares the installed
+  // *tag* (e.g. "v0.24.0") against latestTag, not the bare
+  // `__version__` string from comfyui_version.py (e.g. "0.24.0") which
+  // never matches a "v"-prefixed remote tag and so wedges the
+  // installation into a permanent "update available" state.
+  let resolvedComfyVersion: ComfyVersion | undefined
+  if (fs.existsSync(path.join(destSource, '.git'))) {
+    try {
+      if (!isPygit2Configured() && !(await isGitAvailable())) {
+        await tryConfigurePygit2Fallback(installPath)
+      }
+      await fetchTags(destSource)
+      const headCommit = readGitHead(destSource)
+      if (headCommit) {
+        resolvedComfyVersion = await resolveLocalVersion(
+          destSource,
+          headCommit,
+          updateInfo.tag ?? undefined
+        )
+      }
+    } catch (err) {
+      sendOutput(
+        `Warning: could not resolve adopted ComfyUI version: ${(err as Error).message}\n`
+      )
+    }
+  }
+
   sendProgress('requirements', { percent: 0 })
   const reqReport = await telemetry.trackedStep(
     'comfy.desktop.adopt.requirements',
@@ -1044,6 +1103,7 @@ async function runAdoption(
       variant: 'legacy-uv-py312',
       pythonVersion: '3.12',
       ...(comfyVersion ? { version: comfyVersion } : {}),
+      ...(resolvedComfyVersion ? { comfyVersion: resolvedComfyVersion } : {}),
       ...(updateInfo.tag ? { adoptedComfyTagAtMigration: updateInfo.tag } : {}),
       launchArgs: derived.launchArgs,
       launchMode: 'window',
