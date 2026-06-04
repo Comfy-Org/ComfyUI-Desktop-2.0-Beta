@@ -111,7 +111,7 @@ jobs:
         run: pnpm run datadog:sourcemaps:upload
 
       - name: Install ToDesktop CLI
-        run: npm install --location=global @todesktop/cli@1.22.0
+        run: npm install --location=global @todesktop/cli@1.25.2
 
       - name: Pre-fetch bootstrap-python for all platforms
         # @todesktop/cli now eagerly validates the `extraResources` paths in
