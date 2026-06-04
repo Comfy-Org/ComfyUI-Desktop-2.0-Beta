@@ -434,6 +434,14 @@ export interface ComfyOutputData {
   text: string
 }
 
+/** Snapshot for repainting an interactive console: the retained scrollback,
+ *  the shell's current size, and whether the session has been killed. */
+export interface TerminalRestore {
+  buffer: string[]
+  size: { cols: number; rows: number }
+  exited: boolean
+}
+
 export interface ComfyExitedData {
   installationId: string
   installationName: string
@@ -934,6 +942,16 @@ export interface ElectronApi {
   // Running
   stopComfyUI(installationId: string): Promise<void>
   focusComfyWindow(installationId: string): Promise<void>
+
+  // Interactive console (per-installation shell, shared across windows)
+  /** Spawn the install's shell if needed, subscribe this surface, and return
+   *  the current scrollback/size/exited state to repaint. */
+  terminalSubscribe(installationId: string): Promise<TerminalRestore>
+  terminalUnsubscribe(installationId: string): Promise<void>
+  terminalWrite(installationId: string, data: string): Promise<void>
+  terminalResize(installationId: string, cols: number, rows: number): Promise<void>
+  /** Kill the current shell (if any) and start a fresh one. */
+  terminalRestart(installationId: string): Promise<TerminalRestore>
   /** Open a window for the install backing `installationId`. Focuses
    *  any existing install-backed window; otherwise opens a fresh
    *  chooser host so the user can pick the install from the dashboard.
@@ -1209,6 +1227,10 @@ export interface ElectronApi {
   onInstallProgress(callback: (data: ProgressData) => void): Unsubscribe
   onComfyOutput(callback: (data: ComfyOutputData) => void): Unsubscribe
   onComfyExited(callback: (data: ComfyExitedData) => void): Unsubscribe
+  onTerminalOutput(
+    callback: (data: { installationId: string; data: string }) => void
+  ): Unsubscribe
+  onTerminalExited(callback: (data: { installationId: string }) => void): Unsubscribe
   onComfyBootLog(callback: (data: ComfyBootLogData) => void): Unsubscribe
   onInstanceLaunching(
     callback: (data: { installationId: string; installationName: string }) => void

@@ -33,6 +33,10 @@ import type { WriteStream } from 'fs'
 // install's --list-feature-flags registry so we never inject unrecognized keys.
 const DESKTOP_FEATURE_FLAGS: Record<string, string> = {
   show_signin_button: 'true',
+  // Advertises that an interactive terminal host is available, so the frontend
+  // may surface its bottom-panel terminal. The actual transport is the
+  // __comfyDesktop2.Terminal bridge; the flag only gates visibility.
+  supports_terminal: 'true',
 }
 
 // A clean exit is code 0 with no signal; anything else (non-zero code or a

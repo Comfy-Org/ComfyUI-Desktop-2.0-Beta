@@ -58,6 +58,16 @@ export function buildElectronApi(): ElectronApi {
     // Running
     stopComfyUI: (installationId) => ipcRenderer.invoke('stop-comfyui', installationId),
     focusComfyWindow: (installationId) => ipcRenderer.invoke('focus-comfy-window', installationId),
+
+    // Interactive console
+    terminalSubscribe: (installationId) => ipcRenderer.invoke('terminal-subscribe', installationId),
+    terminalUnsubscribe: (installationId) =>
+      ipcRenderer.invoke('terminal-unsubscribe', installationId),
+    terminalWrite: (installationId, data) =>
+      ipcRenderer.invoke('terminal-write', installationId, data),
+    terminalResize: (installationId, cols, rows) =>
+      ipcRenderer.invoke('terminal-resize', installationId, cols, rows),
+    terminalRestart: (installationId) => ipcRenderer.invoke('terminal-restart', installationId),
     openInstallWindow: (installationId) =>
       ipcRenderer.invoke('open-install-window', installationId),
     closeComfyWindow: (installationId, opts) =>
@@ -213,6 +223,18 @@ export function buildElectronApi(): ElectronApi {
         callback(data as Parameters<typeof callback>[0])
       ipcRenderer.on('comfy-exited', handler)
       return () => ipcRenderer.removeListener('comfy-exited', handler)
+    },
+    onTerminalOutput: (callback) => {
+      const handler = (_event: IpcRendererEvent, data: unknown) =>
+        callback(data as Parameters<typeof callback>[0])
+      ipcRenderer.on('terminal-output', handler)
+      return () => ipcRenderer.removeListener('terminal-output', handler)
+    },
+    onTerminalExited: (callback) => {
+      const handler = (_event: IpcRendererEvent, data: unknown) =>
+        callback(data as Parameters<typeof callback>[0])
+      ipcRenderer.on('terminal-exited', handler)
+      return () => ipcRenderer.removeListener('terminal-exited', handler)
     },
     onComfyBootLog: (callback) => {
       const handler = (_event: IpcRendererEvent, data: unknown) =>

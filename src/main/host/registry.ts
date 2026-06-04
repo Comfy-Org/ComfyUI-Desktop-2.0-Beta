@@ -271,6 +271,16 @@ export function findEntryByTitleBarSender(wc: WebContents): { id: number; entry:
   return null
 }
 
+/** Resolve the installationId backing the comfyView whose webContents sent an
+ *  IPC message. Used by the terminal bridge so the served ComfyUI frontend
+ *  (which has no idea which install it belongs to) reaches the right shell. */
+export function findInstallationIdByComfySender(wc: WebContents): string | null {
+  for (const entry of comfyWindows.values()) {
+    if (entry.comfyView.webContents === wc) return entry.installationId
+  }
+  return null
+}
+
 /** Resolve a host BrowserWindow back to its registry entry. */
 export function findEntryByHostWindow(window: BrowserWindow): ComfyWindowEntry | null {
   for (const entry of comfyWindows.values()) {
