@@ -2,6 +2,12 @@ name: ToDesktop Build & Release
 
 on:
   workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull-request number whose body to use as release notes (optional; falls back to auto-generated notes if empty or absent)
+        required: false
+        type: string
+        default: ''
   push:
     tags:
       - "v*"
@@ -369,6 +375,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ inputs.pr_number }}
         run: |
           set -euo pipefail
 
@@ -379,9 +386,48 @@ jobs:
             exit 0
           fi
 
-          gh release create "${tag}" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --draft \
-            --generate-notes
+          # Classify the tag. Anything with a pre-release suffix
+          # (vX.Y.Z-rc.N, -beta.N, -alpha.N, etc.) ships as a GitHub
+          # "Pre-release" — visible at /releases but not surfaced as
+          # "Latest" and not picked up by auto-update unless the user
+          # explicitly opts in. Plain vX.Y.Z is the stable channel.
+          if [[ "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-.+$ ]]; then
+            channel_flag="--prerelease"
+            channel_label="pre-release"
+          else
+            channel_flag="--latest"
+            channel_label="latest"
+          fi
 
-          echo "Created draft release for ${tag}."
+          # Prefer the release PR body as release notes when the
+          # workflow was dispatched with a pr_number. Falls back to
+          # GitHub's auto-generated PR-titles list when no PR is
+          # known (manual tag push, etc.) so we never ship a release
+          # with empty notes.
+          notes_file=""
+          if [[ -n "${PR_NUMBER}" ]]; then
+            notes_file="$(mktemp)"
+            if gh pr view "${PR_NUMBER}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --json body \
+              --jq '.body' > "${notes_file}" && [[ -s "${notes_file}" ]]; then
+              echo "Using PR #${PR_NUMBER} body as release notes."
+            else
+              echo "PR #${PR_NUMBER} body unavailable; falling back to auto-generated notes."
+              notes_file=""
+            fi
+          fi
+
+          if [[ -n "${notes_file}" ]]; then
+            gh release create "${tag}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              ${channel_flag} \
+              --notes-file "${notes_file}"
+          else
+            gh release create "${tag}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              ${channel_flag} \
+              --generate-notes
+          fi
+
+          echo "Published ${channel_label} release for ${tag}."
