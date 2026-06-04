@@ -1,5 +1,5 @@
 appId: com.todesktop.241012ess7yxs0e
-productName: ComfyUI Desktop 2.0
+productName: ComfyUI
 directories:
   buildResources: resources
 files:
