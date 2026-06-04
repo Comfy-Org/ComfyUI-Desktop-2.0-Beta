@@ -1,6 +1,7 @@
 import { net } from 'electron'
 import fs from 'fs'
 import path from 'path'
+import * as settings from '../settings'
 import { r2MirrorUrl } from './r2Mirror'
 
 export interface DownloadProgress {
@@ -68,11 +69,12 @@ export function download(
   const opts: DownloadOptions = typeof options === 'number' ? { _maxRedirects: options } : options ?? {}
   const { signal, expectedSize, _maxRedirects = 5, _skipMirror = false } = opts
 
-  // Single mirror retry, gated to the case where nothing has been written to
-  // disk yet (no partial that might checksum against the mirror's body). For
-  // mid-download failures we surface the primary error and let the caller's
-  // resume logic handle it on the next attempt.
-  const mirror = _skipMirror ? undefined : r2MirrorUrl(url)
+  // Mirror retry is gated on useChineseMirrors to avoid a thundering-herd
+  // tens-of-TB GCS egress event if R2 ever hiccups for the global user base.
+  // Opted-in users are who actually need the fallback; everyone else keeps
+  // the existing single-origin behaviour.
+  const mirrorEnabled = !_skipMirror && settings.get('useChineseMirrors') === true
+  const mirror = mirrorEnabled ? r2MirrorUrl(url) : undefined
   const tryMirror = async (primaryErr: Error): Promise<string> => {
     if (!mirror || mirror === url) throw primaryErr
     try { fs.unlinkSync(destPath) } catch {}

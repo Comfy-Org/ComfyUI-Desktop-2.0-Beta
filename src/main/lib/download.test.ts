@@ -13,6 +13,12 @@ interface FakeRequest extends EventEmitter {
 }
 
 const requests: FakeRequest[] = []
+const settingsState: Record<string, unknown> = {}
+
+vi.mock('../settings', () => ({
+  get: (key: string) => settingsState[key],
+  set: (key: string, value: unknown) => { settingsState[key] = value },
+}))
 
 vi.mock('electron', () => ({
   net: {
@@ -50,6 +56,8 @@ describe('download — R2 mirror fallback for binaries', () => {
 
   beforeEach(() => {
     requests.length = 0
+    for (const k of Object.keys(settingsState)) delete settingsState[k]
+    settingsState['useChineseMirrors'] = true
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'download-test-'))
   })
 
@@ -94,6 +102,15 @@ describe('download — R2 mirror fallback for binaries', () => {
     const p = download('https://example.com/other.7z', dest, null)
     requests[0]!.emit('error', new Error('NETWORK_DOWN'))
     await expect(p).rejects.toThrow(/NETWORK_DOWN/)
+    expect(requests.length).toBe(1)
+  })
+
+  it('does NOT retry the mirror when useChineseMirrors is off (avoids thundering-herd on R2 blips)', async () => {
+    settingsState['useChineseMirrors'] = false
+    const dest = path.join(tmpDir, 'bundle.7z')
+    const p = download(PRIMARY_BIN, dest, null)
+    requests[0]!.emit('error', new Error('R2_BLIP'))
+    await expect(p).rejects.toThrow(/R2_BLIP/)
     expect(requests.length).toBe(1)
   })
 
