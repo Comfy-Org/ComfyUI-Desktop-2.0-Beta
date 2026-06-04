@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ChevronDown, Tag, Boxes } from 'lucide-vue-next'
+import { ChevronDown, Tag, Boxes, Package } from 'lucide-vue-next'
 import type { SnapshotSummary } from '../../types/ipc'
 import {
   triggerLabel as _triggerLabel,
@@ -64,6 +64,19 @@ const hasNodeChanges = computed(
   () => nodeDelta.value.added + nodeDelta.value.removed + nodeDelta.value.changed > 0
 )
 
+// Pip-package deltas vs the previous snapshot, driving a second collapsed-header pill.
+const pipDelta = computed(() => {
+  const diff = props.snapshot.diffVsPrevious
+  return {
+    added: diff?.pipsAdded ?? 0,
+    removed: diff?.pipsRemoved ?? 0,
+    changed: diff?.pipsChanged ?? 0,
+  }
+})
+const hasPipChanges = computed(
+  () => pipDelta.value.added + pipDelta.value.removed + pipDelta.value.changed > 0
+)
+
 // Title pill: manual label, else a version transition `prev → this`, else the resulting version.
 const isManualWithLabel = computed(
   () => props.snapshot.trigger === 'manual' && !!props.snapshot.label
@@ -102,7 +115,7 @@ const hasTitlePill = computed(() => !!titlePillText.value)
         </div>
       </div>
       <!-- At-a-glance pills: version/name pill + node deltas vs previous. -->
-      <div v-if="hasTitlePill || hasNodeChanges" class="snapshot-row-pills">
+      <div v-if="hasTitlePill || hasNodeChanges || hasPipChanges" class="snapshot-row-pills">
         <span
           v-if="hasTitlePill"
           class="snap-pill snap-pill--version"
@@ -118,6 +131,13 @@ const hasTitlePill = computed(() => !!titlePillText.value)
           <span v-if="nodeDelta.removed" class="snap-delta is-remove">−{{ nodeDelta.removed }}</span>
           <span v-if="nodeDelta.changed" class="snap-delta is-change">~{{ nodeDelta.changed }}</span>
           <span class="snap-pill-label">{{ t('snapshots.nodesLabel', 'nodes') }}</span>
+        </span>
+        <span v-if="hasPipChanges" class="snap-pill snap-pill--pkgs">
+          <Package :size="11" aria-hidden="true" />
+          <span v-if="pipDelta.added" class="snap-delta is-add">+{{ pipDelta.added }}</span>
+          <span v-if="pipDelta.removed" class="snap-delta is-remove">−{{ pipDelta.removed }}</span>
+          <span v-if="pipDelta.changed" class="snap-delta is-change">~{{ pipDelta.changed }}</span>
+          <span class="snap-pill-label">{{ t('snapshots.pkgsLabel', 'pkgs') }}</span>
         </span>
       </div>
     </button>

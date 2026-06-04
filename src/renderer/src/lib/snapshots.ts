@@ -108,7 +108,7 @@ export function changeSummary(s: SnapshotSummary, t: Translator): string[] {
   }
   const pipChanges = d.pipsAdded + d.pipsRemoved + d.pipsChanged
   if (pipChanges > 0) {
-    parts.push(`${pipChanges} pkg changes`)
+    parts.push(t('snapshots.pipChanges', { count: pipChanges }))
   }
   return parts
 }
