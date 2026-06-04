@@ -161,6 +161,48 @@ jobs:
           git commit -m "chore: bump version to ${NEW_VERSION}"
           git push --force origin "${PR_BRANCH}"
 
+      - name: Draft release notes from commits since last tag
+        id: notes
+        run: |
+          set -euo pipefail
+
+          # Last released tag (annotated or lightweight). If the repo has
+          # no tags yet (first release), fall back to the full history.
+          LAST_TAG="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+          if [ -n "${LAST_TAG}" ]; then
+            RANGE="${LAST_TAG}..HEAD"
+          else
+            RANGE="HEAD"
+          fi
+
+          FEATS="${RUNNER_TEMP}/notes-features.md"
+          FIXES="${RUNNER_TEMP}/notes-fixes.md"
+          : > "${FEATS}"
+          : > "${FIXES}"
+
+          # Group conventional commits by type. Strip the prefix/scope.
+          # Drop the version-bump commit itself (always a chore).
+          while IFS= read -r line; do
+            [ -z "${line}" ] && continue
+            msg="$(printf '%s' "${line}" | sed -E 's/^(feat|fix|chore|docs|refactor|test|infra|ci|perf|build|style)(\([^)]*\))?(!)?: //')"
+            case "${line}" in
+              feat:*|feat\(*|feat!*)
+                printf -- '- %s\n' "${msg}" >> "${FEATS}"
+                ;;
+              fix:*|fix\(*|fix!*)
+                printf -- '- %s\n' "${msg}" >> "${FIXES}"
+                ;;
+            esac
+          done < <(git log --no-merges --pretty='format:%s' "${RANGE}")
+
+          # Placeholder when a section is empty so the human notices.
+          [ -s "${FEATS}" ] || echo "- _(no \`feat:\` commits since ${LAST_TAG:-repo start} — add highlights here)_" > "${FEATS}"
+          [ -s "${FIXES}" ] || echo "- _(no \`fix:\` commits since ${LAST_TAG:-repo start} — add highlights here)_" > "${FIXES}"
+
+          echo "features_file=${FEATS}" >> "$GITHUB_OUTPUT"
+          echo "fixes_file=${FIXES}" >> "$GITHUB_OUTPUT"
+          echo "last_tag=${LAST_TAG:-<none>}" >> "$GITHUB_OUTPUT"
+
       - name: Build pull request body
         id: body
         env:
@@ -169,31 +211,38 @@ jobs:
           NEW_VERSION: ${{ steps.bump.outputs.new_version }}
           BUMP_TYPE: ${{ inputs.bump }}
           CHANNEL: ${{ inputs.channel }}
+          LAST_TAG: ${{ steps.notes.outputs.last_tag }}
+          FEATURES_FILE: ${{ steps.notes.outputs.features_file }}
+          FIXES_FILE: ${{ steps.notes.outputs.fixes_file }}
         run: |
           set -euo pipefail
 
           BODY_FILE="${RUNNER_TEMP}/version-bump-pr-body.md"
-          cat > "${BODY_FILE}" <<EOF
+          {
+            cat <<HEADER
           ## Summary
           - bump \`package.json\` version from \`${OLD_VERSION}\` to \`${NEW_VERSION}\`
           - channel: \`${CHANNEL}\` (rc → GitHub pre-release, stable → Latest)
+          - commits since \`${LAST_TAG}\` were auto-grouped below
 
           ## How merging this PR ships the build
           1. Merge — \`Release From Version PR\` workflow tags \`v${NEW_VERSION}\` on the merge commit
           2. Tag triggers \`Publish All / build-release\`, which creates the GitHub Release using **this PR body as the release notes**
           3. ToDesktop picks up the new build and rolls it out
 
-          > **Edit the sections below before merge.** Whatever you write here becomes the public release notes.
+          > **Polish the sections below before merge.** The auto-fill is a starting point — rewrite for users, not for the changelog.
 
           ## Features
-          - …
-
-          ## Fixes
-          - …
+          HEADER
+            cat "${FEATURES_FILE}"
+            printf '\n## Fixes\n'
+            cat "${FIXES_FILE}"
+            cat <<FOOTER
 
           ## Install
           - 👉 [comfy.org/download](https://comfy.org/download)
-          EOF
+          FOOTER
+          } > "${BODY_FILE}"
 
           echo "body_file=${BODY_FILE}" >> "$GITHUB_OUTPUT"
 
@@ -309,8 +358,9 @@ jobs:
         env:
           CHANNEL: ${{ inputs.channel }}
           NEW_VERSION: ${{ steps.bump.outputs.new_version }}
+          PR_URL: ${{ steps.upsert_pr.outputs.pull_request_url }}
         run: |
-          echo "pull_request_url=${{ steps.upsert_pr.outputs.pull_request_url }}"
+          echo "pull_request_url=${PR_URL}"
           echo "channel=${CHANNEL}"
           echo "post_merge_tag=v${NEW_VERSION}"
           if [ "${CHANNEL}" = "rc" ]; then
@@ -318,3 +368,6 @@ jobs:
           else
             echo "GitHub will mark v${NEW_VERSION} as Latest on tag push."
           fi
+          echo ""
+          echo "Tip: add the 'automerge' label to ${PR_URL} once you're"
+          echo "happy with the notes — the PR will merge as soon as CI is green."
