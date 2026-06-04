@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog } from 'electron'
+import { app, BrowserWindow, dialog, nativeImage } from 'electron'
 import { EventEmitter } from 'events'
 import fs from 'fs'
 import path from 'path'
@@ -6,6 +6,9 @@ import * as settings from '../settings'
 import { _broadcastToRenderer } from './ipc/shared'
 
 export const ALLOWED_EXTENSIONS = ['.safetensors', '.sft', '.ckpt', '.pth', '.pt']
+
+/** Asset (output) downloads whose final file is itself an image we can preview. */
+export const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.gif']
 
 export interface DownloadProgress {
   url: string
@@ -22,6 +25,9 @@ export interface DownloadProgress {
   /** First-seen ms for this URL, preserved across status transitions so the
    *  renderer keeps each entry in its insertion-ordered slot. */
   createdAt?: number
+  /** Set on a completed asset download whose file is an image, so the renderer
+   *  knows to lazily request a thumbnail via `download-thumbnail`. */
+  isImage?: boolean
 }
 
 interface PendingDownload {
@@ -185,6 +191,17 @@ export function isPathContained(filePath: string, baseDir: string): boolean {
 export function hasValidExtension(filename: string): boolean {
   const lower = filename.toLowerCase()
   return ALLOWED_EXTENSIONS.some((ext) => lower.endsWith(ext))
+}
+
+function hasImageExtension(filePath: string): boolean {
+  const lower = filePath.toLowerCase()
+  return IMAGE_EXTENSIONS.some((ext) => lower.endsWith(ext))
+}
+
+/** A completed download is previewable only if it's an asset (carries
+ *  `outputDir`; model downloads never do) whose final file is an image. */
+function isImageAsset(pending: PendingDownload): boolean {
+  return !!pending.outputDir && hasImageExtension(pending.savePath)
 }
 
 export function stripQueryParams(rawFilename: string): string {
@@ -551,6 +568,7 @@ function attachDownloadListeners(item: Electron.DownloadItem, pending: PendingDo
         savePath: pending.savePath,
         progress: 1,
         status: 'completed',
+        isImage: isImageAsset(pending),
       })
     } else if (state === 'cancelled') {
       if (pending.tempPath) {
@@ -775,6 +793,59 @@ export function getActiveDownloads(): DownloadProgress[] {
     result.push(pending.lastProgress)
   }
   return result
+}
+
+/** Downscaled-thumbnail data URLs keyed by `${resolvedPath}:${mtimeMs}` so a
+ *  re-downloaded file at the same path re-encodes. LRU-capped. */
+const THUMB_WIDTH = 96
+const THUMB_CACHE_MAX = 64
+const thumbnailCache = new Map<string, string>()
+
+/** Read a completed image download and return a small `data:` URL preview, or
+ *  `null` for non-images, missing/unreadable files, or any decode failure.
+ *  Lazy + cached so it only runs for visible image rows.
+ *
+ *  `savePath` is a LOCAL filesystem path (a download's `savePath`), never a
+ *  remote/source URL — this only ever reads from disk, never the network. A
+ *  value with a URL scheme is rejected so a caller passing the wrong field
+ *  (e.g. the entry's `url`) can't trigger a path-resolve on a URL. */
+export async function getDownloadThumbnail(savePath: unknown): Promise<string | null> {
+  if (typeof savePath !== 'string' || !savePath) return null
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(savePath)) return null
+  const resolved = path.resolve(savePath)
+  if (!hasImageExtension(resolved)) return null
+
+  let stat: fs.Stats
+  try {
+    stat = await fs.promises.stat(resolved)
+  } catch {
+    return null
+  }
+  if (!stat.isFile()) return null
+
+  const key = `${resolved}:${stat.mtimeMs}`
+  const cached = thumbnailCache.get(key)
+  if (cached !== undefined) {
+    // LRU touch: re-insert so it counts as most-recently-used.
+    thumbnailCache.delete(key)
+    thumbnailCache.set(key, cached)
+    return cached
+  }
+
+  try {
+    const img = nativeImage.createFromPath(resolved)
+    if (img.isEmpty()) return null
+    const dataUrl = img.resize({ width: THUMB_WIDTH, quality: 'good' }).toDataURL()
+    thumbnailCache.set(key, dataUrl)
+    while (thumbnailCache.size > THUMB_CACHE_MAX) {
+      const oldest = thumbnailCache.keys().next().value
+      if (oldest === undefined) break
+      thumbnailCache.delete(oldest)
+    }
+    return dataUrl
+  } catch {
+    return null
+  }
 }
 
 /** Full snapshot for the renderer store to seed from on mount — active entries

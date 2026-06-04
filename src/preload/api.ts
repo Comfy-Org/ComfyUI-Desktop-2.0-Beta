@@ -186,6 +186,7 @@ export function buildElectronApi(): ElectronApi {
     clearFinishedModelDownloads: () => ipcRenderer.invoke('model-download-clear-finished'),
     retryModelDownload: (url) => ipcRenderer.invoke('model-download-retry', { url }),
     showDownloadInFolder: (savePath) => ipcRenderer.invoke('show-download-in-folder', { savePath }),
+    getDownloadThumbnail: (savePath) => ipcRenderer.invoke('download-thumbnail', { savePath }),
 
     // Updates
     checkForUpdate: () => ipcRenderer.invoke('check-for-update'),
