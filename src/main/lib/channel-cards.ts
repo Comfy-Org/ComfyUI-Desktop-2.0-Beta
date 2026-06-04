@@ -20,14 +20,9 @@ export interface ChannelCardData {
   lastCheckedAt?: number
   updateAvailable: boolean
   actions?: Record<string, unknown>[]
-  /** True while we know the upstream commit (`commitSha` cached) but
-   *  haven't yet computed `commitsAhead` against the install's local
-   *  `.git` checkout — `enrichCommitsAhead` runs in the background and
-   *  fills this in. The renderer surfaces a muted "Computing commits
-   *  ahead…" hint under the Latest row so the eventual `tag (sha)` →
-   *  `tag + N commits (sha)` label upgrade doesn't look like a silent
-   *  glitch. False on cloud / no-git installs (they have no
-   *  enrichment to wait for) and on already-enriched entries. */
+  /** True while the upstream commit is known but `commitsAhead` hasn't been computed yet
+   *  (background `enrichCommitsAhead` in flight); drives the "Computing commits ahead…" hint.
+   *  False on cloud / no-git installs and already-enriched entries. */
   enriching?: boolean
 }
 
@@ -45,33 +40,22 @@ export function buildChannelCards(
   installation: InstallationRecord,
 ): ChannelCard[] {
   const cv = installation.comfyVersion as ComfyVersion | undefined
-  // `enrichCommitsAhead` reads from the install's own ComfyUI checkout.
-  // Without a `.git` dir there's no enrichment in flight, so the fallback
-  // `tag (sha)` is the final state — surface the hint only when a real
-  // enrichment is possible.
+  // Without a `.git` dir there's no enrichment to wait for, so only show the hint when a
+  // real enrichment is possible.
   const installHasGit = !!installation.installPath
     && hasGitDir(path.join(installation.installPath, 'ComfyUI'))
   return channelDefs.map((def) => {
     const info = releaseCache.getEffectiveInfo(repo, def.value, installation)
-    // When the latest release commit matches the installed commit, reuse
-    // the git-resolved version (which is cherry-pick–aware) instead of the
-    // raw GitHub API comparison data.
+    // When latest matches installed, reuse the cherry-pick-aware git-resolved version
+    // instead of the raw GitHub API comparison.
     const latestCv = info?.commitSha
       ? (cv && cv.commit === info.commitSha && cv.baseTag
         ? cv
         : { commit: info.commitSha, baseTag: info.baseTag, commitsAhead: info.commitsAhead } as ComfyVersion)
       : undefined
-    // Show the "Computing commits ahead…" hint while enrichment is
-    // genuinely in flight.  `enrichCommitsAhead` now recovers a
-    // missing `baseTag` on its own (forced `getLatestStableTag` →
-    // local `findNearestTag` fallback), so we deliberately do NOT
-    // gate on `baseTag` here — the spinner should remain visible
-    // through that recovery window.  Once the helper records a settle
-    // via `lastEnrichAttemptAt` we suppress the hint forever for that
-    // cached entry: a successful follow-up swaps `commitsAhead` in
-    // and the label upgrades silently; a failed settle stays on the
-    // documented `tag (sha)` fallback without re-flashing the spinner
-    // on every picker reopen.
+    // Don't gate on `baseTag` (enrichCommitsAhead recovers a missing one), so the spinner
+    // stays through that window. Once `lastEnrichAttemptAt` records a settle, suppress the
+    // hint forever for that entry so a failed settle doesn't re-flash on every picker reopen.
     const enriching = !!info?.commitSha
       && info.commitsAhead === undefined
       && info.lastEnrichAttemptAt === undefined

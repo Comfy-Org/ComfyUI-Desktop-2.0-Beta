@@ -1,13 +1,5 @@
-/**
- * Fetches the stargazer count for a GitHub repo via the unauthenticated
- * REST API and caches it in-memory for the lifetime of the main process
- * (24h soft TTL). Unauthenticated rate limit is 60 req/hr per IP — the
- * cache makes that effectively free.
- *
- * Returns `null` on any failure (network, non-2xx, parse error, timeout)
- * so callers can hide the chip rather than render a broken placeholder.
- */
-
+// Stargazer count via the unauthenticated GitHub REST API, cached in-memory
+// (24h TTL) to stay under the 60 req/hr limit. null on any failure.
 interface CacheEntry {
   count: number
   fetchedAt: number

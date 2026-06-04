@@ -94,7 +94,7 @@ describe('isSystemPackageInstall (via get-update-capabilities)', () => {
   })
 
   it('returns standard for AppImage (APPIMAGE env set)', async () => {
-    mockAppImage = '/home/user/ComfyUI-Desktop-2.0.AppImage'
+    mockAppImage = '/home/user/Comfy-Desktop.AppImage'
     const caps = await getCapabilities()
     expect(caps).toEqual({ canAutoUpdate: true, systemManaged: false })
   })

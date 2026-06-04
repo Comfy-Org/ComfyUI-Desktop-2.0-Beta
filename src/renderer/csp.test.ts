@@ -81,12 +81,8 @@ describe.each(NON_TELEMETRY_RENDERER_HTMLS)(
   (file) => {
     const csp = parseCSP(readHtml(file))
 
-    // The title-bar dropdown popup is a transient window that does NOT
-    // initialise Datadog/PostHog (see comfyTitlePopup/main.ts). Keeping
-    // the CSP narrow here documents and enforces that decision — adding
-    // a renderer-side telemetry SDK to this surface would also need a
-    // CSP loosening, so requiring the change in both places is a useful
-    // tripwire.
+    // These transient popups don't initialise Datadog/PostHog; the narrow CSP enforces
+    // that, so adding a telemetry SDK here would also need a CSP change (a useful tripwire).
     it('does NOT include Datadog endpoints', () => {
       expect(csp['connect-src']).not.toContain('datadoghq.com')
     })

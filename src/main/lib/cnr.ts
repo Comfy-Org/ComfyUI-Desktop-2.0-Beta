@@ -119,9 +119,8 @@ export async function switchCnrVersion(
     sendOutput(`Downloading ${nodeId}@${info.version}...\n`)
     await download(info.downloadUrl, tmpZip, null)
 
-    // Extract to a temp directory first so we can get the true new file list
-    // before merging into nodePath (walkDir after in-place extraction would
-    // return the union of old+new files, making garbage detection impossible)
+    // Extract to a temp dir first to get the true new file list; in-place
+    // extraction would union old+new files and break garbage detection.
     sendOutput(`Extracting ${nodeId}@${info.version}...\n`)
     await fs.promises.mkdir(tmpExtract, { recursive: true })
     await extract(tmpZip, tmpExtract)

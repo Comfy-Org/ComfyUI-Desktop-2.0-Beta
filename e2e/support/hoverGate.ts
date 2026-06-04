@@ -1,13 +1,7 @@
 /**
- * Hover-gate state-machine helpers for the title-bar e2e tests.
- *
- * The `:hover` styles for the title bar are gated on a
- * `.is-hover-active` class on `.title-bar`. The renderer drops the
- * gate on `window.blur` / `pointerleave` and re-enables it ONLY on a
- * fresh `pointermove` (NOT on bare focus — clicking back into the
- * title bar to dismiss a native menu refocuses the renderer with a
- * stale cursor position). These helpers drive each event into a
- * given title-bar webContents and assert the resulting class state.
+ * Hover-gate helpers for the title-bar e2e tests. Title-bar `:hover` styles
+ * are gated on `.is-hover-active`, dropped on blur/pointerleave and re-enabled
+ * only on a fresh pointermove (not bare focus, to avoid a stale cursor pos).
  */
 import { expect } from '@playwright/test'
 import type { WebContentsPage } from './cdpPages'

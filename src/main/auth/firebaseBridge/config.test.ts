@@ -25,7 +25,6 @@ describe('getFirebaseConfig', () => {
     const config = getFirebaseConfig('dev')
     expect(config.projectId).toBe('dreamboothy-dev')
     expect(config.authDomain).toBe('dreamboothy-dev.firebaseapp.com')
-    // apiKey must be set — initializeApp throws without it.
     expect(config.apiKey).toMatch(/^AIza/)
   })
 

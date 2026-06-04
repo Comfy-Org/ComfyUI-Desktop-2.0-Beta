@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
-// shared.ts (transitively imported by registry.ts) loads electron at module
-// load, so the mock has to be in place before the host module imports.
+// shared.ts (via registry.ts) loads electron at module load, so the mock
+// must be in place before the host module imports.
 vi.mock('electron', () => ({
   app: {
     isPackaged: false,
@@ -92,20 +92,16 @@ describe('cascadeOffsetForCollisions', () => {
   })
 })
 
-// Decision helpers for the host window's close handler. The handler
-// has to honour a `preClearedClose` flag (caller pre-cleared via
-// launch-guard eviction or bulk Exit-All) that can land mid-consult or
-// mid-confirm. These pure helpers encode the three re-check points so
-// the behaviour stays testable without mocking BrowserWindow.
+// Pure decision helpers for the close handler's three `preClearedClose`
+// re-check points, kept testable without mocking BrowserWindow.
 describe('shouldBailAfterConsult', () => {
   it('bails when the renderer aborted and no force-close override is set', () => {
     expect(shouldBailAfterConsult('aborted', false)).toBe(true)
   })
 
   it('does not bail when the renderer aborted but the caller pre-cleared the close', () => {
-    // Launch-guard eviction / bulk Exit-All consent overrides a
-    // per-window cancel — without this, an unrelated open prompt would
-    // strand the caller's awaited teardown.
+    // Bulk Exit-All consent overrides a per-window cancel, else an unrelated
+    // open prompt would strand the caller's awaited teardown.
     expect(shouldBailAfterConsult('aborted', true)).toBe(false)
   })
 

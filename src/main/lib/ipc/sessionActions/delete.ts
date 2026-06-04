@@ -9,23 +9,9 @@ import {
 import type { ActionContext, ActionResult } from './types'
 import { withAbortableSessionAction } from './withAbortable'
 
-/**
- * Wipe the launcher-owned parts of an adopted install at
- * `adoptedBaseDir`, leaving the user's data alone:
- *
- *   delete  `<adoptedBaseDir>/.venv` — opaque interpreter state
- *   delete  `<adoptedBaseDir>/<MARKER_FILE>` — re-adopt sentinel
- *   keep    `models/`, `user/`, `input/`, `output/`, `custom_nodes/`
- *   keep    everything else (user-added files, configs, …)
- *
- * The wrapper at `installPath` is deleted by the standard
- * `deleteDir(installPath)` call in `handleDelete`; this function only
- * handles the legacy-side cleanup, which `deleteDir` cannot reach.
- *
- * Best-effort: a missing or locked legacy venv must not block the primary
- * wrapper deletion — the install record is already on its way out and a
- * half-cleaned legacy dir is recoverable manually.
- */
+// Wipe the launcher-owned parts of an adopted install (.venv + marker) at
+// adoptedBaseDir, leaving the user's data. Best-effort: a locked venv must not
+// block the primary wrapper deletion.
 async function cleanupAdoptedLegacyDir(
   adoptedBaseDir: string,
   sendProgress: (phase: string, detail: Record<string, unknown>) => void,
@@ -54,9 +40,7 @@ export async function handleDelete(ctx: ActionContext): Promise<ActionResult> {
   const adopted = inst.adopted === true
   const adoptedBaseDir = adopted ? (inst.adoptedBaseDir as string | undefined) : undefined
   if (!fs.existsSync(inst.installPath)) {
-    // Wrapper is already gone but the legacy venv may still be on disk
-    // (e.g. user deleted the wrapper manually). Best-effort cleanup before
-    // we drop the record so re-adopt later starts clean.
+    // Wrapper already gone; still clean the legacy venv so re-adopt starts fresh.
     if (adopted && adoptedBaseDir) {
       const noopProgress = (): void => {}
       await cleanupAdoptedLegacyDir(adoptedBaseDir, noopProgress)
@@ -86,10 +70,8 @@ export async function handleDelete(ctx: ActionContext): Promise<ActionResult> {
         await cleanupAdoptedLegacyDir(adoptedBaseDir, sendProgress, signal)
       }
     } catch (err) {
-      // Restore the safety marker so a retry still passes the marker check;
-      // mark the install as partially deleted so the dashboard surfaces it.
-      // The error is re-thrown so the wrapper maps it (cancelled → cancelled,
-      // EBUSY/EPERM → the lock-friendly message below).
+      // Restore the marker (so retry passes the check) and flag partial-delete;
+      // re-throw so the wrapper maps the error.
       try {
         fs.mkdirSync(inst.installPath, { recursive: true })
         fs.writeFileSync(markerPath, markerContent)

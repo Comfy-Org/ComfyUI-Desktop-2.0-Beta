@@ -1,10 +1,6 @@
 <script setup lang="ts">
-/**
- * Renders a string with inline `**bold**` markers as alternating
- * plain text and `<strong>` spans. Avoids pulling in a markdown
- * library for the handful of inline-bolded phrases in the privacy
- * policy.
- */
+// Renders inline `**bold**` markers as <strong> spans, avoiding a markdown
+// library for the few bolded phrases in the privacy policy.
 interface Props {
   text: string
 }

@@ -28,9 +28,7 @@ vi.mock('../settings', () => {
       if (value === undefined) delete store[key]
       else store[key] = value
     }),
-    // `has()` mirrors the real implementation's "explicitly persisted"
-    // semantics — built-in defaults must not look like user choices to
-    // the carry logic.
+    // Mirrors the real "explicitly persisted" semantics: defaults aren't user choices.
     has: vi.fn((key: string) => store[key] !== undefined && store[key] !== null),
     getAll: vi.fn(() => ({ ...store })),
     getMirrorConfig: vi.fn(() => ({ pypiMirror: undefined, useChineseMirrors: false })),
@@ -283,9 +281,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   installFilteredRequirementsMock.mockResolvedValue(0)
   runUvPipMock.mockResolvedValue(0)
-  // Adoption's one-shot ComfyUI update path is exercised in dedicated
-  // tests; the default for unrelated tests is "no tag available", which
-  // makes the update step a no-op without polluting the source tree.
+  // Default "no tag available" makes the one-shot update a no-op for unrelated tests.
   getLatestStableTagMock.mockResolvedValue(null)
   gitCheckoutCommitMock.mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' })
   // Default git helpers to "git is available, no HEAD, no resolved
@@ -342,9 +338,7 @@ describe('deriveLaunchArgs', () => {
   it('reads Comfy.Server.LaunchArgs (not server_config.*)', () => {
     const { launchArgs } = deriveLaunchArgs({
       'Comfy.Server.LaunchArgs': { listen: '0.0.0.0', port: '7860', lowvram: '' },
-      // server_config.* live in legacy `config.json` and are NEVER read
-      // by adoption — including them here ensures the new parser ignores
-      // them rather than silently picking them up.
+      // server_config.* are never read by adoption; included to confirm the parser ignores them.
       'server_config.listen': '1.2.3.4',
       'server_config.port': 1234
     })
@@ -651,9 +645,7 @@ describe('adoptDesktopInstall', () => {
   it('removes the auto-tracked legacy desktop card after successful adoption', async () => {
     const legacy = buildFakeLegacy()
     try {
-      // Pre-seed the auto-tracked legacy card that the startup auto-tracker
-      // would have inserted on first boot. Adoption must drop it so the
-      // dashboard doesn't show two cards for the same workspace.
+      // Pre-seed the auto-tracked legacy card; adoption must drop it (one card per workspace).
       await installations.add({
         name: 'ComfyUI Legacy Desktop',
         sourceId: 'desktop',
@@ -726,9 +718,7 @@ describe('adoptDesktopInstall', () => {
       configFiles: {
         'comfy.settings.json': JSON.stringify({
           'Comfy.ColorPalette': 'dark',
-          // Legacy user had Desktop auto-update OFF — must NOT carry that.
-          // Inheriting it would lock them out of future Desktop 2.0
-          // updates after the in-place app cutover.
+          // Legacy Desktop auto-update OFF must NOT carry, else they'd miss future updates.
           'Comfy-Desktop.AutoUpdate': false,
           'Comfy-Desktop.UV.PypiInstallMirror': 'https://mirrors.aliyun.com/pypi/simple/',
           'Comfy-Desktop.UV.TorchInstallMirror': 'https://download.pytorch.org/whl/cu121'
@@ -738,16 +728,14 @@ describe('adoptDesktopInstall', () => {
     try {
       const tools = buildSilentTools()
       const record = await adoptDesktopInstall({ tools, deps: buildDeps({}, legacy.info) })
-      // ColorPalette is a frontend canvas-color setting, not equivalent to
-      // v2's launcher `theme` — never carried.
+      // ColorPalette is a frontend setting, not v2's launcher `theme` — never carried.
       expect(settingsMock.__store).not.toHaveProperty('theme')
       // Force-on at adoption regardless of legacy value.
       expect(settingsMock.__store['autoInstallUpdates']).toBe(true)
       expect(settingsMock.__store['pypiMirror']).toBe('https://mirrors.aliyun.com/pypi/simple/')
       expect(settingsMock.__store['useChineseMirrors']).toBe(true)
       expect(settingsMock.__store['chineseMirrorsPrompted']).toBe(true)
-      // TorchInstallMirror has no v2 consumer (standalone variants ship
-      // torch pre-bundled) → never stashed on the record.
+      // TorchInstallMirror has no v2 consumer, never stashed on the record.
       expect(record).not.toHaveProperty('adoptedTorchMirror')
     } finally {
       legacy.cleanup()
@@ -755,9 +743,7 @@ describe('adoptDesktopInstall', () => {
   })
 
   it('respects a pre-existing v2 autoInstallUpdates choice on reconcile', async () => {
-    // User explicitly disabled Desktop auto-updates in v2 settings after a
-    // prior adoption. A subsequent migrate-to-standalone reconcile pass
-    // must not silently flip it back on.
+    // A reconcile pass must not silently flip a user's explicit v2 choice back on.
     settingsMock.__store['autoInstallUpdates'] = false
     const legacy = buildFakeLegacy({
       configFiles: {
@@ -776,8 +762,7 @@ describe('adoptDesktopInstall', () => {
   })
 
   it('respects pre-existing v2 settings under the "v2 user choice wins" rule', async () => {
-    // User already configured v2 with a custom pypi mirror before running
-    // adoption. Adoption must NOT overwrite that choice.
+    // Adoption must NOT overwrite a pre-configured v2 choice.
     settingsMock.__store['pypiMirror'] = 'https://pypi.org/simple/'
     settingsMock.__store['inputDir'] = '/v2/chosen/input'
     const legacy = buildFakeLegacy({

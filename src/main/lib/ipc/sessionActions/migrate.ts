@@ -26,10 +26,7 @@ interface PromptSpec {
   cancelId: number
 }
 
-/**
- * Build the native-modal spec for a prompt kind. Each button maps to a
- * concrete {@link UserChoice} the orchestrator understands.
- */
+// Build the native-modal spec for a prompt kind; each button maps to a UserChoice.
 function buildAdoptPromptSpec(kind: AdoptPromptKind, ctx: unknown): PromptSpec {
   const data = (ctx ?? {}) as Record<string, unknown>
   switch (kind) {
@@ -79,8 +76,7 @@ function buildAdoptPromptSpec(kind: AdoptPromptKind, ctx: unknown): PromptSpec {
         cancelId: 2
       }
     case 'confirm-adopt':
-      // The action's `confirm` dialog already gates entry; surface a final
-      // yes/no here only if the orchestrator escalates a runtime decision.
+      // Only shown if the orchestrator escalates a runtime decision.
       return {
         type: 'question',
         title: i18n.t('desktop.adoptConfirmTitle'),
@@ -98,10 +94,7 @@ function buildAdoptPromptSpec(kind: AdoptPromptKind, ctx: unknown): PromptSpec {
   }
 }
 
-/**
- * Resolve a {@link UserChoice} for the orchestrator via a native modal
- * anchored to the currently focused window (or first available window).
- */
+// Resolve a UserChoice via a native modal anchored to the focused window.
 async function showAdoptPrompt(kind: AdoptPromptKind, ctx: unknown): Promise<UserChoice> {
   const spec = buildAdoptPromptSpec(kind, ctx)
   const parent = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null
@@ -144,9 +137,8 @@ export async function handleMigrateToStandalone({
     source_installation_id: inst.id
   }
 
-  // Desktop source → adopt the legacy install in place instead of
-  // copying it. Returns a freshly minted standalone record; the
-  // legacy install record (`inst`) is left alone.
+  // Desktop source → adopt the legacy install in place (the legacy record
+  // is left alone), returning a fresh standalone record.
   if (inst.sourceId === 'desktop') {
     let adopted: InstallationRecord | null = null
     try {
@@ -175,10 +167,8 @@ export async function handleMigrateToStandalone({
       }
       if (abort.signal.aborted) return { ok: true, navigate: 'detail' }
       const message = (err as Error).message
-      // Orchestrator throws this synthetic error when the user picks
-      // "Switch to managed env" on the source-missing prompt. Route the
-      // renderer to the new-install flow rather than surfacing it as a
-      // failure dialog.
+      // Synthetic error meaning "user picked Switch to managed env" — route to
+      // the new-install flow instead of a failure dialog.
       if (message === 'source-missing-switch-to-managed') {
         return { ok: true, navigate: 'new-install' }
       }
@@ -186,8 +176,7 @@ export async function handleMigrateToStandalone({
     }
   }
 
-  // Non-desktop source → standard local-install migration (copy + snapshot
-  // restore + standalone install).
+  // Non-desktop source → standard local-install migration.
   let entry: InstallationRecord | null = null
   let destPath = ''
   try {

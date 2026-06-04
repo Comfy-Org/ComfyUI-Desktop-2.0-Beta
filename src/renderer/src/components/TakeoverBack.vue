@@ -1,31 +1,6 @@
 <script setup lang="ts">
-/**
- * Modal-unification (Track M-5) — back / "Return to main concern"
- * affordance for binding takeover-modals.
- *
- * Per the design rules in `docs/modal-unification-plan.md`, binding
- * takeover-modals replace the corner ✕ with an explicit "back to
- * main concern" affordance: either a back chevron or a "Return to
- * <Dashboard|ComfyUI>" button. This component is the chevron-with-
- * label variant — it sits at the START of the takeover's
- * `view-modal-header` (before `TakeoverHeader`'s grand title) and
- * emits a `back` event that the host modal wires to its existing
- * `close` emit (which, on the four install-flow takeovers, returns
- * to the chooser body underneath).
- *
- * Per-flow choices captured in the plan doc:
- *  - InstallWizardModal / TrackModal / LoadSnapshotModal / QuickInstallModal:
- *    chevron + "Back to Dashboard" label (mounted on the chooser
- *    host window — close emit returns to chooser).
- *  - FirstUseTakeover: NO back affordance — the bootstrap flow has
- *    no underlying dashboard to return to. Skip Onboarding via the
- *    file menu (M-2.2) is the post-consent escape; the consent
- *    step has no escape by design.
- *  - ProgressModal in takeover mode (update-while-running): deferred
- *    to M-6 alongside the cancel-on-window-close wiring (the
- *    semantics there are "cancel update with rollback", not "go
- *    back to a still-live underlying surface").
- */
+// Back affordance for binding takeover-modals: a chevron + label that
+// emits `back`, which the host modal wires to its `close` emit.
 import { ChevronLeft } from 'lucide-vue-next'
 
 defineProps<{

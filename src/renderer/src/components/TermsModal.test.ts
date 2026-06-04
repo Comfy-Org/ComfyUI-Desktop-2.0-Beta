@@ -5,15 +5,9 @@ import TermsModal from './TermsModal.vue'
 import { LEGAL_DOCS, type LegalDocId } from '../lib/legalDocs'
 
 /**
- * `TermsModal` is the single shared component used to render all four
- * legal docs from the consent screen's Learn-more links. The contract:
- *   - the `doc` prop routes to the matching `LEGAL_DOCS` entry
- *   - the modal title resolves to the matching i18n key
- *   - the meta header shows the doc's effectiveDate and appliesTo
- *   - `close` emits on ESC / ✕ button / overlay click
- *
- * If any of these routing wires get crossed, the user sees the wrong
- * document for the link they clicked — a legal-correctness regression.
+ * `TermsModal` renders all four legal docs. Contract: the `doc` prop routes to
+ * the matching `LEGAL_DOCS` entry, title/meta resolve from it, and `close`
+ * emits on ESC / ✕ / overlay. Crossed routing = wrong doc (legal regression).
  */
 
 const i18n = createI18n({
@@ -41,9 +35,7 @@ function mountModal(doc?: LegalDocId) {
     props: doc ? { doc } : {},
     global: {
       plugins: [i18n],
-      // Stub `<Teleport to="body">` so the panel actually renders inside
-      // the wrapper for assertions; otherwise the content lives on
-      // document.body and findAll won't see it.
+      // Stub Teleport so content renders inside the wrapper for assertions.
       stubs: { Teleport: { template: '<div><slot /></div>' } },
     },
   })
@@ -76,9 +68,7 @@ describe('TermsModal', () => {
   })
 
   it('renders block content from the routed doc (not from a stale fallback)', () => {
-    // The EULA's §1 is "Definitions"; the ToS's §1 is "Acceptance".
-    // If the doc prop routing breaks, an EULA modal would show ToS
-    // content (or vice versa) — assert each shows its own §1 heading.
+    // EULA §1 is "Definitions", ToS §1 is "Acceptance" — assert each shows its own.
     const eulaText = mountModal('eula').find('.terms-body').text()
     const tosText = mountModal('tos').find('.terms-body').text()
     expect(eulaText).toContain('1. Definitions')

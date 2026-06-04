@@ -1,25 +1,13 @@
 /**
- * Eval-bridge helpers for asserting against renderer DOM that lives in
- * WebContentsViews (panel body, title bar, popups, ComfyUI frontend).
- *
- * Why not Playwright `connectOverCDP`? The host BrowserWindow has no DOM
- * (its webContents is just a parent surface for child WebContentsViews).
- * Playwright's CDP enumeration model maps targets to BrowserContexts via
- * the parent BrowserWindow, and WebContentsView targets without a loaded
- * parent context don't get exposed as Pages — `connectOverCDP` hangs
- * during the initial enumeration even though the underlying websocket
- * connects.
- *
- * The eval bridge sidesteps that by running `executeJavaScript` against
- * each WebContentsView's webContents through `app.evaluate()`. Tradeoff:
- * no Playwright auto-waiting, no rich locators — but enough for DOM
- * presence / click / text assertions in our smoke tests.
+ * Eval-bridge helpers for asserting against renderer DOM in WebContentsViews.
+ * `connectOverCDP` hangs here: the host BrowserWindow has no DOM and child
+ * WebContentsView targets aren't exposed as Pages, so we run
+ * `executeJavaScript` against each webContents via `app.evaluate()` instead.
  */
 import type { ElectronApplication } from '@playwright/test'
 import { expect } from '@playwright/test'
 import { evalWithRetry } from './evalRetry'
 
-/** Find the webContents id whose URL contains `marker`. Returns null if none. */
 export function findWebContentsId(
   app: ElectronApplication,
   marker: string,
@@ -50,12 +38,8 @@ export async function waitForWebContents(
 }
 
 /**
- * Page-like façade over a WebContentsView's webContents. Exposes a small
- * subset of Playwright Page API mapped to `executeJavaScript` calls.
- *
- * Lookups happen against the *current* webContents id each call so the
- * facade keeps working across page reloads / re-navigations as long as
- * the URL marker still matches.
+ * Page-like façade over a WebContentsView's webContents. Re-resolves the
+ * webContents id each call so it survives reloads while the URL marker matches.
  */
 export class WebContentsPage {
   constructor(
@@ -67,11 +51,7 @@ export class WebContentsPage {
     return this.evaluate<T>(expr)
   }
 
-  /**
-   * Evaluate an arbitrary JavaScript expression in the matching
-   * webContents. Returns the JSON-serialisable result. Use for
-   * one-off DOM probes that don't fit the named helpers below.
-   */
+  /** Evaluate an arbitrary JS expression in the matching webContents. */
   async evaluate<T>(expr: string): Promise<T> {
     const id = await findWebContentsId(this.app, this.marker)
     if (id === null) throw new Error(`webContents not found (marker=${this.marker})`)
@@ -199,18 +179,14 @@ export function titlePopupPage(app: ElectronApplication): WebContentsPage {
   return new WebContentsPage(app, 'comfyTitlePopup.html')
 }
 
-/** WebContentsPage for the shell-level system-modal popup. Hosts the
- *  app-update Download/Restart confirm, the picker Restart confirm,
- *  the switch-instance confirm, and the Close All Windows confirm. */
+/** WebContentsPage for the shell-level system-modal popup. */
 export function systemModalPage(app: ElectronApplication): WebContentsPage {
   return new WebContentsPage(app, 'comfySystemModal.html')
 }
 
 /**
- * True iff the WebContentsView whose URL contains `marker` is currently
- * `setVisible(true)` AND has non-zero bounds — the EmbeddedPopupView
- * contract for "shown to the user". Shared by every popup-asserting
- * e2e test (chooser, downloads-shelf, dropdowns, update-pills, …).
+ * True iff the WebContentsView matching `marker` is `setVisible(true)` and
+ * has non-zero bounds — the EmbeddedPopupView contract for "shown to user".
  */
 export function isPopupVisible(
   app: ElectronApplication,
@@ -230,11 +206,7 @@ export function isPopupVisible(
   }, marker)
 }
 
-/**
- * Force-close the title popup via its bridge if it is currently visible.
- * Used by every test that opens the popup, in `beforeEach` to start from
- * a known state.
- */
+/** Force-close the title popup via its bridge if it is currently visible. */
 export async function closeTitlePopupIfOpen(app: ElectronApplication): Promise<void> {
   const id = await findWebContentsId(app, 'comfyTitlePopup.html')
   if (id === null) return
@@ -250,10 +222,6 @@ export async function closeTitlePopupIfOpen(app: ElectronApplication): Promise<v
   ).toBe(false)
 }
 
-/**
- * Window in milliseconds to wait past the title bar's reopen-suppression
- * debounce (100ms in production) before the next open click. Generously
- * over the 100ms threshold so CI flakiness from timer drift can't push
- * the wait under the suppression window.
- */
+/** Wait past the title bar's 100ms reopen-suppression debounce; padded
+ *  so CI timer drift can't push the wait under the suppression window. */
 export const TITLE_REOPEN_SUPPRESSION_MS = 300

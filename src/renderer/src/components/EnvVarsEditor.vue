@@ -20,12 +20,11 @@ interface EnvVar {
 
 const entries = ref<EnvVar[]>([])
 
-// Sync from prop to local state
 watch(
   () => props.modelValue,
   (val) => {
     const incoming = Object.entries(val || {}).map(([key, value]) => ({ key, value }))
-    // Only reset if structurally different to avoid cursor jumps
+    // Reset only if structurally different to avoid cursor jumps.
     if (
       JSON.stringify(incoming) !== JSON.stringify(entries.value.filter((e) => e.key || e.value))
     ) {

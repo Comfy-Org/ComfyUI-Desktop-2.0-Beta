@@ -27,30 +27,14 @@ import { createExecutionTap } from '../../executionTap'
 import { clearCrash, recordCrash } from '../../crashBuffer'
 import type { WriteStream } from 'fs'
 
-/**
- * Feature flags the launcher wants set on every ComfyUI it spawns. Each entry
- * is gated by the running install's `--list-feature-flags` registry: keys not
- * present in the registry are skipped so we never inject something the
- * running ComfyUI version doesn't recognize.
- */
+// Feature flags injected on every spawned ComfyUI, gated by the running
+// install's --list-feature-flags registry so we never inject unrecognized keys.
 const DESKTOP_FEATURE_FLAGS: Record<string, string> = {
   show_signin_button: 'true',
 }
 
-/**
- * Classify a child-process exit as a crash for the launcher's session
- * lifecycle. Node's `child_process` `exit` event hands back
- * `(code: number | null, signal: NodeJS.Signals | null)`:
- *  - Clean exit  → `code === 0, signal === null` (not a crash).
- *  - Non-zero    → `code !== 0, signal === null` (crash).
- *  - POSIX kill  → `code === null, signal !== null` (crash — `null !== 0`
- *                  satisfies the first clause, but the explicit
- *                  `signal !== null` arm makes the intent legible).
- *  - Windows TerminateProcess (e.g. Task Manager force-kill) reports a
- *    numeric code with `signal === null`, falling into the non-zero
- *    branch — surfaced as a crash because the user didn't go through
- *    our Stop path.
- */
+// A clean exit is code 0 with no signal; anything else (non-zero code or a
+// signal) is a crash, since the user didn't go through our Stop path.
 export function isCrashedExit(code: number | null, signal: NodeJS.Signals | null): boolean {
   return code !== 0 || signal !== null
 }
@@ -74,16 +58,14 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
   if (_operationAborts.has(installationId)) {
     return { ok: false, message: 'Another operation is already running for this installation.' }
   }
-  // The user is taking another shot at this install — drop any retained
-  // crash detail so a future `getLastCrashError` lookup doesn't surface
-  // the previous failure when the lifecycle view re-mounts.
+  // Drop retained crash detail so the lifecycle view doesn't resurface it.
   clearCrash(installationId)
   const source = sourceMap[inst.sourceId]
   if (!source) return { ok: false, message: i18n.t('errors.unknownSource') }
   if (!source.skipInstall && isEffectivelyEmptyInstallDir(inst.installPath)) {
     return { ok: false, message: i18n.t('errors.installDirEmpty') }
   }
-  // Migrate legacy envs/default/ → ComfyUI/.venv/ for standalone installations
+  // Migrate legacy envs/default/ → ComfyUI/.venv/ for standalone installs.
   if (inst.sourceId === 'standalone') {
     const { migrateEnvLayout } = await import('../../../sources/standalone/install')
     const { writeComfyEnvironment } = await import('../../../sources/standalone/envPaths')
@@ -104,8 +86,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
   }
   const launchCmd = launchCmdRaw
 
-  // Filter out unsupported args, then inject desktop-managed feature flags
-  // gated on the running ComfyUI's --list-feature-flags registry.
+  // Filter unsupported args, then inject desktop-managed feature flags.
   if (launchCmd.cmd && launchCmd.args && launchCmd.cwd) {
     const sIdx = launchCmd.args.indexOf('-s')
     if (sIdx !== -1 && sIdx + 1 < launchCmd.args.length) {
@@ -118,8 +99,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
         const userArgs = launchCmd.args.slice(sIdx + 2)
         const filtered = filterUnsupportedArgs(userArgs, schema)
 
-        // Inject desktop-managed feature flags. Skip on ComfyUI versions that
-        // don't expose the discovery flag (avoids a pointless python spawn).
+        // Skip when the discovery flag is absent (avoids a pointless python spawn).
         const desktopFlagArgs: string[] = []
         if (schema.knownFlags.has('feature-flag') && schema.knownFlags.has('list-feature-flags')) {
           const registry = await getComfyFeatureFlagRegistry(launchCmd.cmd, mainPyAbs, launchCmd.cwd, installationId, version)
@@ -132,15 +112,12 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
 
         launchCmd.args = [...prefixArgs, ...desktopFlagArgs, ...filtered]
       } catch {
-        // Schema not available — pass args as-is
+        // Schema not available — pass args as-is.
       }
     }
   }
 
-  // Inject shared models config (--extra-model-paths-config) and/or
-  // input/output directories (--input-directory / --output-directory).
-  // The two flags are independent — an install can have shared models
-  // visible while keeping its workspace local to a specific folder.
+  // Shared models and shared input/output are independent flags.
   const argsAvailable = !launchCmd.skipSharedPaths && !!launchCmd.args
   const useSharedModels = argsAvailable && (inst.useSharedModels as boolean | undefined) !== false
   const useSharedInputOutput = argsAvailable && (inst.useSharedInputOutput as boolean | undefined) !== false
@@ -164,8 +141,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     launchCmd.args!.push('--input-directory', inputDir)
     launchCmd.args!.push('--output-directory', outputDir)
   } else if (argsAvailable) {
-    // Per-install paths (e.g. adopted-from-legacy installs anchored to
-    // <legacyBasePath>/{input,output}). Omitted entirely when not set so
+    // Per-install paths (e.g. adopted-from-legacy); omitted when unset so
     // ComfyUI falls back to its own <installPath>/{input,output} defaults.
     const perInstallInput = inst.inputDir as string | undefined
     const perInstallOutput = inst.outputDir as string | undefined
@@ -286,10 +262,8 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     setPortArg(launchCmd as LaunchCmd, actionData.portOverride as number)
   }
 
-  // Check for port conflicts.
-  // Use isPortListening (net.createServer bind test) as the primary check —
-  // findPidsByPort uses lsof which on Linux can only see same-user processes,
-  // silently returning [] when a different user owns the port.
+  // isPortListening (bind test) is the primary check; findPidsByPort's lsof
+  // only sees same-user processes on Linux.
   const pendingPortOwner = _pendingPorts.get(launchCmd.port!)
   const portBusy = !pendingPortOwner && await isPortListening(launchCmd.port!)
   const existingPids = (pendingPortOwner || !portBusy) ? [] : await findPidsByPort(launchCmd.port!)
@@ -329,8 +303,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
             ? i18n.t('errors.portConflictComfy', { port: launchCmd.port!, process: processDesc })
             : i18n.t('errors.portConflictOther', { port: launchCmd.port!, process: processDesc })
         } else {
-          // Port is busy but we could not identify the owning process
-          // (e.g. lsof on Linux cannot see other-user processes).
+          // Busy but the owner is unidentifiable (e.g. other-user process on Linux).
           isComfy = false
           message = i18n.t('errors.portConflictOther', { port: launchCmd.port!, process: i18n.t('errors.unknownProcess') })
         }

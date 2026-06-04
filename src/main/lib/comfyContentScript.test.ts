@@ -31,15 +31,10 @@ describe('getModelDownloadContentScript', () => {
 
   it('guards model download interception behind __comfyDesktop2Remote check', () => {
     expect(script).toContain('__comfyDesktop2Remote')
-    // The createElement override should be skipped for remote sessions
     expect(script).toContain('if (!window.__comfyDesktop2Remote)')
   })
 
   it('routes captured downloads through window.__comfyDesktop2.downloadModel', () => {
-    // The Launcher's main-process download manager exposes downloadModel
-    // on the preload bridge; the createElement override calls it once it
-    // identifies the click target as a model download with a known
-    // directory hint from the missing-models scrape cache.
     expect(script).toContain('downloadModel')
   })
 
@@ -61,44 +56,30 @@ describe('getModelDownloadContentScript', () => {
   })
 
   it('only clears modelNameCache when both dialog and errors tab are closed', () => {
-    // When dialog closes, it should check errorsTabOpen before clearing
-    // When errors tab closes, it should check dialogWasOpen before clearing
     const occurrences = script.split('modelNameCache = {}').length - 1
     expect(occurrences).toBeGreaterThanOrEqual(2)
   })
 
   it('does not inject the in-page downloads UI', () => {
-    // The downloads affordance lives in the title-bar tray (see
-    // `TitleBarApp.vue` / `comfyTitlePopup/DownloadsView.vue`). The DOM IDs
-    // and the `onDownloadProgress` listener must NOT appear in the
-    // injected script — main re-broadcasts download state via
-    // `comfy-titlebar:downloads-changed` for the title-bar webContents
-    // to consume directly.
+    // The downloads affordance lives in the title-bar tray, so these DOM IDs
+    // and the progress listener must NOT appear in the injected script.
     expect(script).not.toContain('__comfy-dl-tab')
     expect(script).not.toContain('__comfy-dl-toasts')
     expect(script).not.toContain('__comfy-dl-cardlist')
     expect(script).not.toContain('__comfy-dl-dock')
     expect(script).not.toContain('onDownloadProgress')
-    // Theme scraping was only consumed by the toast UI's color
-    // derivation; it has no other consumer in the injected script
-    // and is removed alongside the UI.
     expect(script).not.toContain('comfy-menu-bg')
   })
 
   it('still intercepts remote/cloud workflow outputs for auto-download', () => {
-    // The remote/cloud auto-download intercept ferries workflow outputs
-    // from a remote ComfyUI server back to the local output directory
-    // via the WebSocket message stream.
     expect(script).toContain('downloadAsset')
     expect(script).toContain('window.WebSocket')
   })
 
   it('auto-downloads 3D outputs (SaveGLB) alongside images/audio/video', () => {
-    // SaveGLB emits its results under ui={"3d": [...]} (see
-    // ComfyUI/comfy_extras/nodes_save_3d.py). The remote/cloud
-    // WebSocket intercept iterates a fixed list of output-dict keys,
-    // so "3d" must be in that list or .glb files silently fail to
-    // download from cloud/remote sessions (issue #784).
+    // SaveGLB emits results under ui={"3d": [...]}, and the WebSocket intercept
+    // iterates a fixed key list, so "3d" must be present or .glb files silently
+    // fail to download from cloud/remote sessions.
     expect(script).toContain(`['images', 'gifs', 'audio', 'video', '3d']`)
   })
 })

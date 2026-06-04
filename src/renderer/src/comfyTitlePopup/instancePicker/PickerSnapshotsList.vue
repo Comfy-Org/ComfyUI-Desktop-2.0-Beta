@@ -6,26 +6,9 @@ import SnapshotRow from '../../views/comfyUISettings/SnapshotRow.vue'
 import { changeSummary } from '../../lib/snapshots'
 import type { SnapshotListData, SnapshotSummary } from '../../types/ipc'
 
-/**
- * Snapshots list rendered inside the instance-picker popover's right-
- * pane accordion. Reuses the same `SnapshotRow` component the unified
- * Settings drawer's `SnapshotsView` uses, so visual chrome — header,
- * trigger label, time pill, expand chevron, change-summary chips,
- * meta line — is byte-identical between the two surfaces without
- * either having to re-declare the row template.
- *
- * Mutating actions (save / restore / delete) are emitted upward; the
- * picker view dispatches them through the popup-process bridge, which
- * routes to the same main-side handler the drawer's `runAction`
- * pipeline uses. The popup process doesn't have access to the
- * renderer-side `useModal` primitive, so destructive flows use
- * `window.confirm` for the "are you sure" gate — coarser than the
- * drawer's modal but visible and predictable in the popup context.
- *
- * Heavier flows (snapshot diff drilldown, export / import) intentionally
- * stay in the full drawer where the surface has room for them; the
- * picker is the at-a-glance affordance for save + restore + delete.
- */
+// Snapshots list for the picker's right-pane accordion. Reuses the drawer's
+// SnapshotRow so the two surfaces stay byte-identical. Destructive flows use
+// window.confirm because the popup process has no useModal primitive.
 
 interface Props {
   data: SnapshotListData | null

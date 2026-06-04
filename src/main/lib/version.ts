@@ -1,15 +1,11 @@
-/**
- * Ground-truth version data for an installed ComfyUI.
- *
- * Stored on the installation record as `comfyVersion`.  All display
- * strings are derived at render time via {@link formatComfyVersion}.
- */
+/** Ground-truth version data for an installed ComfyUI, stored on the
+ *  installation record as `comfyVersion`. */
 export interface ComfyVersion {
   /** Full 40-character commit SHA. */
   commit: string
   /** Nearest stable release tag (e.g. "v0.14.2"). */
   baseTag?: string
-  /** Number of commits ahead of baseTag (0 = on the tag, >0 = latest channel). */
+  /** Commits ahead of baseTag (0 = on the tag, >0 = latest channel). */
   commitsAhead?: number
 }
 
@@ -34,9 +30,8 @@ export function formatComfyVersion(
   // Exactly on the tag — display as the tag alone.
   if (commitsAhead === 0) return baseTag
 
-  // commitsAhead is undefined when the GitHub comparison API failed.
-  // We know the baseTag but not how far ahead, so show the tag + SHA to
-  // indicate uncertainty rather than silently displaying the stable tag.
+  // undefined = GitHub comparison API failed: show tag + SHA to signal
+  // uncertainty rather than implying we're exactly on the stable tag.
   if (commitsAhead === undefined) {
     return `${baseTag} (${shortSha})`
   }

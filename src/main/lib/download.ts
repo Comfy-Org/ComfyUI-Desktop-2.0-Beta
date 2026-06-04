@@ -74,7 +74,6 @@ export function download(
 
     fs.mkdirSync(path.dirname(destPath), { recursive: true })
 
-    // Determine if we can resume from a previous incomplete download
     let resumeFrom = 0
     const existingMeta = readMeta(metaPath)
     if (existingMeta && fs.existsSync(destPath)) {
@@ -90,7 +89,7 @@ export function download(
         try { fs.unlinkSync(destPath) } catch {}
         try { fs.unlinkSync(metaPath) } catch {}
       } else if (existingMeta.expectedSize > 0 && resumeFrom >= existingMeta.expectedSize) {
-        // File is already fully downloaded but meta wasn't cleaned up (crash after write, before meta delete)
+        // Fully downloaded but meta wasn't cleaned up (crash after write, before meta delete)
         try { fs.unlinkSync(metaPath) } catch {}
         resolve(destPath)
         return
@@ -170,8 +169,7 @@ export function download(
       const chunkTotalBytes = parseInt(contentLength ?? '0', 10)
       const totalBytes = isResumed ? baseBytes + chunkTotalBytes : chunkTotalBytes
 
-      // Compute effective expected size for validation
-      // Only use totalBytes if Content-Length was actually present
+      // Only trust totalBytes when Content-Length was present.
       const sizeFromHeaders = chunkTotalBytes > 0 ? totalBytes : 0
       const effectiveSize = expectedSize || sizeFromHeaders
 
@@ -184,7 +182,7 @@ export function download(
         return
       }
 
-      // Write meta to mark this download as in-progress (enables resume if interrupted)
+      // Mark this download in-progress to enable resume if interrupted.
       const etag = headerString(response.headers['etag'])
       const lastModified = headerString(response.headers['last-modified'])
       writeMeta(metaPath, { url, expectedSize: effectiveSize, etag, lastModified })
@@ -232,7 +230,6 @@ export function download(
         }
         fileStream!.end()
         fileStream!.on('close', () => {
-          // Validate file size if we know the expected size
           if (effectiveSize > 0) {
             try {
               const actualSize = fs.statSync(destPath).size
@@ -253,8 +250,7 @@ export function download(
             }
           }
 
-          // Remove meta to mark the download as complete.
-          // The data file is already at destPath — no rename needed.
+          // Removing meta marks the download complete (the data file is already at destPath).
           try { fs.unlinkSync(metaPath) } catch {}
           safeResolve(destPath)
         })

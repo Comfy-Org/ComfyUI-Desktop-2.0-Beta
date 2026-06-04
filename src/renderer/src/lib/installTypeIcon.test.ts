@@ -24,8 +24,7 @@ describe('installTypeMetaFor', () => {
     expect(legacy.key).toBe('legacyDesktop')
     expect(legacy.icon).toBe(Computer)
     expect(legacy.labelKey).toBe('installType.legacyDesktop')
-    // The whole point of Track G: Legacy Desktop must not share an icon
-    // with the current Standalone install type.
+    // Legacy Desktop must not share an icon with Standalone.
     expect(legacy.icon).not.toBe(standalone.icon)
   })
 

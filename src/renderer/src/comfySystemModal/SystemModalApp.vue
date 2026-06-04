@@ -3,19 +3,11 @@ import { computed, onMounted, onUnmounted, ref, nextTick } from 'vue'
 import BaseAlert from '../components/ui/BaseAlert.vue'
 
 /**
- * System-modal popup shell.
- *
- * Renders a confirm dialog over a transparent WebContentsView via the
- * shared `BaseAlert` primitive so chrome matches the rest of the app's
- * confirms (delete, return-to-dashboard, etc.) — same `--neutral-800`
- * panel, hairline separators, brand-yellow CTA, focus capture+restore,
- * ESC + backdrop dismiss.
- *
- * Spec arrives via the `comfy-systemmodal:set-modal` IPC each time
- * main opens the modal; the view is hidden between opens but the
- * webContents persists, so the bridge listener is registered once at
- * mount and stays alive. `theme.*` on the spec is no longer used — the
- * field is kept for IPC contract stability but ignored here.
+ * System-modal popup shell. Renders a confirm dialog via the shared `BaseAlert` so
+ * chrome matches the rest of the app's confirms. The spec arrives via
+ * `comfy-systemmodal:set-modal` on each open; the webContents persists between opens,
+ * so the bridge listener is registered once at mount. `spec.theme` is kept for IPC
+ * contract stability but ignored here.
  */
 
 type SystemModalConfirmStyle = 'primary' | 'danger'
@@ -59,10 +51,7 @@ function ack(action: 'confirm' | 'cancel'): void {
 
 let unsubModal: (() => void) | undefined
 
-/** Sequence guard — only the rAF closure for the most recently
- *  applied modal gets to fire `notifyRendered`. Stale rAFs from
- *  earlier opens are suppressed so main never receives a "rendered"
- *  ack for a modal it has already replaced. */
+/** Only the most recent modal's tick fires `notifyRendered`, suppressing stale acks. */
 let renderSeq = 0
 
 onMounted(() => {
@@ -94,9 +83,7 @@ onUnmounted(() => {
     @close="ack('confirm')"
     @cancel="ack('cancel')"
   >
-    <!-- Default slot replaces the bare message rendering when the spec
-         carries structured `details` — we render `message` first, then
-         each detail group as a labelled bulleted list. -->
+    <!-- When the spec carries `details`, render `message` then each group as a bulleted list. -->
     <template v-if="spec?.details && spec.details.length > 0" #default>
       <p v-if="spec.message" class="system-modal-message">{{ spec.message }}</p>
       <div
@@ -114,8 +101,7 @@ onUnmounted(() => {
 </template>
 
 <style>
-/* WebContentsView is per-pixel transparent — keep the document chrome
-   transparent too so only the BaseAlert backdrop + panel paint. */
+/* Keep the document transparent so only the BaseAlert backdrop + panel paint. */
 html,
 body,
 #app {

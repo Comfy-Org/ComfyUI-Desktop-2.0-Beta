@@ -80,7 +80,6 @@ export async function handleAction(
       )
     }
 
-    // Build combined summary
     const summary: string[] = []
 
     if (comfyResult.changed) {
@@ -114,9 +113,8 @@ export async function handleAction(
 
     const totalFailures = nodeResult.failed.length + pipResult.failed.length + (comfyResult.error ? 1 : 0)
 
-    // Collect the SPECIFIC failures so the error surface can explain WHY a
-    // restore failed (issue #609) instead of a bare "N operation(s) failed".
-    // restore.ts already captures these — they were being discarded here.
+    // Collect specific failures so the error surface explains WHY a restore
+    // failed instead of a bare "N operation(s) failed".
     const failureDetails: string[] = []
     if (comfyResult.error) failureDetails.push(`ComfyUI: ${comfyResult.error}`)
     for (const f of nodeResult.failed) failureDetails.push(`Node ${f.id}: ${f.error}`)
@@ -136,8 +134,8 @@ export async function handleAction(
       return { ok: false, message: failMessage(t('standalone.snapshotRestoreReverted')) }
     }
 
-    // Restore update channel and version/lastRollback state so the
-    // release cache sees accurate state for the restored channel.
+    // Restore channel + version/lastRollback state so the release cache sees
+    // accurate state for the restored channel.
     const comfyuiDir = path.join(installation.installPath, 'ComfyUI')
     const restoredHead = comfyResult.commit || readGitHead(comfyuiDir)
     const restoreState = snapshots.buildPostRestoreState(
@@ -145,7 +143,6 @@ export async function handleAction(
       installation.updateInfoByChannel as Record<string, Record<string, unknown>> | undefined,
       installation.comfyVersion as ComfyVersion | undefined
     )
-    // Re-resolve comfyVersion from git state after the snapshot restore.
     if (!comfyResult.error && restoredHead) {
       const resolved = await resolveLocalVersion(comfyuiDir, restoredHead)
       restoreState.comfyVersion = resolved
@@ -156,7 +153,6 @@ export async function handleAction(
     }
     await update(restoreState)
 
-    // Capture a new snapshot reflecting the restored state
     try {
       const updatedInstallation = {
         ...installation,
@@ -174,8 +170,7 @@ export async function handleAction(
       ...(totalFailures > 0 ? { message: failMessage(`${totalFailures} operation(s) failed`) } : {}) }
   }
 
-  // Handler kept for potential future use (e.g., context menu). Button removed from UI since
-  // snapshots are tiny (~5 KB) and auto-pruned, so manual deletion adds more risk than value.
+  // Handler kept for potential future use; the UI button was removed.
   if (actionId === 'snapshot-delete') {
     const file = actionData?.file as string | undefined
     if (!file) return { ok: false, message: t('standalone.snapshotNoFile') }
@@ -195,14 +190,12 @@ export async function handleAction(
 
     const lines: string[] = []
 
-    // ComfyUI version
     if (diff.comfyuiChanged && diff.comfyui) {
       lines.push(`${t('standalone.snapshotDiffComfyUI')}`)
       lines.push(`  ${diff.comfyui.from.formattedVersion} → ${diff.comfyui.to.formattedVersion}`)
       lines.push('')
     }
 
-    // Custom nodes
     if (diff.nodesAdded.length > 0 || diff.nodesRemoved.length > 0 || diff.nodesChanged.length > 0) {
       lines.push(`${t('standalone.snapshotDiffNodes')}`)
       for (const n of diff.nodesAdded) {
@@ -229,7 +222,6 @@ export async function handleAction(
       lines.push('')
     }
 
-    // Pip packages
     const pipTotal = diff.pipsAdded.length + diff.pipsRemoved.length + diff.pipsChanged.length
     if (pipTotal > 0) {
       lines.push(`${t('standalone.snapshotDiffPackages')} (${pipTotal})`)
@@ -266,16 +258,11 @@ export async function handleAction(
       )
     )
     const result = await releaseCache.checkForUpdate(COMFYUI_REPO, channel, installation, update)
-    // Enrich the "+ N commits" label in the background — it can run a slow
-    // `git fetch --unshallow`, and the card refreshes in place via the
-    // `release-cache-enriched` broadcast when it lands. Awaiting here would
-    // stall the click (and the up-to-date alert) on that fetch.
+    // Enrich the "+ N commits" label in the background (it can run a slow
+    // `git fetch --unshallow`); the card refreshes in place when it lands.
     void releaseCache.enrichCommitsAhead(COMFYUI_REPO, path.join(installation.installPath, 'ComfyUI')).catch(() => {})
-    // A manual "Check for update" that finds nothing should say so —
-    // otherwise the click reads as a no-op. The tab-open auto-refresh
-    // passes `silent` so it never pops this alert. Update availability is a
-    // commit-SHA comparison against the freshly-fetched release, so it does
-    // not need the (slow, background) commits-ahead enrichment.
+    // A manual check that finds nothing should say so, else it reads as a no-op.
+    // The tab-open auto-refresh passes `silent` to suppress this.
     if (result.ok && actionData?.silent !== true) {
       const info = releaseCache.getEffectiveInfo(COMFYUI_REPO, channel, installation)
       if (!releaseCache.isUpdateAvailable(installation, channel, info)) {
@@ -309,10 +296,8 @@ async function handleUpdateComfyUI(
     return { ok: false, message: t('standalone.updateNoGit') }
   }
 
-  // Adopted installs don't have a `standalone-env` Python; `runComfyUIUpdate`
-  // routes them through `adoptedPythonPath` (legacy `.venv`, which has
-  // pygit2 installed during adoption). Managed installs still require the
-  // standalone-env Python so we check existence here.
+  // Adopted installs route through `adoptedPythonPath`; only managed installs
+  // need the standalone-env Python, so check existence per-case.
   if (installation.adopted !== true) {
     const masterPython = getMasterPythonPath(installPath)
     if (!fs.existsSync(masterPython)) {
@@ -360,16 +345,15 @@ async function handleUpdateComfyUI(
     return { ok: false, message: result.message }
   }
 
-  // Reconcile installedTag in the release cache against the new comfyVersion
-  // so getDetailSections returns the correct "up to date" badge immediately
-  // without waiting for a renderer-triggered check-update.
+  // Reconcile installedTag against the new comfyVersion so the "up to date"
+  // badge is correct immediately without a renderer-triggered check-update.
   try {
     const freshInst = result.installation as unknown as Record<string, unknown>
     await releaseCache.checkForUpdate(COMFYUI_REPO, channel, freshInst, async (data) => {
       await update(data)
     })
   } catch {
-    // best-effort — UI will still correct itself on the next check-update
+    // best-effort — UI corrects itself on the next check-update
   }
 
   sendProgress('done', { percent: 100, status: 'Complete' })
@@ -599,7 +583,7 @@ async function handleMigrateFrom(
     }
   }
 
-  // Install manager_requirements.txt from destination ComfyUI if present
+  // Install manager_requirements.txt from the destination ComfyUI if present.
   {
     const dstComfyUIDir = path.join(installation.installPath, 'ComfyUI')
     const mgrReqPath = path.join(dstComfyUIDir, 'manager_requirements.txt')

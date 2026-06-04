@@ -7,10 +7,8 @@ vi.mock('./release-cache', () => ({
   isUpdateAvailable: vi.fn(() => true),
 }))
 
-// `buildChannelCards` gates the `enriching` hint on whether the
-// install actually has a `.git` directory.  Stub the helper rather
-// than the whole `git` module so tests don't have to worry about the
-// rest of its (heavy) surface area.
+// Stub just `hasGitDir` (which gates the `enriching` hint) rather than the
+// whole heavy `git` module.
 vi.mock('./git', () => ({
   hasGitDir: vi.fn(() => true),
 }))
@@ -78,8 +76,8 @@ describe('buildChannelCards — latest channel +commits formatting', () => {
         checkedAt: Date.now(),
       }
     })
-    // Install is sitting on the latest commit — the cv === info.commitSha
-    // branch in buildChannelCards reuses the install's own version data.
+    // Install on the latest commit: the cv === info.commitSha branch reuses
+    // the install's own version data.
     const install = baseInstall({
       comfyVersion: { commit: HEAD_SHA, baseTag: BASE_TAG, commitsAhead: 0 },
     } as Partial<InstallationRecord>)
@@ -89,8 +87,8 @@ describe('buildChannelCards — latest channel +commits formatting', () => {
   })
 
   it('falls back to `tag (sha)` only when commitsAhead is undefined (enrichment skipped/failed)', () => {
-    // Regression for the original bug: without enrichment, info.commitsAhead
-    // is undefined and formatComfyVersion emits the uncertainty form.
+    // Without enrichment, commitsAhead is undefined and formatComfyVersion
+    // emits the uncertainty form.
     vi.mocked(releaseCache.getEffectiveInfo).mockImplementation((_repo, channel) => {
       if (channel === 'stable') return null
       return {
@@ -138,13 +136,8 @@ describe('buildChannelCards — enriching flag', () => {
   })
 
   it('still sets enriching=true while baseTag is missing — the helper recovers it in the background', () => {
-    // The original bug (issue #783) showed the spinner forever because
-    // enrichCommitsAhead bailed silently on a missing baseTag and never
-    // broadcast a settle.  The helper now recovers baseTag itself (via
-    // forced `getLatestStableTag` then a local `findNearestTag`
-    // fallback), so the spinner should remain visible through that
-    // window.  The settle stamp + broadcast — not this guard — is what
-    // clears it.
+    // The helper recovers a missing baseTag in the background, so the spinner
+    // must stay visible through that window; the settle stamp clears it.
     latestInfo({ baseTag: undefined })
     const cards = buildChannelCards(REPO, DEFS, baseInstall())
     const latest = cards.find((c) => c.value === 'latest')!
@@ -152,10 +145,8 @@ describe('buildChannelCards — enriching flag', () => {
   })
 
   it('does NOT set enriching once lastEnrichAttemptAt has been stamped', () => {
-    // After a failed settle (network down, no recoverable baseTag,
-    // rev-list still empty after fetch), the helper stamps the entry
-    // so subsequent picker reopens don't keep re-flashing the spinner
-    // before falling back to `tag (sha)`.
+    // After a failed settle the helper stamps the entry so picker reopens
+    // don't keep re-flashing the spinner before falling back to `tag (sha)`.
     latestInfo({ lastEnrichAttemptAt: Date.now() })
     const cards = buildChannelCards(REPO, DEFS, baseInstall())
     const latest = cards.find((c) => c.value === 'latest')!

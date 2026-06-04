@@ -1,29 +1,11 @@
 /**
- * Builds the `window.api` bridge object exposed to renderer surfaces.
+ * Builds the `window.api` bridge exposed to renderer surfaces, shared by the panel
+ * and title-bar preloads via a Rollup chunk.
  *
- * Imported by both `preload/index.ts` (default panel preload) and
- * `preload/comfyTitleBarPreload.ts` (title-bar preload). Rollup splits
- * this into a shared chunk at `out/preload/chunks/api-*.js`, which the
- * preload entries then `require()` at runtime.
- *
- * NOTE — sandbox interaction
- *   Electron 40 defaults preloads to `sandbox: true`, and sandboxed
- *   preloads can only `require()` from the whitelist `electron`,
- *   `events`, `timers`, `url`. The chunked `require("./chunks/...")`
- *   fails silently in that mode, leaving `window.api` undefined and
- *   the renderer blank.
- *
- *   Workaround: every host webPreferences that loads a preload using
- *   this builder explicitly opts out of the sandbox via
- *   `sandbox: false` (title-bar `WebContentsView` and panel
- *   `WebContentsView` in `src/main/index.ts`). `contextIsolation: true`
- *   and `nodeIntegration: false` remain enabled — the real wall
- *   between renderer JS and Node — so the security posture is
- *   roughly equivalent to historical VS Code / Slack / Teams.
- *
- *   See issue #521 for the planned upgrade: a build-time chunk
- *   inlining plugin that lets us re-enable sandbox without
- *   duplicating ~330 lines of bridge code across both preloads.
+ * Hosts loading this preload MUST set `sandbox: false`: sandboxed preloads can only
+ * `require()` the electron whitelist, so the chunked `require("./chunks/...")` would
+ * fail silently and leave `window.api` undefined. `contextIsolation` /
+ * `nodeIntegration: false` stay enabled.
  */
 import { ipcRenderer, webUtils } from 'electron'
 import type { IpcRendererEvent } from 'electron'
@@ -360,11 +342,10 @@ export function buildElectronApi(): ElectronApi {
       return () => ipcRenderer.removeListener('telemetry-setting-changed', handler)
     },
     captureTelemetry: (event, properties) => {
-      // ipcRenderer.send is fire-and-forget; main handles the PostHog Node capture.
       try {
         ipcRenderer.send('telemetry:capture', { event, properties })
       } catch {
-        // ignore — telemetry must never break the renderer
+        // ignore: telemetry must never break the renderer
       }
     },
     captureExceptionTelemetry: (payload) => {

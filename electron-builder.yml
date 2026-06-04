@@ -24,7 +24,7 @@ publish:
   provider: github
   owner: Comfy-Org
   repo: Comfy-Desktop
-artifactName: ComfyUI-Desktop-2.0-${version}-${os}-${arch}.${ext}
+artifactName: Comfy-Desktop-${version}-${os}-${arch}.${ext}
 win:
   target: nsis
   icon: assets/Comfy_Logo_x256.png

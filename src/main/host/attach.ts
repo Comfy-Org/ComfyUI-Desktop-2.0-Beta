@@ -262,7 +262,9 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
    * Three cloud-only patches injected on every dom-ready of the comfy view:
    *
    *   1. popup-blocked toast suppressor — observes new toast DOM nodes
-   *      and removes any that mention `auth/popup-blocked`. That error
+   *      and removes any that mention `auth/popup-blocked` OR the
+   *      user-friendly variants the cloud frontend now maps that code
+   *      to ("Something went wrong while signing you in…"). That error
    *      is fired by the cloud frontend's Firebase SDK every time our
    *      `setWindowOpenHandler` denies the auth popup (so the bridge
    *      can take over), and the user has no way to dismiss the toast
@@ -310,7 +312,12 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
     `function looksBlocked(n){` +
     `if(!n||n.nodeType!==1)return false;` +
     `var t=(n.textContent||'').toLowerCase();` +
-    `return t.indexOf('auth/popup-blocked')>=0;` +
+    // Raw SDK error code (older cloud frontend builds surface it
+    // directly) + the user-friendly text current builds map it to.
+    // Both phrases are specific enough to the sign-in popup path
+    // that matching them won't catch unrelated toasts.
+    `return t.indexOf('auth/popup-blocked')>=0` +
+    `||t.indexOf('signing you in')>=0;` +
     `}` +
     `function nukeToast(n){` +
     `var root=(n.closest&&n.closest('.p-toast-message,.p-toast-item,[role=alert]'))||n;` +

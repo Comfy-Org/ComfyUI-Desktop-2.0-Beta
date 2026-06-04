@@ -19,11 +19,8 @@ export interface DownloadProgress {
   etaSeconds?: number
   status: 'pending' | 'downloading' | 'paused' | 'completed' | 'error' | 'cancelled'
   error?: string
-  /** Wall-clock ms of the first time we saw this URL — stamped by
-   *  `reportProgress` and preserved across status transitions so the
-   *  renderer can render a single insertion-ordered list (active +
-   *  terminal entries stay in their original slot rather than terminal
-   *  ones jumping to the bottom of a separate "recent" bucket). */
+  /** First-seen ms for this URL, preserved across status transitions so the
+   *  renderer keeps each entry in its insertion-ordered slot. */
   createdAt?: number
 }
 
@@ -48,11 +45,9 @@ const attachedSessions = new WeakSet<Electron.Session>()
 const pendingDownloads = new Map<string, PendingDownload>()
 let mainWindow: BrowserWindow | null = null
 
-/** Original dispatch params per URL, captured at start time so a
- *  terminal (error) entry can be re-dispatched via `retryDownload`.
- *  Kept off the broadcast `DownloadProgress` because asset downloads
- *  carry an `authToken` that must never reach the renderer. Evicted
- *  alongside `createdAtByUrl` (FIFO cap / dismiss / clear-finished). */
+/** Original dispatch params per URL, for `retryDownload`. Kept off the
+ *  broadcast `DownloadProgress` because asset downloads carry an `authToken`
+ *  that must never reach the renderer. */
 interface RetryParams {
   kind: 'model' | 'asset'
   filename: string
@@ -64,27 +59,18 @@ interface RetryParams {
 }
 const retryParamsByUrl = new Map<string, RetryParams>()
 
-/**
- * Recent terminal downloads kept in main so a title-bar tray mounted
- * AFTER a download finished can still surface it. Capped at
- * `RECENT_LIMIT`; oldest entries are evicted FIFO. Re-pushed on every
- * tray state broadcast and on the `onTitleBarReady` initial-state push.
- */
+/** Recent terminal downloads kept in main so a tray mounted after a download
+ *  finished can still surface it. FIFO-capped at `RECENT_LIMIT`. */
 const RECENT_LIMIT = 10
 const recentDownloads: DownloadProgress[] = []
 
-/** Main-process event bus for the title-bar downloads tray.
- *  Emits `'tray-state-changed'` whenever a progress event is broadcast
- *  (so subscribers can pull a fresh `getDownloadsTrayState()` snapshot
- *  without each consumer reimplementing the same projection). The
- *  listener cap is bumped because every comfy window subscribes once. */
+/** Event bus for the downloads tray; emits `'tray-state-changed'` on every
+ *  progress broadcast. Listener cap bumped since every comfy window subscribes. */
 export const downloadEvents = new EventEmitter()
 downloadEvents.setMaxListeners(50)
 
-/** Snapshot of the downloads tray state. `active` is every
- *  in-flight (`pending` / `downloading` / `paused`) entry; `recent` is
- *  the last `RECENT_LIMIT` terminal entries (oldest first). Mirror of
- *  the payload pushed on `comfy-titlebar:downloads-changed`. */
+/** Snapshot of the downloads tray: `active` (in-flight) + `recent` (last
+ *  `RECENT_LIMIT` terminal entries). Mirrors `comfy-titlebar:downloads-changed`. */
 export interface DownloadsTrayState {
   active: DownloadProgress[]
   recent: DownloadProgress[]
@@ -95,15 +81,13 @@ function isTerminalStatus(status: DownloadProgress['status']): boolean {
 }
 
 function pushRecent(progress: DownloadProgress): void {
-  // Replace any prior entry for the same URL so a download that
-  // transitions completed → re-attempted → completed appears once.
+  // Replace any prior entry for the same URL so a re-attempted download
+  // appears once.
   const idx = recentDownloads.findIndex((d) => d.url === progress.url)
   if (idx >= 0) recentDownloads.splice(idx, 1)
   recentDownloads.push({ ...progress })
-  // FIFO eviction past the cap — also drop the createdAt stamp so the
-  // map doesn't grow unbounded; a re-download of the same URL after
-  // eviction gets a fresh slot at the end of the list, which is the
-  // user's expectation.
+  // FIFO eviction past the cap; also drop the createdAt/retry stamps so the
+  // maps don't grow unbounded and a re-download gets a fresh end slot.
   while (recentDownloads.length > RECENT_LIMIT) {
     const evicted = recentDownloads.shift()
     if (evicted) {
@@ -225,15 +209,11 @@ function broadcastProgress(progress: DownloadProgress): void {
       }
     }
   }
-  // Fan out to every renderer (host title-bars, panel views, popup
-  // views, …) so the Settings → Downloads tab and popup downloads
-  // store both receive live progress events.
+  // Fan out to every renderer so the Settings → Downloads tab and popup store
+  // both receive live progress events.
   _broadcastToRenderer('model-download-progress', progress)
-  // Title-bar downloads tray state. Terminal entries land in the
-  // recent buffer first so the snapshot the listener pulls already
-  // reflects the new state. The listener (registered in
-  // src/main/index.ts) fans out to every comfy window's title-bar
-  // webContents.
+  // Push terminal entries to the recent buffer first so the snapshot the
+  // tray-state listener pulls already reflects the new state.
   if (isTerminalStatus(progress.status)) {
     pushRecent(progress)
   }
@@ -253,16 +233,12 @@ function setTaskbarProgress(win: BrowserWindow, progress: DownloadProgress): voi
   }
 }
 
-/** First-seen timestamp per URL — preserved across status transitions
- *  and across the `pendingDownloads → recentDownloads` migration that
- *  happens on terminal status. Cleared when the URL is fully evicted
- *  from `recentDownloads`. */
+/** First-seen timestamp per URL, preserved across status transitions and the
+ *  pending→recent migration; cleared on full eviction from `recentDownloads`. */
 const createdAtByUrl = new Map<string, number>()
 
 function reportProgress(progress: DownloadProgress): void {
-  // Stamp insertion timestamp once per URL so terminal entries keep
-  // their slot in the renderer's combined view rather than getting
-  // appended to the bottom of a separate "recent" bucket.
+  // Stamp once per URL so terminal entries keep their slot in the combined view.
   let createdAt = createdAtByUrl.get(progress.url)
   if (createdAt === undefined) {
     createdAt = Date.now()
@@ -317,8 +293,8 @@ function findPendingForItem(item: Electron.DownloadItem): PendingDownload | unde
   const candidates = [...item.getURLChain(), item.getURL()].filter(Boolean)
   for (const u of candidates) {
     const pending = pendingDownloads.get(u)
-    // Only match entries waiting for their DownloadItem (managed model downloads).
-    // Entries that already have an item are active general downloads — don't hijack them.
+    // Only match entries still awaiting their DownloadItem; ones that already
+    // have an item are active general downloads we mustn't hijack.
     if (pending && !pending.item) return pending
   }
   return undefined
@@ -482,8 +458,8 @@ export async function startAssetDownload(
 
   const sess = (senderContents || win.webContents).session
   attachSessionDownloadHandler(sess)
-  // Pass auth headers directly — Electron follows redirects internally and
-  // the original URL stays in item.getURLChain(), so findPendingForItem matches.
+  // Pass auth headers directly; the original URL stays in item.getURLChain()
+  // across redirects, so findPendingForItem still matches.
   const downloadOptions = authToken
     ? { headers: { Authorization: `Bearer ${authToken}` } }
     : undefined
@@ -617,22 +593,19 @@ export function attachSessionDownloadHandler(sess: Electron.Session): void {
       // Managed download — auto-save to the resolved path
       pending.item = item
 
-      // For asset downloads, try to resolve a better filename from the server
-      // response (Content-Disposition or GCS response-content-disposition param).
-      // Cloud uses content hashes as filenames in the WebSocket message, so the
-      // real human-readable name is only available from the HTTP response.
+      // Resolve a better asset filename from the server response: cloud uses
+      // content hashes in the WebSocket message, so the human-readable name is
+      // only available from the HTTP Content-Disposition.
       if (pending.tempPath && pending.outputDir) {
         const serverName = resolveServerFilename(item)
         if (serverName) {
-          // Use the output dir root (not the subfolder from the original path)
-          // so the server name is placed directly in the output directory.
+          // Use the output dir root so the server name lands directly there.
           const baseDir = pending.outputDir
           const safeServer = sanitizeAssetFilename(serverName, baseDir)
           if (safeServer) {
             const newSavePath = path.join(baseDir, safeServer)
-            // Only update if it differs (avoid overwriting display_name with same value)
             if (newSavePath !== pending.savePath) {
-              // Synchronous dedup since will-download must be handled synchronously
+              // Synchronous dedup since will-download must be handled synchronously.
               const saveDir = path.dirname(newSavePath)
               let candidate = newSavePath
               let i = 1
@@ -659,12 +632,9 @@ export function attachSessionDownloadHandler(sess: Electron.Session): void {
       // General download — browser-like save dialog
       const suggestedName = item.getFilename()
       const downloadsDir = app.getPath('downloads')
-      // `webContents` is null for downloads initiated via
-      // `session.downloadURL(...)` (e.g. our setWindowOpenHandler
-      // intercept in createHostWindow.ts) — Electron only populates it
-      // when a real page-initiated navigation triggered the download.
-      // Fall back to the focused window so the Save dialog still has a
-      // parent and the user gets the expected modal sheet.
+      // `webContents` is null for `session.downloadURL(...)`-initiated downloads
+      // (Electron only sets it for page-initiated ones), so fall back to the
+      // focused window for the Save dialog parent.
       const sourceWin = webContents ? BrowserWindow.fromWebContents(webContents) : null
       const win = sourceWin ?? BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null
 
@@ -763,12 +733,9 @@ export function cancelModelDownload(url: string): boolean {
   return true
 }
 
-/** Re-dispatch a terminal (error) download from its captured original
- *  params. No-op if the URL is still in flight or its params have been
- *  evicted (FIFO cap / dismiss / clear-finished). The old terminal row
- *  is removed first — both from the recent buffer and every renderer
- *  store — and its `createdAt` stamp is dropped so the retried download
- *  gets a fresh top-of-list slot rather than leaving a duplicate. */
+/** Re-dispatch a terminal download from its captured params. No-op if still in
+ *  flight or its params were evicted. Removes the old terminal row first (from
+ *  the buffer and every renderer store) so the retry gets a fresh slot. */
 export function retryDownload(url: string): boolean {
   if (pendingDownloads.has(url)) return false
   const params = retryParamsByUrl.get(url)
@@ -802,8 +769,6 @@ export function retryDownload(url: string): boolean {
   return true
 }
 
-// ---- Snapshot for seeding Launcher UI ----
-
 export function getActiveDownloads(): DownloadProgress[] {
   const result: DownloadProgress[] = []
   for (const pending of pendingDownloads.values()) {
@@ -812,10 +777,8 @@ export function getActiveDownloads(): DownloadProgress[] {
   return result
 }
 
-/** Full snapshot the renderer-side download store seeds itself from on
- *  mount — active in-flight entries plus the recent terminal buffer.
- *  Without the recent slice the Settings tab + popup history would be
- *  empty until the next status broadcast. */
+/** Full snapshot for the renderer store to seed from on mount — active entries
+ *  plus the recent terminal buffer. */
 export function getAllDownloads(): DownloadProgress[] {
   const result: DownloadProgress[] = []
   for (const pending of pendingDownloads.values()) {
@@ -827,11 +790,8 @@ export function getAllDownloads(): DownloadProgress[] {
   return result
 }
 
-/** Dismiss a single terminal entry from the recent buffer. In-flight
- *  entries are not dismissable here — cancel them first. Broadcasts a
- *  `model-download-removed` event so every renderer surface drops the
- *  entry from its store in lockstep. Returns true if anything was
- *  removed. */
+/** Dismiss a single terminal entry from the recent buffer (cancel in-flight
+ *  ones first). Broadcasts `model-download-removed` so every renderer drops it. */
 export function dismissRecentDownload(url: string): boolean {
   const idx = recentDownloads.findIndex((d) => d.url === url)
   if (idx < 0) return false
@@ -858,47 +818,28 @@ export function clearFinishedDownloads(): number {
   return removed.length
 }
 
-// ---- Window closed: detach downloads so they continue in the background ----
-
+/** Detach a closing window's downloads; they continue in the background via
+ *  broadcastProgress. */
 export function detachWindowDownloads(win: BrowserWindow): void {
   for (const pending of pendingDownloads.values()) {
     if (pending.window === win) {
-      // Clear the taskbar progress on the closing window
       if (!win.isDestroyed()) win.setProgressBar(-1)
-      // Downloads continue — the Launcher window still receives progress via broadcastProgress
     }
   }
 }
-
-// ---- Temp file cleanup ----
 
 /** Remove the temp download directories and all their contents. */
 export async function cleanupTempDownloads(): Promise<void> {
   try {
     await fs.promises.rm(getTempDir(), { recursive: true, force: true })
   } catch {}
-  // Clean asset temp dir (sibling of output dir)
   try {
     await fs.promises.rm(getAssetTempDir(), { recursive: true, force: true })
   } catch {}
 }
 
-// ---- E2E test seeding ----
-
-/**
- * Test-only: replace the in-memory active + recent buffers with the
- * provided snapshot and emit `tray-state-changed` so every renderer
- * surface (title-bar tray, popup, Settings tab) repaints exactly as
- * if the snapshot had arrived through the production
- * `broadcastProgress` path.
- *
- * The seeded `active` entries are stub `PendingDownload` records that
- * carry only the fields `getDownloadsTrayState()` reads
- * (`lastProgress`); the unused fields are nulled out so test code
- * never has to fabricate a `BrowserWindow` / `DownloadItem`. Only
- * called from `e2eHooks.ts` which is itself only loaded when
- * `process.env['E2E'] === '1'`.
- */
+/** Test-only: replace the in-memory buffers with `snapshot` and emit
+ *  `tray-state-changed`. Active entries are stubs carrying only `lastProgress`. */
 export function _test_setSeededTrayState(snapshot: DownloadsTrayState): void {
   pendingDownloads.clear()
   for (const entry of snapshot.active) {

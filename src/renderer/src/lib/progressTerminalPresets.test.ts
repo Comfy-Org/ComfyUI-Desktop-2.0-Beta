@@ -5,15 +5,7 @@ import {
   successTerminalGoDashboardOrOpen,
 } from './progressTerminalPresets'
 
-/**
- * The picker preset returns the data ProgressModal renders verbatim —
- * shape and id stability matters because the panel-side
- * `handleProgressSuccessChoice` switches on these action ids to map
- * to either `openInstallWindow` / `handleChooserPick` (Open Instance)
- * or `returnToDashboard` (Go to Dashboard). Renaming a constant here
- * silently breaks that mapping; these tests lock both pieces of the
- * contract.
- */
+// The panel-side success-choice handler switches on these action ids, so their stability is a contract.
 describe('successTerminalGoDashboardOrOpen', () => {
   it('returns Go to Dashboard as the first action and Open Instance as the primary CTA', () => {
     const t = successTerminalGoDashboardOrOpen({

@@ -81,9 +81,7 @@ export function useTooltip(
   function attachReflowListeners(): void {
     if (listenersAttached) return
     listenersAttached = true
-    // Capture-phase scroll catches scroll on any ancestor container, not
-    // just the window — without this an open tooltip stays pinned to its
-    // stale viewport coords when a parent scrolls.
+    // Capture-phase so scroll on any ancestor container reflows the bubble, not just window scroll.
     window.addEventListener('scroll', scheduleMeasure, { capture: true, passive: true })
     window.addEventListener('resize', scheduleMeasure)
   }
@@ -108,9 +106,7 @@ export function useTooltip(
     if (!triggerRef.value) return
     if (opts.canShow && !opts.canShow()) return
 
-    // Mount the bubble off-screen first so we can measure its intrinsic
-    // size before placing it. Without this the first hover paints in the
-    // wrong spot for one frame.
+    // Mount off-screen first to measure intrinsic size before placing, else the first frame paints wrong.
     visible.value = true
     bubbleStyle.value = {
       top: '-9999px',

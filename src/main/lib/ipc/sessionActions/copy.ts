@@ -80,13 +80,8 @@ export async function handleCopyUpdate(ctx: ActionContext): Promise<ActionResult
       sendOutput('The copy was created successfully. You can retry the update from the new installation.\n')
     }
 
-    // Channel-switch invocations come from inside an install-backed
-    // host window (Settings → Updates ChannelPicker). Opening a new
-    // window for the destination would spawn an empty chooser host
-    // alongside the source's existing window — the user is mid-
-    // workflow inside the source and the new install can be picked
-    // from the dashboard later. Omit `newInstallationId` so
-    // `ProgressModal.handleDone` skips the `openInstallWindow` branch.
+    // Channel switches happen inside the source's window; omitting
+    // newInstallationId keeps ProgressModal from opening a new chooser host.
     const isChannelSwitch = !!actionData?.channel
     return isChannelSwitch
       ? { ok: true, navigate: 'list' }
@@ -207,9 +202,7 @@ export async function handleReleaseUpdate(ctx: ActionContext): Promise<ActionRes
       sendProgress('done', { percent: 100, status: 'Complete' })
       return { ok: true, navigate: 'list', newInstallationId: entry.id }
     } catch (err) {
-      // Pre-install-complete rollback: any error during install / postInstall
-      // leaves a half-built install on disk and (possibly) in the registry.
-      // Wipe both before re-throwing so the wrapper maps the error.
+      // Wipe the half-built install (disk + registry) before re-throwing.
       if (!installComplete) {
         if (entry) try { await installations.remove(entry.id) } catch {}
         try { await fs.promises.rm(destPath, { recursive: true, force: true }) } catch {}

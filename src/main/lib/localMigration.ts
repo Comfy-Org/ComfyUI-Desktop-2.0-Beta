@@ -13,10 +13,7 @@ import type { Snapshot, SnapshotExportEnvelope } from './snapshots'
 import type { InstallationRecord } from '../installations'
 import * as i18n from './i18n'
 
-/**
- * Find a Python executable in a portable install.
- * Portable installs have python_embeded/ at the portable root.
- */
+/** Find a Python executable in a portable install (python_embeded/ at the portable root). */
 function findPortablePython(installPath: string): string | null {
   const direct = path.join(installPath, 'python_embeded', 'python.exe')
   if (fs.existsSync(direct)) return direct
@@ -33,10 +30,7 @@ function findPortablePython(installPath: string): string | null {
   return null
 }
 
-/**
- * Find a Python executable in a git clone install.
- * Git clone installs may have .venv/ or venv/ at the install root.
- */
+/** Find a Python executable in a git clone install (.venv/ or venv/ at the install root). */
 function findGitPython(installPath: string): string | null {
   const venvNames = ['.venv', 'venv', '.env', 'env']
   for (const venv of venvNames) {
@@ -59,9 +53,7 @@ function findPythonForSource(installPath: string, sourceId: string): string | nu
   return null
 }
 
-/**
- * Capture a snapshot from a local (portable or git) installation.
- */
+/** Capture a snapshot from a local (portable or git) installation. */
 export async function captureLocalSnapshot(
   installPath: string,
   sourceId: string,
@@ -80,7 +72,7 @@ export async function captureLocalSnapshot(
     try {
       pipPackages = await pipFreezeDirect(pythonPath)
     } catch {
-      // Python env may not be accessible — nodes will get deps during restore
+      // Python env may be inaccessible; nodes get deps during restore
     }
   }
 
@@ -103,9 +95,7 @@ export async function captureLocalSnapshot(
   }
 }
 
-/**
- * Capture a local snapshot and stage it to a temp file.
- */
+/** Capture a local snapshot and stage it to a temp file. */
 export async function stageLocalSnapshot(
   installPath: string,
   sourceId: string,
@@ -125,10 +115,7 @@ export async function stageLocalSnapshot(
   return { envelope, stagedFile }
 }
 
-/**
- * Perform a full migration from a portable or git clone install to a new
- * standalone install.
- */
+/** Perform a full migration from a portable or git clone install to a new standalone install. */
 export async function performLocalMigration(
   sourceInstallation: InstallationRecord,
   actionData: Record<string, unknown> | undefined,
@@ -151,7 +138,6 @@ export async function performLocalMigration(
     dataPhaseLabel: i18n.t('migrate.migrateDataPhase'),
   })
 
-  // Prepare snapshot
   const skipPipSync = !(actionData?.enablePipSync as boolean | undefined)
   let stagedFile: string
   let ownsStagedFile = false

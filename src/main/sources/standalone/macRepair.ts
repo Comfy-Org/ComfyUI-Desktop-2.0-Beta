@@ -15,17 +15,10 @@ export async function removeQuarantine(dir: string, log?: (text: string) => void
 }
 
 /**
- * Strip macOS quarantine flags and re-codesign Mach-O binaries in the
- * install's Python env(s). Runs on Gatekeeper-induced SIGKILL during
- * update; also runs once at install time.
- *
- * For managed installs this means `<installPath>/standalone-env` (the
- * bundled bootstrap Python) and `<installPath>/ComfyUI/.venv` (the
- * runtime venv). For adopted installs the standalone-env path is
- * absent (no-op) and the runtime venv is at `<adoptedBaseDir>/.venv`,
- * which `getActiveVenvDir(installation)` resolves correctly. Pass
- * `installation` so adopted installs get their legacy venv repaired
- * instead of a non-existent path under `installPath`.
+ * Strip macOS quarantine flags and re-codesign Mach-O binaries in the install's
+ * Python env(s). Pass `installation` so adopted installs get their legacy venv
+ * (`<adoptedBaseDir>/.venv`, resolved by `getActiveVenvDir`) repaired instead of a
+ * non-existent path under `installPath`.
  */
 export async function repairMacBinaries(
   installPath: string,

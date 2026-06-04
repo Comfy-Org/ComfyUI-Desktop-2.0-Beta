@@ -43,8 +43,7 @@ interface FakeWindow {
   minimized: boolean
   isDestroyed: () => boolean
   isMinimized: () => boolean
-  /** show()/focus()/restore() calls, in order, so tests can assert
-   *  whether (and when) a window was raised. */
+  /** show()/focus()/restore() calls, in order, so tests can assert raise behaviour. */
   raised: string[]
   show: () => void
   focus: () => void
@@ -65,8 +64,6 @@ function makeWindow(opts: { destroyed?: boolean; minimized?: boolean } = {}): Fa
       win.minimized = false
       win.raised.push('restore')
     },
-    // `bringToFront` uses this on Windows; no-op here so the helper is
-    // exercised regardless of the host platform running the suite.
     setAlwaysOnTop: () => {},
   }
   return win
@@ -165,13 +162,8 @@ describe('computeBodyMode', () => {
     expect(computeBodyMode(entry)).toBe('new-install')
   })
 
-  // The picker-driven `'progress'` panel mode was added to keep
-  // ProgressModal visible on top of a running ComfyUI canvas during
-  // cross-host Updates. Layout depends on `computeBodyMode` returning
-  // `'progress'` so `showPanel = mode !== 'comfy'` flips true. Without
-  // this branch the panel would sit at 0x0 invisible behind comfyView
-  // and the modal would be unreachable — the exact silent-close /
-  // freeze symptom the layered fixes were chasing.
+  // `'progress'` must flip showPanel true so ProgressModal stays visible over a running
+  // canvas; otherwise the panel sits at 0x0 behind comfyView and the modal is unreachable.
   it('returns `progress` for install-backed hosts in progress mode, even while the session is running', () => {
     const entry = makeEntry({ installationId: 'inst-A', activePanel: 'progress' })
     _runningSessions.set('inst-A', {} as never)
@@ -185,10 +177,8 @@ describe('computeBodyMode', () => {
 })
 
 describe('shouldConfirmKillForEntry', () => {
-  // Single chokepoint used by Switch, Restart, Close Window, Quit, and
-  // the native ✕ to decide whether to surface a confirm modal. The rule
-  // is "would tearing this down kill a local ComfyUI process?" — yes
-  // for install-backed local hosts, no for everything else.
+  // Rule: "would tearing this down kill a local ComfyUI process?" — yes for install-backed
+  // local hosts, no for everything else.
   it('returns true for an install-backed local host', () => {
     const entry = makeEntry({ installationId: 'inst-A', sourceCategory: 'local' })
     expect(shouldConfirmKillForEntry(entry)).toBe(true)
@@ -212,9 +202,8 @@ describe('shouldConfirmKillForEntry', () => {
   })
 
   it('returns false for a preview-chooser host that carries a local sourceCategory without an install', () => {
-    // attachHostPreview can flash `sourceCategory` onto an install-less
-    // host while the picker hovers a target. The kill-confirm must not
-    // fire there — there is no attached install or running session.
+    // attachHostPreview can flash `sourceCategory` onto an install-less host while hovering;
+    // no attached install or session means no kill-confirm.
     expect(
       shouldConfirmKillForEntry(
         makeEntry({ installationId: null, sourceCategory: 'local' }),
@@ -233,8 +222,7 @@ describe('attach-claim helpers', () => {
     claimAttachHost('inst-A', 7)
     claimAttachHost('inst-B', 9)
     expect(consumeAttachClaim('inst-A')).toBe(7)
-    // Second consume on the same id is empty — the take-once contract
-    // is what guarantees onLaunch can't double-attach the same host.
+    // Take-once contract: a second consume is empty so onLaunch can't double-attach.
     expect(consumeAttachClaim('inst-A')).toBeUndefined()
     expect(consumeAttachClaim('inst-B')).toBe(9)
   })
@@ -283,20 +271,15 @@ describe('register/unregister + getEntryByInstallationId', () => {
     second.installationId = 'inst-A'
     indexInstallationId('inst-A', second.windowKey)
     expect(getEntryByInstallationId('inst-A')).toBe(second)
-    // Unregistering the original entry must not blow away the new owner's
-    // secondary-index pointer.
+    // Unregistering the original entry must not blow away the new owner's index pointer.
     unregisterHostEntry(first)
     expect(getEntryByInstallationId('inst-A')).toBe(second)
   })
 })
 
 describe('hostInstallEvents', () => {
-  // Picker snapshots embed `parentEntry.installationId` as
-  // `activeInstallationId`. The "Current" pill on a row flips on when
-  // attach lands; without this event the picker would only repaint at
-  // `instance-started` time (via `markLaunched` → installationEvents
-  // 'changed') and the user would see a Current-less row for the
-  // entire launching window.
+  // Without this event the picker's "Current" pill would only repaint at instance-started
+  // time, leaving a Current-less row for the whole launching window.
   let events: string[]
   let listener: () => void
   beforeEach(() => {
@@ -321,8 +304,7 @@ describe('hostInstallEvents', () => {
   })
 
   it('does NOT fire on dropInstallationIndex when the id was already absent', () => {
-    // No-op drops shouldn't churn picker snapshots; mirrors how the
-    // installationEvents 'changed' bus avoids spurious emissions.
+    // No-op drops shouldn't churn picker snapshots.
     dropInstallationIndex('inst-never-indexed')
     expect(events).toEqual([])
   })
@@ -333,9 +315,7 @@ describe('hostInstallEvents', () => {
   })
 
   it('does NOT fire on registerHostEntry for an install-less (chooser) host', () => {
-    // Construction of a fresh chooser host shouldn't repaint open
-    // pickers — there's no attached install for `activeInstallationId`
-    // to surface.
+    // A fresh chooser host has no attached install to surface, so it shouldn't repaint pickers.
     registerHostEntry(makeEntry({ installationId: null }))
     expect(events).toEqual([])
   })
@@ -443,14 +423,12 @@ describe('raiseAllHostWindows', () => {
     const order: string[] = []
     const chooser = makeEntry({ installationId: null })
     const install = makeEntry({ installationId: 'inst-A' })
-    // Tag focus calls so we can assert ordering across windows.
     fakeWin(chooser).focus = () => order.push('chooser')
     fakeWin(install).focus = () => order.push('install')
     registerHostEntry(chooser)
     registerHostEntry(install)
     const result = raiseAllHostWindows()
-    // install-backed beats chooser, so it must be focused last (frontmost)
-    // and returned to the caller.
+    // install-backed beats chooser, so it's focused last (frontmost) and returned.
     expect(order[order.length - 1]).toBe('install')
     expect(result).toBe(install.window)
   })
