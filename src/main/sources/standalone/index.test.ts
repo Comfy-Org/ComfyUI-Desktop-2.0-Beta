@@ -74,24 +74,25 @@ describe('standalone.buildInstallation', () => {
     } as unknown as Record<string, unknown>,
   })
 
-  it('Stable: sets autoUpdateComfyUI (post-install update-to-stable), updateChannel left undefined', () => {
+  it('Stable: sets autoUpdateComfyUI + updateChannel="stable" so post-install checks out the latest stable tag', () => {
     const result = standalone.buildInstallation({
       release: makeRelease('stable', 'v0.18.2-env1'),
       variant: makeVariant(VENDOR_ID),
     })
     expect(result.autoUpdateComfyUI).toBe(true)
-    // updateChannel stays falsy: `getEffectiveChannel` defaults to
-    // 'stable' so the IPP picker still opens on Stable.
-    expect(result.updateChannel).toBeUndefined()
+    expect(result.updateChannel).toBe('stable')
   })
 
-  it('Latest on GitHub: persists updateChannel="latest", no autoUpdate', () => {
+  it('Latest on GitHub: sets autoUpdateComfyUI + updateChannel="latest" so post-install fast-forwards to master HEAD', () => {
     const result = standalone.buildInstallation({
       release: makeRelease('latest', 'v0.18.2-env1'),
       variant: makeVariant(VENDOR_ID),
     })
-    expect(result.autoUpdateComfyUI).toBeUndefined()
-    // Persisted so the IPP Update tab opens on Latest on GitHub.
+    // Both channels run the post-install update step — the bundle's
+    // checked-in commit is necessarily behind both stable AND master,
+    // so picking "Latest on GitHub" without an update would leave the
+    // user on an OLD master commit, not the actual latest one.
+    expect(result.autoUpdateComfyUI).toBe(true)
     expect(result.updateChannel).toBe('latest')
   })
 
