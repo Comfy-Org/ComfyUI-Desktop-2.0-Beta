@@ -379,21 +379,12 @@ function readLegacyAppVersion(executablePath: string | null): string | null {
 }
 
 /**
- * Compute the cross-install model dirs to register in `settings.modelsDirs`
- * for the adopted record.
- *
- * Always carries `<basePath>/models` (the legacy install's own folder).
- *
- * For each `base_path:` value in the legacy `extra_models_config.yaml`,
- * carries `<base_path>/models` ONLY if that subdirectory actually exists.
- * The bare base_path is never carried: in extra-model YAMLs it's the root
- * of another tool whose model files live under `<base_path>/<per-folder>`,
- * which doesn't match v2's "each modelsDirs entry is a ComfyUI-style models
- * folder" contract. ComfyUI-style siblings (a second ComfyUI install) get
- * picked up via the `/models` probe; other tools (A1111 etc.) whose layout
- * differs are silently skipped — users can re-add them manually in v2.
- *
- * Dedupes against the caller's existing list.
+ * Cross-install model dirs to register in `settings.modelsDirs` for the
+ * adopted record. Always carries `<basePath>/models`; for each YAML
+ * `base_path:`, carries `<base_path>/models` only when it exists as a
+ * directory (handles ComfyUI-style siblings, silently skips other tools).
+ * The bare base_path is never carried — it points at a tool root whose
+ * models live one level deeper. Dedupes against `existing`.
  */
 export function computeModelsDirsToCarry(
   basePath: string,
@@ -404,7 +395,7 @@ export function computeModelsDirsToCarry(
   if (extraYamlContent) {
     for (const yamlBase of parseExtraModelsYaml(extraYamlContent)) {
       const probe = path.join(yamlBase, 'models')
-      if (fs.existsSync(probe) && fs.statSync(probe).isDirectory()) {
+      if (fs.statSync(probe, { throwIfNoEntry: false })?.isDirectory()) {
         candidates.push(probe)
       }
     }

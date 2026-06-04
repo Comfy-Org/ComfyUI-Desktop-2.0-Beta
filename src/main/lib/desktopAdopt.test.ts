@@ -439,8 +439,6 @@ describe('computeModelsDirsToCarry', () => {
     const a1111 = path.join(tmpRoot, 'a1111')
     fs.mkdirSync(path.join(siblingComfy, 'models'), { recursive: true })
     fs.mkdirSync(path.join(a1111, 'models', 'Stable-diffusion'), { recursive: true })
-    // a1111 has /models too (Auto1111 layout uses it), so it'll be carried; the
-    // point of the probe is to skip *missing* /models, not to make tool-specific judgements.
     const yamlOnlyA1111Layout = path.join(tmpRoot, 'something-else')
     fs.mkdirSync(yamlOnlyA1111Layout) // exists, but no /models subfolder
     const yaml =
