@@ -193,7 +193,7 @@ describe('standalone.getLaunchCommand for adopted Legacy Desktop installs', () =
   function makeAdoptedRecord(overrides: Partial<InstallationRecord> = {}): InstallationRecord {
     return {
       id: 'inst-1',
-      name: 'Adopted from Legacy Desktop',
+      name: 'ComfyUI',
       createdAt: new Date().toISOString(),
       sourceId: 'standalone',
       installPath,

@@ -33,7 +33,13 @@ const MARKER_FILE = ADOPT_MARKER_FILE
 const STAGED_SOURCE_REL = path.join('legacy-staging', 'comfyui')
 const BACKUP_REL = 'legacy-backup'
 const SNAPSHOTS_REL = '.snapshots'
-const ADOPT_INSTALL_NAME = 'Adopted from Legacy Desktop'
+// Display name for adopted installs. `installations.add()` calls
+// `uniqueName()` so a second adoption (or a coexisting standalone
+// install named "ComfyUI") gets "ComfyUI (1)", "ComfyUI (2)", etc.
+// Keeping the name plain — instead of "Adopted from Legacy Desktop" —
+// matches user expectation that the picker shows their app, not the
+// provenance story.
+const ADOPT_INSTALL_NAME = 'ComfyUI'
 const COMFY_SETTINGS_FILE = 'comfy.settings.json'
 const DESKTOP_CONFIG_FILE = 'config.json'
 const EXTRA_MODELS_YAML = 'extra_models_config.yaml'

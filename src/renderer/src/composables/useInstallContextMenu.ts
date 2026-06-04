@@ -193,18 +193,30 @@ export function useInstallContextMenu(opts: {
     // the registry entry only; Delete also wipes disk. Keeping them
     // adjacent under a single divider scans as "remove this install,
     // pick how" instead of two unrelated leaf items.
+    //
+    // Adopted (legacy-desktop) installs are intentionally NOT forgettable:
+    // forgetting drops the registry entry but the `.comfyui-desktop-2`
+    // marker stays on disk, so the legacy auto-tracker also stops showing
+    // the install — the user loses the install entirely with no way back
+    // short of deleting the marker by hand. Adopted installs also carry
+    // legacy launch args / per-install input+output dirs that a fresh
+    // adoption wouldn't reproduce. Delete (which truly disposes) stays
+    // available for users who really do want it gone.
     if (isInstalled(inst) && isLocalLikeInstall(inst)) {
-      items.push({
-        id: 'untrack',
-        label: t('actions.untrack'),
-        separator: items.length > 0,
-        style: 'danger',
-      })
+      if (!inst.adopted) {
+        items.push({
+          id: 'untrack',
+          label: t('actions.untrack'),
+          separator: items.length > 0,
+          style: 'danger',
+        })
+      }
       items.push({
         id: 'delete',
         label: t('chooser.menuDelete'),
         disabled: stoppedActionGated,
         title: gatedTitle,
+        separator: !inst.adopted ? false : items.length > 0,
         style: 'danger',
       })
     }
