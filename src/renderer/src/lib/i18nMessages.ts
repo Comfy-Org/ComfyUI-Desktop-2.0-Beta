@@ -114,17 +114,24 @@ export const en = {
     showInFolder: 'Show in Finder',
     remove: 'Remove from list',
     viewAllInSettings: 'View All Downloads',
-    completed: 'Completed'
+    completed: 'Completed',
+    thumbnailAlt: 'Thumbnail of {name}'
   },
   downloadsTab: {
     title: 'Downloads',
-    empty: 'No downloads to show',
+    empty: 'No downloads yet',
+    emptyHint: 'Downloads will appear here.',
     filterAll: 'All',
     filterActive: 'Active',
     filterCompleted: 'Completed',
     filterErrored: 'Failed',
     filterAriaLabel: 'Status filter',
-    retry: 'Retry'
+    retry: 'Retry',
+    badgeFailed: 'Failed',
+    badgeCancelled: 'Cancelled',
+    footerActive: '{n} active',
+    footerCompleted: '{n} completed',
+    clearFinished: 'Clear finished'
   },
   settingsModal: {
     title: 'Settings',
