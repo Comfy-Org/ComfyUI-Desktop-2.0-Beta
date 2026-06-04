@@ -501,13 +501,14 @@ const showOpOverlay = computed(() => {
 
 const opBlocksFooter = computed(() => opInflight.value)
 
-// The tab that renders progress for the active op. Snapshot ops have
-// their own timeline rail in SnapshotsView; everything else surfaces in
-// the Update tab's inline overlay.
+// The tab that renders progress for the active op. Only snapshot-restore
+// has its own rail in SnapshotsView (matching `showOpOverlay`); every
+// other op — including snapshot-save/delete — surfaces in the Update
+// tab's inline overlay.
 const opHomeTab = computed<ComfyUISettingsTab | null>(() => {
   const op = props.activeOperation
   if (!op) return null
-  return op.actionId.startsWith('snapshot-') ? 'snapshots' : 'update'
+  return op.actionId === 'snapshot-restore' ? 'snapshots' : 'update'
 })
 
 // Locking the other tabs during an op is meant to force the user onto
@@ -520,7 +521,7 @@ watch(
   [
     () => opInflight.value,
     () => props.installation?.id ?? null,
-    () => tabs.value.length
+    () => tabs.value.map((tab) => tab.key).join(',')
   ],
   () => {
     if (!opInflight.value) return
