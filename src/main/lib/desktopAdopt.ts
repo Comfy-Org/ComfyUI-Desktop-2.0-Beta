@@ -27,6 +27,7 @@ import * as installations from '../installations'
 import type { InstallationRecord } from '../installations'
 import * as settings from '../settings'
 import * as telemetry from './telemetry'
+import { scrubAll } from '../../shared/piiScrub'
 import * as i18n from './i18n'
 
 const MARKER_FILE = ADOPT_MARKER_FILE
@@ -840,7 +841,10 @@ export async function adoptDesktopInstall(opts: AdoptOptions): Promise<Installat
 
   const info = deps.detectDesktopInstall()
   if (!info) {
-    telemetry.capture('comfy.desktop.adopt.failed', { error_bucket: 'no-legacy-install' })
+    telemetry.capture('comfy.desktop.adopt.failed', {
+      stage: 'detect',
+      error_bucket: 'no-legacy-install'
+    })
     throw new Error('no-legacy-install')
   }
 
@@ -873,14 +877,35 @@ export async function adoptDesktopInstall(opts: AdoptOptions): Promise<Installat
 
   telemetry.capture('comfy.desktop.adopt.started', {})
 
+  // Track the most recently entered phase so adopt.failed can report
+  // *which* step blew up. Without this, every failure surfaces with
+  // stage=null and the only debug signal is the free-text
+  // `error_message`. sendProgress is called at the start of each
+  // runAdoption phase, so the wrapped delegate updates this before the
+  // phase begins running. `init` covers everything that happens before
+  // runAdoption's first sendProgress (`backup`).
+  let currentPhase = 'init'
+  const phaseAwareTools: AdoptTools = {
+    ...tools,
+    sendProgress: (phase, detail) => {
+      currentPhase = phase
+      tools.sendProgress(phase, detail)
+    }
+  }
+
   try {
-    const result = await runAdoption(info, tools, deps)
+    const result = await runAdoption(info, phaseAwareTools, deps)
     return result
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
+    // Scrub before slice so the redacted prefix doesn't get truncated
+    // mid-token. The bucket runs on raw text because its regexes don't
+    // care about user paths and would otherwise miss a legitimate match
+    // hidden inside a `[REDACTED]` substitution.
     telemetry.capture('comfy.desktop.adopt.failed', {
+      stage: currentPhase,
       error_bucket: telemetry.bucketError(message),
-      error_message: message.slice(0, 500)
+      error_message: scrubAll(message).slice(0, 500)
     })
     throw err
   }

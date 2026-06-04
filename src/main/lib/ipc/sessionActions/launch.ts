@@ -25,6 +25,7 @@ import { lastNLines, stripAnsi } from '../../stderrTail'
 import { rotateLogFiles, getLogDir } from '../../logRotation'
 import { createExecutionTap } from '../../executionTap'
 import { clearCrash, recordCrash } from '../../crashBuffer'
+import * as telemetry from '../../telemetry'
 import type { WriteStream } from 'fs'
 
 // Feature flags injected on every spawned ComfyUI, gated by the running
@@ -393,6 +394,18 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     if (!sender.isDestroyed()) {
       sender.send('comfy-output', { installationId, text: `> ${cmdLine}\n\n` })
     }
+    // Explicit boot-attempt event. `installation_started` already fires
+    // on successful boot with `boot_time_ms`, and `comfyui.exited` carries
+    // `crashed=true` on failure — but boot success rate needed inferred
+    // counts from those two events. Emitting `boot_started` makes it a
+    // single division (`installation_started / boot_started`) and surfaces
+    // retries (port_retry / reboot_retry counters) directly.
+    telemetry.capture('comfy.desktop.comfyui.boot_started', {
+      installation_id: installationId,
+      variant: (inst.variant as string | undefined) ?? null,
+      port_retry_count: portRetries,
+      reboot_retry_count: rebootRetries
+    })
     const spawned = spawnComfy()
 
     let earlyExit: string | null = null
