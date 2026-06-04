@@ -342,7 +342,7 @@ function handleNewInstallClick(): void {
   min-height: 0;
   display: grid;
   grid-template-rows:
-    clamp(24px, 12vh, 140px)
+    clamp(24px, 4vh, 56px)
     auto
     auto
     minmax(0, auto)
