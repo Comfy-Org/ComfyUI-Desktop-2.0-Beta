@@ -6,6 +6,16 @@ import { createPinia, setActivePinia } from 'pinia'
 import { en } from '../lib/i18nMessages.ts'
 import type { SnapshotListData } from '../types/ipc'
 
+// The interactive console pane drives a real xterm terminal (needs a canvas);
+// stub it so the picker's detail pane renders without a terminal host.
+vi.mock('../views/comfyUISettings/ConsoleTerminalPane.vue', () => ({
+  default: {
+    name: 'ConsoleTerminalPane',
+    props: ['installationId'],
+    template: '<div data-testid="console-terminal-pane-stub" />',
+  },
+}))
+
 const emptySnapshotListPayload: SnapshotListData = {
   snapshots: [],
   copyEvents: [],

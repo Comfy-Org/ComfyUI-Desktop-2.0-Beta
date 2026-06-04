@@ -1,7 +1,19 @@
-export type PickerTab = 'config' | 'status' | 'update' | 'snapshots' | 'storage'
+export type PickerTab =
+  | 'config'
+  | 'status'
+  | 'update'
+  | 'snapshots'
+  | 'storage'
+  | 'console'
 
 /** Narrowing of `DetailSection.tab`. Uses 'settings' where PickerTab uses 'config'. */
-export type SectionTab = 'settings' | 'status' | 'update' | 'snapshots' | 'storage'
+export type SectionTab =
+  | 'settings'
+  | 'status'
+  | 'update'
+  | 'snapshots'
+  | 'storage'
+  | 'console'
 
 const PICKER_TABS: ReadonlySet<PickerTab> = new Set([
   'config',
@@ -9,6 +21,7 @@ const PICKER_TABS: ReadonlySet<PickerTab> = new Set([
   'update',
   'snapshots',
   'storage',
+  'console',
 ])
 
 export function isPickerTab(tab: string | null | undefined): tab is PickerTab {
