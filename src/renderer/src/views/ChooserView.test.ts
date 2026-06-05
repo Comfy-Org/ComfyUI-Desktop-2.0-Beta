@@ -4,11 +4,23 @@ import { createI18n } from 'vue-i18n'
 import { createPinia, setActivePinia } from 'pinia'
 
 import ChooserView from './ChooserView.vue'
+import { useSessionStore } from '../stores/sessionStore'
 import type { Installation } from '../types/ipc'
 
 // Stub the heavy ContextMenu child — we don't exercise menu interactions here.
 vi.mock('../components/ContextMenu.vue', () => ({
   default: { name: 'ContextMenu', template: '<div data-testid="context-menu" />' },
+}))
+
+// Test-controllable `useModal` mock — `viewError` routes its readable
+// error through `modal.alert`, and the context menu shares the singleton.
+const mockModal = {
+  alert: vi.fn().mockResolvedValue(undefined),
+  confirm: vi.fn().mockResolvedValue(true),
+  close: vi.fn(),
+}
+vi.mock('../composables/useModal', () => ({
+  useModal: () => mockModal,
 }))
 
 const messages = {
@@ -33,6 +45,12 @@ const messages = {
       manageInstall: 'Manage',
       searchPlaceholder: 'Search for and open an instance',
       noMatches: 'No instances match',
+      statusRunning: 'Running',
+      statusLaunching: 'Starting…',
+      statusStopping: 'Stopping…',
+      statusError: 'Error',
+      viewErrorTooltip: 'View error details',
+      errorTitle: 'Error',
     },
   },
 }
@@ -49,6 +67,7 @@ interface MockApi {
   runAction: ReturnType<typeof vi.fn>
   // progressStore subscribes to onErrorDetail at construction time.
   onErrorDetail: ReturnType<typeof vi.fn>
+  focusComfyWindow: ReturnType<typeof vi.fn>
 }
 
 function installMockApi(initial: Installation[]): MockApi {
@@ -59,6 +78,7 @@ function installMockApi(initial: Installation[]): MockApi {
     getSetting: vi.fn().mockResolvedValue(undefined),
     runAction: vi.fn().mockResolvedValue({ ok: true }),
     onErrorDetail: vi.fn(() => () => {}),
+    focusComfyWindow: vi.fn().mockResolvedValue(true),
   }
   ;(window as unknown as { api: MockApi }).api = api
   return api
@@ -83,6 +103,7 @@ function mountChooser() {
 describe('ChooserView', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    mockModal.alert.mockClear()
   })
 
   it('always renders the New Install tile and a Cloud tile', async () => {
@@ -164,19 +185,119 @@ describe('ChooserView', () => {
     expect((events![0]![0] as Installation).id).toBe('a')
   })
 
-  it('does not render per-state launch CTAs — only the Close-instance CTA when running', async () => {
-    // Per-state CTAs collapsed into the body click handler; only a
-    // "Close instance" CTA remains, and only while running / stopping.
+  it('renders no lifecycle CTA cluster on a tile — the instance window owns lifecycle', async () => {
+    // The dashboard no longer carries any stop/launch button. State is
+    // shown via a labelled status pill; lifecycle actions live in the
+    // instance window.
     installMockApi([
       makeInstall({ id: 'a', name: 'Alpha', status: 'installed' }),
     ])
     const wrapper = mountChooser()
     await flushPromises()
-    expect(wrapper.find('.chooser-tile-cta-play').exists()).toBe(false)
-    expect(wrapper.find('.chooser-tile-cta-show').exists()).toBe(false)
-    expect(wrapper.find('.chooser-tile-cta-progress').exists()).toBe(false)
-    // Idle install has no CTA cluster at all.
     expect(wrapper.find('.chooser-tile-cta').exists()).toBe(false)
+    // Idle install has no centered status pill and no error badge.
+    expect(wrapper.find('.chooser-tile-status').exists()).toBe(false)
+    expect(wrapper.find('.chooser-tile-error-badge').exists()).toBe(false)
+  })
+
+  it('shows a "Running" status pill (keeping the source pill) and focuses the existing window instead of emitting pick', async () => {
+    const api = installMockApi([
+      makeInstall({ id: 'a', name: 'Alpha', status: 'installed' }),
+    ])
+    api.focusComfyWindow = vi.fn().mockResolvedValue(true)
+    const wrapper = mountChooser()
+    await flushPromises()
+
+    // Mark the install as running directly in the session store.
+    const sessionStore = useSessionStore()
+    sessionStore.runningInstances.set('a', { installationId: 'a' } as never)
+    await flushPromises()
+
+    const tile = wrapper.findAll('.chooser-tile').find((t) => t.text().includes('Alpha'))!
+    // Status pill sits in the top-right cluster next to the kebab, not in
+    // the meta row — the source pill stays.
+    expect(tile.find('.chooser-tile-actions .chooser-tile-status--running').exists()).toBe(true)
+    expect(tile.text()).toContain('Running')
+    expect(tile.text()).toContain('Standalone')
+
+    await tile.trigger('click')
+    await flushPromises()
+    // Running tile focuses the existing window; it must NOT open a second one.
+    expect(api.focusComfyWindow).toHaveBeenCalledWith('a')
+    expect(wrapper.emitted('pick')).toBeUndefined()
+  })
+
+  it('shows a clickable error badge that opens the error details without emitting pick', async () => {
+    installMockApi([
+      makeInstall({ id: 'a', name: 'Alpha', status: 'installed' }),
+    ])
+    const wrapper = mountChooser()
+    await flushPromises()
+
+    // Seed an op-failure error (e.g. a migrate that silently failed).
+    const sessionStore = useSessionStore()
+    sessionStore.errorInstances.set('a', {
+      installationName: 'Alpha',
+      message: 'Migration failed: takeover did not start.',
+    } as never)
+    await flushPromises()
+
+    const tile = wrapper.findAll('.chooser-tile').find((t) => t.text().includes('Alpha'))!
+    expect(tile.classes()).toContain('chooser-tile-errored')
+    // Error badge sits in the top-right cluster next to the kebab.
+    const badge = tile.find('.chooser-tile-actions .chooser-tile-error-badge')
+    expect(badge.exists()).toBe(true)
+    expect(badge.text()).toContain('Error')
+
+    await badge.trigger('click')
+    await flushPromises()
+    // Clicking the badge shows the readable error; it must NOT launch.
+    expect(mockModal.alert).toHaveBeenCalledWith({
+      title: 'Error',
+      message: 'Migration failed: takeover did not start.',
+    })
+    expect(wrapper.emitted('pick')).toBeUndefined()
+  })
+
+  it('focuses the existing window instead of relaunching when a crashed tile body is clicked', async () => {
+    const api = installMockApi([
+      makeInstall({ id: 'a', name: 'Alpha', status: 'installed' }),
+    ])
+    api.focusComfyWindow = vi.fn().mockResolvedValue(true)
+    const wrapper = mountChooser()
+    await flushPromises()
+
+    const sessionStore = useSessionStore()
+    sessionStore.errorInstances.set('a', { installationName: 'Alpha', exitCode: 1 } as never)
+    await flushPromises()
+
+    const tile = wrapper.findAll('.chooser-tile').find((t) => t.text().includes('Alpha'))!
+    await tile.trigger('click')
+    await flushPromises()
+    // The crashed window still exists — bring it forward, never relaunch from
+    // the dashboard.
+    expect(api.focusComfyWindow).toHaveBeenCalledWith('a')
+    expect(wrapper.emitted('pick')).toBeUndefined()
+  })
+
+  it('launches when a crashed tile is clicked but no window exists to focus', async () => {
+    const api = installMockApi([
+      makeInstall({ id: 'a', name: 'Alpha', status: 'installed' }),
+    ])
+    // No window backs the install (crash hydrated from the retained buffer).
+    api.focusComfyWindow = vi.fn().mockResolvedValue(false)
+    const wrapper = mountChooser()
+    await flushPromises()
+
+    const sessionStore = useSessionStore()
+    sessionStore.errorInstances.set('a', { installationName: 'Alpha', exitCode: 1 } as never)
+    await flushPromises()
+
+    const tile = wrapper.findAll('.chooser-tile').find((t) => t.text().includes('Alpha'))!
+    await tile.trigger('click')
+    await flushPromises()
+    expect(api.focusComfyWindow).toHaveBeenCalledWith('a')
+    expect(wrapper.emitted('pick')).toHaveLength(1)
   })
 
   it('does not emit pick when the kebab button is clicked — only the menu opens', async () => {

@@ -50,7 +50,13 @@
     "menuRevealInFolder": "Open Folder",
     "menuDelete": "Uninstall",
     "stoppedActionGatedReason": "Stop the running instance first.",
-    "menuDismissError": "Dismiss Error"
+    "menuDismissError": "Dismiss Error",
+    "statusRunning": "Running",
+    "statusLaunching": "Starting…",
+    "statusStopping": "Stopping…",
+    "statusError": "Error",
+    "viewErrorTooltip": "View error details",
+    "errorTitle": "Error"
   },
 
   "titleBar": {
@@ -982,6 +988,8 @@
     "instanceRunningReplace": "Close & Launch",
     "modelFolderRelaunchTitle": "Restarting ComfyUI",
     "modelFolderRelaunchDesc": "New model folders were detected from custom nodes. Restarting so ComfyUI can use them right away.",
+    "launchSplashTitle": "Starting ComfyUI",
+    "launchSplashDesc": "Launching your ComfyUI instance…",
     "steps": {
       "securityScan": "Running security scan…",
       "mountLibraries": "Mounting model libraries…",

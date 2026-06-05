@@ -8,6 +8,8 @@ import {
   _onStop,
   _operationAborts, _runningSessions,
   _getPublicSessions,
+  _getLaunchingInstances,
+  _getStoppingInstallationIds,
   stopRunning,
 } from './shared'
 import { dispatchSessionAction } from './sessionActions'
@@ -25,6 +27,10 @@ export function registerSessionHandlers(): void {
   })
 
   ipcMain.handle('get-running-instances', () => _getPublicSessions())
+
+  ipcMain.handle('get-launching-instances', () => _getLaunchingInstances())
+
+  ipcMain.handle('get-stopping-instances', () => _getStoppingInstallationIds())
 
   ipcMain.handle('cancel-launch', () => {
     for (const [_id, abort] of _operationAborts) {
