@@ -15,10 +15,16 @@ vi.mock('electron', () => ({
   app: { getPath: () => testStateDir }
 }))
 
+let quitInProgress = false
+vi.mock('./quit-state', () => ({
+  isQuitInProgress: () => quitInProgress
+}))
+
 import {
   _resetLastSessionCacheForTest,
   clearLastActiveSurface,
   flushLastSession,
+  flushLastSessionSync,
   getLastActiveSurface,
   recordDashboardSurface,
   recordInstanceSurface
@@ -28,6 +34,7 @@ const statePath = (): string => path.join(testStateDir, 'last-session.json')
 
 beforeEach(() => {
   testStateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'last-session-'))
+  quitInProgress = false
   _resetLastSessionCacheForTest()
 })
 
@@ -85,6 +92,38 @@ describe('recordInstanceSurface / recordDashboardSurface', () => {
     expect(getLastActiveSurface()).toEqual({ kind: 'dashboard' })
     recordInstanceSurface('inst-D')
     expect(getLastActiveSurface()).toEqual({ kind: 'instance', installationId: 'inst-D' })
+  })
+
+  it('skips recording while a quit is in progress', () => {
+    quitInProgress = true
+    recordInstanceSurface('inst-Q')
+    recordDashboardSurface()
+    expect(getLastActiveSurface()).toBeNull()
+  })
+})
+
+describe('flushLastSessionSync', () => {
+  it('synchronously persists a recorded instance surface', () => {
+    recordInstanceSurface('inst-F')
+    flushLastSessionSync()
+    expect(JSON.parse(fs.readFileSync(statePath(), 'utf-8'))).toEqual({
+      kind: 'instance',
+      installationId: 'inst-F'
+    })
+  })
+
+  it('synchronously removes the file when state was cleared', () => {
+    recordInstanceSurface('inst-G')
+    flushLastSessionSync()
+    expect(fs.existsSync(statePath())).toBe(true)
+    clearLastActiveSurface()
+    flushLastSessionSync()
+    expect(fs.existsSync(statePath())).toBe(false)
+  })
+
+  it('is a no-op when nothing was recorded', () => {
+    flushLastSessionSync()
+    expect(fs.existsSync(statePath())).toBe(false)
   })
 })
 

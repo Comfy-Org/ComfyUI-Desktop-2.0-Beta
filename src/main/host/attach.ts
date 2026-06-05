@@ -7,7 +7,6 @@ import { TITLEBAR_BG } from '../lib/theme'
 import * as mainTelemetry from '../lib/telemetry'
 import { refreshCloudUserTier } from '../lib/userTier'
 import { forwardDatadogError } from '../lib/processErrorHandlers'
-import { isQuitInProgress } from '../lib/quit-state'
 import { recordInstanceSurface } from '../lib/lastSession'
 import { installationEvents, type InstallationRecord } from '../installations'
 import {
@@ -141,8 +140,9 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
     setLastFocusedInstallationId(installationId)
     // An attach onto the focused host makes this install the active surface;
     // persist it so the next boot restores this instance (no fresh focus
-    // event fires for an in-place attach).
-    if (!isQuitInProgress()) recordInstanceSurface(installationId)
+    // event fires for an in-place attach). The record helper no-ops while
+    // quitting.
+    recordInstanceSurface(installationId)
   }
 
   // OS-level window title is rebuilt whenever the page title or the

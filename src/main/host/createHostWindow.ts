@@ -751,9 +751,10 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
       setLastFocusedInstallationId(entry.installationId)
     }
     // Persist which surface was last active so the next boot can restore it.
-    // Skip while quitting: windows can take focus as siblings are destroyed,
-    // which would clobber the surface the user actually left from.
-    if (entry && !isQuitInProgress()) {
+    // The record helpers no-op while quitting: windows can take focus as
+    // siblings are destroyed, which would otherwise clobber the surface the
+    // user actually left from.
+    if (entry) {
       if (entry.installationId) recordInstanceSurface(entry.installationId)
       else recordDashboardSurface()
     }

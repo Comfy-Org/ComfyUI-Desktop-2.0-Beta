@@ -6,7 +6,6 @@ import { COMFY_BG } from '../lib/theme'
 import { destroyPanelView, ensurePanelView } from './panelView'
 import { openSystemModalAsync, openSystemModalChoiceAsync } from '../popups/systemModal'
 import type { SystemModalDetailGroup } from '../popups/systemModal'
-import { isQuitInProgress } from '../lib/quit-state'
 import { recordDashboardSurface } from '../lib/lastSession'
 import { comfyWindows, isChooserHost, isInstallHost, shouldConfirmKillForEntry } from './registry'
 import type { ComfyWindowEntry } from './registry'
@@ -353,9 +352,10 @@ export function _detachInstallImpl(entry: ComfyWindowEntry): void {
   if (entry.window.isDestroyed()) return
 
   // Returning to the dashboard makes it the active surface — persist so the
-  // next boot opens the dashboard, not the install we just detached. Skipped
-  // while quitting (the user's last surface is whatever they left from).
-  if (!isQuitInProgress()) recordDashboardSurface()
+  // next boot opens the dashboard, not the install we just detached. The
+  // record helper no-ops while quitting (the user's last surface is whatever
+  // they left from).
+  recordDashboardSurface()
 
   // Symmetric undo of attachInstall (listeners, maps, stopRunning, etc).
   entry._installCleanup?.()

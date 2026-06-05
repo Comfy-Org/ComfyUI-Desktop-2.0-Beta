@@ -17,7 +17,7 @@ import { migrateXdgPaths } from './lib/paths'
 import { saveWindowBounds } from './lib/windowState'
 import {
   clearLastActiveSurface,
-  flushLastSession,
+  flushLastSessionSync,
   getLastActiveSurface
 } from './lib/lastSession'
 import { registerProcessErrorHandlers } from './lib/processErrorHandlers'
@@ -1965,8 +1965,9 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
       _stopPeriodicReleaseChecks = null
     }
     // Persist any pending last-active-surface write so the next boot can
-    // restore it (best-effort; in-session writes are already debounce-flushed).
-    void flushLastSession()
+    // restore it. Synchronous: the app exits without awaiting promises, so an
+    // async write would be torn down mid-flight and lose a just-made change.
+    flushLastSessionSync()
     cleanupTempDownloads()
   })
 
