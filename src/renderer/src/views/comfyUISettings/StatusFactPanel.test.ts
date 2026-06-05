@@ -1,14 +1,36 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
+import { createTestingPinia } from '@pinia/testing'
+import { setActivePinia } from 'pinia'
 import { nextTick } from 'vue'
 
 import { en } from '../../lib/i18nMessages.ts'
+import { useSessionStore } from '../../stores/sessionStore'
 import StatusFactPanel from './StatusFactPanel.vue'
-import type { Installation } from '../../types/ipc'
+import type { DetailSection, Installation } from '../../types/ipc'
+
+beforeEach(() => {
+  setActivePinia(createTestingPinia({ stubActions: false }))
+})
 
 function makeI18n() {
   return createI18n({ legacy: false, locale: 'en', messages: { en } })
+}
+
+/** A status section carrying the `active-port` field main appends for a running install. */
+function portSection(port: number): DetailSection {
+  return { tab: 'status', fields: [{ key: 'active-port', label: 'Port', value: String(port) }] } as unknown as DetailSection
+}
+
+/** Mark inst-1 running in the session store (mirrors what the dashboard / popup hydrate). */
+function markRunning(): void {
+  useSessionStore().runningInstances.set('inst-1', {
+    installationId: 'inst-1',
+    installationName: 'Maanil',
+    port: 8188,
+    mode: 'window',
+  })
 }
 
 function makeInstall(name: string): Installation {
@@ -22,8 +44,19 @@ function makeInstall(name: string): Installation {
   } as Installation
 }
 
+function makeCloudInstall(name: string): Installation {
+  return {
+    id: 'cloud-1',
+    name,
+    sourceLabel: 'Cloud',
+    sourceCategory: 'cloud',
+    status: 'installed',
+  } as Installation
+}
+
 function mountPanel(props: {
   installation: Installation | null
+  sections?: DetailSection[]
   onRename?: (newName: string) => Promise<boolean>
 }) {
   return mount(StatusFactPanel, {
@@ -79,6 +112,24 @@ describe('StatusFactPanel — hero name', () => {
     expect((el.element as HTMLElement).textContent).toBe('Original')
   })
 
+  it('renders the Cloud name as static, non-editable text (issue #922)', async () => {
+    const onRename = vi.fn().mockResolvedValue(true)
+    const wrapper = mountPanel({ installation: makeCloudInstall('Comfy Cloud'), onRename })
+    await nextTick()
+
+    const name = wrapper.find('.status-fact-hero-name')
+    expect(name.exists()).toBe(true)
+    expect(name.text()).toBe('Comfy Cloud')
+    // No contenteditable affordance and no pencil hint.
+    expect(name.attributes('contenteditable')).toBeUndefined()
+    expect(wrapper.find('.status-fact-hero-name-static').exists()).toBe(true)
+    expect(wrapper.find('.status-fact-hero-edit-hint').exists()).toBe(false)
+
+    // Blur must not commit a rename for the Cloud entry.
+    await name.trigger('blur')
+    expect(onRename).not.toHaveBeenCalled()
+  })
+
   it('repaints the hero when the installation name prop changes', async () => {
     const wrapper = mountPanel({ installation: makeInstall('First') })
     await nextTick()
@@ -87,5 +138,47 @@ describe('StatusFactPanel — hero name', () => {
     await wrapper.setProps({ installation: makeInstall('Second') })
     await nextTick()
     expect(wrapper.find('.status-fact-hero-name').text()).toBe('Second')
+  })
+})
+
+describe('StatusFactPanel — running details', () => {
+  it('shows the running port under a Running details group when running', async () => {
+    markRunning()
+    const wrapper = mountPanel({ installation: makeInstall('Maanil'), sections: [portSection(8188)] })
+    await nextTick()
+
+    const titles = wrapper.findAll('.status-fact-group-title').map((n) => n.text())
+    expect(titles).toContain('Running details')
+    expect(wrapper.text()).toContain('8188')
+  })
+
+  it('hides Running details when the instance is not running, even if a port field is present', async () => {
+    // No markRunning() — sessionStore reports the install as stopped.
+    const wrapper = mountPanel({ installation: makeInstall('Maanil'), sections: [portSection(8188)] })
+    await nextTick()
+
+    const titles = wrapper.findAll('.status-fact-group-title').map((n) => n.text())
+    expect(titles).not.toContain('Running details')
+  })
+
+  it('keeps the port out of the Install details group', async () => {
+    markRunning()
+    const wrapper = mountPanel({ installation: makeInstall('Maanil'), sections: [portSection(8188)] })
+    await nextTick()
+
+    const installGroup = wrapper.findAll('.status-fact-group').find(
+      (g) => g.find('.status-fact-group-title').text() === 'Install details',
+    )
+    // The only field is the port, which belongs to Running details, so there is no Install details group.
+    expect(installGroup).toBeUndefined()
+  })
+
+  it('omits Running details when running but no active-port field is present', async () => {
+    markRunning()
+    const wrapper = mountPanel({ installation: makeInstall('Maanil') })
+    await nextTick()
+
+    const titles = wrapper.findAll('.status-fact-group-title').map((n) => n.text())
+    expect(titles).not.toContain('Running details')
   })
 })

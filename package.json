@@ -1,6 +1,6 @@
 {
   "name": "comfyui-desktop-2",
-  "version": "1.0.5",
+  "version": "1.0.8",
   "description": "Comfy Desktop",
   "author": {
     "name": "Comfy Org",
@@ -63,7 +63,8 @@
     "posthog-node": "^5.30.7",
     "smol-toml": "^1.6.1",
     "systeminformation": "^5.31.5",
-    "tar": "^7.5.11"
+    "tar": "^7.5.11",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@datadog/datadog-ci": "^5.9.0",

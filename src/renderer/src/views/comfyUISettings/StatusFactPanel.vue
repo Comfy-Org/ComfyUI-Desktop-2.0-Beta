@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { Pencil } from 'lucide-vue-next'
 import BaseCopyButton from '../../components/ui/BaseCopyButton.vue'
 import type { DetailField, DetailSection, Installation } from '../../types/ipc'
+import { useSessionStore } from '../../stores/sessionStore'
 
 /**
  * Status tab: grouped install summary with an inline-editable identity hero (committing calls `onRename`).
@@ -20,6 +21,11 @@ interface Props {
 const props = defineProps<Props>()
 
 const { t } = useI18n()
+const sessionStore = useSessionStore()
+
+// The Comfy Cloud entry is not user-renamable (issue #922): render its name as
+// static text with no contenteditable / pencil affordance.
+const nameEditable = computed(() => props.installation?.sourceCategory !== 'cloud')
 
 // Drive the hero name imperatively: mixing `{{ }}` with the inline pencil icon left Vue unable to patch the edited text node, so a committed rename painted everywhere except here.
 const nameEl = useTemplateRef<HTMLElement>('nameEl')
@@ -127,29 +133,6 @@ function matchLabel(field: DetailField, keys: string[]): boolean {
   return keys.some((k) => id.includes(k) || label.includes(k.toLowerCase()))
 }
 
-const heroSubtitle = computed(() => {
-  const parts: string[] = []
-  for (const field of allFields.value) {
-    if (matchLabel(field, ['comfyui', 'comfyui-version'])) {
-      parts.push(fieldValue(field))
-      break
-    }
-  }
-  for (const field of allFields.value) {
-    if (matchLabel(field, ['variant'])) {
-      parts.push(fieldValue(field))
-      break
-    }
-  }
-  for (const field of allFields.value) {
-    if (matchLabel(field, ['python'])) {
-      parts.push(fieldValue(field))
-      break
-    }
-  }
-  return parts.filter((p) => p && p !== '—').join(' · ')
-})
-
 function toRow(field: DetailField): FactRow {
   const value = fieldValue(field)
   const extra = field as DetailField & { key?: string }
@@ -168,8 +151,7 @@ const installDetailRows = computed<FactRow[]>(() => {
   for (const field of allFields.value) {
     if (matchLabel(field, ['lineage'])) continue
     if (matchLabel(field, ['location', 'path', 'disk'])) continue
-    if (matchLabel(field, ['comfyui', 'comfyui-version'])) continue
-    if (matchLabel(field, ['variant', 'python']) && heroSubtitle.value) continue
+    if (matchLabel(field, ['active-port'])) continue
     if (matchLabel(field, ['install method', 'method'])) continue
     const row = toRow(field)
     if (sourceLabel && row.value.toLowerCase() === sourceLabel) continue
@@ -205,6 +187,18 @@ const lineageRows = computed<FactRow[]>(() => {
     .map(toRow)
 })
 
+// The running port arrives as an `active-port` field from main (it's the only
+// source that knows the real port in every window). Visibility is gated on the
+// reactive session store so the section hides the instant the instance stops,
+// without waiting for a section refetch.
+const runningDetailRows = computed<FactRow[]>(() => {
+  const id = props.installation?.id
+  if (!id || !sessionStore.isRunning(id)) return []
+  return allFields.value
+    .filter((field) => matchLabel(field, ['active-port']))
+    .map(toRow)
+})
+
 const groups = computed<FactGroup[]>(() => {
   const out: FactGroup[] = []
   const details = installDetailRows.value
@@ -213,6 +207,14 @@ const groups = computed<FactGroup[]>(() => {
       id: 'install-details',
       title: t('statusFactPanel.installDetails', 'Install details'),
       rows: details,
+    })
+  }
+  const running = runningDetailRows.value
+  if (running.length > 0) {
+    out.push({
+      id: 'running-details',
+      title: t('statusFactPanel.runningDetails', 'Running details'),
+      rows: running,
     })
   }
   const location = locationRows.value
@@ -241,6 +243,7 @@ const groups = computed<FactGroup[]>(() => {
       <div class="status-fact-hero-title-row">
         <span class="status-fact-hero-name-wrap">
           <span
+            v-if="nameEditable"
             ref="nameEl"
             class="status-fact-hero-name"
             role="textbox"
@@ -254,13 +257,20 @@ const groups = computed<FactGroup[]>(() => {
             @keydown.meta.a.prevent="handleNameSelectAll"
             @paste="handleNamePaste"
           />
-          <Pencil :size="13" class="status-fact-hero-edit-hint" aria-hidden="true" />
+          <span v-else class="status-fact-hero-name status-fact-hero-name-static">{{
+            installation.name
+          }}</span>
+          <Pencil
+            v-if="nameEditable"
+            :size="13"
+            class="status-fact-hero-edit-hint"
+            aria-hidden="true"
+          />
         </span>
         <span v-if="installation.sourceLabel" class="status-fact-hero-badge">
           {{ installation.sourceLabel }}
         </span>
       </div>
-      <p v-if="heroSubtitle" class="status-fact-hero-meta">{{ heroSubtitle }}</p>
     </header>
 
     <section v-for="group in groups" :key="group.id" class="status-fact-group">
@@ -331,7 +341,12 @@ const groups = computed<FactGroup[]>(() => {
   transition: background-color 120ms ease;
 }
 
-.status-fact-hero-name:hover {
+/* Static (non-renamable) name, e.g. Comfy Cloud: no edit affordance. */
+.status-fact-hero-name-static {
+  cursor: default;
+}
+
+.status-fact-hero-name:not(.status-fact-hero-name-static):hover {
   background: var(--brand-surface-bg-hover);
 }
 
@@ -364,13 +379,6 @@ const groups = computed<FactGroup[]>(() => {
   color: var(--text-muted);
   background: color-mix(in srgb, var(--text) 8%, transparent);
   border-radius: 999px;
-}
-
-.status-fact-hero-meta {
-  margin: 4px 0 0;
-  font-size: 14px;
-  line-height: 20px;
-  color: var(--neutral-100);
 }
 
 .status-fact-group {

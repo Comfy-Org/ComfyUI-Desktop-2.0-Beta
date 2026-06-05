@@ -139,6 +139,7 @@ vi.mock('./github-mirror', () => ({
 import {
   adoptDesktopInstall,
   parseExtraModelsYaml,
+  parseExtraModelsSections,
   deriveLaunchArgs,
   computeModelsDirsToCarry,
   getLegacyVenvUvPath,
@@ -328,6 +329,57 @@ describe('parseExtraModelsYaml', () => {
   })
 })
 
+describe('parseExtraModelsSections', () => {
+  it('returns base_path plus per-type overrides for each section', () => {
+    const yaml =
+      `comfyui_desktop:\n` +
+      `  is_default: 'true'\n` +
+      `  base_path: /Users/me/ComfyUI\n` +
+      `my_external:\n` +
+      `  base_path: /mnt/nas/ai\n` +
+      `  checkpoints: /mnt/big-ssd/checkpoints\n` +
+      `  loras: models/loras\n`
+    const sections = parseExtraModelsSections(yaml)
+    expect(sections).toEqual([
+      { name: 'comfyui_desktop', basePath: '/Users/me/ComfyUI', overrides: [] },
+      {
+        name: 'my_external',
+        basePath: '/mnt/nas/ai',
+        overrides: [
+          { type: 'checkpoints', path: '/mnt/big-ssd/checkpoints' },
+          { type: 'loras', path: 'models/loras' }
+        ]
+      }
+    ])
+  })
+
+  it('ignores non-model section keys (is_default, custom_nodes, download_model_base)', () => {
+    const yaml =
+      `s:\n` +
+      `  base_path: /a\n` +
+      `  is_default: 'true'\n` +
+      `  custom_nodes: /a/custom_nodes\n` +
+      `  download_model_base: /a/models\n` +
+      `  vae: /a/models/vae\n`
+    const [section] = parseExtraModelsSections(yaml)
+    expect(section!.overrides).toEqual([{ type: 'vae', path: '/a/models/vae' }])
+  })
+
+  it('splits pipe-block multi-path values into one override per path', () => {
+    const yaml = `s:\n  base_path: /a\n  loras: |\n    models/Lora\n    models/LyCORIS\n`
+    const [section] = parseExtraModelsSections(yaml)
+    expect(section!.overrides).toEqual([
+      { type: 'loras', path: 'models/Lora' },
+      { type: 'loras', path: 'models/LyCORIS' }
+    ])
+  })
+
+  it('returns [] on malformed YAML rather than throwing', () => {
+    expect(parseExtraModelsSections('  : : :\n\tbad')).toEqual([])
+    expect(parseExtraModelsSections('')).toEqual([])
+  })
+})
+
 describe('deriveLaunchArgs', () => {
   it('synthesizes --port 8000 + --enable-manager when LaunchArgs is empty', () => {
     const { launchArgs, pathOverrides } = deriveLaunchArgs({})
@@ -433,26 +485,90 @@ describe('computeModelsDirsToCarry', () => {
     expect(result).toEqual([path.resolve(path.join(basePath, 'models'))])
   })
 
-  it('carries <yamlBase>/models for YAML entries whose /models subfolder exists; skips others', () => {
+  it('carries <yamlBase>/models when present, else the bare base_path dir', () => {
     const basePath = path.join(tmpRoot, 'primary')
     const siblingComfy = path.join(tmpRoot, 'sibling-comfy')
     const a1111 = path.join(tmpRoot, 'a1111')
     fs.mkdirSync(path.join(siblingComfy, 'models'), { recursive: true })
     fs.mkdirSync(path.join(a1111, 'models', 'Stable-diffusion'), { recursive: true })
-    const yamlOnlyA1111Layout = path.join(tmpRoot, 'something-else')
-    fs.mkdirSync(yamlOnlyA1111Layout) // exists, but no /models subfolder
+    // A base_path that exists but has no `/models` sibling: carried as the bare dir.
+    const bareRoot = path.join(tmpRoot, 'bare-root')
+    fs.mkdirSync(bareRoot)
     const yaml =
       `comfyui_sibling:\n  base_path: ${siblingComfy}\n` +
       `a1111:\n  base_path: ${a1111}\n` +
-      `weird:\n  base_path: ${yamlOnlyA1111Layout}\n`
+      `weird:\n  base_path: ${bareRoot}\n`
     const result = computeModelsDirsToCarry(basePath, yaml, [])
     expect(result).toContain(path.resolve(path.join(basePath, 'models')))
     expect(result).toContain(path.resolve(path.join(siblingComfy, 'models')))
     expect(result).toContain(path.resolve(path.join(a1111, 'models')))
-    expect(result).not.toContain(path.resolve(path.join(yamlOnlyA1111Layout, 'models')))
-    // Never the bare base_path.
+    // No `/models` sibling → bare dir carried.
+    expect(result).toContain(path.resolve(bareRoot))
+    expect(result).not.toContain(path.resolve(path.join(bareRoot, 'models')))
+    // Siblings that DO have `/models` are carried via `/models`, not bare.
     expect(result).not.toContain(path.resolve(siblingComfy))
     expect(result).not.toContain(path.resolve(a1111))
+  })
+
+  it('carries a per-type override pointing OUTSIDE base_path via its parent dir', () => {
+    const basePath = path.join(tmpRoot, 'primary')
+    const sectionBase = path.join(tmpRoot, 'install')
+    fs.mkdirSync(path.join(sectionBase, 'models'), { recursive: true })
+    // External drive: an absolute checkpoints override outside base_path.
+    const externalDrive = path.join(tmpRoot, 'external-drive', 'ai')
+    fs.mkdirSync(path.join(externalDrive, 'checkpoints'), { recursive: true })
+    const yaml =
+      `s:\n  base_path: ${sectionBase}\n  checkpoints: ${path.join(externalDrive, 'checkpoints')}\n`
+    const result = computeModelsDirsToCarry(basePath, yaml, [])
+    // type-named leaf → carry its parent so buildYaml discovers `checkpoints/`.
+    expect(result).toContain(path.resolve(externalDrive))
+    expect(result).toContain(path.resolve(path.join(sectionBase, 'models')))
+  })
+
+  it('resolves a relative override against the section base_path', () => {
+    const basePath = path.join(tmpRoot, 'primary')
+    const sectionBase = path.join(tmpRoot, 'webui')
+    // base_path has no `/models`, so its bare dir is the carried root.
+    fs.mkdirSync(path.join(sectionBase, 'Stable-diffusion'), { recursive: true })
+    fs.mkdirSync(path.join(sectionBase, 'extra-loras'), { recursive: true })
+    const yaml =
+      `a1111:\n  base_path: ${sectionBase}\n` +
+      `  checkpoints: Stable-diffusion\n` +
+      `  loras: extra-loras\n`
+    const result = computeModelsDirsToCarry(basePath, yaml, [])
+    // base_path carried as bare dir; both relative overrides resolve under it
+    // and are therefore subsumed (not separately registered).
+    expect(result).toContain(path.resolve(sectionBase))
+    expect(result).not.toContain(path.resolve(path.join(sectionBase, 'Stable-diffusion')))
+    expect(result).not.toContain(path.resolve(path.join(sectionBase, 'extra-loras')))
+  })
+
+  it('skips the home directory and filesystem root as models roots (safety guard)', () => {
+    const basePath = path.join(tmpRoot, 'primary')
+    const fsRoot = path.parse(tmpRoot).root
+    const home = path.resolve(os.homedir())
+    const yaml =
+      `bad_root:\n  base_path: ${fsRoot}\n  checkpoints: ${fsRoot}\n` +
+      `bad_home:\n  base_path: ${home}\n`
+    const result = computeModelsDirsToCarry(basePath, yaml, [])
+    expect(result).not.toContain(path.resolve(fsRoot))
+    expect(result).not.toContain(home)
+    // Primary install root is still carried.
+    expect(result).toContain(path.resolve(path.join(basePath, 'models')))
+  })
+
+  it('skips non-existent override and base_path targets', () => {
+    const basePath = path.join(tmpRoot, 'primary')
+    const sectionBase = path.join(tmpRoot, 'install')
+    fs.mkdirSync(path.join(sectionBase, 'models'), { recursive: true })
+    const yaml =
+      `s:\n  base_path: ${sectionBase}\n` +
+      `  checkpoints: ${path.join(tmpRoot, 'does-not-exist', 'checkpoints')}\n` +
+      `gone:\n  base_path: ${path.join(tmpRoot, 'also-missing')}\n`
+    const result = computeModelsDirsToCarry(basePath, yaml, [])
+    expect(result).toContain(path.resolve(path.join(sectionBase, 'models')))
+    expect(result).not.toContain(path.resolve(path.join(tmpRoot, 'does-not-exist')))
+    expect(result).not.toContain(path.resolve(path.join(tmpRoot, 'also-missing')))
   })
 
   it('dedupes against the caller existing list', () => {
@@ -465,15 +581,24 @@ describe('computeModelsDirsToCarry', () => {
     expect(result).toEqual([path.resolve(path.join(sibling, 'models'))])
   })
 
-  it('skips a YAML base_path that exists as a file (not a directory)', () => {
+  it('dedupes a base_path equal to the primary install (no duplicate <basePath>/models)', () => {
+    const basePath = path.join(tmpRoot, 'primary')
+    fs.mkdirSync(path.join(basePath, 'models'), { recursive: true })
+    const yaml = `self:\n  base_path: ${basePath}\n`
+    const result = computeModelsDirsToCarry(basePath, yaml, [])
+    expect(result).toEqual([path.resolve(path.join(basePath, 'models'))])
+  })
+
+  it('carries a base_path that exists as a dir even when its `models` child is a file', () => {
     const basePath = path.join(tmpRoot, 'primary')
     const yamlBase = path.join(tmpRoot, 'has-models-file')
     fs.mkdirSync(yamlBase, { recursive: true })
-    // create `models` as a file, not a directory
+    // `models` here is a file, not a directory → fall back to the bare dir.
     fs.writeFileSync(path.join(yamlBase, 'models'), 'not a dir')
     const yaml = `s:\n  base_path: ${yamlBase}\n`
     const result = computeModelsDirsToCarry(basePath, yaml, [])
     expect(result).not.toContain(path.resolve(path.join(yamlBase, 'models')))
+    expect(result).toContain(path.resolve(yamlBase))
   })
 })
 
@@ -553,16 +678,20 @@ describe('adoptDesktopInstall', () => {
     }
   })
 
-  it('merges modelsDirs: basePath/models always + <yamlBase>/models when present, never the bare base_path', async () => {
-    // Sibling install exists with a `/models` folder; "missing" install has no `/models`.
+  it('merges modelsDirs: basePath/models + <yamlBase>/models when present + bare base_path + external override', async () => {
+    // Sibling install has `/models`; "bare" install has no `/models`;
+    // an external per-type override lives outside any base_path.
     const tmpYamlRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'adopt-yaml-roots-'))
     const sibling = path.join(tmpYamlRoot, 'sibling-comfy')
-    const missingModels = path.join(tmpYamlRoot, 'no-models')
+    const bareRoot = path.join(tmpYamlRoot, 'no-models')
+    const externalDrive = path.join(tmpYamlRoot, 'external')
     fs.mkdirSync(path.join(sibling, 'models'), { recursive: true })
-    fs.mkdirSync(missingModels, { recursive: true })
+    fs.mkdirSync(bareRoot, { recursive: true })
+    fs.mkdirSync(path.join(externalDrive, 'loras'), { recursive: true })
     const yaml =
       `comfyui_sibling:\n  base_path: ${sibling}\n  is_default: true\n` +
-      `weird:\n  base_path: ${missingModels}\n`
+      `weird:\n  base_path: ${bareRoot}\n` +
+      `ext:\n  base_path: ${sibling}\n  loras: ${path.join(externalDrive, 'loras')}\n`
     const legacy = buildFakeLegacy({
       configFiles: {
         'comfy.settings.json': '{}',
@@ -580,12 +709,15 @@ describe('adoptDesktopInstall', () => {
       expect(finalDirs).toEqual(
         expect.arrayContaining([
           path.resolve(path.join(legacy.basePath, 'models')),
-          path.resolve(path.join(sibling, 'models'))
+          path.resolve(path.join(sibling, 'models')),
+          // base_path with no `/models` sibling → bare dir carried.
+          path.resolve(bareRoot),
+          // external `loras` override → carried via its parent.
+          path.resolve(externalDrive)
         ])
       )
+      // Sibling with `/models` is carried via `/models`, not the bare dir.
       expect(finalDirs).not.toContain(path.resolve(sibling))
-      expect(finalDirs).not.toContain(path.resolve(missingModels))
-      expect(finalDirs).not.toContain(path.resolve(path.join(missingModels, 'models')))
     } finally {
       legacy.cleanup()
       fs.rmSync(tmpYamlRoot, { recursive: true, force: true })

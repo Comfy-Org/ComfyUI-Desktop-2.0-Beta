@@ -28,6 +28,21 @@
 ; blocks (the source BMPs are still at resources/installerHeader.bmp,
 ; resources/installerSidebar.bmp, resources/uninstallerSidebar.bmp).
 
+; Force the install-directory page into the installer flow. electron-builder's
+; template (assistedInstaller.nsh) gates `!insertmacro MUI_PAGE_DIRECTORY` on
+; `!ifdef allowToChangeInstallationDirectory`. ToDesktop's todesktop.json CLI
+; schema rejects the matching `windows.allowToChangeInstallationDirectory`
+; key (confirmed by run #27005979459 — same gate that bit the installer-art
+; keys in #810/#817), so we set the NSIS define directly here instead — same
+; nsisInclude mechanism ToDesktop already accepts. Our sharedHeader is
+; prepended ahead of installer.nsi line 40 (`!include "assistedInstaller.nsh"`),
+; so this define is in scope before the page macro runs. Guarded with
+; !ifndef so if electron-builder/ToDesktop ever set it from above us, we
+; won't trip the -WX "macro redefined" failure.
+!ifndef allowToChangeInstallationDirectory
+  !define allowToChangeInstallationDirectory
+!endif
+
 ; Friendlier install-mode page strings. electron-builder's defaults read like
 ; internals ("There is already a per-user installation." / "Will reinstall/
 ; upgrade."). electron-builder !includes its own message lang file AFTER this

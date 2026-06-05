@@ -9,7 +9,7 @@ import { truncateNotes } from '../../lib/comfyui-releases'
 import { deleteAction, untrackAction, launchAction, openFolderAction, renameAction } from '../../lib/actions'
 import { t } from '../../lib/i18n'
 import { buildLaunchSettingsFields, buildStorageFields } from '../common/launchSettingsFields'
-import { getVariantLabel, DEFAULT_LAUNCH_ARGS } from './envPaths'
+import { getVariantLabel, getTorchVersion, DEFAULT_LAUNCH_ARGS } from './envPaths'
 import type { InstallationRecord } from '../../installations'
 import type { StatusTag } from '../../types/sources'
 
@@ -62,12 +62,11 @@ export function getDetailSections(installation: InstallationRecord): Record<stri
 
   const infoFields: Record<string, unknown>[] = [
     { label: t('common.installMethod'), value: installation.sourceLabel as string },
-    { key: 'comfyui-version', label: t('standalone.comfyui'), value: installation.comfyVersion ? formatComfyVersion(installation.comfyVersion as ComfyVersion, 'detail') : (installation.version as string | undefined) || 'unknown' },
-    { label: t('common.release'), value: (installation.releaseTag as string | undefined) || '—' },
+    { key: 'comfyui-version', label: t('standalone.currentVersion'), value: installation.comfyVersion ? formatComfyVersion(installation.comfyVersion as ComfyVersion, 'detail') : (installation.version as string | undefined) || 'unknown' },
     { label: t('standalone.variant'), value: (installation.variant as string | undefined) ? getVariantLabel(installation.variant as string) : '—' },
     { label: t('standalone.python'), value: (installation.pythonVersion as string | undefined) || '—' },
+    { label: t('standalone.pytorch'), value: getTorchVersion(installation) || '—' },
     { label: t('common.location'), value: installation.installPath || '—' },
-    { label: t('common.installed'), value: new Date(installation.createdAt).toLocaleDateString() },
   ]
 
   const copiedFrom = installation.copiedFrom as string | undefined
