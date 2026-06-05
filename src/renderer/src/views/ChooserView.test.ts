@@ -316,7 +316,8 @@ describe('ChooserView', () => {
   it('filters install tiles by source category when a filter chip is active', async () => {
     installMockApi([
       makeInstall({ id: 'l', name: 'LocalThing', sourceCategory: 'local' }),
-      makeInstall({ id: 'd', name: 'DesktopThing', sourceCategory: 'desktop' }),
+      // Legacy Desktop reports category `local`; sourceId is the marker.
+      makeInstall({ id: 'd', name: 'LegacyDesktopThing', sourceCategory: 'local', sourceId: 'desktop' }),
       makeInstall({ id: 'r', name: 'RemoteThing', sourceCategory: 'remote' }),
     ])
     const wrapper = mountChooser()
@@ -339,7 +340,8 @@ describe('ChooserView', () => {
     // Legacy Desktop installs surface under the Local chip, not a dedicated one.
     installMockApi([
       makeInstall({ id: 'l', name: 'LocalThing', sourceCategory: 'local' }),
-      makeInstall({ id: 'd', name: 'LegacyDesktopThing', sourceCategory: 'desktop' }),
+      // Legacy Desktop reports category `local`; sourceId is the marker.
+      makeInstall({ id: 'd', name: 'LegacyDesktopThing', sourceCategory: 'local', sourceId: 'desktop' }),
       makeInstall({ id: 'r', name: 'RemoteThing', sourceCategory: 'remote' }),
     ])
     const wrapper = mountChooser()

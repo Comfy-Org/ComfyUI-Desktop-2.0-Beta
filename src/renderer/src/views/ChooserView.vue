@@ -75,8 +75,8 @@ onMounted(() => {
 // regressions guard.
 //
 // "Local" includes both standalone local installs and Legacy Desktop
-// installs (`sourceCategory === 'desktop'`) — they're conceptually the
-// same family from the user's POV.
+// installs (both report `sourceCategory === 'local'`) — they're
+// conceptually the same family from the user's POV.
 const installationsRef = toRef(installationStore, 'installations')
 const {
   searchQuery,

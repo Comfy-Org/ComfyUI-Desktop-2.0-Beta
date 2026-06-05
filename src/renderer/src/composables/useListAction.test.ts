@@ -54,7 +54,8 @@ function makeInstall(overrides: Partial<Installation> = {}): Installation {
     id: 'inst-1',
     name: 'Legacy Desktop',
     sourceLabel: 'Legacy Desktop',
-    sourceCategory: 'desktop',
+    // Legacy Desktop reports category `local`; the `desktop` sourceId is the marker.
+    sourceCategory: 'local',
     sourceId: 'desktop',
     status: 'installed',
     ...overrides,

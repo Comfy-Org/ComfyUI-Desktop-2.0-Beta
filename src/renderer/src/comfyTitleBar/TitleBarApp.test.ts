@@ -457,9 +457,9 @@ describe('TitleBarApp', () => {
     bridgeState.sourceCategoryChangedCallbacks.forEach((cb) => cb('cloud'))
     await flushPromises()
     expect(wrapper.find('.title-install-type-icon').attributes('title')).toBe('Cloud')
-    bridgeState.sourceCategoryChangedCallbacks.forEach((cb) => cb('desktop'))
+    bridgeState.sourceCategoryChangedCallbacks.forEach((cb) => cb('remote'))
     await flushPromises()
-    expect(wrapper.find('.title-install-type-icon').attributes('title')).toBe('Legacy Desktop')
+    expect(wrapper.find('.title-install-type-icon').attributes('title')).toBe('Remote')
   })
 
   it('suppresses the install-type icon on install-less host windows even when a category arrives', async () => {
@@ -485,6 +485,61 @@ describe('TitleBarApp', () => {
     expect(wrapper.find('.title-install-type-icon').exists()).toBe(false)
   })
 
+
+  it('renders the refresh button for local installs (parity with cloud)', async () => {
+    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+    const wrapper = mount(TitleBarApp)
+    await flushPromises()
+    expect(wrapper.find('.title-refresh-button').exists()).toBe(false)
+    bridgeState.sourceCategoryChangedCallbacks.forEach((cb) => cb('local'))
+    await flushPromises()
+    expect(wrapper.find('.title-refresh-button').exists()).toBe(true)
+  })
+
+  it('renders the refresh button for cloud and remote installs', async () => {
+    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+    const wrapper = mount(TitleBarApp)
+    await flushPromises()
+    bridgeState.sourceCategoryChangedCallbacks.forEach((cb) => cb('cloud'))
+    await flushPromises()
+    expect(wrapper.find('.title-refresh-button').exists()).toBe(true)
+    bridgeState.sourceCategoryChangedCallbacks.forEach((cb) => cb('remote'))
+    await flushPromises()
+    expect(wrapper.find('.title-refresh-button').exists()).toBe(true)
+  })
+
+  it('hides the refresh button when no category is set or it is unresolved', async () => {
+    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+    const wrapper = mount(TitleBarApp)
+    await flushPromises()
+    bridgeState.sourceCategoryChangedCallbacks.forEach((cb) => cb('local'))
+    await flushPromises()
+    expect(wrapper.find('.title-refresh-button').exists()).toBe(true)
+    bridgeState.sourceCategoryChangedCallbacks.forEach((cb) => cb(null))
+    await flushPromises()
+    expect(wrapper.find('.title-refresh-button').exists()).toBe(false)
+  })
+
+  it('hides the refresh button on install-less host windows', async () => {
+    bridgeState = installMockBridge({ installationId: null })
+    vi.resetModules()
+    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+    const wrapper = mount(TitleBarApp)
+    await flushPromises()
+    bridgeState.sourceCategoryChangedCallbacks.forEach((cb) => cb('local'))
+    await flushPromises()
+    expect(wrapper.find('.title-refresh-button').exists()).toBe(false)
+  })
+
+  it('invokes clickRefreshInstance when the refresh button is clicked', async () => {
+    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+    const wrapper = mount(TitleBarApp)
+    await flushPromises()
+    bridgeState.sourceCategoryChangedCallbacks.forEach((cb) => cb('local'))
+    await flushPromises()
+    await wrapper.find('.title-refresh-button').trigger('click')
+    expect(bridgeState.refreshInstanceClicks).toBe(1)
+  })
 
   it('hides both status pills by default (no update available, no install update)', async () => {
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')

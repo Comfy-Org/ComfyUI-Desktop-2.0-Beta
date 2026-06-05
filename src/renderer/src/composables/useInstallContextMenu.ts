@@ -69,7 +69,10 @@ export function useInstallContextMenu(opts: {
   }
 
   function hasMigratePrompt(inst: Installation): boolean {
-    return inst.sourceCategory === 'desktop' && isInstalled(inst)
+    // The backend tags every migratable install (Legacy Desktop, portable,
+    // git) with a `migrate` status tag — mirror the `hasUpdateTag` pattern
+    // rather than special-casing a single source.
+    return inst.statusTag?.style === 'migrate'
   }
 
   function hasInstallPath(inst: Installation): boolean {

@@ -34,3 +34,14 @@ export function installTypeMetaFor(
       return { key: 'unknown', icon: Box, labelKey: 'installType.unknown' }
   }
 }
+
+/** Resolve install-type metadata for a concrete installation. Legacy Desktop
+ *  installs report `sourceCategory === 'local'`, so the distinct
+ *  `legacyDesktop` identity is keyed off the `desktop` sourceId instead. */
+export function installTypeMetaForInstall(inst: {
+  sourceId?: unknown
+  sourceCategory: string | null | undefined
+}): InstallTypeIconMeta {
+  if (inst.sourceId === 'desktop') return installTypeMetaFor('desktop')
+  return installTypeMetaFor(inst.sourceCategory)
+}

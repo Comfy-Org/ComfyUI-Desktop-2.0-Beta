@@ -78,10 +78,11 @@ describe('useInstallList', () => {
   })
 
   describe('filter chips', () => {
-    it('local filter includes both local and desktop sourceCategory', () => {
+    it('local filter includes standalone and Legacy Desktop installs (both report category local)', () => {
       const installations = ref<Installation[]>([
         makeInstall({ id: 'l', sourceCategory: 'local' }),
-        makeInstall({ id: 'd', sourceCategory: 'desktop' }),
+        // Legacy Desktop reports category `local`; sourceId is the marker.
+        makeInstall({ id: 'd', sourceCategory: 'local', sourceId: 'desktop' } as Partial<Installation>),
         makeInstall({ id: 'r', sourceCategory: 'remote' }),
       ])
       const list = withI18nScope(i18n, () => useInstallList({ installations }))
@@ -116,7 +117,8 @@ describe('useInstallList', () => {
       const installations = ref<Installation[]>([
         makeInstall({ id: 'l', sourceCategory: 'local' }),
         makeInstall({ id: 'r', sourceCategory: 'remote' }),
-        makeInstall({ id: 'd', sourceCategory: 'desktop' }),
+        // Legacy Desktop reports category `local`; sourceId is the marker.
+        makeInstall({ id: 'd', sourceCategory: 'local', sourceId: 'desktop' }),
         makeInstall({ id: 'c', sourceCategory: 'cloud' }),
       ])
       const list = withI18nScope(i18n, () => useInstallList({ installations }))

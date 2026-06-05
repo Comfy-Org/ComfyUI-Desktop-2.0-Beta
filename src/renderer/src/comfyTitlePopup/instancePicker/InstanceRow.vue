@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { installTypeMetaFor } from '../../lib/installTypeIcon'
+import { installTypeMetaForInstall } from '../../lib/installTypeIcon'
 import { TID } from '../../../../shared/testIds'
 import type { CloudCapacityStatus, Installation } from '../../types/ipc'
 
@@ -43,7 +43,7 @@ const emit = defineEmits<{
   select: [installation: Installation]
 }>()
 
-const typeMeta = computed(() => installTypeMetaFor(props.installation.sourceCategory))
+const typeMeta = computed(() => installTypeMetaForInstall(props.installation))
 
 function handleClick(): void {
   // Always selects, even for a disabled cloud install, so the user can
