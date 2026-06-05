@@ -118,7 +118,7 @@ describe('useInstallList', () => {
         makeInstall({ id: 'l', sourceCategory: 'local' }),
         makeInstall({ id: 'r', sourceCategory: 'remote' }),
         // Legacy Desktop reports category `local`; sourceId is the marker.
-        makeInstall({ id: 'd', sourceCategory: 'local', sourceId: 'desktop' } as Partial<Installation>),
+        makeInstall({ id: 'd', sourceCategory: 'local', sourceId: 'desktop' }),
         makeInstall({ id: 'c', sourceCategory: 'cloud' }),
       ])
       const list = withI18nScope(i18n, () => useInstallList({ installations }))
