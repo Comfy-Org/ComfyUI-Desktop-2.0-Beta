@@ -170,14 +170,11 @@ export interface InstancePickerSnapshot {
 }
 
 /** Single Models-directory row pushed to the global-settings popup.
- *  `isDefault` flags the system-default path (matches the renderer-
- *  side DirCard tag). `isPrimary` is positional — first row in
- *  `modelsDirs` wins, but we materialise it here so the view stays a
- *  pure prop reader. */
+ *  `isPrimary` is positional — the first row in `modelsDirs` wins, but we
+ *  materialise it here so the view stays a pure prop reader. */
 export interface GlobalSettingsModelsDir {
   path: string
   isPrimary: boolean
-  isDefault: boolean
 }
 
 /** Snapshot pushed to the global-settings popup on open and on every
@@ -335,8 +332,7 @@ function buildPickerStorageSlice(): PickerStorageSlice {
     sharedDirectoriesFields,
     modelsDirs: modelsDirsRaw.map((p, i) => ({
       path: p,
-      isPrimary: i === 0,
-      isDefault: p === modelsDefault
+      isPrimary: i === 0
     })),
     modelsSystemDefault: modelsDefault
   }
@@ -2033,8 +2029,7 @@ function buildGlobalSettingsSnapshot(): GlobalSettingsSnapshot {
     sharedDirectoriesFields: shared,
     modelsDirs: modelsDirsRaw.map((p, i) => ({
       path: p,
-      isPrimary: i === 0,
-      isDefault: p === modelsDefault
+      isPrimary: i === 0
     })),
     modelsSystemDefault: modelsDefault,
     appUpdate: {

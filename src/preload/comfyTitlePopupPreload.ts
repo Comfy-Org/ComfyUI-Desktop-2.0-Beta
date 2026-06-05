@@ -75,7 +75,6 @@ export interface PopupInstancePickerSnapshot {
 export interface PopupGlobalSettingsModelsDir {
   path: string
   isPrimary: boolean
-  isDefault: boolean
 }
 
 /** Snapshot for the global-settings popup; field arrays are loose-typed (the

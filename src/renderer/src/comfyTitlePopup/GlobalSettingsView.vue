@@ -26,7 +26,6 @@ import type {
 interface ModelsDir {
   path: string
   isPrimary: boolean
-  isDefault: boolean
 }
 
 interface Snapshot {

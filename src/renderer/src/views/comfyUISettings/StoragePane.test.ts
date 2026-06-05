@@ -46,8 +46,8 @@ function makeSnapshot(): StorageSnapshot {
   return {
     sharedDirectoriesFields: [],
     modelsDirs: [
-      { path: '/home/u/ComfyUI/models', isPrimary: true, isDefault: true },
-      { path: '/mnt/extra/models', isPrimary: false, isDefault: false },
+      { path: '/home/u/ComfyUI/models', isPrimary: true },
+      { path: '/mnt/extra/models', isPrimary: false },
     ],
     modelsSystemDefault: '/home/u/ComfyUI/models',
   }

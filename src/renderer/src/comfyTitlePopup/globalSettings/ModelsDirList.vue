@@ -1,13 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Folder, FolderLock, FolderOpen, MoreHorizontal, Plus } from 'lucide-vue-next'
+import { Folder, FolderOpen, MoreHorizontal, Plus } from 'lucide-vue-next'
 import InfoTooltip from '../../components/InfoTooltip.vue'
 
 interface ModelsDir {
   path: string
   isPrimary: boolean
-  isDefault: boolean
 }
 
 interface Props {
@@ -39,9 +38,8 @@ function setMenuRef(index: number, el: Element | null): void {
 }
 
 function hasMenuActions(dir: ModelsDir): boolean {
-  const canMakePrimary = !dir.isPrimary
-  const canRemove = !dir.isDefault && !dir.isPrimary
-  return canMakePrimary || canRemove
+  // Both "Make primary" and "Remove" are available on any non-primary row.
+  return !dir.isPrimary
 }
 
 async function toggleMenu(index: number): Promise<void> {
@@ -131,13 +129,9 @@ const rows = computed(() =>
       class="models-dir-row"
       :class="{ 'is-just-promoted': row.path === justPromotedPath }"
     >
-      <component
-        :is="row.isDefault ? FolderLock : Folder"
+      <Folder
         :size="14"
         class="models-dir-icon"
-        :class="{ 'is-default': row.isDefault }"
-        :aria-label="row.isDefault ? t('tooltips.modelsDefault') : undefined"
-        :title="row.isDefault ? t('tooltips.modelsDefault') : undefined"
       />
       <div class="models-dir-main">
         <span class="models-dir-name" :title="row.path">{{ row.path }}</span>
@@ -188,7 +182,7 @@ const rows = computed(() =>
               {{ t('models.makePrimary', 'Make primary') }}
             </button>
             <button
-              v-if="!row.isDefault && !row.isPrimary"
+              v-if="!row.isPrimary"
               type="button"
               role="menuitem"
               class="danger"
@@ -253,10 +247,6 @@ const rows = computed(() =>
 .models-dir-icon {
   flex-shrink: 0;
   color: var(--text-muted);
-}
-
-.models-dir-icon.is-default {
-  color: color-mix(in oklab, var(--neutral-100) 60%, transparent);
 }
 
 .models-dir-main {
