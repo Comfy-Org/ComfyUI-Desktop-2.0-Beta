@@ -49,8 +49,31 @@ export function stateDir(): string {
   return app.getPath("userData");
 }
 
-export function defaultInstallDir(): string {
+/** Built-in fallback when no `installDir` setting is configured. */
+export function builtinDefaultInstallDir(): string {
   return path.join(app.getPath("home"), "ComfyUI-Installs");
+}
+
+/** Resolver for the user's configured install location, injected by settings.ts.
+ *  Kept as injected state (not a direct `import`) so paths.ts has no dependency
+ *  on settings — settings → models → paths is the only allowed direction, and
+ *  importing settings here would re-enter paths before its top-level consts
+ *  (e.g. `isLinux`) initialize. */
+let installDirResolver: (() => string | undefined) | null = null;
+
+export function setInstallDirResolver(resolver: () => string | undefined): void {
+  installDirResolver = resolver;
+}
+
+/** Parent directory suggested for new installations. Honors the user's
+ *  `installDir` Desktop Setting so every new-install path stays consistent;
+ *  falls back to the built-in default. */
+export function defaultInstallDir(): string {
+  const configured = installDirResolver?.();
+  if (typeof configured === "string" && configured.trim() !== "") {
+    return configured;
+  }
+  return builtinDefaultInstallDir();
 }
 
 /** Migrate a file/dir to a new location (only if old exists and new doesn't). Uses

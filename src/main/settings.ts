@@ -1,7 +1,7 @@
 import path from 'path'
 import fs from 'fs'
 import { app } from 'electron'
-import { configDir, cacheDir, homeDir } from './lib/paths'
+import { configDir, cacheDir, homeDir, setInstallDirResolver } from './lib/paths'
 import { MODEL_FOLDER_TYPES } from './lib/models'
 import { readFileSafe, writeFileSafe } from './lib/safe-file'
 
@@ -12,6 +12,8 @@ export interface KnownSettings {
   modelsDirs: string[]
   inputDir: string
   outputDir: string
+  /** Default suggested parent directory for new installations. */
+  installDir: string
   language?: string
   theme?: string
   /** Legacy "check for updates on startup" toggle. No longer gated on a setting;
@@ -40,6 +42,7 @@ type DefaultedSettingKey =
   | 'modelsDirs'
   | 'inputDir'
   | 'outputDir'
+  | 'installDir'
 type SettingsDefaults = Pick<KnownSettings, DefaultedSettingKey>
 
 const dataPath = path.join(configDir(), "settings.json")
@@ -53,6 +56,7 @@ const SETTINGS_SCHEMA = {
   modelsDirs: { nullable: false },
   inputDir: { nullable: false },
   outputDir: { nullable: false },
+  installDir: { nullable: false },
   language: { nullable: false },
   theme: { nullable: false },
   autoUpdate: { nullable: false },
@@ -89,6 +93,7 @@ export const defaults: SettingsDefaults = {
   modelsDirs: [path.join(SHARED_ROOT, "models")],
   inputDir: path.join(SHARED_ROOT, "input"),
   outputDir: path.join(SHARED_ROOT, "output"),
+  installDir: path.join(homeDir(), "ComfyUI-Installs"),
 }
 
 const systemDefault = defaults.modelsDirs[0]!
@@ -246,6 +251,12 @@ function load(): Settings {
       result.outputDir = nextOutputDir
       changed = true
     }
+
+    const nextInstallDir = sanitizeUserDefaultPath(result.installDir, defaults.installDir)
+    if (nextInstallDir !== result.installDir) {
+      result.installDir = nextInstallDir
+      changed = true
+    }
   }
 
   // Keep modelsDirs a valid array of non-empty strings; inject system default as fallback.
@@ -355,3 +366,7 @@ export function has(key: string): boolean {
 export function getMirrorConfig(): { pypiMirror?: string; useChineseMirrors?: boolean } {
   return { pypiMirror: get('pypiMirror'), useChineseMirrors: get('useChineseMirrors') === true }
 }
+
+// Let paths.defaultInstallDir() honor the user's configured location without
+// paths.ts importing this module (which would create an init cycle).
+setInstallDirResolver(() => get('installDir'))

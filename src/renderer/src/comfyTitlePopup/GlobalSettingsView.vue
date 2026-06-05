@@ -36,6 +36,7 @@ interface Snapshot {
   cacheFields: Record<string, unknown>[]
   advancedFields: Record<string, unknown>[]
   sharedDirectoriesFields: Record<string, unknown>[]
+  installLocationFields: Record<string, unknown>[]
   modelsDirs: ModelsDir[]
   modelsSystemDefault: string
   appUpdate: {
@@ -112,6 +113,9 @@ const cacheSections = computed<DetailSection[]>(() => [
 ])
 const advancedSections = computed<DetailSection[]>(() => [
   { fields: props.snapshot.advancedFields as unknown as DetailField[] }
+])
+const installLocationSections = computed<DetailSection[]>(() => [
+  { fields: props.snapshot.installLocationFields as unknown as DetailField[] }
 ])
 const appUpdateState = computed<AppUpdateState>(
   () => props.snapshot.appUpdate.state as unknown as AppUpdateState
@@ -268,6 +272,16 @@ onMounted(() => {
         </template>
 
         <template v-else>
+          <GlobalSettingsMicroSection
+            :title="t('settings.installLocation', 'Default Install Location')"
+            :tooltip="t('tooltips.installDir')"
+          >
+            <SettingsSectionList
+              :sections="installLocationSections"
+              @update-field="handleUpdateField"
+            />
+          </GlobalSettingsMicroSection>
+
           <GlobalSettingsMicroSection :title="snapshot.i18n.advanced">
             <SettingsSectionList :sections="advancedSections" @update-field="handleUpdateField" />
           </GlobalSettingsMicroSection>

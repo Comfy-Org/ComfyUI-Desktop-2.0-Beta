@@ -27,7 +27,8 @@ import {
   applySettingSet,
   buildSettingsSections,
   buildMediaSections,
-  buildModelsPayload
+  buildModelsPayload,
+  buildInstallLocationFields
 } from '../lib/ipc/registerSettingsHandlers'
 import { globalSettingsEvents } from '../lib/globalSettingsEvents'
 import { getCachedGithubStarCount, getGithubStarCount } from '../lib/githubStars'
@@ -192,6 +193,9 @@ export interface GlobalSettingsSnapshot {
   cacheFields: Record<string, unknown>[]
   advancedFields: Record<string, unknown>[]
   sharedDirectoriesFields: Record<string, unknown>[]
+  /** Default suggested install location — global-only; not in the
+   *  per-instance picker storage slice. */
+  installLocationFields: Record<string, unknown>[]
   modelsDirs: GlobalSettingsModelsDir[]
   modelsSystemDefault: string
   appUpdate: {
@@ -2017,6 +2021,7 @@ function buildGlobalSettingsSnapshot(): GlobalSettingsSnapshot {
   const cache = findSettingsFields(settingsSections, 'settings.cache', 2)
   const advanced = findSettingsFields(settingsSections, 'settings.advanced', 3)
   const shared = (mediaSections[0]?.fields ?? []).map(toDetailField)
+  const installLocationFields = (buildInstallLocationFields()[0]?.fields ?? []).map(toDetailField)
   const modelsDirsRaw = (modelsPayload.sections[0]?.fields[0]?.value as string[] | undefined) ?? []
   const modelsDefault = modelsPayload.systemDefault
   const appUpdateState = updater.getCurrentUpdateState() as unknown as Record<string, unknown>
@@ -2031,6 +2036,7 @@ function buildGlobalSettingsSnapshot(): GlobalSettingsSnapshot {
     cacheFields: cache,
     advancedFields: advanced,
     sharedDirectoriesFields: shared,
+    installLocationFields,
     modelsDirs: modelsDirsRaw.map((p, i) => ({
       path: p,
       isPrimary: i === 0,
