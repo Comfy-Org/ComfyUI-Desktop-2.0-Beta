@@ -274,7 +274,6 @@
     "models": "共享模型",
     "cache": "缓存",
     "cacheDir": "缓存目录",
-    "maxCachedFiles": "最大缓存下载数",
     "open": "打开",
     "advanced": "高级",
     "pypiMirror": "PyPI 镜像 URL",

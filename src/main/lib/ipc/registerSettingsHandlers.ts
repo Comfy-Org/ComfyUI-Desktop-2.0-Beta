@@ -79,14 +79,6 @@ export function buildSettingsSections(): SettingsSection[] {
           type: 'path',
           value: s.cacheDir,
           openable: true
-        },
-        {
-          id: 'maxCachedFiles',
-          label: i18n.t('settings.maxCachedFiles'),
-          type: 'number',
-          value: s.maxCachedFiles,
-          min: 1,
-          max: 50
         }
       ]
     },

@@ -403,7 +403,6 @@
     "models": "Shared Models",
     "cache": "Cache",
     "cacheDir": "Cache Directory",
-    "maxCachedFiles": "Max Cached Downloads",
     "open": "Open",
     "advanced": "Advanced",
     "pypiMirror": "PyPI Mirror URL",
