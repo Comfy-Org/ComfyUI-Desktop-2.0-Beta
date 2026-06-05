@@ -13,7 +13,7 @@ import {
   _markLaunching, _clearLaunchingFailed,
   isEffectivelyEmptyInstallDir,
   captureSnapshotIfChanged, getSnapshotCount,
-  syncCustomModelFolders, discoverExtraModelFolders,
+  syncCustomModelFolders, discoverExtraModelFolders, instanceModelPathsYaml,
   createSessionPath, buildLaunchEnv, checkRebootMarker,
   makeSendProgress, makeSendOutput,
   getComfyArgsSchema, filterUnsupportedArgs,
@@ -136,10 +136,26 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
   const useSharedModels = argsAvailable && (inst.useSharedModels as boolean | undefined) !== false
   const useSharedInputOutput = argsAvailable && (inst.useSharedInputOutput as boolean | undefined) !== false
   let preLaunchExtras: string[] = []
-  let sharedModelsDirs: string[] | undefined
+  // Model dirs whose extra-folder changes drive auto-relaunch, plus the YAML
+  // they're written to (undefined = the global shared YAML). Sourced from the
+  // global settings when this install uses shared models, or from its
+  // per-install list when it opts out.
+  let modelDirsForLaunch: string[] | undefined
+  let modelYamlPath: string | undefined
+  let manageModelFolders = false
   if (useSharedModels) {
-    sharedModelsDirs = settings.get('modelsDirs') as string[] | undefined
-    const { config } = syncCustomModelFolders(inst.installPath, sharedModelsDirs)
+    manageModelFolders = true
+    modelDirsForLaunch = settings.get('modelsDirs') as string[] | undefined
+  } else if (argsAvailable) {
+    const instanceDirs = inst.modelDirs as string[] | undefined
+    if (instanceDirs && instanceDirs.length > 0) {
+      manageModelFolders = true
+      modelDirsForLaunch = instanceDirs
+      modelYamlPath = instanceModelPathsYaml(installationId)
+    }
+  }
+  if (manageModelFolders) {
+    const { config } = syncCustomModelFolders(inst.installPath, modelDirsForLaunch, [], modelYamlPath)
     if (config) {
       launchCmd.args!.push('--extra-model-paths-config', config.yamlPath)
     }
@@ -521,8 +537,8 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
 
   // Check if custom nodes created new model folders during startup
   let site1Relaunched = false
-  if (useSharedModels) {
-    const { newFolders } = syncCustomModelFolders(inst.installPath, sharedModelsDirs, preLaunchExtras)
+  if (manageModelFolders) {
+    const { newFolders } = syncCustomModelFolders(inst.installPath, modelDirsForLaunch, preLaunchExtras, modelYamlPath)
     if (newFolders.length > 0) {
       sendOutput(`\n--- Restarting: new model folders detected (${newFolders.join(', ')}) ---\n\n`)
       if (_onModelFolderRelaunch) {
@@ -582,8 +598,8 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
         if (!isModelRelaunch) {
           sendOutput('\n--- ComfyUI restarting ---\n\n')
         }
-        if (useSharedModels) {
-          const { config } = syncCustomModelFolders(inst.installPath, sharedModelsDirs)
+        if (manageModelFolders) {
+          const { config } = syncCustomModelFolders(inst.installPath, modelDirsForLaunch, [], modelYamlPath)
           if (config) {
             for (const f of config.extraFolders) knownExtras.add(f)
           }
@@ -604,7 +620,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
         writePortLock(launchCmd.port!, { pid: proc.pid!, installationName: inst.name })
         attachExitHandler(proc)
         if (_onComfyRestarted) _onComfyRestarted({ installationId, process: proc })
-        if (useSharedModels) {
+        if (manageModelFolders) {
           rebootModelCheckAbort = new AbortController()
           const checkSignal = rebootModelCheckAbort.signal
           waitForPort(launchCmd.port!, '127.0.0.1', { timeoutMs: COMFY_BOOT_TIMEOUT_MS, signal: checkSignal })
@@ -615,7 +631,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
               const currentExtras = discoverExtraModelFolders(inst.installPath)
               const newFolders = currentExtras.filter((f) => !knownExtras.has(f))
               if (newFolders.length > 0) {
-                const { config } = syncCustomModelFolders(inst.installPath, sharedModelsDirs)
+                const { config } = syncCustomModelFolders(inst.installPath, modelDirsForLaunch, [], modelYamlPath)
                 if (config) {
                   for (const f of config.extraFolders) knownExtras.add(f)
                 }

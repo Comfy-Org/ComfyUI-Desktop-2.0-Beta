@@ -31,6 +31,11 @@ export interface InstallationRecord {
    *  `--output-directory` from the global settings; else uses the per-install
    *  dirs below or ComfyUI's `<installPath>/{input,output}` defaults. */
   useSharedInputOutput?: boolean
+  /** Per-install extra model directories, used only when
+   *  `useSharedModels === false`. The first entry is the primary (where newly
+   *  downloaded models go). Written to a per-install
+   *  `--extra-model-paths-config` YAML at launch. */
+  modelDirs?: string[]
   /** Per-install input dir, used only when `useSharedInputOutput === false`. */
   inputDir?: string
   /** Per-install output dir, used only when `useSharedInputOutput === false`. */

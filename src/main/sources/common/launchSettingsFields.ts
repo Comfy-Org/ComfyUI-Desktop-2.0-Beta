@@ -31,6 +31,16 @@ export function buildStorageFields(installation: InstallationRecord): Record<str
       editable: true, editType: 'boolean', tooltip: t('tooltips.useSharedInputOutput'),
       requiresRestart: true,
     },
+    // Per-install model directories, only meaningful when `useSharedModels === false`.
+    // StoragePane.vue renders this through its own ModelsDirList (not the generic
+    // SettingsSectionList) and hides it while shared models is on.
+    {
+      id: 'modelDirs', label: t('common.perInstallModelDirs'),
+      value: (installation.modelDirs as string[] | undefined) ?? [],
+      editable: true, editType: 'model-dirs',
+      tooltip: t('tooltips.perInstallModelDirs'),
+      requiresRestart: true,
+    },
     // Per-install paths, only meaningful when `useSharedInputOutput === false`;
     // StoragePane.vue hides them while the toggle is on.
     {

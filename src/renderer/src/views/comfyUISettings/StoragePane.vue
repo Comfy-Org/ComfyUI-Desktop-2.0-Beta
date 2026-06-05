@@ -68,7 +68,7 @@ watch(
 )
 
 /** Edits to these per-install fields also trigger the restart prompt. */
-const PER_INSTALL_STORAGE_FIELD_IDS = ['useSharedModels', 'useSharedInputOutput', 'inputDir', 'outputDir']
+const PER_INSTALL_STORAGE_FIELD_IDS = ['useSharedModels', 'useSharedInputOutput', 'modelDirs', 'inputDir', 'outputDir']
 
 const showRestartWarning = computed(() => {
   if (globalTouched.value) return true
@@ -104,17 +104,72 @@ const useSharedInputOutputEnabled = computed<boolean>(() => {
   return f ? f.value !== false : true
 })
 
-/** Per-install sections, with `inputDir` / `outputDir` filtered out when
- *  shared input/output is on (they're meaningless in that mode). */
+/** Per-install sections rendered by the generic SettingsSectionList. `modelDirs`
+ *  is always stripped (it has its own ModelsDirList UI below), and
+ *  `inputDir` / `outputDir` are stripped when shared input/output is on. */
 const perInstallSections = computed<DetailSection[]>(() => {
-  if (useSharedInputOutputEnabled.value) {
-    return props.sections.map((s) => ({
-      ...s,
-      fields: (s.fields ?? []).filter((f) => f.id !== 'inputDir' && f.id !== 'outputDir'),
-    }))
-  }
-  return props.sections
+  const dropInputOutput = useSharedInputOutputEnabled.value
+  return props.sections.map((s) => ({
+    ...s,
+    fields: (s.fields ?? []).filter(
+      (f) => f.id !== 'modelDirs' && (!dropInputOutput || (f.id !== 'inputDir' && f.id !== 'outputDir'))
+    ),
+  }))
 })
+
+/** Per-install model directories, derived from the `modelDirs` field. The first
+ *  entry is the primary (where newly downloaded models go), mirroring the global
+ *  shared-models list. */
+const instanceModelDirs = computed<ModelsDir[]>(() => {
+  const f = findField('modelDirs')
+  const dirs = Array.isArray(f?.value) ? (f!.value as string[]) : []
+  return dirs.map((path, i) => ({ path, isPrimary: i === 0 }))
+})
+
+function persistInstanceModelDirs(dirs: string[]): void {
+  const field = findField('modelDirs')
+  if (!field) return
+  emit('update-field', field, dirs)
+}
+
+async function handleAddInstanceModelDir(): Promise<void> {
+  const picked = await bridge?.globalSettingsBrowseFolder()
+  if (!picked) return
+  const dirs = instanceModelDirs.value.map((d) => d.path)
+  if (dirs.includes(picked)) return
+  dirs.push(picked)
+  persistInstanceModelDirs(dirs)
+}
+
+async function handleRemoveInstanceModelDir(index: number): Promise<void> {
+  const dir = instanceModelDirs.value[index]
+  if (!dir) return
+  const ok = await modal.confirm({
+    title: t('models.removeInstanceDirTitle', 'Remove model directory?'),
+    message: t(
+      'models.removeInstanceDirConfirm',
+      "This won't delete any files. You can re-add the directory later from this list."
+    ),
+    confirmLabel: t('models.removeDir', 'Remove'),
+    confirmStyle: 'danger',
+  })
+  if (!ok) return
+  const dirs = instanceModelDirs.value.map((d) => d.path)
+  dirs.splice(index, 1)
+  persistInstanceModelDirs(dirs)
+}
+
+function handleMakeInstancePrimary(index: number): void {
+  const dirs = instanceModelDirs.value.map((d) => d.path)
+  const moved = dirs.splice(index, 1)[0]
+  if (typeof moved !== 'string') return
+  dirs.unshift(moved)
+  persistInstanceModelDirs(dirs)
+}
+
+function handleOpenInstanceModelDir(path: string): void {
+  bridge?.globalSettingsOpenPath(path)
+}
 
 async function handleAddModelsDir(): Promise<void> {
   const picked = await bridge?.globalSettingsBrowseFolder()
@@ -220,11 +275,27 @@ function handleUpdatePerInstallField(field: DetailField, value: unknown): void {
         {{
           t(
             'comfyUISettings.useSharedModelsOffWarning',
-            'Shared models is OFF for this install. It can only see models placed under its own folder — your shared library is hidden until you turn this back on.'
+            'Shared models is OFF for this install. It can only see models in its own folder plus any custom directories you add below — your shared library stays hidden until you turn this back on.'
           )
         }}
       </p>
     </div>
+
+    <!-- Per-install model directories, shown only when this install opts out of
+         shared models. Mirrors the global Shared Models list. -->
+    <GlobalSettingsMicroSection
+      v-if="findField('modelDirs') && !useSharedModelsEnabled"
+      :title="t('settings.modelDirectories', 'Model Directories')"
+      :tooltip="t('tooltips.perInstallModelDirs')"
+    >
+      <ModelsDirList
+        :dirs="instanceModelDirs"
+        @open="handleOpenInstanceModelDir"
+        @remove="handleRemoveInstanceModelDir"
+        @make-primary="handleMakeInstancePrimary"
+        @add="handleAddInstanceModelDir"
+      />
+    </GlobalSettingsMicroSection>
 
     <!-- Hidden when this install opts out of shared models. -->
     <GlobalSettingsMicroSection

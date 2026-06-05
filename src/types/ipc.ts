@@ -125,7 +125,7 @@ export interface ComfyArgDef {
 export interface DetailField {
   id: string
   label: string
-  value: string | boolean | number | Record<string, string> | null
+  value: string | boolean | number | string[] | Record<string, string> | null
   editable?: boolean
   editType?:
     | 'select'
@@ -136,6 +136,7 @@ export interface DetailField {
     | 'channel-cards'
     | 'args-builder'
     | 'env-vars'
+    | 'model-dirs'
   options?: DetailFieldOption[]
   refreshSection?: boolean
   /** Action id to fire automatically when this field's value changes

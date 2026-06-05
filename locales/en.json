@@ -85,7 +85,7 @@
     "emptyInstallLess": "Open a ComfyUI install to view its settings.",
     "storageGlobalNote": "Changes here apply to all of your ComfyUI instances.",
     "storageRestartNote": "Restart the application (or close and reopen) for these changes to take effect.",
-    "useSharedModelsOffWarning": "Shared models is OFF for this install. It can only see models placed under its own folder — your shared library is hidden until you turn this back on."
+    "useSharedModelsOffWarning": "Shared models is OFF for this install. It can only see models in its own folder plus any custom directories you add below — your shared library stays hidden until you turn this back on."
   },
 
   "comfyLifecycle": {
@@ -142,7 +142,9 @@
     "removeDir": "Remove",
     "primary": "primary",
     "default": "default",
-    "makePrimary": "Make Primary"
+    "makePrimary": "Make Primary",
+    "removeInstanceDirTitle": "Remove model directory?",
+    "removeInstanceDirConfirm": "This won't delete any files. You can re-add the directory later from this list."
   },
 
   "common": {
@@ -178,6 +180,7 @@
     "extract": "Extract",
     "useSharedModels": "Use Shared Models",
     "useSharedInputOutput": "Use Shared Input/Output Folders",
+    "perInstallModelDirs": "Model Directories",
     "perInstallInputDir": "Input Folder",
     "perInstallOutputDir": "Output Folder",
     "autoDownloadOutputs": "Auto-Download Outputs",
@@ -401,6 +404,7 @@
     "telemetry": "Telemetry",
     "telemetryEnabled": "Share anonymous usage telemetry",
     "models": "Shared Models",
+    "modelDirectories": "Model Directories",
     "cache": "Cache",
     "cacheDir": "Cache Directory",
     "maxCachedFiles": "Max Cached Downloads",
@@ -1055,6 +1059,7 @@
     "modelsDefault": "The system default directory. This path is created automatically and cannot be removed.",
     "useSharedModels": "When enabled, this install can see every model in your global shared model folders. Disabling hides those models — most users want this on.",
     "useSharedInputOutput": "When enabled, this install reads and writes input and output files from the global shared folders. Disable to point this install at its own folders below.",
+    "perInstallModelDirs": "Extra model directories for this install only, used while shared models is off. The first directory is the primary, where newly downloaded models are saved.",
     "perInstallInputDir": "Folder this install reads input files from. Leave blank to use this install's own internal input folder.",
     "perInstallOutputDir": "Folder this install writes generated output files to. Leave blank to use this install's own internal output folder.",
     "inputDir": "Shared folder for input files (images, masks, etc.) accessible to all installations.",

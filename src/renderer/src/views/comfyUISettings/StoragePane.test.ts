@@ -68,6 +68,37 @@ function mountPane(snapshot: StorageSnapshot = makeSnapshot()) {
   })
 }
 
+// Per-install storage section with shared-models toggled off and a per-instance
+// model-dirs list, exercising the StoragePane's own ModelsDirList wiring.
+function makeStorageSections(modelDirs: string[]) {
+  return [
+    {
+      fields: [
+        { id: 'useSharedModels', label: 'Use Shared Models', value: false, editable: true, editType: 'boolean' },
+        { id: 'modelDirs', label: 'Model Directories', value: modelDirs, editable: true, editType: 'model-dirs' },
+      ],
+    },
+  ]
+}
+
+function mountPaneWithSections(
+  sections: ReturnType<typeof makeStorageSections>,
+  snapshot: StorageSnapshot = makeSnapshot()
+) {
+  return mount(StoragePane, {
+    props: {
+      installation: { id: 'inst-1' } as never,
+      snapshot,
+      sections: sections as never,
+      pendingRestartFieldIds: new Set<string>(),
+      fieldErrorMessages: new Map<string, string>(),
+      runningActionIds: new Set<string>(),
+    },
+    global: { plugins: [makeI18n()] },
+    attachTo: document.body,
+  })
+}
+
 describe('StoragePane', () => {
   beforeEach(() => {
     document.body.innerHTML = ''
@@ -154,5 +185,60 @@ describe('StoragePane', () => {
     await wrapper.findAll('.models-dir-row .models-dir-action')[0]!.trigger('click')
     await flushPromises()
     expect(wrapper.find('.storage-note.is-warning').exists()).toBe(false)
+  })
+
+  describe('per-instance model directories (shared models off)', () => {
+    it('renders the per-instance model-dir list when shared models is off', async () => {
+      installMockBridge()
+      const wrapper = mountPaneWithSections(makeStorageSections(['/a/models', '/b/models']))
+      await nextTick()
+      // Global Shared Models section is hidden; only the instance list shows.
+      const rows = wrapper.findAll('.models-dir-row')
+      expect(rows).toHaveLength(2)
+      expect(rows[0]!.find('.tag-primary').exists()).toBe(true)
+      expect(rows[1]!.find('.tag-primary').exists()).toBe(false)
+      expect(wrapper.text()).toContain('Model Directories')
+    })
+
+    it('emits update-field with the appended dir when adding', async () => {
+      const bridge = installMockBridge()
+      bridge.browseFolderReturn = '/c/models'
+      const wrapper = mountPaneWithSections(makeStorageSections(['/a/models', '/b/models']))
+      await nextTick()
+      await wrapper.find('.models-dir-add').trigger('click')
+      await flushPromises()
+      const emitted = wrapper.emitted('update-field')
+      expect(emitted).toBeTruthy()
+      const [field, value] = emitted![0] as [{ id: string }, string[]]
+      expect(field.id).toBe('modelDirs')
+      expect(value).toEqual(['/a/models', '/b/models', '/c/models'])
+    })
+
+    it('emits update-field with reordered dirs when making one primary', async () => {
+      installMockBridge()
+      const wrapper = mountPaneWithSections(makeStorageSections(['/a/models', '/b/models']))
+      await nextTick()
+      await wrapper.find('.models-dir-menu-wrap > button').trigger('click')
+      await nextTick()
+      await flushPromises()
+      await wrapper.find('.models-dir-menu button[role="menuitem"]').trigger('click')
+      await flushPromises()
+      const emitted = wrapper.emitted('update-field')
+      expect(emitted).toBeTruthy()
+      const [, value] = emitted![0] as [{ id: string }, string[]]
+      expect(value).toEqual(['/b/models', '/a/models'])
+    })
+
+    it('hides the per-instance list when shared models is on', async () => {
+      installMockBridge()
+      const sections = makeStorageSections(['/a/models'])
+      sections[0]!.fields[0]!.value = true // useSharedModels = true
+      const wrapper = mountPaneWithSections(sections)
+      await nextTick()
+      // Only the global Shared Models list (2 rows) renders, not the instance one.
+      const rows = wrapper.findAll('.models-dir-row')
+      expect(rows).toHaveLength(2)
+      expect(wrapper.text()).toContain('Shared Models')
+    })
   })
 })

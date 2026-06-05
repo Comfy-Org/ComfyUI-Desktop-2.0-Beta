@@ -23,6 +23,7 @@ export const en = {
     sharedDirectories: 'Shared Directories',
     installLocation: 'Default Install Location',
     models: 'Shared Models',
+    modelDirectories: 'Model Directories',
     updatesTab: 'Updates',
     checkForUpdates: 'Check for updates',
     checkingForUpdates: 'Checking…'
@@ -31,7 +32,9 @@ export const en = {
     tabStorage: 'Storage',
     storageGlobalNote: 'Changes here apply to all of your ComfyUI instances.',
     storageRestartNote:
-      'Restart the application (or close and reopen) for these changes to take effect.'
+      'Restart the application (or close and reopen) for these changes to take effect.',
+    useSharedModelsOffWarning:
+      'Shared models is OFF for this install. It can only see models in its own folder plus any custom directories you add below — your shared library stays hidden until you turn this back on.'
   },
   statusFactPanel: {
     editName: 'Edit installation name'
@@ -41,6 +44,9 @@ export const en = {
     removeDir: 'Remove',
     removeDirTitle: 'Remove shared models directory?',
     removeDirConfirm:
+      "This won't delete any files. You can re-add the directory later from this list.",
+    removeInstanceDirTitle: 'Remove model directory?',
+    removeInstanceDirConfirm:
       "This won't delete any files. You can re-add the directory later from this list.",
     primary: 'Primary',
     makePrimary: 'Make primary',
@@ -55,6 +61,8 @@ export const en = {
       "Folders shared across all installations so models aren't downloaded twice. Newly downloaded models go to the primary folder. The primary folder can't be removed while it's in use — pick a different primary first.",
     modelsPrimary:
       'The primary directory is where ComfyUI saves newly downloaded models by default.',
+    perInstallModelDirs:
+      'Extra model directories for this install only, used while shared models is off. The first directory is the primary, where newly downloaded models are saved.',
     installDir:
       "Default parent folder suggested when creating new installations. Existing installs aren't moved."
   },

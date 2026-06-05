@@ -38,7 +38,7 @@ import { formatTime } from '../util'
 import { getActiveDownloads } from '../comfyDownloadManager'
 import * as releaseCache from '../release-cache'
 import * as i18n from '../i18n'
-import { syncCustomModelFolders, discoverExtraModelFolders } from '../models'
+import { syncCustomModelFolders, discoverExtraModelFolders, instanceModelPathsYaml } from '../models'
 import { copyDirWithProgress } from '../copy'
 import { fetchJSON } from '../fetch'
 import { fetchLatestRelease, getLatestStableTag } from '../comfyui-releases'
@@ -73,7 +73,7 @@ export {
   performLocalMigration, stageLocalSnapshot,
   getDiskSpace, getDirectorySize, validateInstallPath,
   syncOemSeed, formatTime, getActiveDownloads,
-  syncCustomModelFolders, discoverExtraModelFolders,
+  syncCustomModelFolders, discoverExtraModelFolders, instanceModelPathsYaml,
   copyDirWithProgress, fetchJSON, fetchLatestRelease, getLatestStableTag,
   captureSnapshotIfChanged, getSnapshotCount, getSnapshotListData, getSnapshotDetailData,
   getSnapshotDiffVsPrevious, diffAgainstCurrent, loadSnapshot, listSnapshots, diffSnapshots,

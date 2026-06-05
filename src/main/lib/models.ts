@@ -29,6 +29,13 @@ export const MODEL_FOLDER_TYPES = [
 
 const YAML_PATH: string = path.join(dataDir(), 'shared_model_paths.yaml')
 
+/** Per-install YAML path for instance-specific model directories (used when an
+ *  install opts out of shared models). Kept under dataDir() so it survives a
+ *  reinstall and is trivial to clean up when the install is removed. */
+export function instanceModelPathsYaml(installationId: string): string {
+  return path.join(dataDir(), 'instance-model-paths', `${installationId}.yaml`)
+}
+
 // Canonical names plus legacy/alias directory names ComfyUI maps to canonical names.
 const KNOWN_MODEL_FOLDERS = new Set<string>([
   ...MODEL_FOLDER_TYPES,
@@ -145,7 +152,8 @@ function buildYaml(modelsDirs: string[], extraFolders: string[] = []): string {
  * already present in the shared dirs. Returns null if no directories are configured.
  */
 export function ensureModelPathsConfig(
-  modelsDirs: string[] | null | undefined
+  modelsDirs: string[] | null | undefined,
+  yamlPath: string = YAML_PATH
 ): ModelPathsResult | null {
   if (!modelsDirs || !Array.isArray(modelsDirs) || modelsDirs.length === 0) return null
   const resolved = modelsDirs.map((d) => path.resolve(d))
@@ -154,14 +162,14 @@ export function ensureModelPathsConfig(
 
   let existing: string | null = null
   try {
-    existing = fs.readFileSync(YAML_PATH, 'utf-8')
+    existing = fs.readFileSync(yamlPath, 'utf-8')
   } catch {}
 
   if (existing !== yaml) {
-    writeFileSafe(YAML_PATH, yaml)
+    writeFileSafe(yamlPath, yaml)
   }
 
-  return { yamlPath: YAML_PATH, extraFolders }
+  return { yamlPath, extraFolders }
 }
 
 /** All subdirectory names from the install's models dir, checking standalone and portable layouts. */
@@ -183,7 +191,8 @@ function allInstallModelFolders(installPath: string): string[] {
 export function syncCustomModelFolders(
   installPath: string,
   modelsDirs: string[] | null | undefined,
-  previousExtras: string[] = []
+  previousExtras: string[] = [],
+  yamlPath: string = YAML_PATH
 ): SyncResult {
   if (!modelsDirs || !Array.isArray(modelsDirs) || modelsDirs.length === 0) {
     return { newFolders: [], config: null }
@@ -204,7 +213,7 @@ export function syncCustomModelFolders(
   const previousSet = new Set(previousExtras)
   const newFolders = extraFolders.filter((f) => !previousSet.has(f))
 
-  const config = ensureModelPathsConfig(modelsDirs)
+  const config = ensureModelPathsConfig(modelsDirs, yamlPath)
 
   return { newFolders, config }
 }
