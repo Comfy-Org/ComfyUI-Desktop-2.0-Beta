@@ -74,8 +74,7 @@
   "media": {
     "sharedDirs": "媒体",
     "inputDir": "输入目录",
-    "outputDir": "输出目录",
-    "installDir": "安装位置"
+    "outputDir": "输出目录"
   },
 
   "directories": {
@@ -288,7 +287,7 @@
     "community": "社区",
     "storageTab": "存储",
     "sharedDirectories": "共享目录",
-    "installLocation": "安装位置",
+    "installLocation": "默认安装位置",
     "updatesTab": "更新"
   },
 

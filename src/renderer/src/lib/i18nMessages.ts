@@ -21,7 +21,7 @@ export const en = {
     platform: 'Platform',
     storageTab: 'Storage',
     sharedDirectories: 'Shared Directories',
-    installLocation: 'Install Location',
+    installLocation: 'Default Install Location',
     models: 'Shared Models',
     updatesTab: 'Updates',
     checkForUpdates: 'Check for updates',

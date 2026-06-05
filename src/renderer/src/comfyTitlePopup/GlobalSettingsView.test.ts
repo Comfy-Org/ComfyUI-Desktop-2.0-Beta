@@ -194,14 +194,22 @@ describe('GlobalSettingsView', () => {
     expect(bridge.updateFieldCalls).toEqual([{ id: 'sharedOutputDir', value: true }])
   })
 
-  it('Storage tab renders the global Install Location section', async () => {
+  it('Advanced tab renders the global Default Install Location section', async () => {
+    installMockBridge()
+    const wrapper = mountView()
+    await wrapper.findAll('.gs-tab').find((t) => t.text() === 'Advanced')!.trigger('click')
+    await nextTick()
+    expect(wrapper.text()).toContain('Default Install Location')
+    const inputValues = wrapper.findAll('input').map((i) => (i.element as HTMLInputElement).value)
+    expect(inputValues).toContain('/home/u/ComfyUI-Installs')
+  })
+
+  it('does not render the Install Location section in the Storage tab', async () => {
     installMockBridge()
     const wrapper = mountView()
     await wrapper.findAll('.gs-tab').find((t) => t.text() === 'Storage')!.trigger('click')
     await nextTick()
-    expect(wrapper.text()).toContain('Install Location')
-    const inputValues = wrapper.findAll('input').map((i) => (i.element as HTMLInputElement).value)
-    expect(inputValues).toContain('/home/u/ComfyUI-Installs')
+    expect(wrapper.text()).not.toContain('Install Location')
   })
 
   it('close button routes to bridge.close', async () => {

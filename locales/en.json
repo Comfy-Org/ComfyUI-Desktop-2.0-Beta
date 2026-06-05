@@ -122,8 +122,7 @@
   "media": {
     "sharedDirs": "Media",
     "inputDir": "Input Directory",
-    "outputDir": "Output Directory",
-    "installDir": "Install Location"
+    "outputDir": "Output Directory"
   },
 
   "directories": {
@@ -417,7 +416,7 @@
     "community": "Community",
     "storageTab": "Storage",
     "sharedDirectories": "Shared Directories",
-    "installLocation": "Install Location",
+    "installLocation": "Default Install Location",
     "updatesTab": "Updates"
   },
 

@@ -19,8 +19,6 @@ interface ModelsDir {
 
 export interface GlobalStorageSnapshot {
   sharedDirectoriesFields: Record<string, unknown>[]
-  /** Default suggested install location — global-only (not shown per-instance). */
-  installLocationFields: Record<string, unknown>[]
   modelsDirs: ModelsDir[]
   modelsSystemDefault: string
 }
@@ -63,10 +61,6 @@ const bridge = (window as unknown as { __comfyTitlePopup?: GlobalSettingsBridge 
 
 const sharedDirsSections = computed<DetailSection[]>(() => [
   { fields: props.snapshot.sharedDirectoriesFields as unknown as DetailField[] },
-])
-
-const installLocationSections = computed<DetailSection[]>(() => [
-  { fields: props.snapshot.installLocationFields as unknown as DetailField[] },
 ])
 
 async function handleAddModelsDir(): Promise<void> {
@@ -117,20 +111,6 @@ async function handleUpdateSharedDirField(field: DetailField, value: unknown): P
 </script>
 
 <template>
-  <GlobalSettingsMicroSection
-    :title="t('settings.installLocation', 'Install Location')"
-    :tooltip="t('tooltips.installDir')"
-  >
-    <SettingsSectionList
-      :sections="installLocationSections"
-      :installation-id="installationId"
-      :running-action-ids="runningActionIds"
-      :pending-restart-field-ids="pendingRestartFieldIds"
-      :field-error-messages="fieldErrorMessages"
-      @update-field="handleUpdateSharedDirField"
-    />
-  </GlobalSettingsMicroSection>
-
   <GlobalSettingsMicroSection
     :title="t('settings.models', 'Shared Models')"
     :tooltip="t('tooltips.sharedModels')"
