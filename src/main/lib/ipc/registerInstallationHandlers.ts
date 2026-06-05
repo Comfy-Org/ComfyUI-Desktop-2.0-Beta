@@ -24,6 +24,7 @@ import {
   untrackAction,
   MARKER_FILE,
   _operationAborts,
+  _runningSessions,
   sanitizeEnvVars,
   getComfyArgsSchema,
   COMFYUI_REPO
@@ -474,7 +475,18 @@ export function registerInstallationHandlers(): void {
         })
       }
     }
-    return source.getDetailSections(inst)
+    const sections = source.getDetailSections(inst)
+    // Surface the live port for a running instance. Sourced here (not in the
+    // renderer session store) so it works in every window the settings panel
+    // renders in, including the title popup where the store isn't initialised.
+    const running = _runningSessions.get(installationId)
+    if (running?.port) {
+      sections.push({
+        tab: 'status',
+        fields: [{ key: 'active-port', label: i18n.t('common.port'), value: String(running.port) }],
+      })
+    }
+    return sections
   })
 
   ipcMain.handle(
