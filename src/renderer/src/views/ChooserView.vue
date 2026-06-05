@@ -102,17 +102,11 @@ defineExpose({ activeFilter })
 const baseTileCount = computed(() => 2 + nonCloudInstalls.value.length)
 
 const TILES_PER_ROW = 4
-const TOP_MAX_PX = 220 // 1-row resting spot (centered hero)
-const TOP_MIN_PX = 32 // floor once the grid claims the height
-const TOP_STEP_PX = 110 // shed per extra row
 
-/** Top offset for `--cluster-top`: shrinks as rows grow, so the cluster rises
- *  and hands its space to the grid; bottoms out at `TOP_MIN_PX`. */
-const clusterTop = computed(() => {
-  const rows = Math.ceil(baseTileCount.value / TILES_PER_ROW)
-  const px = TOP_MAX_PX - Math.max(0, rows - 1) * TOP_STEP_PX
-  return `${Math.max(TOP_MIN_PX, px)}px`
-})
+/** Unfiltered tile rows. Unitless — CSS turns it into a viewport-aware top
+ *  offset (see the `--cluster-top` clamp). Raw count, so search never shifts
+ *  the cluster. */
+const clusterRows = computed(() => Math.ceil(baseTileCount.value / TILES_PER_ROW))
 
 /** Freeze a leaving tile's box so it doesn't collapse under `position:
  *  absolute`, letting survivors FLIP into the gap immediately. */
@@ -257,7 +251,7 @@ function handleNewInstallClick(): void {
 
 <template>
   <BrandBackground v-show="props.visible" class="chooser-bg">
-    <div class="chooser-view" :style="{ '--cluster-top': clusterTop }">
+    <div class="chooser-view" :style="{ '--rows': clusterRows }">
       <ComfyWordmark class="chooser-wordmark" aria-hidden="true" />
       <div class="chooser-search">
         <BaseInput
@@ -395,8 +389,17 @@ function handleNewInstallClick(): void {
   left: anchor(center, clamp(39%, calc(52.5vw - 135px), 44%));
 }
 
-/* `--cluster-top` drives the top spacer (see `clusterTop`). Registered as a
- * <length> so it interpolates — a bare custom property won't transition. */
+/* Unitless tile-row count from JS (see `clusterRows`). Registered as <integer>
+ * so it's a typed number usable in the `--cluster-top` calc() below. */
+@property --rows {
+  syntax: '<integer>';
+  inherits: true;
+  initial-value: 1;
+}
+
+/* `--cluster-top` drives the top spacer (resolved from `--rows` + vh below).
+ * Registered as a <length> so it interpolates — a bare custom property won't
+ * transition. */
 @property --cluster-top {
   syntax: '<length>';
   inherits: true;
@@ -407,7 +410,24 @@ function handleNewInstallClick(): void {
   /* Only the top spacer flexes; wordmark/search/grid stay tight. Shrinking
    * `--cluster-top` raises the cluster and hands height to the grid, which
    * scrolls internally once the bottom spacer (1fr) runs out.
-   * Rows: [top spacer] [wordmark] [search] [grid] [bottom spacer] */
+   * Rows: [top spacer] [wordmark] [search] [grid] [bottom spacer]
+   *
+   * Resting top spacer, viewport-aware: `base` is the 1-row hero offset scaled
+   * to height, `shed` is the height surrendered per extra row. The clamp
+   * caps map to the legacy JS constants (220 cap / 110 shed-cap / 16 floor) so
+   * tall monitors keep the hero feel while short ones sit the cluster much
+   * higher. vh re-evaluates on resize, so this responds to window height with
+   * no JS listener. */
+  --cluster-base: clamp(16px, 20vh, 220px);
+  --cluster-shed: clamp(40px, 11vh, 110px);
+  --cluster-top: max(
+    16px,
+    calc(var(--cluster-base) - max(0, var(--rows) - 1) * var(--cluster-shed))
+  );
+  /* Vertical rhythm tightens on short viewports so the second tile row isn't
+   * pushed off-screen; horizontal padding stays fixed. */
+  --chooser-pad-y: clamp(12px, 2.5vh, 24px);
+  --chooser-row-gap: clamp(16px, 3.5vh, 32px);
   flex: 1 1 auto;
   min-height: 0;
   display: grid;
@@ -421,8 +441,8 @@ function handleNewInstallClick(): void {
   justify-items: center;
   width: 100%;
   max-width: 1280px;
-  padding: 24px;
-  row-gap: 32px;
+  padding: var(--chooser-pad-y) 24px;
+  row-gap: var(--chooser-row-gap);
   transition: --cluster-top 260ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 
@@ -503,20 +523,23 @@ function handleNewInstallClick(): void {
   justify-content: center;
   gap: 16px;
   align-content: start;
-  /* Vertical padding pushes the first/last rows into the mask fade
-   * so they appear to glide under it rather than clip abruptly. */
-  padding: 24px 0;
+  /* Vertical padding pushes the first/last rows into the mask fade so they
+   * glide under it rather than clip abruptly. Fluid on height (`--chooser-fade`)
+   * so short viewports reclaim the band for an extra tile row. */
+  --chooser-fade: clamp(12px, 2.5vh, 24px);
+  padding: var(--chooser-fade) 0;
 }
 
 /* Soft top + bottom fade on the scroll viewport so the edge of the
- * grid feels like a smooth dissolve instead of a hard cut. */
+ * grid feels like a smooth dissolve instead of a hard cut. Fade distance
+ * tracks the grid's vertical padding so the first/last rows still tuck under. */
 @supports (mask-image: linear-gradient(black, black)) {
   .chooser-grid {
     mask-image: linear-gradient(
       to bottom,
       transparent 0,
-      black 32px,
-      black calc(100% - 32px),
+      black var(--chooser-fade),
+      black calc(100% - var(--chooser-fade)),
       transparent 100%
     );
   }
