@@ -10,13 +10,23 @@ function escapeHtml(s: string): string {
 }
 
 /**
- * Render the model-folder relaunch splash into the given WebContents.
- * Must target the ComfyUI WebContentsView's webContents, NOT the parent
+ * Render the animated brand splash into the given WebContents. Used both for
+ * the model-folder restart and to mask a stale/dead page while ComfyUI
+ * reloads (e.g. relaunching into an existing window after a crash). Must
+ * target the ComfyUI WebContentsView's webContents, NOT the parent
  * BrowserWindow's (empty and covered by child views, so the splash is invisible there).
+ *
+ * `copy` overrides the default model-folder relaunch wording; pass it when
+ * the splash is shown for a plain launch so the user doesn't see the
+ * "new model folders" message.
  */
-export async function showModelFolderRelaunchPage(webContents: WebContents, theme: SplashTheme = SPLASH_DARK): Promise<void> {
-  const title = escapeHtml(i18n.t('launch.modelFolderRelaunchTitle'))
-  const desc = escapeHtml(i18n.t('launch.modelFolderRelaunchDesc'))
+export async function showSplashPage(
+  webContents: WebContents,
+  theme: SplashTheme = SPLASH_DARK,
+  copy?: { title: string; desc: string },
+): Promise<void> {
+  const title = escapeHtml(copy?.title ?? i18n.t('launch.modelFolderRelaunchTitle'))
+  const desc = escapeHtml(copy?.desc ?? i18n.t('launch.modelFolderRelaunchDesc'))
   const { bg, fg } = theme
   const mutedFg = theme.isDark ? '#888' : '#666'
   const html = `<!DOCTYPE html>

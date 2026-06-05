@@ -41,7 +41,7 @@ import {
   list as listInstallations
 } from './installations'
 import { startPeriodicReleaseChecks } from './lib/release-cache-startup'
-import { showModelFolderRelaunchPage } from './lib/relaunchPage'
+import { showSplashPage } from './lib/relaunchPage'
 import { COMFY_BG, SPLASH_DARK, TITLEBAR_BG, type SplashTheme } from './lib/theme'
 import { titleBarOverlayForTheme } from './lib/titleBarOverlay'
 import {
@@ -260,7 +260,7 @@ async function onModelFolderRelaunch({
   const token = ++relaunchTokenCounter
 
   relaunchStates.set(installationId, { originalUrl, theme, navBlocker: blockNav, token })
-  await showModelFolderRelaunchPage(comfyContents, theme)
+  await showSplashPage(comfyContents, theme)
 }
 
 function onComfyRestarted({
@@ -388,10 +388,7 @@ function onLaunch({
     // until the chooser host closes (`dropAttachClaimsForWindow`).
     consumeAttachClaim(installationId)
     existing.comfyUrl = comfyUrl
-    if (!existing.comfyView.webContents.isDestroyed()) {
-      existing.comfyView.setBackgroundColor(COMFY_BG)
-      void existing.comfyView.webContents.loadURL(comfyUrl).catch(() => {})
-    }
+
     // A relaunch implicitly means "land me in the live ComfyUI view",
     // so force the host's activePanel back to `'comfy'`. Without this, a
     // launch kicked off from a non-comfy panel (e.g. the install-settings
@@ -409,10 +406,49 @@ function onLaunch({
     // would lose the success screen and be dumped into Comfy with no
     // sense of what just happened. The renderer's `handleProgressClose`
     // restores `'comfy'` once the modal dismisses.
-    if (existing.activePanel !== 'progress') {
-      setActivePanel(existing.windowKey, 'comfy')
+    const revealReusedComfy = (): void => {
+      if (existing.window.isDestroyed() || existing.installationId !== installationId) return
+      if (existing.activePanel !== 'progress') {
+        setActivePanel(existing.windowKey, 'comfy')
+      }
+      refreshComfyTabBody(installationId)
     }
-    refreshComfyTabBody(installationId)
+
+    if (!existing.comfyView.webContents.isDestroyed()) {
+      const comfyContents = existing.comfyView.webContents
+      // The reused window's comfyView still holds the dead pre-crash page
+      // (often a Chrome "can't be reached" error from the fail-retry loop).
+      // Paint the splash over it BEFORE revealing the comfy body and loading
+      // the fresh URL, so the user sees a clean "Starting…" screen instead of
+      // the stale error page while ComfyUI boots its frontend. Mirrors the
+      // in-place model-folder relaunch flow.
+      comfyFailRetryTimerCancels.get(installationId)?.()
+      void (async () => {
+        existing.comfyView.setBackgroundColor(SPLASH_DARK.bg)
+        await showSplashPage(comfyContents, SPLASH_DARK, {
+          title: i18n.t('launch.launchSplashTitle'),
+          desc: i18n.t('launch.launchSplashDesc'),
+        }).catch(() => {})
+        if (
+          existing.window.isDestroyed() ||
+          comfyContents.isDestroyed() ||
+          existing.installationId !== installationId
+        ) {
+          return
+        }
+        // Process died again during the splash paint — keep the lifecycle
+        // body instead of loading (and revealing) a dead URL.
+        if (!_runningSessions.has(installationId)) {
+          refreshComfyTabBody(installationId)
+          return
+        }
+        revealReusedComfy()
+        void comfyContents.loadURL(comfyUrl).catch(() => {})
+      })()
+    } else {
+      revealReusedComfy()
+    }
+
     if (proc) {
       proc.on('exit', () => {
         // Session registry handles state cleanup

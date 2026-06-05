@@ -110,8 +110,11 @@ export function buildElectronApi(): ElectronApi {
     claimAttachHost: (installationId) => ipcRenderer.invoke('claim-attach-host', installationId),
     releaseAttachHostPreview: () => ipcRenderer.invoke('release-attach-host-preview'),
     getRunningInstances: () => ipcRenderer.invoke('get-running-instances'),
+    getLaunchingInstances: () => ipcRenderer.invoke('get-launching-instances'),
+    getStoppingInstances: () => ipcRenderer.invoke('get-stopping-instances'),
     getLastCrashError: (installationId: string) =>
       ipcRenderer.invoke('get-last-crash-error', installationId),
+    getCrashInstances: () => ipcRenderer.invoke('get-crash-instances'),
     cancelLaunch: () => ipcRenderer.invoke('cancel-launch'),
     cancelOperation: (installationId) => ipcRenderer.invoke('cancel-operation', installationId),
     killPortProcess: (port) => ipcRenderer.invoke('kill-port-process', port),
@@ -213,6 +216,12 @@ export function buildElectronApi(): ElectronApi {
         callback(data as Parameters<typeof callback>[0])
       ipcRenderer.on('comfy-exited', handler)
       return () => ipcRenderer.removeListener('comfy-exited', handler)
+    },
+    onInstanceCrashed: (callback) => {
+      const handler = (_event: IpcRendererEvent, data: unknown) =>
+        callback(data as Parameters<typeof callback>[0])
+      ipcRenderer.on('instance-crashed', handler)
+      return () => ipcRenderer.removeListener('instance-crashed', handler)
     },
     onComfyBootLog: (callback) => {
       const handler = (_event: IpcRendererEvent, data: unknown) =>

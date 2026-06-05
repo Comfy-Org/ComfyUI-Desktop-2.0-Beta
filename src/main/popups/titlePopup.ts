@@ -125,7 +125,7 @@ export interface InstancePickerSnapshot {
   activeInstallationId: string | null
   runningInstallationIds: string[]
   /** Installs mid-launch — `instance-launching` fired, `instance-started`
-   *  has not. Mirrors `_launchingInstallationIds` in main so the picker
+   *  has not. Mirrors `_launchingInstances` in main so the picker
    *  popup can hydrate `sessionStore.launchingInstances` from the
    *  snapshot (its preload doesn't expose `onInstanceLaunching`).
    *  Drives the CTA flip from **Start → Restart / Switch** during the

@@ -168,11 +168,12 @@ export const _runningSessions = new Map<string, SessionInfo>()
 export const _pendingPorts = new Map<number, string>()
 
 /**
- * Installation IDs mid-launch (between `instance-launching` and `instance-started` /
- * `instance-launch-failed`). Mirrors the renderer's `sessionStore.launchingInstances` so the
- * picker popup, which can't subscribe to `instance-launching` itself, hydrates from a snapshot.
+ * Installs mid-launch (between `instance-launching` and `instance-started` /
+ * `instance-launch-failed`), keyed by id → name. Mirrors the renderer's
+ * `sessionStore.launchingInstances` so the picker popup (which can't subscribe to
+ * `instance-launching` itself) and freshly-opened windows hydrate from a snapshot.
  */
-const _launchingInstallationIds = new Set<string>()
+const _launchingInstances = new Map<string, { installationName: string }>()
 
 /**
  * Internal bus emitted whenever the launching set or `_runningSessions` mutates, so the
@@ -181,13 +182,22 @@ const _launchingInstallationIds = new Set<string>()
 export const sessionLifecycleEvents = new EventEmitter()
 
 export function _getLaunchingInstallationIds(): string[] {
-  return Array.from(_launchingInstallationIds)
+  return Array.from(_launchingInstances.keys())
+}
+
+/** Snapshot of launching installs (id + name), so a window opened mid-launch can
+ *  hydrate `sessionStore.launchingInstances` instead of missing the live event. */
+export function _getLaunchingInstances(): { installationId: string; installationName: string }[] {
+  return Array.from(_launchingInstances.entries()).map(([installationId, { installationName }]) => ({
+    installationId,
+    installationName,
+  }))
 }
 
 /** Mark `installationId` mid-launch and broadcast `instance-launching`. Idempotent. */
 export function _markLaunching(installationId: string, installationName: string): void {
-  const wasNew = !_launchingInstallationIds.has(installationId)
-  _launchingInstallationIds.add(installationId)
+  const wasNew = !_launchingInstances.has(installationId)
+  _launchingInstances.set(installationId, { installationName })
   _broadcastToRenderer('instance-launching', { installationId, installationName })
   if (wasNew) sessionLifecycleEvents.emit('changed')
 }
@@ -195,9 +205,20 @@ export function _markLaunching(installationId: string, installationName: string)
 /** Failure-path clear for `_markLaunching`; broadcasts `instance-launch-failed`. The success
  *  path clears inline in `_addSession`. */
 export function _clearLaunchingFailed(installationId: string): void {
-  const had = _launchingInstallationIds.delete(installationId)
+  const had = _launchingInstances.delete(installationId)
   _broadcastToRenderer('instance-launch-failed', { installationId })
   if (had) sessionLifecycleEvents.emit('changed')
+}
+
+/**
+ * Installs currently being stopped (between `instance-stopping` and `instance-stopped`).
+ * Lets a window opened mid-stop hydrate the "Stopping…" state instead of missing the
+ * one-shot broadcast. Maintained by `stopRunning`.
+ */
+const _stoppingInstallationIds = new Set<string>()
+
+export function _getStoppingInstallationIds(): string[] {
+  return Array.from(_stoppingInstallationIds)
 }
 
 export interface PickerOperationStatus {
@@ -470,7 +491,7 @@ export function _addSession(installationId: string, { proc, port, url, mode, ins
   _runningSessions.set(installationId, { proc, port, url, mode, installationName, startedAt: Date.now() })
   // Clear the launching marker first so subscribers never double-count this id across the
   // transition.
-  _launchingInstallationIds.delete(installationId)
+  _launchingInstances.delete(installationId)
   _broadcastToRenderer('instance-started', { installationId, port, url, mode, installationName, bootTimeMs })
   sessionLifecycleEvents.emit('changed')
   // Stamps lastLaunchedAt + per-category recency so those surfaces needn't scan every record.
@@ -707,17 +728,20 @@ export async function stopRunning(installationId?: string): Promise<void> {
   if (installationId) {
     const session = _runningSessions.get(installationId)
     if (!session) return
+    _stoppingInstallationIds.add(installationId)
     _broadcastToRenderer('instance-stopping', { installationId })
     if (session.port) removePortLock(session.port)
     _runningSessions.delete(installationId)
     if (session.proc && !session.proc.killed) {
       await killProcessTree(session.proc)
     }
+    _stoppingInstallationIds.delete(installationId)
     _broadcastToRenderer('instance-stopped', { installationId })
     sessionLifecycleEvents.emit('changed')
   } else {
     const sessions = [..._runningSessions.entries()]
     for (const [id] of sessions) {
+      _stoppingInstallationIds.add(id)
       _broadcastToRenderer('instance-stopping', { installationId: id })
     }
     for (const [, session] of sessions) {
@@ -732,6 +756,7 @@ export async function stopRunning(installationId?: string): Promise<void> {
     }
     await Promise.all(kills)
     for (const [id] of sessions) {
+      _stoppingInstallationIds.delete(id)
       _broadcastToRenderer('instance-stopped', { installationId: id })
     }
     if (sessions.length > 0) sessionLifecycleEvents.emit('changed')

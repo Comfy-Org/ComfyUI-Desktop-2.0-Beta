@@ -18,6 +18,7 @@ import {
   makeSendProgress, makeSendOutput,
   getComfyArgsSchema, filterUnsupportedArgs,
   getComfyFeatureFlagRegistry,
+  _broadcastToRenderer,
 } from '../shared'
 import type { ChildProcess, LaunchCmd } from '../shared'
 import type { ActionContext, ActionResult } from './types'
@@ -246,7 +247,14 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
         installationName: inst.name,
         lastStderr,
       }
-      if (crashed) recordCrash(exitedPayload)
+      if (crashed) {
+        recordCrash(exitedPayload)
+        // Broadcast to every renderer (not just `sender`) so any already-open
+        // dashboard shows the red error tile live. `comfy-exited` stays
+        // sender-only because its panel-side handler fires per-window
+        // telemetry that must not multiply across windows.
+        _broadcastToRenderer('instance-crashed', exitedPayload)
+      }
       if (!sender.isDestroyed()) {
         sender.send('comfy-exited', exitedPayload)
       }
@@ -640,7 +648,14 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
         installationName: inst.name,
         lastStderr,
       }
-      if (crashed) recordCrash(exitedPayload)
+      if (crashed) {
+        recordCrash(exitedPayload)
+        // Broadcast to every renderer (not just `sender`) so any already-open
+        // dashboard shows the red error tile live. `comfy-exited` stays
+        // sender-only because its panel-side handler fires per-window
+        // telemetry that must not multiply across windows.
+        _broadcastToRenderer('instance-crashed', exitedPayload)
+      }
       if (!sender.isDestroyed()) {
         sender.send('comfy-exited', exitedPayload)
       }

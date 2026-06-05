@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ArrowDownToLine, ArrowRightLeft, MoreVertical } from 'lucide-vue-next'
+import { AlertCircle, ArrowDownToLine, ArrowRightLeft, MoreVertical } from 'lucide-vue-next'
 import { useSessionStore } from '../../stores/sessionStore'
 import { installTypeMetaFor } from '../../lib/installTypeIcon'
 import { TID } from '../../../../shared/testIds'
@@ -24,6 +24,7 @@ const emit = defineEmits<{
   'open-card-menu': [event: MouseEvent, installation: Installation]
   'open-kebab-menu': [event: MouseEvent, installation: Installation]
   'trigger-action': [action: 'update' | 'migrate', installation: Installation]
+  'view-error': [installation: Installation]
 }>()
 
 const { t } = useI18n()
@@ -34,15 +35,17 @@ const inst = computed(() => props.installation)
 const isRunning = computed(() => sessionStore.isRunning(inst.value.id))
 const isLaunching = computed(() => sessionStore.isLaunching(inst.value.id))
 const isStopping = computed(() => sessionStore.isStopping(inst.value.id))
+const hasError = computed(() => sessionStore.errorInstances.has(inst.value.id))
 
 const statusClasses = computed<Record<string, boolean>>(() => ({
   'chooser-tile-running': isRunning.value && !isStopping.value,
   'chooser-tile-stopping': isStopping.value,
+  'chooser-tile-errored': hasError.value,
 }))
 
-/* Lifecycle → status pill (dot + label). Stopping wins over launching
- * wins over running; an idle tile gets no pill. Crash state is
- * deliberately absent — the instance window owns error reporting. */
+/* Lifecycle → top-right status pill (dot + label). Stopping wins over
+ * launching wins over running; an idle tile gets no pill. An errored
+ * tile shows the clickable error badge instead (see template). */
 const statusPill = computed<{ label: string; dotClass: string } | null>(() => {
   if (isStopping.value) return { label: 'chooser.statusStopping', dotClass: 'chooser-tile-status--stopping' }
   if (isLaunching.value) return { label: 'chooser.statusLaunching', dotClass: 'chooser-tile-status--launching' }
@@ -90,7 +93,29 @@ function handleClick(): void {
     >
       <component :is="typeMeta.icon" :size="28" />
     </div>
+    <!-- Top-right cluster: lifecycle indicator + kebab. The status pill is
+         non-interactive (clicks fall through to the body); the error badge
+         is a click target that opens the error details. -->
     <div class="chooser-tile-actions">
+      <button
+        v-if="hasError"
+        type="button"
+        class="chooser-tile-error-badge"
+        :title="t('chooser.viewErrorTooltip')"
+        @click.stop="emit('view-error', inst)"
+        @keydown.enter.stop="emit('view-error', inst)"
+      >
+        <AlertCircle :size="14" />
+        {{ t('chooser.statusError') }}
+      </button>
+      <span
+        v-else-if="statusPill"
+        class="chooser-tile-pill chooser-tile-status"
+        :class="statusPill.dotClass"
+      >
+        <span class="chooser-tile-status-dot" aria-hidden="true" />
+        {{ t(statusPill.label) }}
+      </span>
       <button
         type="button"
         class="chooser-tile-kebab"
@@ -107,20 +132,9 @@ function handleClick(): void {
       {{ inst.name }}
     </div>
     <div class="chooser-tile-meta">
-      <!-- Single no-wrap pill row. When a status pill is present it
-           replaces the source pill (lifecycle state is the headline, the
-           source label is redundant noise then) so the row never crowds
-           past two pills. The source pill is the shrink target. -->
+      <!-- Single no-wrap pill row: source pill + an optional action /
+           version pill. The source pill is the shrink target. -->
       <span
-        v-if="statusPill"
-        class="chooser-tile-pill chooser-tile-status"
-        :class="statusPill.dotClass"
-      >
-        <span class="chooser-tile-status-dot" aria-hidden="true" />
-        {{ t(statusPill.label) }}
-      </span>
-      <span
-        v-else
         class="chooser-tile-pill"
         :title="sourcePillLabel"
       >

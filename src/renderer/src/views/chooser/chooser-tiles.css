@@ -195,23 +195,30 @@
   background: var(--accent-warning-soft, rgba(217, 119, 6, 0.12));
 }
 
-/* Status treatment — the labelled status pill (below) is the source of
- * truth for lifecycle state. The tile chrome only quietly reinforces it:
- * a running tile gets a slightly firmer resting border so it reads as
- * "active" without the old 2px accent outline that looked "selected". */
+/* Status treatment — the centered status pill / error badge (below) is
+ * the source of truth for lifecycle state. The tile chrome only quietly
+ * reinforces it: a running tile gets a slightly firmer resting border so
+ * it reads as "active" without the old 2px accent outline that looked
+ * "selected", and an errored tile gets a red outline. */
 .chooser-tile-running {
   border-color: var(--chooser-surface-border-hover);
 }
 .chooser-tile-stopping {
   opacity: 0.7;
 }
+.chooser-tile-errored {
+  border-color: var(--accent-danger, #d92d20);
+  box-shadow: inset 0 0 0 1px var(--accent-danger, #d92d20);
+}
 
-/* Status pill — colored dot + label (e.g. "● Running"). Holds its width
- * so the source pill stays the truncation target. */
+/* Status pill — colored dot + label (e.g. "● Running") in the top-right
+ * cluster next to the kebab. Click-through so a running-tile body click
+ * still focuses the existing window. */
 .chooser-tile-status {
   gap: 6px;
   flex-shrink: 0;
   opacity: 1;
+  pointer-events: none;
 }
 .chooser-tile-status-dot {
   width: 8px;
@@ -246,7 +253,38 @@
   }
 }
 
-/* Top-right cluster — error badge + kebab (⋮) action button. */
+/* Error badge — red, clickable; opens the error details. Lives in the
+ * top-right cluster next to the kebab. */
+.chooser-tile-error-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  color: var(--accent-danger, #d92d20);
+  background: var(--accent-danger-soft, rgba(217, 45, 32, 0.12));
+  border: 1px solid var(--accent-danger, #d92d20);
+  transition:
+    background-color 0.12s,
+    transform 0.12s;
+}
+.chooser-tile-error-badge:hover,
+.chooser-tile-error-badge:focus-visible {
+  background: var(--accent-danger-soft-hover, rgba(217, 45, 32, 0.22));
+  transform: scale(1.03);
+  outline: none;
+}
+.chooser-tile-error-badge:focus-visible {
+  outline: 2px solid var(--accent-danger, #d92d20);
+  outline-offset: 2px;
+}
+
+/* Top-right cluster — lifecycle indicator (status pill / error badge) +
+ * kebab (⋮) action button. */
 .chooser-tile-actions {
   position: absolute;
   top: 8px;
