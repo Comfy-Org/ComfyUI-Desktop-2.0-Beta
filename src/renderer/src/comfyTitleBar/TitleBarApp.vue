@@ -1124,9 +1124,10 @@ onUnmounted(() => {
   gap: 4px;
   padding: 3px 8px;
   border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--comfy-yellow) 45%, transparent);
-  background: color-mix(in srgb, var(--comfy-yellow) 12%, transparent);
-  color: var(--comfy-yellow);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--titlebar-icon);
+  opacity: 0.85;
   font: inherit;
   font-size: 11px;
   line-height: 14px;
@@ -1134,14 +1135,21 @@ onUnmounted(() => {
   cursor: pointer;
   transition:
     background-color 0.12s,
-    border-color 0.12s;
+    opacity 0.12s,
+    border-color 0.12s,
+    color 0.12s;
 }
 .title-zoom-reset-percent {
   letter-spacing: 0.01em;
 }
 .title-bar.is-hover-active .title-zoom-reset:hover {
-  background: color-mix(in srgb, var(--comfy-yellow) 20%, transparent);
-  border-color: var(--comfy-yellow);
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+.title-bar.is-light.is-hover-active .title-zoom-reset:hover {
+  background: rgba(0, 0, 0, 0.06);
+  border-color: rgba(0, 0, 0, 0.18);
 }
 .title-zoom-reset:focus-visible {
   outline: 2px solid var(--focus-ring);

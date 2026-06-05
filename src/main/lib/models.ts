@@ -30,7 +30,7 @@ export const MODEL_FOLDER_TYPES = [
 const YAML_PATH: string = path.join(dataDir(), 'shared_model_paths.yaml')
 
 // Canonical names plus legacy/alias directory names ComfyUI maps to canonical names.
-const KNOWN_MODEL_FOLDERS = new Set<string>([
+export const KNOWN_MODEL_FOLDERS = new Set<string>([
   ...MODEL_FOLDER_TYPES,
   'clip', // legacy alias for text_encoders
   'unet', // legacy alias for diffusion_models

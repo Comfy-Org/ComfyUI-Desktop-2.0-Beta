@@ -525,3 +525,49 @@ describe('installations.hasNameConflict', () => {
     expect(await installations.hasNameConflict(a.id, 'Self')).toBe(false)
   })
 })
+
+describe('installations.enforceCloudName', () => {
+  it('resets a renamed Cloud entry back to the canonical name', async () => {
+    const installations = await loadInstallations()
+    const cloud = await installations.add({
+      name: 'My Renamed Cloud',
+      installPath: path.join(tmpRoot, 'cloud'),
+      sourceId: installations.CLOUD_SOURCE_ID,
+      status: 'installed',
+    })
+    await installations.enforceCloudName()
+    const rec = (await installations.list()).find((r) => r.id === cloud.id)!
+    expect(rec.name).toBe(installations.CLOUD_INSTALL_NAME)
+  })
+
+  it('leaves a Cloud entry that already has the canonical name untouched', async () => {
+    const installations = await loadInstallations()
+    const cloud = await installations.add({
+      name: installations.CLOUD_INSTALL_NAME,
+      installPath: path.join(tmpRoot, 'cloud'),
+      sourceId: installations.CLOUD_SOURCE_ID,
+      status: 'installed',
+    })
+    await installations.enforceCloudName()
+    const rec = (await installations.list()).find((r) => r.id === cloud.id)!
+    expect(rec.name).toBe(installations.CLOUD_INSTALL_NAME)
+  })
+
+  it('does not touch non-Cloud installs', async () => {
+    const installations = await loadInstallations()
+    const local = await installations.add({
+      name: 'My Local',
+      installPath: path.join(tmpRoot, 'local'),
+      sourceId: 'standalone',
+      status: 'installed',
+    })
+    await installations.enforceCloudName()
+    const rec = (await installations.list()).find((r) => r.id === local.id)!
+    expect(rec.name).toBe('My Local')
+  })
+
+  it('is a no-op when there is no Cloud entry', async () => {
+    const installations = await loadInstallations()
+    await expect(installations.enforceCloudName()).resolves.toBeUndefined()
+  })
+})

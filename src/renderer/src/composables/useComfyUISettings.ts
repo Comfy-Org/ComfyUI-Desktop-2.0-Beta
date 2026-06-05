@@ -683,6 +683,9 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     (running, wasRunning) => {
       const inst = toValue(opts.installation)
       if (!inst) return
+      // Refetch so the "Running details" port row (sourced from main) appears
+      // on launch and clears on stop. Race-safe via reload()'s requestSeq.
+      void reload()
       if (wasRunning && !running) {
         if (restartBaselines.value.has(inst.id)) {
           const next = new Map(restartBaselines.value)
