@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useDebounceFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
@@ -21,6 +22,7 @@ const props = defineProps<Props>()
 const { t } = useI18n()
 const api = window.api
 
+const paneRef = ref<HTMLDivElement | null>(null)
 const hostRef = ref<HTMLDivElement | null>(null)
 const exited = ref(false)
 
@@ -55,9 +57,14 @@ function applyRestore(restore: TerminalRestore): void {
 function pushSize(): void {
   if (!terminal || !fitAddon || !currentId) return
   if (!hostRef.value?.offsetParent) return
-  fitAddon.fit()
-  void api.terminalResize(currentId, terminal.cols, terminal.rows)
+  const dims = fitAddon.proposeDimensions()
+  if (!dims || !dims.cols || !dims.rows) return
+  if (dims.cols === terminal.cols && dims.rows === terminal.rows) return
+  terminal.resize(dims.cols, dims.rows)
+  void api.terminalResize(currentId, dims.cols, dims.rows)
 }
+
+const debouncedPushSize = useDebounceFn(pushSize, 50)
 
 async function attach(id: string): Promise<void> {
   if (!hostRef.value) return
@@ -80,8 +87,8 @@ async function attach(id: string): Promise<void> {
     })
   )
 
-  resizeObserver = new ResizeObserver(() => pushSize())
-  resizeObserver.observe(hostRef.value)
+  resizeObserver = new ResizeObserver(() => void debouncedPushSize())
+  if (paneRef.value) resizeObserver.observe(paneRef.value)
 
   pushSize()
   applyRestore(await api.terminalSubscribe(id))
@@ -112,7 +119,7 @@ onBeforeUnmount(teardown)
 </script>
 
 <template>
-  <div class="console-pane">
+  <div ref="paneRef" class="console-pane">
     <div ref="hostRef" class="console-host" :data-testid="TID.consoleTerminal" />
     <div
       v-if="exited"
