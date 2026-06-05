@@ -401,6 +401,81 @@ describe('deriveLaunchArgs', () => {
     expect(launchArgs).not.toContain('1234')
   })
 
+  it('honors Comfy.Server.ServerConfigValues (authoritative legacy store)', () => {
+    // ServerConfigValues keeps native types: number port, boolean flags.
+    const { launchArgs } = deriveLaunchArgs({
+      'Comfy.Server.ServerConfigValues': { port: 8192, 'enable-manager-legacy-ui': true }
+    })
+    expect(launchArgs).toContain('--port 8192')
+    expect(launchArgs).toContain('--enable-manager-legacy-ui')
+  })
+
+  it('keeps a custom port from ServerConfigValues (no --port 8000 override)', () => {
+    const { launchArgs } = deriveLaunchArgs({
+      'Comfy.Server.ServerConfigValues': { port: 8192 }
+    })
+    expect(launchArgs).toContain('--port 8192')
+    expect(launchArgs).not.toContain('--port 8000')
+  })
+
+  it('carries enable-manager-legacy-ui and does NOT add --enable-manager', () => {
+    const { launchArgs } = deriveLaunchArgs({
+      'Comfy.Server.ServerConfigValues': { 'enable-manager-legacy-ui': true }
+    })
+    expect(launchArgs).toContain('--enable-manager-legacy-ui')
+    expect(launchArgs).not.toContain('--enable-manager ')
+    expect(launchArgs.endsWith('--enable-manager')).toBe(false)
+    expect(launchArgs.split(' ')).not.toContain('--enable-manager')
+  })
+
+  it('lets LaunchArgs override ServerConfigValues on a conflicting key', () => {
+    const { launchArgs } = deriveLaunchArgs({
+      'Comfy.Server.ServerConfigValues': { port: 8192 },
+      'Comfy.Server.LaunchArgs': { port: '7860' }
+    })
+    expect(launchArgs).toContain('--port 7860')
+    expect(launchArgs).not.toContain('8192')
+  })
+
+  it('synthesizes --port 8000 when neither store sets a port', () => {
+    const { launchArgs } = deriveLaunchArgs({
+      'Comfy.Server.ServerConfigValues': { 'cpu-vae': true },
+      'Comfy.Server.LaunchArgs': { lowvram: '' }
+    })
+    expect(launchArgs).toContain('--port 8000')
+  })
+
+  it('drops ServerConfigValues entries explicitly set to false', () => {
+    const { launchArgs } = deriveLaunchArgs({
+      'Comfy.Server.ServerConfigValues': { 'enable-manager-legacy-ui': false }
+    })
+    expect(launchArgs).not.toContain('--enable-manager-legacy-ui')
+    // legacy disabled -> new Manager is force-added as usual
+    expect(launchArgs).toContain('--enable-manager')
+  })
+
+  it('leaves LaunchArgs-only --enable-manager behavior unchanged', () => {
+    const { launchArgs } = deriveLaunchArgs({
+      'Comfy.Server.LaunchArgs': { 'enable-manager': '', lowvram: '' }
+    })
+    expect((launchArgs.match(/--enable-manager\b/g) ?? []).length).toBe(1)
+    expect(launchArgs).toContain('--lowvram')
+  })
+
+  it('is idempotent: re-deriving from its own output keys yields stable args', () => {
+    const first = deriveLaunchArgs({
+      'Comfy.Server.ServerConfigValues': { port: 8192, 'enable-manager-legacy-ui': true }
+    })
+    // Feed the derived flags back through both stores; result must not grow.
+    const second = deriveLaunchArgs({
+      'Comfy.Server.ServerConfigValues': { port: 8192, 'enable-manager-legacy-ui': true },
+      'Comfy.Server.LaunchArgs': { port: '8192', 'enable-manager-legacy-ui': '' }
+    })
+    expect(second.launchArgs).toBe(first.launchArgs)
+    expect((second.launchArgs.match(/--enable-manager-legacy-ui/g) ?? []).length).toBe(1)
+    expect((second.launchArgs.match(/--port/g) ?? []).length).toBe(1)
+  })
+
   it('does NOT synthesize --listen (legacy implicit matches ComfyUI native)', () => {
     const { launchArgs } = deriveLaunchArgs({ 'Comfy.Server.LaunchArgs': {} })
     expect(launchArgs).not.toContain('--listen')

@@ -325,16 +325,49 @@ export interface DerivedLaunchArgs {
 }
 
 /**
+ * Coerce a raw legacy settings value into the flag→value convention used
+ * when emitting the launchArgs string: booleans become `''` (flag with no
+ * value) when truthy and are dropped when `false`; everything else is
+ * stringified. Returns `null` when the entry should be skipped entirely.
+ *
+ * This normalizes the two legacy stores into one shape. `LaunchArgs`
+ * already stores boolean flags as `''` and numbers as strings, while
+ * `ServerConfigValues` keeps native `true`/`false`/number values, so a
+ * raw `true` here means "emit the bare flag" and a raw `false` means
+ * "the user explicitly disabled it — emit nothing".
+ */
+function normalizeLaunchValue(value: unknown): string | null {
+  if (value === undefined || value === null) return null
+  if (typeof value === 'boolean') return value ? '' : null
+  return String(value)
+}
+
+/**
  * Build the user-facing `launchArgs` string for an adopted install from
- * the legacy `comfy.settings.json` blob (a flat dotted-key map). Reads
- * **only** `Comfy.Server.LaunchArgs` — the actual source of legacy launch
- * flags. Legacy `server_config.{listen,port}` keys are baked into
- * defaults by the legacy app itself and never appear here.
+ * the legacy `comfy.settings.json` blob (a flat dotted-key map).
+ *
+ * Merges both legacy server-config stores, keyed by config id (which is
+ * the CLI flag name):
+ *  - `Comfy.Server.ServerConfigValues` is the AUTHORITATIVE store of the
+ *    user's server-config choices and forms the BASE of the merge. The
+ *    legacy frontend already filters out values equal to their default,
+ *    so whatever is present here is a deliberate non-default choice.
+ *  - `Comfy.Server.LaunchArgs` is a lazily-synced derived copy that only
+ *    gets written while the Server-Config settings panel is open, so it
+ *    is frequently stale or empty. It OVERRIDES `ServerConfigValues` on
+ *    key conflicts (it is the more-recent edit when both are present),
+ *    but never erases a value that lives only in `ServerConfigValues`.
+ *
+ * Legacy `server_config.{listen,port}` keys are baked into defaults by
+ * the legacy app itself and never appear here.
  *
  * The synthesized output preserves legacy implicit defaults users notice:
- *  - `--port 8000` when the user hasn't overridden it (legacy default;
- *    matters because legacy users have it bookmarked).
- *  - `--enable-manager` always included (legacy always did).
+ *  - `--port 8000` when the user hasn't overridden it in EITHER store
+ *    (legacy default; matters because legacy users have it bookmarked).
+ *  - `--enable-manager` included by default, EXCEPT when the user opted
+ *    into the legacy Manager UI (`enable-manager-legacy-ui`). The two
+ *    Manager UIs are mutually exclusive, so honoring the legacy choice
+ *    must not also inject the new Manager.
  *  - `--listen` is NOT synthesized — legacy's implicit `127.0.0.1`
  *    matches ComfyUI's native default, so emitting it would only add
  *    noise to the editable string. Explicit user-set `listen` values
@@ -345,19 +378,24 @@ export interface DerivedLaunchArgs {
  * them into the per-install `inputDir` / `outputDir` fields.
  */
 export function deriveLaunchArgs(comfySettings: Record<string, unknown>): DerivedLaunchArgs {
-  const raw = comfySettings['Comfy.Server.LaunchArgs']
-  const launchArgsMap: Record<string, unknown> =
+  const asMap = (raw: unknown): Record<string, unknown> =>
     raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {}
+
+  const serverConfigValues = asMap(comfySettings['Comfy.Server.ServerConfigValues'])
+  const launchArgsMap = asMap(comfySettings['Comfy.Server.LaunchArgs'])
+
+  // ServerConfigValues is the base; LaunchArgs overrides on key conflicts.
+  const mergedMap: Record<string, unknown> = { ...serverConfigValues, ...launchArgsMap }
 
   const parts: string[] = []
   const pathOverrides: DerivedLaunchArgs['pathOverrides'] = {}
   let hasPort = false
 
-  for (const [key, value] of Object.entries(launchArgsMap)) {
+  for (const [key, value] of Object.entries(mergedMap)) {
     if (!key) continue
     if (STRIPPED_LAUNCH_KEYS.has(key)) continue
-    if (value === undefined || value === null) continue
-    const strVal = String(value)
+    const strVal = normalizeLaunchValue(value)
+    if (strVal === null) continue
     if (PROMOTED_LAUNCH_KEYS.has(key)) {
       if (strVal === '') continue
       if (key === 'input-directory') pathOverrides.inputDir = strVal
@@ -377,7 +415,10 @@ export function deriveLaunchArgs(comfySettings: Record<string, unknown>): Derive
   // because its legacy implicit `127.0.0.1` matches ComfyUI's native
   // default — writing it adds noise without effect.
   if (!hasPort) parts.unshift('--port', '8000')
-  if (!parts.includes('--enable-manager')) parts.push('--enable-manager')
+  // The new Manager and the legacy Manager UI are mutually exclusive, so
+  // don't force the new Manager on when the user opted into the legacy UI.
+  const usesLegacyManager = parts.includes('--enable-manager-legacy-ui')
+  if (!usesLegacyManager && !parts.includes('--enable-manager')) parts.push('--enable-manager')
 
   return { launchArgs: parts.join(' '), pathOverrides }
 }
