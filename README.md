@@ -11,7 +11,7 @@
 [![License](https://img.shields.io/github/license/Comfy-Org/Comfy-Desktop?style=flat&color=blue)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/Comfy-Org/Comfy-Desktop?style=flat&logo=github&color=f5c518)](https://github.com/Comfy-Org/Comfy-Desktop/stargazers)
 [![Discord](https://img.shields.io/badge/Discord-comfy.org-5865F2?style=flat&logo=discord&logoColor=white)](https://www.comfy.org/discord)
-![Platforms](https://img.shields.io/badge/platforms-Windows%20·%20macOS%20·%20Linux-555?style=flat)
+![Platforms](https://img.shields.io/badge/platforms-Windows%20·%20macOS-555?style=flat)
 
 [**Download**](#download) · [**Getting Started**](#getting-started) · [**Contributing**](#development) · [**Discord**](https://www.comfy.org/discord)
 
@@ -40,7 +40,7 @@ Comfy Desktop is the official desktop application for **ComfyUI**, the node-base
 
 <div align="center">
 
-[![Download Comfy Desktop](https://img.shields.io/badge/⬇%20Download%20Comfy%20Desktop-Windows%20·%20macOS%20·%20Linux-4f46e5?style=for-the-badge)](https://dl.todesktop.com/241130tqe9q3y)
+[![Download Comfy Desktop](https://img.shields.io/badge/⬇%20Download%20Comfy%20Desktop-Windows%20·%20macOS-4f46e5?style=for-the-badge)](https://dl.todesktop.com/241130tqe9q3y)
 
 **[dl.todesktop.com/241130tqe9q3y](https://dl.todesktop.com/241130tqe9q3y)** — one link, auto-detects your platform.
 
