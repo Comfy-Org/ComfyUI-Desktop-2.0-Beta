@@ -182,7 +182,7 @@ export function register(callbacks: RegisterCallbacks = {}): void {
     try {
       const cache = createCache(
         settings.get('cacheDir') as string,
-        settings.get('maxCachedFiles') as number
+        settings.get('maxCachedDownloads') as number
       )
       await cache.cleanPartials()
     } catch {}

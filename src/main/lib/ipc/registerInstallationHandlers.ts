@@ -251,7 +251,7 @@ export function registerInstallationHandlers(): void {
       _operationAborts.set(installationId, abort)
       const cache = createCache(
         settings.get('cacheDir') as string,
-        settings.get('maxCachedFiles') as number
+        settings.get('maxCachedDownloads') as number
       )
       try {
         await source.install(inst, { sendProgress, download, cache, extract, signal: abort.signal })

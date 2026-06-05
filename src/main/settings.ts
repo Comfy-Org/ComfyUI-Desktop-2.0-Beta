@@ -7,7 +7,9 @@ import { readFileSafe, writeFileSafe } from './lib/safe-file'
 
 export interface KnownSettings {
   cacheDir: string
-  maxCachedFiles: number
+  /** Number of completed downloads kept in the cache before eviction. Not
+   *  exposed in the UI; editable only by hand in settings.json. */
+  maxCachedDownloads: number
   onAppClose: 'tray' | 'quit'
   modelsDirs: string[]
   inputDir: string
@@ -31,17 +33,13 @@ export interface KnownSettings {
   firstUseCompleted?: boolean
   oemManagedModelDirs?: string[]
   oemWorkflowImportVersion?: number
-  /** `true` once the one-time pin of `maxCachedFiles` to 1 has run. The field
-   *  is no longer editable in the UI; after this flips, a manual settings.json
-   *  edit to `maxCachedFiles` is preserved. */
-  maxCachedFilesReset?: boolean
 }
 
 export type Settings = KnownSettings & Record<string, unknown>
 
 type DefaultedSettingKey =
   | 'cacheDir'
-  | 'maxCachedFiles'
+  | 'maxCachedDownloads'
   | 'onAppClose'
   | 'modelsDirs'
   | 'inputDir'
@@ -55,7 +53,7 @@ const SHARED_ROOT = path.join(homeDir(), "ComfyUI-Shared")
 
 const SETTINGS_SCHEMA = {
   cacheDir: { nullable: false },
-  maxCachedFiles: { nullable: false },
+  maxCachedDownloads: { nullable: false },
   onAppClose: { nullable: false },
   modelsDirs: { nullable: false },
   inputDir: { nullable: false },
@@ -72,7 +70,6 @@ const SETTINGS_SCHEMA = {
   firstUseCompleted: { nullable: false },
   oemManagedModelDirs: { nullable: false },
   oemWorkflowImportVersion: { nullable: false },
-  maxCachedFilesReset: { nullable: false },
 } as const satisfies Record<keyof KnownSettings, { nullable: boolean }>
 
 export type KnownSettingKey = keyof typeof SETTINGS_SCHEMA
@@ -92,7 +89,7 @@ function isNullableKnownSettingKey(key: KnownSettingKey): key is NullableKnownSe
 
 export const defaults: SettingsDefaults = {
   cacheDir: path.join(cacheDir(), "download-cache"),
-  maxCachedFiles: 1,
+  maxCachedDownloads: 1,
   // Docking-to-tray is disabled (createTray() is currently a no-op).
   onAppClose: "quit",
   modelsDirs: [path.join(SHARED_ROOT, "models")],
@@ -210,21 +207,14 @@ function load(): Settings {
   const result: Settings = { ...defaults, ...(parsed || {}) }
   let changed = false
 
-  // Drop legacy pin keys that no longer back any UI.
-  for (const key of ['primaryInstallId', 'pinnedInstallIds']) {
+  // Drop legacy keys that no longer back any setting. `maxCachedFiles` was the
+  // user-editable predecessor of `maxCachedDownloads`; its old value is
+  // discarded so everyone adopts the new default.
+  for (const key of ['primaryInstallId', 'pinnedInstallIds', 'maxCachedFiles']) {
     if (Object.prototype.hasOwnProperty.call(result, key)) {
       delete result[key]
       changed = true
     }
-  }
-
-  // One-time pin of Max Cached Downloads to 1. The field is no longer editable
-  // in the UI; once this has run, a manual settings.json edit to
-  // `maxCachedFiles` is preserved.
-  if (result.maxCachedFilesReset !== true) {
-    result.maxCachedFiles = 1
-    result.maxCachedFilesReset = true
-    changed = true
   }
 
   // Drop a stale `onAppClose: 'tray'` while docking is disabled, else it would

@@ -342,7 +342,7 @@ export async function migrateToStandaloneFromSnapshot(
   await fs.promises.writeFile(path.join(destPath, MARKER_FILE), entry.id)
   const cache = createCache(
     settings.get('cacheDir') as string,
-    settings.get('maxCachedFiles') as number
+    settings.get('maxCachedDownloads') as number
   )
   const installRecord = { ...instData, installPath: destPath } as unknown as InstallationRecord
 
