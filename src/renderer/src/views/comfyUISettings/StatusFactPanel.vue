@@ -401,7 +401,7 @@ const groups = computed<FactGroup[]>(() => {
 
 .status-fact-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
   align-items: center;
   gap: 12px;
   padding: 10px 0;

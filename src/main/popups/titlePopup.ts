@@ -30,7 +30,7 @@ import {
   buildModelsPayload
 } from '../lib/ipc/registerSettingsHandlers'
 import { globalSettingsEvents } from '../lib/globalSettingsEvents'
-import { getGithubStarCount } from '../lib/githubStars'
+import { getCachedGithubStarCount, getGithubStarCount } from '../lib/githubStars'
 import {
   comfyWindows,
   findEntryByTitleBarSender,
@@ -205,6 +205,7 @@ export interface GlobalSettingsSnapshot {
   }
   githubUrl: string
   githubStars: number | null
+  githubStarsLoading: boolean
   i18n: {
     overview: string
     updates: string
@@ -1623,22 +1624,27 @@ export interface TitlePopupHostBindings {
 function openGlobalSettingsForHost(
   parentEntry: ComfyWindowEntry,
   parentEntryId: number,
-  _bindings: TitlePopupHostBindings,
+  bindings: TitlePopupHostBindings,
   titleBarSender: Electron.WebContents
 ): void {
   if (parentEntry.window.isDestroyed()) return
+  // Open instantly off the cached snapshot — like the instance picker — so the
+  // popup never waits on the GitHub-stars network fetch. Warm the cache in the
+  // background and broadcast the result so the star count fills in afterwards.
+  openTitlePopup({
+    parent: parentEntry.window,
+    parentEntryId,
+    kind: 'global-settings',
+    snapshot: buildGlobalSettingsSnapshot(),
+    anchor: { x: 0, y: TITLEBAR_HEIGHT },
+    theme: parentEntry.lastTheme,
+    titleBarSender
+  })
   void (async () => {
-    const snapshot = await buildGlobalSettingsSnapshot()
+    await getGithubStarCount('comfy-org/ComfyUI').catch(() => null)
+    githubStarsFetchAttempted = true
     if (parentEntry.window.isDestroyed()) return
-    openTitlePopup({
-      parent: parentEntry.window,
-      parentEntryId,
-      kind: 'global-settings',
-      snapshot,
-      anchor: { x: 0, y: TITLEBAR_HEIGHT },
-      theme: parentEntry.lastTheme,
-      titleBarSender
-    })
+    await broadcastGlobalSettingsSnapshotToTitlePopups(bindings)
   })()
 }
 
@@ -1854,8 +1860,14 @@ function activateTitlePopupMenuItem(
     // Open the Global Settings popup. The host's active installation
     // (null on chooser hosts) drives the install-scoped Update Channel
     // + Copy & Update controls.
+    //
+    // `openGlobalSettingsForHost` now opens synchronously (it no longer
+    // awaits the GitHub-stars fetch), reusing this popup's view via the
+    // kind-switch in `openTitlePopup` — which already dismisses the menu.
+    // Returning here skips the trailing `hideTitlePopup(entry)` below,
+    // which would otherwise immediately hide the settings popup we just
+    // opened on the same shared view.
     if (parentEntry && !parentEntry.window.isDestroyed()) {
-      releaseFocusToParent = false
       openGlobalSettingsForHost(
         parentEntry,
         entry.parentEntryId,
@@ -1863,6 +1875,7 @@ function activateTitlePopupMenuItem(
         parentEntry.titleBarView.webContents
       )
     }
+    return
   } else if (id === 'skip-onboarding') {
     // Forward to the panel renderer so it runs the same
     // `markFirstUseCompleted` + dismiss sequence the Cloud-branch
@@ -1939,6 +1952,13 @@ let lastAppUpdateProgress: Record<string, unknown> | null = null
  *  another IPC round-trip. */
 let globalSettingsLastCheckedAt: number | null = null
 
+/*  Flips true once the first background GitHub-stars fetch of the session
+ *  resolves (success or failure). Until then a null count means "still
+ *  loading" and the renderer shows a skeleton; afterwards a null count means
+ *  "unavailable" and the badge is hidden. Prevents an infinite shimmer when
+ *  offline. */
+let githubStarsFetchAttempted = false
+
 const SETTINGS_TYPE_TO_DETAIL_EDIT_TYPE: Record<string, string | undefined> = {
   text: 'text',
   number: 'number',
@@ -1986,7 +2006,7 @@ function findSettingsFields(
   return src.map(toDetailField)
 }
 
-async function buildGlobalSettingsSnapshot(): Promise<GlobalSettingsSnapshot> {
+function buildGlobalSettingsSnapshot(): GlobalSettingsSnapshot {
   const settingsSections = buildSettingsSections()
   const mediaSections = buildMediaSections()
   const modelsPayload = buildModelsPayload()
@@ -2002,7 +2022,8 @@ async function buildGlobalSettingsSnapshot(): Promise<GlobalSettingsSnapshot> {
   const appUpdateState = updater.getCurrentUpdateState() as unknown as Record<string, unknown>
   const isDownloading = appUpdateState['kind'] === 'downloading'
   if (!isDownloading) lastAppUpdateProgress = null
-  const githubStars = await getGithubStarCount('comfy-org/ComfyUI').catch(() => null)
+  const githubStars = getCachedGithubStarCount('comfy-org/ComfyUI')
+  const githubStarsLoading = githubStars == null && !githubStarsFetchAttempted
   return {
     generalFields,
     telemetryFields,
@@ -2030,6 +2051,7 @@ async function buildGlobalSettingsSnapshot(): Promise<GlobalSettingsSnapshot> {
     },
     githubUrl: GLOBAL_SETTINGS_GITHUB_URL,
     githubStars,
+    githubStarsLoading,
     i18n: {
       overview: i18n.t('settings.general'),
       updates: i18n.t('settings.updatesTab'),
@@ -2052,7 +2074,7 @@ async function broadcastGlobalSettingsSnapshotToTitlePopups(
     if (entry.kind !== 'global-settings') continue
     if (!entry.view.isOpen && entry.view.pendingShowTimer === null) continue
     if (entry.view.popup.webContents.isDestroyed()) continue
-    const snapshot = await buildGlobalSettingsSnapshot()
+    const snapshot = buildGlobalSettingsSnapshot()
     const snapshotJson = JSON.stringify(snapshot)
     if (entry.lastGlobalSettingsBroadcastJson === snapshotJson) continue
     entry.lastGlobalSettingsBroadcastJson = snapshotJson

@@ -49,6 +49,7 @@ interface Snapshot {
   }
   githubUrl: string
   githubStars: number | null
+  githubStarsLoading: boolean
   i18n: {
     overview: string
     updates: string
@@ -240,6 +241,7 @@ onMounted(() => {
             <GitHubLinkCard
               :url="snapshot.githubUrl"
               :stars="snapshot.githubStars"
+              :loading="snapshot.githubStarsLoading"
               @open="handleOpenExternal"
             />
           </GlobalSettingsMicroSection>

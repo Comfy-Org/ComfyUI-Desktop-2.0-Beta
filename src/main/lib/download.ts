@@ -1,6 +1,8 @@
 import { net } from 'electron'
 import fs from 'fs'
 import path from 'path'
+import * as settings from '../settings'
+import { r2MirrorUrl } from './r2Mirror'
 
 export interface DownloadProgress {
   percent: number
@@ -23,6 +25,9 @@ export interface DownloadMeta {
 interface DownloadOptions {
   signal?: AbortSignal
   expectedSize?: number
+  // Internal: suppresses the auto-derived R2 mirror retry. Set by the
+  // mirror-retry branch itself to avoid bouncing back to primary indefinitely.
+  _skipMirror?: boolean
   _maxRedirects?: number
 }
 
@@ -62,7 +67,26 @@ export function download(
   options?: DownloadOptions | number
 ): Promise<string> {
   const opts: DownloadOptions = typeof options === 'number' ? { _maxRedirects: options } : options ?? {}
-  const { signal, expectedSize, _maxRedirects = 5 } = opts
+  const { signal, expectedSize, _maxRedirects = 5, _skipMirror = false } = opts
+
+  // Mirror retry is gated on useChineseMirrors to avoid a thundering-herd
+  // tens-of-TB GCS egress event if R2 ever hiccups for the global user base.
+  // Opted-in users are who actually need the fallback; everyone else keeps
+  // the existing single-origin behaviour.
+  const mirrorEnabled = !_skipMirror && settings.get('useChineseMirrors') === true
+  const mirror = mirrorEnabled ? r2MirrorUrl(url) : undefined
+  const tryMirror = async (primaryErr: Error): Promise<string> => {
+    if (!mirror || mirror === url) throw primaryErr
+    try { fs.unlinkSync(destPath) } catch {}
+    try { fs.unlinkSync(downloadMetaPath(destPath)) } catch {}
+    try {
+      return await download(mirror, destPath, onProgress, {
+        signal, expectedSize, _maxRedirects, _skipMirror: true,
+      })
+    } catch {
+      throw primaryErr
+    }
+  }
 
   const metaPath = downloadMetaPath(destPath)
 
@@ -152,7 +176,12 @@ export function download(
       const isResumed = response.statusCode === 206 && resumeFrom > 0
       if (!isResumed && response.statusCode !== 200) {
         cleanup()
-        safeReject(new Error(`Download failed: HTTP ${response.statusCode}`))
+        const err = new Error(`Download failed: HTTP ${response.statusCode}`)
+        if (resumeFrom === 0 && !_skipMirror) {
+          tryMirror(err).then(safeResolve, safeReject)
+        } else {
+          safeReject(err)
+        }
         return
       }
 
@@ -266,7 +295,14 @@ export function download(
     request.on('error', (err: Error) => {
       cleanup()
       if (aborted) return // onAbort already handled it
-      safeReject(err)
+      // Network failure before any response arrived — try the mirror exactly
+      // once. If a partial body had already started landing we skip the mirror
+      // to avoid stitching together two origins' bytes.
+      if (resumeFrom === 0 && !_skipMirror) {
+        tryMirror(err).then(safeResolve, safeReject)
+      } else {
+        safeReject(err)
+      }
     })
     request.end()
   })

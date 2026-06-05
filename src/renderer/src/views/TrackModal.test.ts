@@ -24,7 +24,7 @@ const messages = {
     },
     git: { venv: 'Virtual Environment', venvNotFound: 'Not found' },
     track: {
-      grandTitle: 'Track Existing Install',
+      grandTitle: 'Add Existing Install',
       grandSubtitle: 'Add an existing local ComfyUI checkout.',
       installDir: 'Install Directory',
       selectDir: 'Select a directory',

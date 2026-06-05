@@ -247,6 +247,8 @@ export const en = {
     // Row meta + chips.
     nodesCount: '{count} nodes',
     packagesCount: '{count} packages',
+    nodesLabel: 'nodes',
+    pkgsLabel: 'pkgs',
     nodeChanges: '{count} node changes',
     pipChanges: '{count} pkg changes',
     comfyuiUpdated: 'ComfyUI updated',

@@ -2,6 +2,7 @@ import { net } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import { cacheDir } from './paths'
+import { r2MirrorUrl } from './r2Mirror'
 import { writeFileSafe } from './safe-file'
 
 interface CacheEntry {
@@ -68,15 +69,14 @@ function _headerString(value: string | string[] | undefined): string | undefined
   return Array.isArray(value) ? value[0] : value
 }
 
-export function fetchJSON(url: string, opts?: { refresh?: boolean }): Promise<unknown> {
-  _ensureLoaded()
-  // `refresh` ignores the persisted ETag so the response is never served from cache. Used
-  // for R2 manifests where a stale value would strand users on an old release.
-  const cached = opts?.refresh ? undefined : _cache.get(url)
-
+// Single-shot fetch with ETag negotiation. `cached` provides the If-None-Match
+// value (and the 304 short-circuit body); `cacheKey` is the URL the successful
+// response should be cached under, or undefined to skip writing to the cache
+// entirely. Splitting these lets the mirror-retry below run WITHOUT leaking the
+// primary's ETag to the mirror (cached: undefined) and WITHOUT poisoning the
+// primary's persisted cache entry with mirror-tagged data (cacheKey: undefined).
+function fetchJSONOnce(url: string, cached: CacheEntry | undefined, cacheKey: string | undefined): Promise<unknown> {
   return new Promise((resolve, reject) => {
-    // "no-cache" forces Chromium to revalidate (send If-None-Match) instead of serving from
-    // its disk cache. GitHub returns 304 for free when the ETag matches.
     const request = net.request({ url, cache: "no-cache" })
     request.setHeader("User-Agent", "ComfyUI-Desktop-2")
 
@@ -102,11 +102,6 @@ export function fetchJSON(url: string, opts?: { refresh?: boolean }): Promise<un
           return
         }
         if (response.statusCode !== 200) {
-          // On error, fall back to cached data if available
-          if (cached) {
-            resolve(structuredClone(cached.data))
-            return
-          }
           let msg = `HTTP ${response.statusCode}`
           if (response.statusCode === 403 || response.statusCode === 429) {
             const resetHeader = _headerString(response.headers["x-ratelimit-reset"])
@@ -131,28 +126,52 @@ export function fetchJSON(url: string, opts?: { refresh?: boolean }): Promise<un
         try {
           parsed = JSON.parse(data)
         } catch {
-          if (cached) {
-            resolve(structuredClone(cached.data))
-            return
-          }
           reject(new Error(`Invalid JSON response from ${url}`))
           return
         }
-        const etag = _headerString(response.headers["etag"])
-        if (etag) {
-          _cacheSet(url, { etag, data: parsed })
+        if (cacheKey) {
+          const etag = _headerString(response.headers["etag"])
+          if (etag) {
+            _cacheSet(cacheKey, { etag, data: parsed })
+          }
         }
         resolve(parsed)
       })
     })
-    request.on("error", (err) => {
-      // Network error — fall back to cached data if available
-      if (cached) {
-        resolve(structuredClone(cached.data))
-        return
-      }
-      reject(err)
-    })
+    request.on("error", (err) => reject(err))
     request.end()
   })
+}
+
+/** @internal — exposed only for tests. */
+export function _resetCacheForTest(): void {
+  _cache.clear()
+  _loaded = false
+}
+
+export async function fetchJSON(url: string, opts?: { refresh?: boolean }): Promise<unknown> {
+  _ensureLoaded()
+  // `refresh` ignores the persisted ETag so the response is never served from cache. Used
+  // for R2 manifests where a stale value would strand users on an old release.
+  const cached = opts?.refresh ? undefined : _cache.get(url)
+
+  try {
+    return await fetchJSONOnce(url, cached, url)
+  } catch (primaryErr) {
+    // If this is an R2 URL with a configured mirror, retry once against it
+    // before falling back to the persisted cache. The retry deliberately
+    // discards `cached` (no ETag negotiation against the mirror) and writes
+    // nothing back to the cache so a stale or compromised mirror cannot
+    // poison the primary's cache entry.
+    const mirror = r2MirrorUrl(url)
+    if (mirror && mirror !== url) {
+      try {
+        return await fetchJSONOnce(mirror, undefined, undefined)
+      } catch {
+        // fall through to cache / primary error
+      }
+    }
+    if (cached) return structuredClone(cached.data)
+    throw primaryErr
+  }
 }

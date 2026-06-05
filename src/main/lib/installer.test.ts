@@ -2,6 +2,21 @@ import { describe, it, expect, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+
+// `installer.ts` -> `download.ts` -> `../settings` -> `models.ts` -> `paths.ts`
+// pulls in electron's `app.getPath` at module-load time. The download function
+// here is dependency-injected through `ctx`, so none of that code actually
+// runs in this suite — but the import chain still has to resolve, so stub
+// the surface used by `paths.ts`.
+vi.mock('electron', () => ({
+  app: {
+    isPackaged: false,
+    getPath: () => '/tmp',
+    getVersion: () => '0.0.0-test',
+    getLocale: () => 'en',
+  },
+}))
+
 import { downloadAndExtract, downloadAndExtractMulti } from './installer'
 import type { Cache } from './cache'
 import type { DownloadProgress } from './download'
