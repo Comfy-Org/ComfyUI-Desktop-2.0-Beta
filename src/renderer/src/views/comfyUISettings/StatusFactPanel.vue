@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { Pencil } from 'lucide-vue-next'
 import BaseCopyButton from '../../components/ui/BaseCopyButton.vue'
 import type { DetailField, DetailSection, Installation } from '../../types/ipc'
+import { useSessionStore } from '../../stores/sessionStore'
 
 /**
  * Status tab: grouped install summary with an inline-editable identity hero (committing calls `onRename`).
@@ -20,6 +21,7 @@ interface Props {
 const props = defineProps<Props>()
 
 const { t } = useI18n()
+const sessionStore = useSessionStore()
 
 // Drive the hero name imperatively: mixing `{{ }}` with the inline pencil icon left Vue unable to patch the edited text node, so a committed rename painted everywhere except here.
 const nameEl = useTemplateRef<HTMLElement>('nameEl')
@@ -181,9 +183,13 @@ const lineageRows = computed<FactRow[]>(() => {
     .map(toRow)
 })
 
-// The running port arrives as an `active-port` field from main (works in every
-// window, unlike the renderer session store which isn't initialised in the popup).
-const activeDetailRows = computed<FactRow[]>(() => {
+// The running port arrives as an `active-port` field from main (it's the only
+// source that knows the real port in every window). Visibility is gated on the
+// reactive session store so the section hides the instant the instance stops,
+// without waiting for a section refetch.
+const runningDetailRows = computed<FactRow[]>(() => {
+  const id = props.installation?.id
+  if (!id || !sessionStore.isRunning(id)) return []
   return allFields.value
     .filter((field) => matchLabel(field, ['active-port']))
     .map(toRow)
@@ -199,12 +205,12 @@ const groups = computed<FactGroup[]>(() => {
       rows: details,
     })
   }
-  const active = activeDetailRows.value
-  if (active.length > 0) {
+  const running = runningDetailRows.value
+  if (running.length > 0) {
     out.push({
-      id: 'active-details',
-      title: t('statusFactPanel.activeDetails', 'Active details'),
-      rows: active,
+      id: 'running-details',
+      title: t('statusFactPanel.runningDetails', 'Running details'),
+      rows: running,
     })
   }
   const location = locationRows.value
