@@ -123,13 +123,28 @@ describe('StoragePane', () => {
     expect(document.activeElement).toBe(toggle.element)
   })
 
-  it('opens a models dir through the bridge when the open icon is clicked', async () => {
+  it('browses and re-points the dir through the bridge when the browse icon is clicked', async () => {
     const bridge = installMockBridge()
+    bridge.browseFolderReturn = '/mnt/new/models'
     const wrapper = mountPane()
     await nextTick()
-    const openBtns = wrapper.findAll('.models-dir-row .models-dir-action')
-    await openBtns[0]!.trigger('click')
-    expect(bridge.openPathCalls).toEqual(['/home/u/ComfyUI/models'])
+    const browseBtns = wrapper.findAll('.models-dir-row .models-dir-action')
+    await browseBtns[0]!.trigger('click')
+    await flushPromises()
+    expect(bridge.setModelsDirsCalls).toEqual([
+      ['/mnt/new/models', '/mnt/extra/models'],
+    ])
+  })
+
+  it('leaves dirs unchanged when the browse picker is canceled', async () => {
+    const bridge = installMockBridge()
+    bridge.browseFolderReturn = null
+    const wrapper = mountPane()
+    await nextTick()
+    const browseBtns = wrapper.findAll('.models-dir-row .models-dir-action')
+    await browseBtns[0]!.trigger('click')
+    await flushPromises()
+    expect(bridge.setModelsDirsCalls).toEqual([])
   })
 
   // make-primary is a "touched" action; the note bar must flip to the
@@ -147,12 +162,14 @@ describe('StoragePane', () => {
     expect(wrapper.find('.storage-note.is-warning').exists()).toBe(true)
   })
 
-  it('does not flip the storage note when only opening a dir', async () => {
-    installMockBridge()
+  it('flips the storage note to the warning state after browsing to a new dir', async () => {
+    const bridge = installMockBridge()
+    bridge.browseFolderReturn = '/mnt/new/models'
     const wrapper = mountPane()
     await nextTick()
+    expect(wrapper.find('.storage-note.is-warning').exists()).toBe(false)
     await wrapper.findAll('.models-dir-row .models-dir-action')[0]!.trigger('click')
     await flushPromises()
-    expect(wrapper.find('.storage-note.is-warning').exists()).toBe(false)
+    expect(wrapper.find('.storage-note.is-warning').exists()).toBe(true)
   })
 })
