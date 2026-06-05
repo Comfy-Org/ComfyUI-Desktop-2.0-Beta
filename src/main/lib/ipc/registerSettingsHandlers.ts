@@ -158,6 +158,26 @@ export function buildModelsPayload(): { systemDefault: string; sections: Setting
   }
 }
 
+// Default suggested install location (global-only; intentionally NOT part of
+// buildMediaSections so it doesn't leak into the per-instance Storage tab).
+// Label/tooltip live on the section header, so the field itself is unlabelled.
+export function buildInstallLocationFields(): SettingsSection[] {
+  const s = settings.getAll()
+  return [
+    {
+      fields: [
+        {
+          id: 'installDir',
+          label: '',
+          type: 'path' as const,
+          value: s.installDir || settings.defaults.installDir,
+          openable: true
+        }
+      ]
+    }
+  ]
+}
+
 // Shared input/output directories.
 export function buildMediaSections(): SettingsSection[] {
   const s = settings.getAll()

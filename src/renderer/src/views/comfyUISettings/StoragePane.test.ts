@@ -83,6 +83,15 @@ describe('StoragePane', () => {
     expect(rows[1]!.find('.tag-primary').exists()).toBe(false)
   })
 
+  // The global default install location is intentionally NOT shown in the
+  // per-instance Storage tab — it only belongs in Global Desktop Settings.
+  it('does not render the global Install Location section', async () => {
+    installMockBridge()
+    const wrapper = mountPane()
+    await nextTick()
+    expect(wrapper.text()).not.toContain('Install Location')
+  })
+
   it('writes reordered dirs through the bridge when make-primary is invoked', async () => {
     const bridge = installMockBridge()
     const wrapper = mountPane()

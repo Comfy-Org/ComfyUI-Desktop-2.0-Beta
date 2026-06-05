@@ -242,7 +242,7 @@ function fieldOwnsLabel(field: DetailField): boolean {
         </div>
 
         <template v-else>
-          <label v-if="!fieldOwnsLabel(field)" class="settings-v2-field-label">
+          <label v-if="!fieldOwnsLabel(field) && field.label" class="settings-v2-field-label">
             <span class="settings-v2-field-label-text">{{ field.label }}</span>
             <InfoTooltip v-if="field.tooltip" :text="field.tooltip" />
             <span v-if="needsRestartTag(field)" class="settings-v2-restart-tag" role="status">

@@ -287,6 +287,7 @@
     "community": "社区",
     "storageTab": "存储",
     "sharedDirectories": "共享目录",
+    "installLocation": "默认安装位置",
     "updatesTab": "更新"
   },
 
@@ -663,6 +664,7 @@
     "useSharedModels": "启用后，此安装可以看到您全局共享模型文件夹中的所有模型。关闭后将隐藏这些模型——大多数用户应保持启用。",
     "useSharedInputOutput": "启用后，此安装将从全局共享文件夹读取和写入输入与输出文件。关闭后可在下方将此安装指向自己的文件夹。",
     "perInstallInputDir": "此安装读取输入文件的文件夹。留空则使用该安装自带的内部输入文件夹。",
-    "perInstallOutputDir": "此安装写入生成的输出文件的文件夹。留空则使用该安装自带的内部输出文件夹。"
+    "perInstallOutputDir": "此安装写入生成的输出文件的文件夹。留空则使用该安装自带的内部输出文件夹。",
+    "installDir": "创建新安装时建议使用的默认上级文件夹。现有安装不会被移动。"
   }
 }

@@ -416,6 +416,7 @@
     "community": "Community",
     "storageTab": "Storage",
     "sharedDirectories": "Shared Directories",
+    "installLocation": "Default Install Location",
     "updatesTab": "Updates"
   },
 
@@ -1050,6 +1051,7 @@
     "perInstallOutputDir": "Folder this install writes generated output files to. Leave blank to use this install's own internal output folder.",
     "inputDir": "Shared folder for input files (images, masks, etc.) accessible to all installations.",
     "outputDir": "Shared folder where ComfyUI saves generated outputs, accessible to all installations.",
+    "installDir": "Default parent folder suggested when creating new installations. Existing installs aren't moved.",
     "autoDownloadOutputs": "Automatically download output files (images, videos) from this remote instance to a local directory after each workflow run.",
     "useSharedOutputDir": "When enabled, downloaded outputs are saved to the shared output directory. Disable to use a custom output folder for this install.",
     "outputDirPerInstall": "Custom local folder where outputs from this remote instance will be saved.",

@@ -21,6 +21,7 @@ export const en = {
     platform: 'Platform',
     storageTab: 'Storage',
     sharedDirectories: 'Shared Directories',
+    installLocation: 'Default Install Location',
     models: 'Shared Models',
     updatesTab: 'Updates',
     checkForUpdates: 'Check for updates',
@@ -53,7 +54,9 @@ export const en = {
     sharedModels:
       "Folders shared across all installations so models aren't downloaded twice. Newly downloaded models go to the primary folder. The primary folder can't be removed while it's in use — pick a different primary first.",
     modelsPrimary:
-      'The primary directory is where ComfyUI saves newly downloaded models by default.'
+      'The primary directory is where ComfyUI saves newly downloaded models by default.',
+    installDir:
+      "Default parent folder suggested when creating new installations. Existing installs aren't moved."
   },
   installType: {
     standalone: 'Standalone',
