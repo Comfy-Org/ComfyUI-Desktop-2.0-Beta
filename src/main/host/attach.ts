@@ -2,6 +2,8 @@ import * as ipc from '../lib/ipc'
 import { getAppVersion } from '../lib/ipc'
 import { attachSessionDownloadHandler } from '../lib/comfyDownloadManager'
 import { getModelDownloadContentScript } from '../lib/comfyContentScript'
+import { getComfyTerminalContentScript } from '../lib/comfyTerminalContentScript'
+import { isCachedFeatureFlagAvailable } from '../lib/comfy-feature-flags'
 import { _operationAborts, sourceMap } from '../lib/ipc/shared'
 import { TITLEBAR_BG } from '../lib/theme'
 import * as mainTelemetry from '../lib/telemetry'
@@ -377,6 +379,18 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
     comfyContents.executeJavaScript(COMFY_THEME_OBSERVER_JS).catch(() => {})
     const preamble = isLocal ? '' : 'window.__comfyDesktop2Remote = true;\n'
     comfyContents.executeJavaScript(preamble + getModelDownloadContentScript()).catch(() => {})
+    // Stopgap: inject a fallback bottom-panel Terminal tab for standalone
+    // installs whose ComfyUI doesn't advertise `supports_terminal`, the exact
+    // case where the real flag-gated frontend tab can't appear. The transport
+    // (__comfyDesktop2.Terminal) exists regardless of the flag. Remove once the
+    // official tab ships in a stable release.
+    if (
+      isLocal &&
+      installation.sourceId === 'standalone' &&
+      !isCachedFeatureFlagAvailable(installationId, 'supports_terminal')
+    ) {
+      comfyContents.executeJavaScript(getComfyTerminalContentScript()).catch(() => {})
+    }
     // Cloud-only patches (popup-blocked toast suppression + post-signin
     // flicker hide). Skipped for local installs — they don't load cloud
     // frontend, never see the toast or the redirect flash.

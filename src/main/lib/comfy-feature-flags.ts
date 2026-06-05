@@ -57,10 +57,36 @@ export async function getComfyFeatureFlagRegistry(
     console.warn('[comfy-feature-flags] Could not get registry:', (err as Error).message)
   }
 
-  if (version) {
-    registryCache.set(installationId, { registry, version })
-  }
+  registryCache.set(installationId, { registry, version: version ?? '' })
   return registry
+}
+
+/**
+ * Read the cached registry without ever spawning Python. Returns `null` when
+ * nothing is cached for the install (e.g. discovery hasn't run, or failed).
+ * A blank cached version matches any requested version so launches that lacked
+ * a version string still hit.
+ */
+export function getCachedFeatureFlagRegistry(
+  installationId: string,
+  version?: string,
+): FeatureFlagRegistry | null {
+  const cached = registryCache.get(installationId)
+  if (!cached) return null
+  if (version !== undefined && cached.version !== '' && cached.version !== version) {
+    return null
+  }
+  return cached.registry
+}
+
+/** Whether a CLI feature flag is known to the install's ComfyUI, read from the
+ *  cache only (no spawn). Treats an absent cache as "not available". */
+export function isCachedFeatureFlagAvailable(
+  installationId: string,
+  key: string,
+  version?: string,
+): boolean {
+  return key in (getCachedFeatureFlagRegistry(installationId, version) ?? {})
 }
 
 function runListFeatureFlags(pythonPath: string, mainPyPath: string, cwd: string): Promise<string> {
