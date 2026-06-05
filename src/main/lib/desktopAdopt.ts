@@ -52,7 +52,7 @@ export type AdoptPromptKind = 'tcc' | 'venv-broken' | 'source-missing' | 'confir
 export type UserChoice =
   | { kind: 'tcc'; choice: 'continue' | 'denied' }
   | { kind: 'venv-broken'; choice: 'use-anyway' | 'cancel' }
-  | { kind: 'source-missing'; choice: 'switch-to-managed' | 'retry' | 'cancel' }
+  | { kind: 'source-missing'; choice: 'retry' | 'cancel' }
   | { kind: 'confirm-adopt'; choice: 'yes' | 'no' }
 
 export interface AdoptTools {
@@ -1025,13 +1025,13 @@ async function runAdoption(
       message: sourceResult.message,
       attempts: sourceAttempts
     })
-    if (choice.kind !== 'source-missing') break
-    if (choice.choice === 'cancel') {
+    // Only an explicit retry loops. Anything else (cancel, or an
+    // unexpected choice) is a hard failure: adoption cannot continue
+    // without the ComfyUI source. Throw a clear error the dispatcher
+    // surfaces to the user — with a suggestion to do a fresh install —
+    // rather than silently leaving `sourceMode` null.
+    if (!(choice.kind === 'source-missing' && choice.choice === 'retry')) {
       throw new Error(`source-missing: ${sourceResult.message}`)
-    }
-    if (choice.choice === 'switch-to-managed') {
-      // Caller (dispatcher) maps this to the fresh-standalone flow.
-      throw new Error('source-missing-switch-to-managed')
     }
     // 'retry' loops.
   }

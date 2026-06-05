@@ -88,10 +88,12 @@ describe('handleMigrateToStandalone — desktop branch', () => {
     })
   })
 
-  it('routes "source-missing-switch-to-managed" to new-install navigation', async () => {
-    adoptDesktopInstallMock.mockRejectedValueOnce(new Error('source-missing-switch-to-managed'))
+  it('fails clearly when adoption cannot source ComfyUI (no fake-success fallback)', async () => {
+    adoptDesktopInstallMock.mockRejectedValueOnce(
+      new Error('source-missing: git clone failed')
+    )
     const result = await handleMigrateToStandalone(makeContext({ sourceId: 'desktop' }))
-    expect(result).toEqual({ ok: true, navigate: 'new-install' })
+    expect(result).toEqual({ ok: false, message: 'desktop.adoptSourceMissingFailed' })
   })
 
   it('surfaces other adoption errors as failure results', async () => {

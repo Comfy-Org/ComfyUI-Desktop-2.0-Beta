@@ -63,17 +63,13 @@ function buildAdoptPromptSpec(kind: AdoptPromptKind, ctx: unknown): PromptSpec {
         detail: typeof data['message'] === 'string' ? (data['message'] as string) : undefined,
         buttons: [
           {
-            label: i18n.t('desktop.adoptPromptSwitchToManaged'),
-            choice: { kind: 'source-missing', choice: 'switch-to-managed' }
-          },
-          {
             label: i18n.t('desktop.adoptPromptRetry'),
             choice: { kind: 'source-missing', choice: 'retry' }
           },
           { label: i18n.t('common.cancel'), choice: { kind: 'source-missing', choice: 'cancel' } }
         ],
-        defaultId: 1,
-        cancelId: 2
+        defaultId: 0,
+        cancelId: 1
       }
     case 'confirm-adopt':
       // Only shown if the orchestrator escalates a runtime decision.
@@ -167,10 +163,11 @@ export async function handleMigrateToStandalone({
       }
       if (abort.signal.aborted) return { ok: true, navigate: 'detail' }
       const message = (err as Error).message
-      // Synthetic error meaning "user picked Switch to managed env" — route to
-      // the new-install flow instead of a failure dialog.
-      if (message === 'source-missing-switch-to-managed') {
-        return { ok: true, navigate: 'new-install' }
+      // Adoption couldn't obtain the ComfyUI source (no staged copy and the
+      // git clone failed). Fail clearly with a message that points the user
+      // at doing a fresh install, rather than the old fake-success no-op.
+      if (message.startsWith('source-missing')) {
+        return { ok: false, message: i18n.t('desktop.adoptSourceMissingFailed') }
       }
       return { ok: false, message }
     }
