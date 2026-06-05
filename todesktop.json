@@ -35,7 +35,13 @@
   },
   "mac": {
     "icon": "./assets/Comfy_Logo_mac_x1024.png",
-    "category": "public.app-category.graphics-design"
+    "category": "public.app-category.graphics-design",
+    "extendInfo": {
+      "NSLocalNetworkUsageDescription": "Comfy Desktop connects to ComfyUI servers running on your local network.",
+      "NSAppTransportSecurity": {
+        "NSAllowsLocalNetworking": true
+      }
+    }
   },
   "dmg": {
     "title": "Comfy Desktop",
