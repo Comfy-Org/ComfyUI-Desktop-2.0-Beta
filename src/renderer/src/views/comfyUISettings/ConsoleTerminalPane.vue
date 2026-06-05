@@ -137,6 +137,10 @@ onBeforeUnmount(teardown)
 .console-pane {
   position: relative;
   width: 100%;
+  /* Without min-width:0 the xterm host's intrinsic ~80-col width propagates up
+   * the flex chain and blows out the settings pane (overflowing buttons, broken
+   * tab strip). */
+  min-width: 0;
   flex: 1 1 auto;
   min-height: 240px;
   background: #171717;
@@ -144,10 +148,13 @@ onBeforeUnmount(teardown)
   overflow: hidden;
 }
 
+/* Absolutely positioned so xterm's content size never contributes to the
+ * layout's intrinsic width — the pane is sized by the flex container only. */
 .console-host {
-  width: 100%;
-  height: 100%;
+  position: absolute;
+  inset: 0;
   padding: 8px;
+  overflow: hidden;
 }
 
 .console-ended {
