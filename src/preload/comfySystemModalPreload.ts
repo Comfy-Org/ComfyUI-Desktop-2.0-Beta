@@ -8,6 +8,7 @@ import type { IpcRendererEvent } from 'electron'
  */
 
 export type SystemModalConfirmStyle = 'primary' | 'danger'
+export type SystemModalSecondaryStyle = 'primary' | 'danger' | 'default'
 
 export interface SystemModalDetailGroup {
   label: string
@@ -23,10 +24,13 @@ export interface SystemModalSpec {
   confirmLabel: string
   cancelLabel: string
   confirmStyle?: SystemModalConfirmStyle
+  /** Optional middle action; when present the modal renders a third button. */
+  secondaryLabel?: string
+  secondaryStyle?: SystemModalSecondaryStyle
   theme: { bg: string; text: string }
 }
 
-export type SystemModalAction = 'confirm' | 'cancel'
+export type SystemModalAction = 'confirm' | 'cancel' | 'secondary'
 
 export interface SystemModalActionPayload {
   modalId: string
@@ -80,7 +84,13 @@ function isModalSpec(value: unknown): value is SystemModalSpec {
 const bridge: ComfySystemModalBridge = {
   action: (payload) => {
     if (!payload || typeof payload.modalId !== 'string') return
-    if (payload.action !== 'confirm' && payload.action !== 'cancel') return
+    if (
+      payload.action !== 'confirm' &&
+      payload.action !== 'cancel' &&
+      payload.action !== 'secondary'
+    ) {
+      return
+    }
     ipcRenderer.send('comfy-systemmodal:action', payload)
   },
   ready: () => {

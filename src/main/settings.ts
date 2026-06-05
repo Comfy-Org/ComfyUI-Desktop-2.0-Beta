@@ -22,6 +22,9 @@ export interface KnownSettings {
   /** When true (default), Desktop updates download and install silently; when
    *  false, the user is prompted before any download/install. */
   autoInstallUpdates?: boolean
+  /** When true (default), boot reopens the last-used instance window instead of
+   *  the dashboard, when the last active surface was an instance. */
+  reopenLastInstanceOnLaunch?: boolean
   pypiMirror?: string
   useChineseMirrors?: boolean
   chineseMirrorsPrompted?: boolean
@@ -61,6 +64,7 @@ const SETTINGS_SCHEMA = {
   theme: { nullable: false },
   autoUpdate: { nullable: false },
   autoInstallUpdates: { nullable: false },
+  reopenLastInstanceOnLaunch: { nullable: false },
   pypiMirror: { nullable: false },
   useChineseMirrors: { nullable: false },
   chineseMirrorsPrompted: { nullable: false },

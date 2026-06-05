@@ -55,6 +55,12 @@ export function buildSettingsSections(): SettingsSection[] {
           type: 'boolean',
           value: s.autoInstallUpdates !== false
         },
+        {
+          id: 'reopenLastInstanceOnLaunch',
+          label: i18n.t('settings.reopenLastInstanceOnLaunch'),
+          type: 'boolean',
+          value: s.reopenLastInstanceOnLaunch !== false
+        },
         // onAppClose field hidden while docking-to-tray is disabled.
         ...(isChinese ? [chineseMirrorsField] : [])
       ]

@@ -4,6 +4,7 @@ import { TITLEBAR_HEIGHT } from '../lib/titleBarOverlay'
 import { EmbeddedPopupView } from './embeddedPopupView'
 
 type SystemModalConfirmStyle = 'primary' | 'danger'
+type SystemModalSecondaryStyle = 'primary' | 'danger' | 'default'
 
 export interface SystemModalDetailGroup {
   label: string
@@ -19,10 +20,14 @@ export interface SystemModalSpec {
   confirmLabel: string
   cancelLabel: string
   confirmStyle?: SystemModalConfirmStyle
+  /** Optional middle action (rendered between Cancel and the primary). When set,
+   *  the modal becomes a three-way choice and resolves `'secondary'`. */
+  secondaryLabel?: string
+  secondaryStyle?: SystemModalSecondaryStyle
   theme: { bg: string; text: string }
 }
 
-type SystemModalAction = 'confirm' | 'cancel'
+type SystemModalAction = 'confirm' | 'cancel' | 'secondary'
 
 export type SystemModalCallback = (action: SystemModalAction) => void
 
@@ -169,6 +174,26 @@ export function openSystemModalAsync(opts: OpenSystemModalOpts): Promise<boolean
   })
 }
 
+/** Three-way variant of `openSystemModalAsync`. Resolves the raw action so a
+ *  caller offering a middle option (`secondaryLabel`) can branch on it. Cancel
+ *  / superseded / parent-destroyed all resolve `'cancel'`. */
+export function openSystemModalChoiceAsync(
+  opts: OpenSystemModalOpts,
+): Promise<'confirm' | 'cancel' | 'secondary'> {
+  return new Promise((resolve) => {
+    openSystemModal({
+      parent: opts.parent,
+      spec: opts.spec,
+      callback: (action) => {
+        if (opts.callback) {
+          try { opts.callback(action) } catch {}
+        }
+        resolve(action)
+      },
+    })
+  })
+}
+
 /** Wire the IPC handlers that drive the system-modal popup. Called once at app ready. */
 export function registerSystemModalIpc(): void {
   ipcMain.on('comfy-systemmodal:ready', (event) => {
@@ -204,7 +229,7 @@ export function registerSystemModalIpc(): void {
       // Stale ack — the modal was already replaced by a newer open.
       if (payload?.modalId !== spec.id) return
       const action = payload?.action
-      if (action !== 'confirm' && action !== 'cancel') return
+      if (action !== 'confirm' && action !== 'cancel' && action !== 'secondary') return
       entry.currentSpec = null
       entry.currentCallback = null
       entry.view.hide({ focusParent: true })

@@ -15,6 +15,11 @@ import { installAppMenu } from './menu'
 import * as i18n from './lib/i18n'
 import { migrateXdgPaths } from './lib/paths'
 import { saveWindowBounds } from './lib/windowState'
+import {
+  clearLastActiveSurface,
+  flushLastSession,
+  getLastActiveSurface
+} from './lib/lastSession'
 import { registerProcessErrorHandlers } from './lib/processErrorHandlers'
 import { registerTitleTooltipIpc } from './popups/titleTooltip'
 import { registerTitleCoachmarkIpc } from './popups/titleCoachmark'
@@ -191,6 +196,52 @@ function quitApp(): void {
     tray = null
   }
   app.quit()
+}
+
+/**
+ * Boot surface: always open the chooser host, then — when the reopen setting is
+ * on and the user last left an instance window — restore that instance in place
+ * on top of it. Restore reuses the dashboard's own launch path (the
+ * `picker-pick-install` deep link → `handleChooserPick`), so it gets the same
+ * progress overlay, claim, and in-place attach the user sees when clicking an
+ * install card. Any failure (install gone, launch error, console/external mode)
+ * just leaves the dashboard up.
+ */
+function openStartupSurface(): void {
+  // Read the persisted surface BEFORE opening the chooser host: showing the
+  // chooser fires its `focus` handler, which would record 'dashboard' and
+  // clobber the instance we're about to restore.
+  const surface = getLastActiveSurface()
+  const restoreEnabled =
+    settings.get('reopenLastInstanceOnLaunch') !== false &&
+    settings.get('firstUseCompleted') === true
+
+  const chooserWindow = openOrFocusChooserHostWindow()
+
+  if (!restoreEnabled || surface?.kind !== 'instance') return
+  const installationId = surface.installationId
+
+  void (async () => {
+    const inst = await getInstallation(installationId)
+    if (!inst) {
+      // The remembered install was deleted — fall back to the dashboard and
+      // drop the stale state so we don't retry forever.
+      clearLastActiveSurface()
+      return
+    }
+    const entry = findEntryByHostWindow(chooserWindow)
+    if (!entry || entry.window.isDestroyed() || !isChooserHost(entry)) return
+    const panelView =
+      entry.panelView ?? ensurePanelView(entry.windowKey, entry, computeBodyMode(entry))
+    if (panelView.webContents.isDestroyed()) return
+    // `sendToPanelDeferred` holds the IPC until the panel renderer's
+    // `did-finish-load`; the deep-link handler then awaits its own bootstrap
+    // before launching, so this is safe to fire immediately after open.
+    sendToPanelDeferred(panelView, 'panel-trigger-overlay', {
+      kind: 'picker-pick-install',
+      installationId
+    })
+  })()
 }
 
 function onComfyExited({ installationId }: { installationId?: string } = {}): void {
@@ -1833,8 +1884,10 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     // The install-less chooser host is the primary surface. Each
     // install gets its own ComfyUI window via openComfyWindow()
     // when launched, and the chooser host is the entry-point for
-    // picking / creating installs.
-    openOrFocusChooserHostWindow()
+    // picking / creating installs. When the user last left an instance
+    // window (and the reopen setting is on), restore that instance
+    // in-place on top of the freshly-opened chooser host.
+    openStartupSurface()
 
     // Single subscription rebroadcasts every install-list mutation
     // (add/remove/update/markLaunched/reorder/...) to all renderers as
@@ -1911,6 +1964,9 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
       _stopPeriodicReleaseChecks()
       _stopPeriodicReleaseChecks = null
     }
+    // Persist any pending last-active-surface write so the next boot can
+    // restore it (best-effort; in-session writes are already debounce-flushed).
+    void flushLastSession()
     cleanupTempDownloads()
   })
 
