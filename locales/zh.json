@@ -111,6 +111,7 @@
     "release": "版本",
     "location": "位置",
     "installed": "已安装",
+    "port": "端口",
     "launchSettings": "启动设置",
     "startupArgs": "启动参数",
     "launchMode": "启动模式",

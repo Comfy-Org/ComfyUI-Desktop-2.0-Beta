@@ -162,6 +162,7 @@
     "release": "Release",
     "location": "Location",
     "installed": "Installed",
+    "port": "Port",
     "launchSettings": "Launch Settings",
     "startupArgs": "Startup Arguments",
     "launchMode": "Launch Mode",

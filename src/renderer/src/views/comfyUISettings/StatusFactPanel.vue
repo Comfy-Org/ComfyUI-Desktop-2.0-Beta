@@ -4,7 +4,6 @@ import { useI18n } from 'vue-i18n'
 import { Pencil } from 'lucide-vue-next'
 import BaseCopyButton from '../../components/ui/BaseCopyButton.vue'
 import type { DetailField, DetailSection, Installation } from '../../types/ipc'
-import { useSessionStore } from '../../stores/sessionStore'
 
 /**
  * Status tab: grouped install summary with an inline-editable identity hero (committing calls `onRename`).
@@ -21,7 +20,6 @@ interface Props {
 const props = defineProps<Props>()
 
 const { t } = useI18n()
-const sessionStore = useSessionStore()
 
 // Drive the hero name imperatively: mixing `{{ }}` with the inline pencil icon left Vue unable to patch the edited text node, so a committed rename painted everywhere except here.
 const nameEl = useTemplateRef<HTMLElement>('nameEl')
@@ -147,6 +145,7 @@ const installDetailRows = computed<FactRow[]>(() => {
   for (const field of allFields.value) {
     if (matchLabel(field, ['lineage'])) continue
     if (matchLabel(field, ['location', 'path', 'disk'])) continue
+    if (matchLabel(field, ['active-port'])) continue
     if (matchLabel(field, ['install method', 'method'])) continue
     const row = toRow(field)
     if (sourceLabel && row.value.toLowerCase() === sourceLabel) continue
@@ -182,16 +181,12 @@ const lineageRows = computed<FactRow[]>(() => {
     .map(toRow)
 })
 
+// The running port arrives as an `active-port` field from main (works in every
+// window, unlike the renderer session store which isn't initialised in the popup).
 const activeDetailRows = computed<FactRow[]>(() => {
-  const id = props.installation?.id
-  if (!id) return []
-  const running = sessionStore.runningInstances.get(id)
-  if (!running?.port) return []
-  return [{
-    id: '__port',
-    label: t('statusFactPanel.port', 'Port'),
-    value: String(running.port),
-  }]
+  return allFields.value
+    .filter((field) => matchLabel(field, ['active-port']))
+    .map(toRow)
 })
 
 const groups = computed<FactGroup[]>(() => {
