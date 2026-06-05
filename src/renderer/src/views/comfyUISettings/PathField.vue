@@ -39,7 +39,7 @@ function handleChange(value: string): void {
   <BaseInput
     :model-value="stringValue"
     :readonly="isBrowseOnly"
-    :aria-label="field.label"
+    :aria-label="field.label || undefined"
     @change="handleChange"
   >
     <template #trailing>
