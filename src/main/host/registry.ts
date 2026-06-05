@@ -244,6 +244,17 @@ export function shouldConfirmKillForEntry(
 }
 
 /**
+ * Predicate: this entry has a live ComfyUI session (i.e. its body shows the
+ * running ComfyUI view, not the lifecycle/crash panel). Used to decide whether
+ * the install is a healthy "last active surface" worth restoring on next boot.
+ */
+export function hasRunningSessionForEntry(
+  entry: ComfyWindowEntry | null | undefined,
+): entry is ComfyWindowEntry & { installationId: string } {
+  return !!entry && isInstallHost(entry) && _runningSessions.has(entry.installationId)
+}
+
+/**
  * Decide what fills a comfy window's body. Install-backed: the Comfy pill →
  * live ComfyUI view (running) or lifecycle panel (stopped). Install-less: the
  * Comfy pill → chooser. Centralised so layout and body swaps can't disagree.

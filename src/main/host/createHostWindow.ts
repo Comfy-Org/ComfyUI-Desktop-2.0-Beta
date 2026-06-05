@@ -40,6 +40,7 @@ import {
   comfyWindows,
   computeBodyMode,
   dropAttachClaimsForWindow,
+  hasRunningSessionForEntry,
   isChooserHost,
   isInstallHost,
   nextWindowKey,
@@ -751,11 +752,13 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
       setLastFocusedInstallationId(entry.installationId)
     }
     // Persist which surface was last active so the next boot can restore it.
-    // The record helpers no-op while quitting: windows can take focus as
-    // siblings are destroyed, which would otherwise clobber the surface the
-    // user actually left from.
+    // Only a *running* instance is a healthy restore target — a stopped or
+    // crashed install-backed window shows the lifecycle panel, so record it as
+    // the dashboard to avoid relaunching straight into a crash next boot. The
+    // record helpers no-op while quitting: windows can take focus as siblings
+    // are destroyed, which would otherwise clobber the surface the user left.
     if (entry) {
-      if (entry.installationId) recordInstanceSurface(entry.installationId)
+      if (hasRunningSessionForEntry(entry)) recordInstanceSurface(entry.installationId)
       else recordDashboardSurface()
     }
   })

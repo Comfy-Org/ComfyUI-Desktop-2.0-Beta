@@ -9,6 +9,7 @@ import type { ChildProcess } from 'child_process'
 import todesktop from '@todesktop/runtime'
 import * as ipc from './lib/ipc'
 import { getAppVersion } from './lib/ipc'
+import type { ExitCallbackInfo } from './lib/ipc'
 import * as updater from './lib/updater'
 import * as settings from './settings'
 import { installAppMenu } from './menu'
@@ -18,7 +19,8 @@ import { saveWindowBounds } from './lib/windowState'
 import {
   clearLastActiveSurface,
   flushLastSessionSync,
-  getLastActiveSurface
+  getLastActiveSurface,
+  recordDashboardSurface
 } from './lib/lastSession'
 import { registerProcessErrorHandlers } from './lib/processErrorHandlers'
 import { registerTitleTooltipIpc } from './popups/titleTooltip'
@@ -244,8 +246,14 @@ function openStartupSurface(): void {
   })()
 }
 
-function onComfyExited({ installationId }: { installationId?: string } = {}): void {
+function onComfyExited({ installationId, crashed }: ExitCallbackInfo = {}): void {
   if (!installationId) return
+  // A crashed instance is no longer a healthy restore target: drop it back to
+  // the dashboard so the next boot doesn't relaunch straight into the crash.
+  // `recordDashboardSurface` only overwrites when this install is still the
+  // recorded surface's intent (it's a simple last-writer), which is correct
+  // here — the crashed window is the one the user was on.
+  if (crashed) recordDashboardSurface()
   // The window stays alive — exit (clean or crash) just swaps the body to the
   // lifecycle panel so the user can re-launch, look at logs, or close the
   // window themselves. Window destruction only happens via explicit close

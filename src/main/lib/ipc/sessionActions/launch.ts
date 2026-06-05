@@ -270,7 +270,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
       if (!sender.isDestroyed()) {
         sender.send('comfy-exited', exitedPayload)
       }
-      if (_onComfyExited) _onComfyExited({ installationId })
+      if (_onComfyExited) _onComfyExited({ installationId, crashed })
     })
 
     if (_onLaunch) {
@@ -671,7 +671,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
       if (!sender.isDestroyed()) {
         sender.send('comfy-exited', exitedPayload)
       }
-      if (_onComfyExited) _onComfyExited({ installationId })
+      if (_onComfyExited) _onComfyExited({ installationId, crashed })
     })
   }
   attachExitHandler(proc)
