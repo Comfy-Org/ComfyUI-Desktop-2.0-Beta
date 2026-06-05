@@ -46,8 +46,8 @@ function makeSnapshot(): StorageSnapshot {
   return {
     sharedDirectoriesFields: [],
     modelsDirs: [
-      { path: '/home/u/ComfyUI/models', isPrimary: true, isDefault: true },
-      { path: '/mnt/extra/models', isPrimary: false, isDefault: false },
+      { path: '/home/u/ComfyUI/models', isPrimary: true },
+      { path: '/mnt/extra/models', isPrimary: false },
     ],
     modelsSystemDefault: '/home/u/ComfyUI/models',
   }
@@ -81,6 +81,15 @@ describe('StoragePane', () => {
     expect(rows).toHaveLength(2)
     expect(rows[0]!.find('.tag-primary').exists()).toBe(true)
     expect(rows[1]!.find('.tag-primary').exists()).toBe(false)
+  })
+
+  // The global default install location is intentionally NOT shown in the
+  // per-instance Storage tab — it only belongs in Global Desktop Settings.
+  it('does not render the global Install Location section', async () => {
+    installMockBridge()
+    const wrapper = mountPane()
+    await nextTick()
+    expect(wrapper.text()).not.toContain('Install Location')
   })
 
   it('writes reordered dirs through the bridge when make-primary is invoked', async () => {

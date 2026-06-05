@@ -129,6 +129,20 @@ describe('settings unset/default semantics', () => {
     expect(readPersistedSettings()['customKey']).toBeNull()
   })
 
+  it('defaults installDir to ~/ComfyUI-Installs and persists overrides', () => {
+    const builtinDefault = path.join(homePath, 'ComfyUI-Installs')
+    expect(settings.get('installDir')).toBe(builtinDefault)
+
+    const custom = path.join(homePath, 'Custom', 'Installs')
+    settings.set('installDir', custom)
+    expect(settings.get('installDir')).toBe(custom)
+    expect(readPersistedSettings()['installDir']).toBe(custom)
+
+    settings.set('installDir', undefined)
+    expect(settings.get('installDir')).toBe(builtinDefault)
+    expect(readPersistedSettings()).not.toHaveProperty('installDir')
+  })
+
   it('treats empty and whitespace-only strings as unset for pypiMirror', () => {
     settings.set('pypiMirror', 'https://mirrors.aliyun.com/pypi/simple/')
     expect(settings.get('pypiMirror')).toBe('https://mirrors.aliyun.com/pypi/simple/')
@@ -148,15 +162,24 @@ describe('settings path sanitization', () => {
   it('rewrites copied foreign-user defaults on Windows only', () => {
     fs.mkdirSync(path.dirname(settingsPath), { recursive: true })
     const customModelsDir = path.join(tmpRoot, 'custom-models')
+    // The directories referenced below must exist on disk, otherwise the
+    // "all model dirs missing -> restore shared default" and "input/output
+    // missing -> fall back to default" safeguards would fire and obscure
+    // what this test is actually checking (path sanitization).
+    fs.mkdirSync(customModelsDir, { recursive: true })
+    for (const sub of ['models', 'input', 'output']) {
+      fs.mkdirSync(path.join(adminHomePath, 'ComfyUI-Shared', sub), { recursive: true })
+    }
+    // systemDefault is no longer force-appended when the user's
+    // modelsDirs is non-empty. On Windows the foreign-admin path is
+    // dropped via sanitizeModelsDirs and the user is left with just
+    // their custom entry; on non-Windows the admin path stays because
+    // sanitization doesn't run.
     const expectedModelsDirs = shouldRewriteCopiedDefaults
-      ? [
-          customModelsDir,
-          path.join(homePath, 'ComfyUI-Shared', 'models'),
-        ]
+      ? [customModelsDir]
       : [
           path.join(adminHomePath, 'ComfyUI-Shared', 'models'),
           customModelsDir,
-          path.join(homePath, 'ComfyUI-Shared', 'models'),
         ]
     const expectedInputDir = shouldRewriteCopiedDefaults
       ? path.join(homePath, 'ComfyUI-Shared', 'input')
@@ -234,6 +257,9 @@ describe('modelsDirs user ordering', () => {
   it('preserves user-chosen primary models path across restarts', () => {
     const userPrimary = path.join(tmpRoot, 'D-drive-models')
     const systemDefault = path.join(homePath, 'ComfyUI-Shared', 'models')
+    // Must exist on disk so the "all model dirs missing" safeguard
+    // doesn't promote systemDefault ahead of the user's primary.
+    fs.mkdirSync(userPrimary, { recursive: true })
     fs.mkdirSync(path.dirname(settingsPath), { recursive: true })
     fs.writeFileSync(
       settingsPath,
@@ -245,19 +271,91 @@ describe('modelsDirs user ordering', () => {
     expect((settings.get('modelsDirs') as string[])[0]).toBe(userPrimary)
   })
 
-  it('appends system default when missing from user list', () => {
-    const userDir = path.join(tmpRoot, 'only-my-models')
-    const systemDefault = path.join(homePath, 'ComfyUI-Shared', 'models')
+  it('does not recreate ~/ComfyUI-Shared when user has custom existing paths (#699)', () => {
+    // Alexis's scenario: custom model/input/output paths that all exist,
+    // and a deleted ~/ComfyUI-Shared. None of it should reappear on load.
+    //
+    // beforeEach only wipes settings.json's parent dir; sweep the shared
+    // root from any previous test in this run so we can assert it stays
+    // absent after `settings.get` loads.
+    const sharedRoot = path.join(homePath, 'ComfyUI-Shared')
+    fs.rmSync(sharedRoot, { recursive: true, force: true })
+
+    const userModels = path.join(tmpRoot, 'only-my-models')
+    const userInput = path.join(tmpRoot, 'only-my-input')
+    const userOutput = path.join(tmpRoot, 'only-my-output')
+    for (const d of [userModels, userInput, userOutput]) fs.mkdirSync(d, { recursive: true })
     fs.mkdirSync(path.dirname(settingsPath), { recursive: true })
     fs.writeFileSync(
       settingsPath,
-      JSON.stringify({ modelsDirs: [userDir] }, null, 2),
+      JSON.stringify({ modelsDirs: [userModels], inputDir: userInput, outputDir: userOutput }, null, 2),
+      'utf-8'
+    )
+
+    expect(settings.get('modelsDirs')).toEqual([userModels])
+    expect(settings.get('inputDir')).toBe(userInput)
+    expect(settings.get('outputDir')).toBe(userOutput)
+
+    // And ~/ComfyUI-Shared must NOT have been recreated on disk.
+    expect(fs.existsSync(sharedRoot)).toBe(false)
+  })
+
+  it('restores shared default as primary when all model dirs are missing (#699)', () => {
+    // The user's only model dir was deleted (e.g. by a system tool). The
+    // app must never be left with no usable models dir, so the shared
+    // default is restored as the primary entry and created on disk.
+    const sharedRoot = path.join(homePath, 'ComfyUI-Shared')
+    fs.rmSync(sharedRoot, { recursive: true, force: true })
+    const systemDefault = path.join(homePath, 'ComfyUI-Shared', 'models')
+    const missing = path.join(tmpRoot, 'gone-models') // deliberately not created
+
+    fs.mkdirSync(path.dirname(settingsPath), { recursive: true })
+    fs.writeFileSync(
+      settingsPath,
+      JSON.stringify({ modelsDirs: [missing] }, null, 2),
       'utf-8'
     )
 
     const dirs = settings.get('modelsDirs') as string[]
-    expect(dirs).toEqual([userDir, systemDefault])
-    expect(dirs[0]).toBe(userDir)
+    expect(dirs[0]).toBe(systemDefault) // restored as primary (non-deletable)
+    expect(dirs.length).toBe(2) // the missing custom path is kept after it
+    expect(fs.existsSync(systemDefault)).toBe(true) // created on disk
+  })
+
+  it('falls back to the default input/output dir when the designated one is missing (#699)', () => {
+    const sharedRoot = path.join(homePath, 'ComfyUI-Shared')
+    const defaultInput = path.join(sharedRoot, 'input')
+    const defaultOutput = path.join(sharedRoot, 'output')
+    const missingInput = path.join(tmpRoot, 'gone-input') // not created
+    const missingOutput = path.join(tmpRoot, 'gone-output') // not created
+
+    fs.mkdirSync(path.dirname(settingsPath), { recursive: true })
+    fs.writeFileSync(
+      settingsPath,
+      JSON.stringify({ inputDir: missingInput, outputDir: missingOutput }, null, 2),
+      'utf-8'
+    )
+
+    expect(settings.get('inputDir')).toBe(defaultInput)
+    expect(settings.get('outputDir')).toBe(defaultOutput)
+    expect(fs.existsSync(defaultInput)).toBe(true)
+    expect(fs.existsSync(defaultOutput)).toBe(true)
+  })
+
+  it('preserves an existing custom input/output dir', () => {
+    const customInput = path.join(tmpRoot, 'my-input')
+    const customOutput = path.join(tmpRoot, 'my-output')
+    fs.mkdirSync(customInput, { recursive: true })
+    fs.mkdirSync(customOutput, { recursive: true })
+    fs.mkdirSync(path.dirname(settingsPath), { recursive: true })
+    fs.writeFileSync(
+      settingsPath,
+      JSON.stringify({ inputDir: customInput, outputDir: customOutput }, null, 2),
+      'utf-8'
+    )
+
+    expect(settings.get('inputDir')).toBe(customInput)
+    expect(settings.get('outputDir')).toBe(customOutput)
   })
 
   it('injects system default when modelsDirs is empty', () => {

@@ -15,7 +15,6 @@ import type { DetailField, DetailSection, Installation } from '../../types/ipc'
 interface ModelsDir {
   path: string
   isPrimary: boolean
-  isDefault: boolean
 }
 
 export interface StorageSnapshot {

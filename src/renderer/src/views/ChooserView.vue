@@ -6,6 +6,7 @@ import { useSessionStore } from '../stores/sessionStore'
 import { useInstallContextMenu } from '../composables/useInstallContextMenu'
 import { useInstallList } from '../composables/useInstallList'
 import { useCloudCapacity } from '../composables/useCloudCapacity'
+import { useModal } from '../composables/useModal'
 import { Cloud, MoreVertical, Plus, Search } from 'lucide-vue-next'
 import ContextMenu from '../components/ContextMenu.vue'
 import BrandBackground from '../components/BrandBackground.vue'
@@ -58,6 +59,7 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const installationStore = useInstallationStore()
 const sessionStore = useSessionStore()
+const modal = useModal()
 
 onMounted(() => {
   if (installationStore.installations.length === 0) {
@@ -171,11 +173,23 @@ const {
   onShowProgress: (showOpts) => emit('show-progress', showOpts)
 })
 
-function hasError(inst: Installation): boolean {
-  return sessionStore.errorInstances.has(inst.id)
-}
-
 async function pickInstall(inst: Installation): Promise<void> {
+  // The instance window owns lifecycle. If a host window already exists for
+  // this install — running, launching, OR crashed (the window stays open on
+  // its lifecycle/error surface) — bring it forward instead of kicking off a
+  // second launch with a dashboard takeover. Restart, stop, and crash details
+  // all live inside that window.
+  if (
+    sessionStore.isRunning(inst.id) ||
+    sessionStore.isLaunching(inst.id) ||
+    sessionStore.errorInstances.has(inst.id)
+  ) {
+    const focused = await window.api.focusComfyWindow(inst.id)
+    // `errorInstances` can be hydrated from the retained crash buffer after
+    // the window was closed, so a focus may find nothing — fall through and
+    // launch normally in that case.
+    if (focused) return
+  }
   // Cloud capacity gate — catches the case where a cloud install
   // already exists and the user clicks its per-install tile (the
   // generic "Try Cloud" tile gates separately in `handleCloudClick`).
@@ -183,16 +197,27 @@ async function pickInstall(inst: Installation): Promise<void> {
   emit('pick', inst)
 }
 
-/** Close the install's window AND its underlying process. The window's
- *  main-side `close` handler runs the full teardown, so closeComfyWindow
- *  is enough — no separate stop call needed.
- *
- *  Focus the install window first so a Tier 2 / Tier 3 cancel prompt
- *  (raised by main consulting the panel renderer) is visible — without
- *  this the dashboard window stays in front and the prompt is hidden. */
-async function closeRunningInstance(inst: Installation): Promise<void> {
-  await window.api.focusComfyWindow(inst.id)
-  await window.api.closeComfyWindow(inst.id)
+/** Surface a failed install's error so it's readable from the dashboard.
+ *  Covers both op failures (which carry a `message`, e.g. a migrate that
+ *  silently did nothing but turn the tile red) and crashes (exit code /
+ *  signal + captured stderr). */
+function viewError(inst: Installation): void {
+  const err = sessionStore.errorInstances.get(inst.id)
+  if (!err) return
+  let message = err.message
+  if (!message) {
+    if (err.signal && err.exitCode != null) {
+      message = t('comfyLifecycle.crashedDescWithCodeAndSignal', { code: err.exitCode, signal: err.signal })
+    } else if (err.signal) {
+      message = t('comfyLifecycle.crashedDescWithSignal', { signal: err.signal })
+    } else if (err.exitCode != null) {
+      message = t('comfyLifecycle.crashedDescWithCode', { code: err.exitCode })
+    } else {
+      message = t('comfyLifecycle.crashedDesc')
+    }
+  }
+  if (err.lastStderr) message = `${message}\n\n${err.lastStderr}`
+  void modal.alert({ title: t('chooser.errorTitle'), message })
 }
 
 // Capacity-protection switch (PostHog flag `desktop-cloud-capacity`).
@@ -332,12 +357,11 @@ function handleNewInstallClick(): void {
           :installation="inst"
           :is-stopped-action-gated="isStoppedActionGated(inst)"
           :last-launched-label="lastLaunchedLabel(inst)"
-          :has-error="hasError(inst)"
           @pick="pickInstall"
           @open-card-menu="openCardMenu"
           @open-kebab-menu="openKebabMenu"
           @trigger-action="(action, installation) => triggerAction(action, installation)"
-          @close-running="closeRunningInstance"
+          @view-error="viewError"
         />
       </TransitionGroup>
 

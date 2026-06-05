@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron'
-import { getCrash } from '../crashBuffer'
+import { getCrash, getAllCrashes } from '../crashBuffer'
 import type { ComfyExitedData } from '../../../types/ipc'
 
 // IPC reads from the per-install crash buffer; lets a recreated panel
@@ -9,4 +9,8 @@ export function registerCrashHandlers(): void {
     if (!installationId) return null
     return getCrash(installationId)
   })
+
+  // Bulk variant — lets a freshly-opened window hydrate every retained crash
+  // (e.g. the dashboard showing error tiles for crashes that predate it).
+  ipcMain.handle('get-crash-instances', (): ComfyExitedData[] => getAllCrashes())
 }

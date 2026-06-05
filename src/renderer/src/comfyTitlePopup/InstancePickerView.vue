@@ -37,7 +37,6 @@ interface PickerInstall {
 interface PickerStorageDir {
   path: string
   isPrimary: boolean
-  isDefault: boolean
 }
 
 /** Must stay in sync with `PickerStorageSlice` in `src/main/popups/titlePopup.ts`. */

@@ -1,7 +1,7 @@
 import path from 'path'
 import fs from 'fs'
 import { app } from 'electron'
-import { configDir, cacheDir, homeDir } from './lib/paths'
+import { configDir, cacheDir, homeDir, setInstallDirResolver } from './lib/paths'
 import { MODEL_FOLDER_TYPES } from './lib/models'
 import { readFileSafe, writeFileSafe } from './lib/safe-file'
 
@@ -12,6 +12,8 @@ export interface KnownSettings {
   modelsDirs: string[]
   inputDir: string
   outputDir: string
+  /** Default suggested parent directory for new installations. */
+  installDir: string
   language?: string
   theme?: string
   /** Legacy "check for updates on startup" toggle. No longer gated on a setting;
@@ -40,6 +42,7 @@ type DefaultedSettingKey =
   | 'modelsDirs'
   | 'inputDir'
   | 'outputDir'
+  | 'installDir'
 type SettingsDefaults = Pick<KnownSettings, DefaultedSettingKey>
 
 const dataPath = path.join(configDir(), "settings.json")
@@ -53,6 +56,7 @@ const SETTINGS_SCHEMA = {
   modelsDirs: { nullable: false },
   inputDir: { nullable: false },
   outputDir: { nullable: false },
+  installDir: { nullable: false },
   language: { nullable: false },
   theme: { nullable: false },
   autoUpdate: { nullable: false },
@@ -89,6 +93,7 @@ export const defaults: SettingsDefaults = {
   modelsDirs: [path.join(SHARED_ROOT, "models")],
   inputDir: path.join(SHARED_ROOT, "input"),
   outputDir: path.join(SHARED_ROOT, "output"),
+  installDir: path.join(homeDir(), "ComfyUI-Installs"),
 }
 
 const systemDefault = defaults.modelsDirs[0]!
@@ -147,11 +152,9 @@ function sanitizeModelsDirs(value: unknown, currentDefault: string): string[] {
     result.push(candidate)
   }
 
-  // Append (don't prepend) the system default so the user's primary stays at [0].
-  const resolvedDefault = path.resolve(currentDefault)
-  if (!seen.has(resolvedDefault)) {
-    result.push(resolvedDefault)
-  }
+  // A non-empty list reflects the user's stated preference — return
+  // as-is. Empty / missing input falls back to [systemDefault] in the
+  // caller (`load()`).
 
   return result
 }
@@ -246,6 +249,12 @@ function load(): Settings {
       result.outputDir = nextOutputDir
       changed = true
     }
+
+    const nextInstallDir = sanitizeUserDefaultPath(result.installDir, defaults.installDir)
+    if (nextInstallDir !== result.installDir) {
+      result.installDir = nextInstallDir
+      changed = true
+    }
   }
 
   // Keep modelsDirs a valid array of non-empty strings; inject system default as fallback.
@@ -257,22 +266,62 @@ function load(): Settings {
   if (!Array.isArray(result.modelsDirs) || result.modelsDirs.length === 0) {
     result.modelsDirs = [systemDefault]
     changed = true
-  } else if (!result.modelsDirs.some((d) => path.resolve(d) === path.resolve(systemDefault))) {
-    result.modelsDirs.push(systemDefault)
-    changed = true
   }
-  try {
-    fs.mkdirSync(systemDefault, { recursive: true })
-    for (const folder of MODEL_FOLDER_TYPES) {
-      fs.mkdirSync(path.join(systemDefault, folder), { recursive: true })
+
+  // If none of the user's model directories exist on disk anymore (e.g.
+  // the primary was deleted by the user or a system tool), restore the
+  // shared default as the primary entry so the app is never left without
+  // a usable, non-deletable models directory.
+  const anyModelsDirExists = result.modelsDirs.some(
+    (d): d is string => typeof d === 'string' && fs.existsSync(path.resolve(d))
+  )
+  if (!anyModelsDirExists) {
+    const others = result.modelsDirs.filter((d) => path.resolve(d) !== path.resolve(systemDefault))
+    const restored = [systemDefault, ...others]
+    if (
+      restored.length !== result.modelsDirs.length
+      || restored.some((d, i) => d !== result.modelsDirs[i])
+    ) {
+      result.modelsDirs = restored
+      changed = true
     }
-  } catch {}
-  try {
-    for (const key of ["inputDir", "outputDir"] as const) {
-      const dir = (result[key] as string | undefined) || defaults[key]
-      fs.mkdirSync(dir, { recursive: true })
+  }
+
+  // Create the shared default models tree whenever it's part of the list
+  // (the user chose it, or we just restored it above). A user who moved
+  // their models elsewhere and still has those paths keeps an untouched
+  // ~/ComfyUI-Shared.
+  const usesSystemDefault = result.modelsDirs.some(
+    (d): d is string => typeof d === 'string' && path.resolve(d) === path.resolve(systemDefault)
+  )
+  if (usesSystemDefault) {
+    try {
+      fs.mkdirSync(systemDefault, { recursive: true })
+      for (const folder of MODEL_FOLDER_TYPES) {
+        fs.mkdirSync(path.join(systemDefault, folder), { recursive: true })
+      }
+    } catch {}
+  }
+
+  // inputDir/outputDir must always point at a folder that exists. If the
+  // designated folder is gone, fall back to the safe shared default
+  // (which is always OK to recreate) and surface that in the setting —
+  // we don't resurrect a vanished custom path.
+  for (const key of ["inputDir", "outputDir"] as const) {
+    const designated = result[key] as string | undefined
+    const exists =
+      typeof designated === 'string'
+      && designated.trim() !== ''
+      && fs.existsSync(path.resolve(designated))
+    if (exists) continue
+    if (result[key] !== defaults[key]) {
+      result[key] = defaults[key]
+      changed = true
     }
-  } catch {}
+    try {
+      fs.mkdirSync(defaults[key], { recursive: true })
+    } catch {}
+  }
   if (changed) save(result)
   return result
 }
@@ -355,3 +404,7 @@ export function has(key: string): boolean {
 export function getMirrorConfig(): { pypiMirror?: string; useChineseMirrors?: boolean } {
   return { pypiMirror: get('pypiMirror'), useChineseMirrors: get('useChineseMirrors') === true }
 }
+
+// Let paths.defaultInstallDir() honor the user's configured location without
+// paths.ts importing this module (which would create an init cycle).
+setInstallDirResolver(() => get('installDir'))

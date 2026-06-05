@@ -137,16 +137,23 @@ export async function postInstall(installation: InstallationRecord, { sendProgre
     console.warn('Initial snapshot failed:', err)
   }
 
-  // Auto-update to latest stable if the user selected "Latest Stable".
+  // Auto-update to the channel the user picked on the install wizard.
+  // `installation.updateChannel` is set by `buildInstallation`:
+  // 'stable' → check out the latest stable tag; 'latest' → fast-forward
+  // to master HEAD. Defaults to 'stable' for installs created before
+  // the channel split, where `autoUpdateComfyUI` implicitly meant stable.
   if (installation.autoUpdateComfyUI && fs.existsSync(path.join(comfyuiDir, '.git'))) {
     if (signal?.aborted) throw new Error('Cancelled')
-    sendProgress('update', { percent: -1, status: 'Fetching latest stable version' })
+    const channel: 'stable' | 'latest' =
+      (installation.updateChannel as 'stable' | 'latest' | undefined) ?? 'stable'
+    const channelLabel = channel === 'latest' ? 'latest version' : 'latest stable version'
+    sendProgress('update', { percent: -1, status: `Fetching ${channelLabel}` })
 
     try {
       // Bypass the in-memory tag cache, which can be poisoned with `null` at
       // startup before any git backend is configured. `tryConfigurePygit2Fallback`
       // above has since configured pygit2, so the refreshed lookup fires.
-      const latestRelease = await fetchLatestRelease('stable', { refresh: true })
+      const latestRelease = await fetchLatestRelease(channel, { refresh: true })
       const latestTag = latestRelease?.tag_name as string | undefined
       const current = installation.comfyVersion as ComfyVersion | undefined
       const onLatestTag = !!latestTag && tagsEqual(current?.baseTag, latestTag) && current?.commitsAhead === 0
@@ -154,14 +161,14 @@ export async function postInstall(installation: InstallationRecord, { sendProgre
       if (!latestTag) {
         // A network flake must not masquerade as "up to date" — that stranded
         // first installs on the bundled version.
-        sendProgress('update', { percent: 100, status: 'Skipped — could not verify latest version' })
+        sendProgress('update', { percent: 100, status: `Skipped — could not verify ${channelLabel}` })
       } else if (onLatestTag) {
         sendProgress('update', { percent: 100, status: 'Already up to date' })
       } else {
         const result = await runComfyUIUpdate({
           installPath: installation.installPath,
           installation,
-          channel: 'stable',
+          channel,
           update,
           sendProgress: sendProgress as (step: string, data: Record<string, unknown>) => void,
           signal,
@@ -175,7 +182,7 @@ export async function postInstall(installation: InstallationRecord, { sendProgre
       }
     } catch (err) {
       if ((err as Error).message === 'Cancelled') throw err
-      console.warn('Auto-update to latest stable failed:', err)
+      console.warn(`Auto-update to ${channel} failed:`, err)
       sendProgress('update', { percent: 100, status: 'Skipped' })
     }
   }

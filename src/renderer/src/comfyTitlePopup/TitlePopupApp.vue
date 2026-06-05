@@ -58,7 +58,6 @@ interface PickerInstall {
 interface PickerStorageDir {
   path: string
   isPrimary: boolean
-  isDefault: boolean
 }
 
 /** Must stay in sync with `PickerStorageSlice` in `src/main/popups/titlePopup.ts`. */
@@ -88,7 +87,6 @@ interface PickerSnapshot {
 interface GlobalSettingsModelsDir {
   path: string
   isPrimary: boolean
-  isDefault: boolean
 }
 
 interface GlobalSettingsSnapshot {
@@ -98,6 +96,7 @@ interface GlobalSettingsSnapshot {
   cacheFields: Record<string, unknown>[]
   advancedFields: Record<string, unknown>[]
   sharedDirectoriesFields: Record<string, unknown>[]
+  installLocationFields: Record<string, unknown>[]
   modelsDirs: GlobalSettingsModelsDir[]
   modelsSystemDefault: string
   appUpdate: {
@@ -189,6 +188,7 @@ const globalSettingsSnapshot = ref<GlobalSettingsSnapshot>({
   cacheFields: [],
   advancedFields: [],
   sharedDirectoriesFields: [],
+  installLocationFields: [],
   modelsDirs: [],
   modelsSystemDefault: '',
   appUpdate: {

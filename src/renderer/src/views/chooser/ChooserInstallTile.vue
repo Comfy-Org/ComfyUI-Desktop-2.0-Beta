@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { AlertCircle, ArrowDownToLine, ArrowRightLeft, MoreVertical, X } from 'lucide-vue-next'
+import { AlertCircle, ArrowDownToLine, ArrowRightLeft, MoreVertical } from 'lucide-vue-next'
 import { useSessionStore } from '../../stores/sessionStore'
 import { installTypeMetaForInstall } from '../../lib/installTypeIcon'
 import { TID } from '../../../../shared/testIds'
@@ -15,8 +15,6 @@ interface Props {
    *  launched pill is soft-disabled in the template. */
   // eslint-disable-next-line vue/no-unused-properties
   lastLaunchedLabel: string
-  /** Whether this install's last session crashed or its last action errored. */
-  hasError: boolean
 }
 
 const props = defineProps<Props>()
@@ -26,7 +24,7 @@ const emit = defineEmits<{
   'open-card-menu': [event: MouseEvent, installation: Installation]
   'open-kebab-menu': [event: MouseEvent, installation: Installation]
   'trigger-action': [action: 'update' | 'migrate', installation: Installation]
-  'close-running': [installation: Installation]
+  'view-error': [installation: Installation]
 }>()
 
 const { t } = useI18n()
@@ -35,13 +33,25 @@ const sessionStore = useSessionStore()
 const inst = computed(() => props.installation)
 
 const isRunning = computed(() => sessionStore.isRunning(inst.value.id))
+const isLaunching = computed(() => sessionStore.isLaunching(inst.value.id))
 const isStopping = computed(() => sessionStore.isStopping(inst.value.id))
+const hasError = computed(() => sessionStore.errorInstances.has(inst.value.id))
 
 const statusClasses = computed<Record<string, boolean>>(() => ({
   'chooser-tile-running': isRunning.value && !isStopping.value,
   'chooser-tile-stopping': isStopping.value,
-  'chooser-tile-errored': props.hasError,
+  'chooser-tile-errored': hasError.value,
 }))
+
+/* Lifecycle → top-right status pill (dot + label). Stopping wins over
+ * launching wins over running; an idle tile gets no pill. An errored
+ * tile shows the clickable error badge instead (see template). */
+const statusPill = computed<{ label: string; dotClass: string } | null>(() => {
+  if (isStopping.value) return { label: 'chooser.statusStopping', dotClass: 'chooser-tile-status--stopping' }
+  if (isLaunching.value) return { label: 'chooser.statusLaunching', dotClass: 'chooser-tile-status--launching' }
+  if (isRunning.value) return { label: 'chooser.statusRunning', dotClass: 'chooser-tile-status--running' }
+  return null
+})
 
 const hasUpdate = computed(() => inst.value.statusTag?.style === 'update')
 // The backend tags every migratable install (Legacy Desktop, portable, git)
@@ -84,13 +94,28 @@ function handleClick(): void {
     >
       <component :is="typeMeta.icon" :size="28" />
     </div>
+    <!-- Top-right cluster: lifecycle indicator + kebab. The status pill is
+         non-interactive (clicks fall through to the body); the error badge
+         is a click target that opens the error details. -->
     <div class="chooser-tile-actions">
-      <span
+      <button
         v-if="hasError"
-        class="chooser-tile-error"
-        :title="t('running.errors')"
+        type="button"
+        class="chooser-tile-error-badge"
+        :title="t('chooser.viewErrorTooltip')"
+        @click.stop="emit('view-error', inst)"
+        @keydown.enter.stop="emit('view-error', inst)"
       >
-        <AlertCircle :size="16" />
+        <AlertCircle :size="14" />
+        {{ t('chooser.statusError') }}
+      </button>
+      <span
+        v-else-if="statusPill"
+        class="chooser-tile-pill chooser-tile-status"
+        :class="statusPill.dotClass"
+      >
+        <span class="chooser-tile-status-dot" aria-hidden="true" />
+        {{ t(statusPill.label) }}
       </span>
       <button
         type="button"
@@ -108,8 +133,8 @@ function handleClick(): void {
       {{ inst.name }}
     </div>
     <div class="chooser-tile-meta">
-      <!-- Single no-wrap pill row. The source pill is the shrink target;
-           the others stay at content width via `flex-shrink: 0`. -->
+      <!-- Single no-wrap pill row: source pill + an optional action /
+           version pill. The source pill is the shrink target. -->
       <span
         class="chooser-tile-pill"
         :title="sourcePillLabel"
@@ -161,24 +186,6 @@ function handleClick(): void {
         {{ lastLaunchedLabel }}
       </span>
       -->
-    </div>
-    <!-- Close-instance button, only while running / stopping. main's
-         `closeComfyWindow` IPC also tears the process down. Idle states
-         use the body click handler instead. -->
-    <div
-      v-if="isRunning || isStopping"
-      class="chooser-tile-cta"
-    >
-      <button
-        type="button"
-        class="chooser-tile-cta-btn chooser-tile-cta-close"
-        :title="t('console.stop')"
-        :aria-label="t('console.stop')"
-        :disabled="isStopping"
-        @click.stop="emit('close-running', inst)"
-      >
-        <X :size="16" />
-      </button>
     </div>
   </div>
 </template>

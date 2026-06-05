@@ -75,7 +75,6 @@ export interface PopupInstancePickerSnapshot {
 export interface PopupGlobalSettingsModelsDir {
   path: string
   isPrimary: boolean
-  isDefault: boolean
 }
 
 /** Snapshot for the global-settings popup; field arrays are loose-typed (the
@@ -87,6 +86,7 @@ export interface PopupGlobalSettingsSnapshot {
   cacheFields: Record<string, unknown>[]
   advancedFields: Record<string, unknown>[]
   sharedDirectoriesFields: Record<string, unknown>[]
+  installLocationFields: Record<string, unknown>[]
   modelsDirs: PopupGlobalSettingsModelsDir[]
   modelsSystemDefault: string
   appUpdate: {
@@ -402,6 +402,7 @@ function isGlobalSettingsSnapshot(value: unknown): value is PopupGlobalSettingsS
   if (!Array.isArray(v['cacheFields'])) return false
   if (!Array.isArray(v['advancedFields'])) return false
   if (!Array.isArray(v['sharedDirectoriesFields'])) return false
+  if (!Array.isArray(v['installLocationFields'])) return false
   if (!Array.isArray(v['modelsDirs'])) return false
   if (typeof v['modelsSystemDefault'] !== 'string') return false
   if (!v['appUpdate'] || typeof v['appUpdate'] !== 'object') return false

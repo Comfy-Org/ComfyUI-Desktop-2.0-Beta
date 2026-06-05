@@ -73,16 +73,22 @@ jobs:
           const channel = process.env.CHANNEL
           const pkgPath = 'package.json'
           const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'))
-          const match = String(pkg.version).match(/^(\d+)\.(\d+)\.(\d+)(?:-rc\.(\d+))?$/)
+          // Accept X.Y.Z, X.Y.Z-rc, or X.Y.Z-rc.N. Bare `-rc` (no `.N`)
+          // shows up when an earlier manual bump landed without the
+          // numeric suffix — treat it as `-rc.0` so the next rc bump
+          // produces `-rc.1` and a stable bump drops the suffix.
+          const match = String(pkg.version).match(/^(\d+)\.(\d+)\.(\d+)(-rc(?:\.(\d+))?)?$/)
 
           if (!match) {
-            throw new Error(`Unsupported version format: ${pkg.version} (expected X.Y.Z or X.Y.Z-rc.N)`)
+            throw new Error(`Unsupported version format: ${pkg.version} (expected X.Y.Z, X.Y.Z-rc, or X.Y.Z-rc.N)`)
           }
 
           let major = Number(match[1])
           let minor = Number(match[2])
           let patch = Number(match[3])
-          const currentRc = match[4] === undefined ? null : Number(match[4])
+          // match[4] is the whole suffix (e.g. "-rc", "-rc.3", or undefined).
+          // match[5] is the explicit N. Missing N on a present suffix → 0.
+          const currentRc = match[4] === undefined ? null : (match[5] === undefined ? 0 : Number(match[5]))
 
           const applyBaseBump = () => {
             if (bumpType === 'major') {

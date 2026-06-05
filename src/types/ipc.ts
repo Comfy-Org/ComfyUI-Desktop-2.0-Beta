@@ -933,7 +933,10 @@ export interface ElectronApi {
 
   // Running
   stopComfyUI(installationId: string): Promise<void>
-  focusComfyWindow(installationId: string): Promise<void>
+  /** Bring the host window backing `installationId` to the front. Resolves
+   *  to `true` when a window (or external process window) was focused,
+   *  `false` when none exists. */
+  focusComfyWindow(installationId: string): Promise<boolean>
   /** Open a window for the install backing `installationId`. Focuses
    *  any existing install-backed window; otherwise opens a fresh
    *  chooser host so the user can pick the install from the dashboard.
@@ -1066,6 +1069,14 @@ export interface ElectronApi {
    *  for chooser hosts with no preview currently active. */
   releaseAttachHostPreview(): Promise<boolean>
   getRunningInstances(): Promise<RunningInstance[]>
+  /** Snapshot of installs currently mid-launch (id + name). Lets a window
+   *  opened during an in-flight launch hydrate `sessionStore.launchingInstances`
+   *  instead of missing the one-shot `onInstanceLaunching` broadcast. */
+  getLaunchingInstances(): Promise<{ installationId: string; installationName: string }[]>
+  /** Snapshot of installs currently being stopped. Lets a window opened
+   *  mid-stop hydrate the "Stopping…" state instead of missing the one-shot
+   *  `onInstanceStopping` broadcast. */
+  getStoppingInstances(): Promise<string[]>
   /**
    * Read the retained crash detail for an installation, if any. Main holds
    * the last `comfy-exited` payload (with stderr tail) per installation
@@ -1075,6 +1086,10 @@ export interface ElectronApi {
    * panel WebContents existed. Returns `null` when no crash is on record.
    */
   getLastCrashError(installationId: string): Promise<ComfyExitedData | null>
+  /** Bulk crash snapshot — every retained `comfy-exited` payload. Lets a
+   *  freshly-opened window hydrate error state for crashes that happened
+   *  before it existed (e.g. the dashboard's red error tiles). */
+  getCrashInstances(): Promise<ComfyExitedData[]>
   cancelLaunch(): Promise<void>
   cancelOperation(installationId: string): Promise<void>
   killPortProcess(port: number): Promise<KillResult>
@@ -1209,6 +1224,10 @@ export interface ElectronApi {
   onInstallProgress(callback: (data: ProgressData) => void): Unsubscribe
   onComfyOutput(callback: (data: ComfyOutputData) => void): Unsubscribe
   onComfyExited(callback: (data: ComfyExitedData) => void): Unsubscribe
+  /** Crash broadcast to every renderer (unlike `onComfyExited`, which only
+   *  reaches the launching window). Lets any open dashboard show the red
+   *  error tile live. */
+  onInstanceCrashed(callback: (data: ComfyExitedData) => void): Unsubscribe
   onComfyBootLog(callback: (data: ComfyBootLogData) => void): Unsubscribe
   onInstanceLaunching(
     callback: (data: { installationId: string; installationName: string }) => void

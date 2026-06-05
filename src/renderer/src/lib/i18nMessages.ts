@@ -21,6 +21,7 @@ export const en = {
     platform: 'Platform',
     storageTab: 'Storage',
     sharedDirectories: 'Shared Directories',
+    installLocation: 'Default Install Location',
     models: 'Shared Models',
     updatesTab: 'Updates',
     checkForUpdates: 'Check for updates',
@@ -42,7 +43,6 @@ export const en = {
     removeDirConfirm:
       "This won't delete any files. You can re-add the directory later from this list.",
     primary: 'Primary',
-    default: 'Default',
     makePrimary: 'Make primary',
     moreActions: 'More actions'
   },
@@ -52,11 +52,11 @@ export const en = {
     snapshots:
       'A saved point-in-time state of an installation (versions + custom nodes) you can restore later.',
     sharedModels:
-      "Folders shared across all installations so models aren't downloaded twice. Newly downloaded models go to the primary folder. The system default folder is always kept and can't be removed, and the primary folder can't be removed while it's in use — pick a different primary first.",
+      "Folders shared across all installations so models aren't downloaded twice. Newly downloaded models go to the primary folder. The primary folder can't be removed while it's in use — pick a different primary first.",
     modelsPrimary:
       'The primary directory is where ComfyUI saves newly downloaded models by default.',
-    modelsDefault:
-      'The system default directory. This path is created automatically and cannot be removed.'
+    installDir:
+      "Default parent folder suggested when creating new installations. Existing installs aren't moved."
   },
   installType: {
     standalone: 'Standalone',

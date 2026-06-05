@@ -288,6 +288,7 @@ function installMockApi(initial?: {
     onInstanceStopping: vi.fn(() => () => {}),
     onComfyOutput: vi.fn(() => () => {}),
     onComfyExited: vi.fn(() => () => {}),
+    onInstanceCrashed: vi.fn(() => () => {}),
     onErrorDetail: vi.fn(() => () => {}),
     getSetting: vi.fn(async (key: string) => state.settings[key]),
     setSetting: vi.fn(async (key: string, value: unknown) => {

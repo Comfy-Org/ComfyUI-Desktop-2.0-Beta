@@ -27,7 +27,8 @@ import {
   applySettingSet,
   buildSettingsSections,
   buildMediaSections,
-  buildModelsPayload
+  buildModelsPayload,
+  buildInstallLocationFields
 } from '../lib/ipc/registerSettingsHandlers'
 import { globalSettingsEvents } from '../lib/globalSettingsEvents'
 import { getCachedGithubStarCount, getGithubStarCount } from '../lib/githubStars'
@@ -125,7 +126,7 @@ export interface InstancePickerSnapshot {
   activeInstallationId: string | null
   runningInstallationIds: string[]
   /** Installs mid-launch — `instance-launching` fired, `instance-started`
-   *  has not. Mirrors `_launchingInstallationIds` in main so the picker
+   *  has not. Mirrors `_launchingInstances` in main so the picker
    *  popup can hydrate `sessionStore.launchingInstances` from the
    *  snapshot (its preload doesn't expose `onInstanceLaunching`).
    *  Drives the CTA flip from **Start → Restart / Switch** during the
@@ -170,14 +171,11 @@ export interface InstancePickerSnapshot {
 }
 
 /** Single Models-directory row pushed to the global-settings popup.
- *  `isDefault` flags the system-default path (matches the renderer-
- *  side DirCard tag). `isPrimary` is positional — first row in
- *  `modelsDirs` wins, but we materialise it here so the view stays a
- *  pure prop reader. */
+ *  `isPrimary` is positional — the first row in `modelsDirs` wins, but we
+ *  materialise it here so the view stays a pure prop reader. */
 export interface GlobalSettingsModelsDir {
   path: string
   isPrimary: boolean
-  isDefault: boolean
 }
 
 /** Snapshot pushed to the global-settings popup on open and on every
@@ -192,6 +190,9 @@ export interface GlobalSettingsSnapshot {
   cacheFields: Record<string, unknown>[]
   advancedFields: Record<string, unknown>[]
   sharedDirectoriesFields: Record<string, unknown>[]
+  /** Default suggested install location — global-only; not in the
+   *  per-instance picker storage slice. */
+  installLocationFields: Record<string, unknown>[]
   modelsDirs: GlobalSettingsModelsDir[]
   modelsSystemDefault: string
   appUpdate: {
@@ -335,8 +336,7 @@ function buildPickerStorageSlice(): PickerStorageSlice {
     sharedDirectoriesFields,
     modelsDirs: modelsDirsRaw.map((p, i) => ({
       path: p,
-      isPrimary: i === 0,
-      isDefault: p === modelsDefault
+      isPrimary: i === 0
     })),
     modelsSystemDefault: modelsDefault
   }
@@ -2017,6 +2017,7 @@ function buildGlobalSettingsSnapshot(): GlobalSettingsSnapshot {
   const cache = findSettingsFields(settingsSections, 'settings.cache', 2)
   const advanced = findSettingsFields(settingsSections, 'settings.advanced', 3)
   const shared = (mediaSections[0]?.fields ?? []).map(toDetailField)
+  const installLocationFields = (buildInstallLocationFields()[0]?.fields ?? []).map(toDetailField)
   const modelsDirsRaw = (modelsPayload.sections[0]?.fields[0]?.value as string[] | undefined) ?? []
   const modelsDefault = modelsPayload.systemDefault
   const appUpdateState = updater.getCurrentUpdateState() as unknown as Record<string, unknown>
@@ -2031,10 +2032,10 @@ function buildGlobalSettingsSnapshot(): GlobalSettingsSnapshot {
     cacheFields: cache,
     advancedFields: advanced,
     sharedDirectoriesFields: shared,
+    installLocationFields,
     modelsDirs: modelsDirsRaw.map((p, i) => ({
       path: p,
-      isPrimary: i === 0,
-      isDefault: p === modelsDefault
+      isPrimary: i === 0
     })),
     modelsSystemDefault: modelsDefault,
     appUpdate: {

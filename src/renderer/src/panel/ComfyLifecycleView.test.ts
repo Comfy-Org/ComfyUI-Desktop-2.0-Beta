@@ -67,6 +67,7 @@ interface MockApi {
   onInstanceStopping: ReturnType<typeof vi.fn>
   onComfyOutput: ReturnType<typeof vi.fn>
   onComfyExited: ReturnType<typeof vi.fn>
+  onInstanceCrashed: ReturnType<typeof vi.fn>
 }
 
 function installMockApi(overrides: Partial<MockApi> = {}): MockApi {
@@ -82,6 +83,7 @@ function installMockApi(overrides: Partial<MockApi> = {}): MockApi {
     onInstanceStopping: vi.fn(() => () => {}),
     onComfyOutput: vi.fn(() => () => {}),
     onComfyExited: vi.fn(() => () => {}),
+    onInstanceCrashed: vi.fn(() => () => {}),
     ...overrides,
   }
   ;(window as unknown as { api: MockApi }).api = api
