@@ -10,8 +10,8 @@ import { useI18n } from 'vue-i18n'
 import { scoreName } from '../utils/fuzzyMatch'
 import type { Installation } from '../types/ipc'
 
-// `local` also covers Legacy Desktop installs (`sourceCategory === 'desktop'`),
-// which has no dedicated chip.
+// `local` also covers Legacy Desktop installs (which report
+// `sourceCategory === 'local'`); they have no dedicated chip.
 export type FilterKey = 'all' | 'local' | 'cloud' | 'remote'
 
 export interface FilterChip {
@@ -83,9 +83,7 @@ export function useInstallList(opts: UseInstallListOpts): UseInstallListApi {
         case 'all':
           return sorted
         case 'local':
-          return sorted.filter(
-            (i) => i.sourceCategory === 'local' || i.sourceCategory === 'desktop',
-          )
+          return sorted.filter((i) => i.sourceCategory === 'local')
         case 'remote':
           return sorted.filter((i) => i.sourceCategory === 'remote')
         case 'cloud':

@@ -227,13 +227,15 @@ const {
 // firstUseMode is consumed by isFirstUseLockdown / isConsentLockdown
 // inside the composable; the template only reads the derived booleans.
 
-/** Browser-style refresh button — shown on remote web instances (cloud +
- *  user-pointed remote ComfyUI), never on local installs, install-less
- *  hosts, or during first-use lockdown. Clicking re-navigates the remote
- *  comfyView via the same reload path as F5/Ctrl+R. */
+/** Browser-style refresh button — shown on any install-backed host (cloud,
+ *  user-pointed remote ComfyUI, or local installs), never on install-less
+ *  hosts or during first-use lockdown. Clicking re-navigates the comfyView
+ *  via the same reload path as F5/Ctrl+R. */
 const showRefreshButton = computed(
   () =>
-    (sourceCategory.value === 'cloud' || sourceCategory.value === 'remote') &&
+    (sourceCategory.value === 'cloud' ||
+      sourceCategory.value === 'remote' ||
+      sourceCategory.value === 'local') &&
     !isInstallLess.value &&
     !isFirstUseLockdown.value
 )
@@ -666,9 +668,9 @@ onUnmounted(() => {
       >
         <MenuIcon :size="18" />
       </button>
-      <!-- Browser-style refresh for remote/cloud instances, right of the
-           hamburger. Re-navigates the comfyView via the same reload path
-           as F5/Ctrl+R. -->
+      <!-- Browser-style refresh for install-backed instances (local +
+           remote/cloud), right of the hamburger. Re-navigates the
+           comfyView via the same reload path as F5/Ctrl+R. -->
       <button
         v-if="showRefreshButton"
         type="button"

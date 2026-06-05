@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { Cloud, Computer, LaptopMinimal, Globe, Box } from 'lucide-vue-next'
 
-import { installTypeMetaFor } from './installTypeIcon'
+import { installTypeMetaFor, installTypeMetaForInstall } from './installTypeIcon'
 
 describe('installTypeMetaFor', () => {
   it('maps `local` to the Standalone laptop icon', () => {
@@ -42,5 +42,26 @@ describe('installTypeMetaFor', () => {
       expect(meta.icon).toBe(Box)
       expect(meta.labelKey).toBe('installType.unknown')
     }
+  })
+})
+
+describe('installTypeMetaForInstall', () => {
+  it('resolves Legacy Desktop installs via sourceId even though they report category `local`', () => {
+    const meta = installTypeMetaForInstall({ sourceId: 'desktop', sourceCategory: 'local' })
+    expect(meta.key).toBe('legacyDesktop')
+    expect(meta.icon).toBe(Computer)
+    expect(meta.labelKey).toBe('installType.legacyDesktop')
+  })
+
+  it('falls through to the category for non-desktop installs', () => {
+    expect(installTypeMetaForInstall({ sourceId: 'standalone', sourceCategory: 'local' }).key).toBe(
+      'standalone',
+    )
+    expect(installTypeMetaForInstall({ sourceId: 'cloud', sourceCategory: 'cloud' }).key).toBe(
+      'cloud',
+    )
+    expect(installTypeMetaForInstall({ sourceId: 'remote', sourceCategory: 'remote' }).key).toBe(
+      'remote',
+    )
   })
 })

@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { AlertCircle, ArrowDownToLine, ArrowRightLeft, MoreVertical, X } from 'lucide-vue-next'
 import { useSessionStore } from '../../stores/sessionStore'
-import { installTypeMetaFor } from '../../lib/installTypeIcon'
+import { installTypeMetaForInstall } from '../../lib/installTypeIcon'
 import { TID } from '../../../../shared/testIds'
 import type { Installation } from '../../types/ipc'
 
@@ -44,11 +44,12 @@ const statusClasses = computed<Record<string, boolean>>(() => ({
 }))
 
 const hasUpdate = computed(() => inst.value.statusTag?.style === 'update')
-const hasMigratePrompt = computed(
-  () => inst.value.sourceCategory === 'desktop' && inst.value.status === 'installed',
-)
+// The backend tags every migratable install (Legacy Desktop, portable, git)
+// with a `migrate` status tag — mirror `hasUpdate` rather than special-casing
+// a single source.
+const hasMigratePrompt = computed(() => inst.value.statusTag?.style === 'migrate')
 
-const typeMeta = computed(() => installTypeMetaFor(inst.value.sourceCategory))
+const typeMeta = computed(() => installTypeMetaForInstall(inst.value))
 
 /* Desktop's listPreview is the bare installPath (useless in a pill), so
  * fall back to sourceLabel. Gated on `sourceId` because `sourceCategory`

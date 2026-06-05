@@ -203,7 +203,7 @@ const visibleChips = computed(() => {
     if (chip.key === 'all') return true
     const count = installations.value.filter((i) => {
       if (chip.key === 'local') {
-        return i.sourceCategory === 'local' || i.sourceCategory === 'desktop'
+        return i.sourceCategory === 'local'
       }
       return i.sourceCategory === chip.key
     }).length

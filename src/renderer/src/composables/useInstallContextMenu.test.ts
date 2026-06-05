@@ -131,12 +131,24 @@ beforeEach(() => {
 })
 
 describe('useInstallContextMenu — gated REQUIRES_STOPPED items', () => {
-  it('renders update / migrate / restore-snapshot / delete enabled when the install is idle', () => {
-    const inst = makeInstall({ sourceCategory: 'desktop' })
+  // Update and migrate are mutually exclusive (a single `statusTag`), so each
+  // is exercised against an install carrying the matching tag.
+  it('renders update / restore-snapshot / delete enabled when the install is idle', () => {
+    const inst = makeInstall() // statusTag style 'update'
     const { menu } = mountHarness(inst)
     const items = menu.ctxMenuItems.value
 
     expect(findItem(items, 'update')?.disabled).toBeFalsy()
+    expect(findItem(items, 'restore-snapshot')?.disabled).toBeFalsy()
+    expect(findItem(items, 'delete')?.disabled).toBeFalsy()
+    expect(menu.isStoppedActionGated(inst)).toBe(false)
+  })
+
+  it('renders migrate / restore-snapshot / delete enabled when the install is idle', () => {
+    const inst = makeInstall({ statusTag: { style: 'migrate', label: 'Migrate to Standalone' } })
+    const { menu } = mountHarness(inst)
+    const items = menu.ctxMenuItems.value
+
     expect(findItem(items, 'migrate')?.disabled).toBeFalsy()
     expect(findItem(items, 'restore-snapshot')?.disabled).toBeFalsy()
     expect(findItem(items, 'delete')?.disabled).toBeFalsy()
@@ -144,7 +156,7 @@ describe('useInstallContextMenu — gated REQUIRES_STOPPED items', () => {
   })
 
   it('disables REQUIRES_STOPPED items when the install is running', () => {
-    const inst = makeInstall({ sourceCategory: 'desktop' })
+    const inst = makeInstall({ statusTag: { style: 'migrate', label: 'Migrate to Standalone' } })
     const { menu } = mountHarness(inst, ({ session }) => {
       session.runningInstances.set(inst.id, {
         installationId: inst.id,
@@ -153,7 +165,6 @@ describe('useInstallContextMenu — gated REQUIRES_STOPPED items', () => {
     })
     const items = menu.ctxMenuItems.value
 
-    expect(findItem(items, 'update')?.disabled).toBe(true)
     expect(findItem(items, 'migrate')?.disabled).toBe(true)
     expect(findItem(items, 'restore-snapshot')?.disabled).toBe(true)
     expect(findItem(items, 'delete')?.disabled).toBe(true)
@@ -384,6 +395,31 @@ describe('useInstallContextMenu — untrack confirm-then-remove', () => {
     const items = menu.ctxMenuItems.value
     expect(findItem(items, 'untrack')).toBeTruthy()
     expect(findItem(items, 'delete')).toBeTruthy()
+  })
+})
+
+describe('useInstallContextMenu — migrate item keys off the migrate status tag', () => {
+  // Portable, git, and Legacy Desktop installs all report a `migrate`
+  // status tag (and `sourceCategory === 'local'`), so the Migrate item must
+  // follow the tag, not a single source.
+  it.each([
+    ['portable', 'standalone'],
+    ['git', 'standalone'],
+    ['desktop', 'desktop'],
+  ])('shows the Migrate item for a %s install carrying a migrate tag', (_label, sourceId) => {
+    const inst = makeInstall({
+      sourceId,
+      sourceCategory: 'local',
+      statusTag: { style: 'migrate', label: 'Migrate to Standalone' },
+    } as Partial<Installation>)
+    const { menu } = mountHarness(inst)
+    expect(findItem(menu.ctxMenuItems.value, 'migrate')).toBeTruthy()
+  })
+
+  it('hides the Migrate item when there is no migrate tag (e.g. an update is pending)', () => {
+    const inst = makeInstall() // statusTag style 'update'
+    const { menu } = mountHarness(inst)
+    expect(findItem(menu.ctxMenuItems.value, 'migrate')).toBeUndefined()
   })
 })
 
