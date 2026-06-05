@@ -18,6 +18,10 @@ const fakeTerminal = {
   resize: vi.fn(),
   reset: vi.fn(),
   dispose: vi.fn(),
+  element: {
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn()
+  },
   cols: 80,
   rows: 30
 }
@@ -48,6 +52,9 @@ function createTestI18n() {
 }
 
 let exitCallbacks: Array<(data: { installationId: string }) => void> = []
+let outputCallbacks: Array<
+  (data: { installationId: string; data: string }) => void
+> = []
 
 function makeRestore(overrides: Partial<TerminalRestore> = {}): TerminalRestore {
   return { buffer: [], size: { cols: 80, rows: 30 }, exited: false, ...overrides }
@@ -60,7 +67,12 @@ function setupApi(subscribeRestore: TerminalRestore = makeRestore()): void {
     terminalWrite: vi.fn().mockResolvedValue(undefined),
     terminalResize: vi.fn().mockResolvedValue(undefined),
     terminalRestart: vi.fn().mockResolvedValue(makeRestore()),
-    onTerminalOutput: vi.fn(() => () => {}),
+    onTerminalOutput: vi.fn(
+      (cb: (data: { installationId: string; data: string }) => void) => {
+        outputCallbacks.push(cb)
+        return () => {}
+      }
+    ),
     onTerminalExited: vi.fn((cb: (data: { installationId: string }) => void) => {
       exitCallbacks.push(cb)
       return () => {}
@@ -78,6 +90,7 @@ function mountPane(): VueWrapper {
 describe('comfyUISettings/ConsoleTerminalPane', () => {
   beforeEach(() => {
     exitCallbacks = []
+    outputCallbacks = []
     vi.clearAllMocks()
     ;(globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
       observe() {}
@@ -109,6 +122,41 @@ describe('comfyUISettings/ConsoleTerminalPane', () => {
     await flushPromises()
     expect(window.api.terminalRestart).toHaveBeenCalledWith('install-A')
     expect(w.find(`[data-testid="${TID.consoleSessionEnded}"]`).exists()).toBe(false)
+  })
+
+  it('clears the session-ended banner when output resumes', async () => {
+    const w = mountPane()
+    await flushPromises()
+
+    exitCallbacks.forEach((cb) => cb({ installationId: 'install-A' }))
+    await flushPromises()
+    expect(w.find(`[data-testid="${TID.consoleSessionEnded}"]`).exists()).toBe(true)
+
+    outputCallbacks.forEach((cb) =>
+      cb({ installationId: 'install-A', data: 'fresh prompt' })
+    )
+    await flushPromises()
+    expect(w.find(`[data-testid="${TID.consoleSessionEnded}"]`).exists()).toBe(false)
+  })
+
+  it('re-asserts its size to the shared PTY on focus even when local dims are unchanged', async () => {
+    const w = mountPane()
+    await flushPromises()
+
+    const host = w.find(`[data-testid="${TID.consoleTerminal}"]`)
+      .element as HTMLElement
+    Object.defineProperty(host, 'offsetParent', {
+      value: document.body,
+      configurable: true
+    })
+    vi.mocked(window.api.terminalResize).mockClear()
+
+    const focusHandler = fakeTerminal.element.addEventListener.mock.calls.find(
+      ([event]) => event === 'focusin'
+    )?.[1] as () => void
+    focusHandler()
+
+    expect(window.api.terminalResize).toHaveBeenCalledWith('install-A', 80, 30)
   })
 
   it('ignores exit events for other installations', async () => {

@@ -173,6 +173,24 @@ describe('terminal manager', () => {
     expect(ptyAt(1).written).toContain('echo hi\r')
   })
 
+  it('clears stale scrollback when respawning after exit', async () => {
+    const wc = makeWebContents()
+    await subscribeTerminal('inst-a', asWc(wc))
+    ptyAt(0).emitData('old-session-output')
+    expect(getTerminalRestore('inst-a')?.buffer.join('')).toContain(
+      'old-session-output',
+    )
+
+    ptyAt(0).emitExit()
+
+    // Re-subscribing respawns the shell; the dead session's scrollback is gone.
+    const restore = await subscribeTerminal('inst-a', asWc(wc))
+
+    expect(spawn).toHaveBeenCalledTimes(2)
+    expect(restore.exited).toBe(false)
+    expect(restore.buffer.join('')).not.toContain('old-session-output')
+  })
+
   it('does not fire a spurious exit when restarting a live shell', async () => {
     const wc = makeWebContents()
     await subscribeTerminal('inst-a', asWc(wc))
