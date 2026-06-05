@@ -21,6 +21,10 @@ const props = defineProps<Props>()
 
 const { t } = useI18n()
 
+// The Comfy Cloud entry is not user-renamable (issue #922): render its name as
+// static text with no contenteditable / pencil affordance.
+const nameEditable = computed(() => props.installation?.sourceCategory !== 'cloud')
+
 // Drive the hero name imperatively: mixing `{{ }}` with the inline pencil icon left Vue unable to patch the edited text node, so a committed rename painted everywhere except here.
 const nameEl = useTemplateRef<HTMLElement>('nameEl')
 
@@ -241,6 +245,7 @@ const groups = computed<FactGroup[]>(() => {
       <div class="status-fact-hero-title-row">
         <span class="status-fact-hero-name-wrap">
           <span
+            v-if="nameEditable"
             ref="nameEl"
             class="status-fact-hero-name"
             role="textbox"
@@ -254,7 +259,15 @@ const groups = computed<FactGroup[]>(() => {
             @keydown.meta.a.prevent="handleNameSelectAll"
             @paste="handleNamePaste"
           />
-          <Pencil :size="13" class="status-fact-hero-edit-hint" aria-hidden="true" />
+          <span v-else class="status-fact-hero-name status-fact-hero-name-static">{{
+            installation.name
+          }}</span>
+          <Pencil
+            v-if="nameEditable"
+            :size="13"
+            class="status-fact-hero-edit-hint"
+            aria-hidden="true"
+          />
         </span>
         <span v-if="installation.sourceLabel" class="status-fact-hero-badge">
           {{ installation.sourceLabel }}
@@ -331,7 +344,12 @@ const groups = computed<FactGroup[]>(() => {
   transition: background-color 120ms ease;
 }
 
-.status-fact-hero-name:hover {
+/* Static (non-renamable) name, e.g. Comfy Cloud: no edit affordance. */
+.status-fact-hero-name-static {
+  cursor: default;
+}
+
+.status-fact-hero-name:not(.status-fact-hero-name-static):hover {
   background: var(--brand-surface-bg-hover);
 }
 

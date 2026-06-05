@@ -22,6 +22,16 @@ function makeInstall(name: string): Installation {
   } as Installation
 }
 
+function makeCloudInstall(name: string): Installation {
+  return {
+    id: 'cloud-1',
+    name,
+    sourceLabel: 'Cloud',
+    sourceCategory: 'cloud',
+    status: 'installed',
+  } as Installation
+}
+
 function mountPanel(props: {
   installation: Installation | null
   onRename?: (newName: string) => Promise<boolean>
@@ -77,6 +87,24 @@ describe('StatusFactPanel — hero name', () => {
 
     expect(onRename).toHaveBeenCalledWith('Duplicate')
     expect((el.element as HTMLElement).textContent).toBe('Original')
+  })
+
+  it('renders the Cloud name as static, non-editable text (issue #922)', async () => {
+    const onRename = vi.fn().mockResolvedValue(true)
+    const wrapper = mountPanel({ installation: makeCloudInstall('Comfy Cloud'), onRename })
+    await nextTick()
+
+    const name = wrapper.find('.status-fact-hero-name')
+    expect(name.exists()).toBe(true)
+    expect(name.text()).toBe('Comfy Cloud')
+    // No contenteditable affordance and no pencil hint.
+    expect(name.attributes('contenteditable')).toBeUndefined()
+    expect(wrapper.find('.status-fact-hero-name-static').exists()).toBe(true)
+    expect(wrapper.find('.status-fact-hero-edit-hint').exists()).toBe(false)
+
+    // Blur must not commit a rename for the Cloud entry.
+    await name.trigger('blur')
+    expect(onRename).not.toHaveBeenCalled()
   })
 
   it('repaints the hero when the installation name prop changes', async () => {

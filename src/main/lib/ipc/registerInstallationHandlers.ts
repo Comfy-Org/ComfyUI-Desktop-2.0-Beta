@@ -403,6 +403,11 @@ export function registerInstallationHandlers(): void {
           }
         }
       }
+      // The Comfy Cloud entry is not user-renamable (issue #922); drop any
+      // attempted name change so the canonical name is preserved.
+      if (inst.sourceId === installations.CLOUD_SOURCE_ID) {
+        allowedIds.delete('name')
+      }
       const filtered: Record<string, unknown> = {}
       for (const key of Object.keys(data)) {
         if (allowedIds.has(key)) {

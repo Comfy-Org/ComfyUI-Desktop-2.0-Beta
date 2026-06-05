@@ -55,21 +55,25 @@ export function register(callbacks: RegisterCallbacks = {}): void {
 
   installations.seedDefaults([
     {
-      name: 'Comfy Cloud',
-      sourceId: 'cloud',
+      name: installations.CLOUD_INSTALL_NAME,
+      sourceId: installations.CLOUD_SOURCE_ID,
       remoteUrl: 'https://cloud.comfy.org/',
       launchMode: 'window',
       browserPartition: 'shared'
     }
   ])
-  installations.ensureExists('cloud', {
-    name: 'Comfy Cloud',
-    sourceId: 'cloud',
+  installations.ensureExists(installations.CLOUD_SOURCE_ID, {
+    name: installations.CLOUD_INSTALL_NAME,
+    sourceId: installations.CLOUD_SOURCE_ID,
     remoteUrl: 'https://cloud.comfy.org/',
     launchMode: 'window',
     browserPartition: 'shared',
     status: 'installed'
   })
+  // The Cloud entry is not user-renamable; reset any entry a prior build
+  // let the user rename back to the canonical name (issue #922). Runs after
+  // ensureExists via the shared FIFO write queue.
+  void installations.enforceCloudName()
 
   // Auto-track a detected Legacy Desktop install.
   {
