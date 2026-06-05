@@ -99,8 +99,14 @@ async function handleMakePrimary(index: number): Promise<void> {
   await bridge?.globalSettingsSetModelsDirs(dirs)
 }
 
-function handleOpenModelsDir(path: string): void {
-  bridge?.globalSettingsOpenPath(path)
+async function handleChangeModelsDir(index: number): Promise<void> {
+  const current = props.snapshot.modelsDirs[index]?.path
+  const picked = await bridge?.globalSettingsBrowseFolder(current)
+  if (!picked || picked === current) return
+  emit('touched')
+  const dirs = props.snapshot.modelsDirs.map((d) => d.path)
+  dirs[index] = picked
+  await bridge?.globalSettingsSetModelsDirs(dirs)
 }
 
 async function handleUpdateSharedDirField(field: DetailField, value: unknown): Promise<void> {
@@ -116,7 +122,7 @@ async function handleUpdateSharedDirField(field: DetailField, value: unknown): P
   >
     <ModelsDirList
       :dirs="snapshot.modelsDirs"
-      @open="handleOpenModelsDir"
+      @change="handleChangeModelsDir"
       @remove="handleRemoveModelsDir"
       @make-primary="handleMakePrimary"
       @add="handleAddModelsDir"

@@ -16,7 +16,7 @@ interface Props {
 const props = defineProps<Props>()
 
 const emit = defineEmits<{
-  open: [path: string]
+  change: [index: number]
   remove: [index: number]
   'make-primary': [index: number]
   add: []
@@ -76,9 +76,9 @@ function handleMenuArrow(index: number, direction: 1 | -1, event: KeyboardEvent)
   items[next]?.focus()
 }
 
-function handleOpen(path: string): void {
+function handleChange(index: number): void {
   closeMenu()
-  emit('open', path)
+  emit('change', index)
 }
 
 function handleRemove(index: number): void {
@@ -144,9 +144,9 @@ const rows = computed(() =>
         <button
           type="button"
           class="models-dir-action"
-          :aria-label="t('settings.open', 'Open')"
-          :title="t('settings.open', 'Open')"
-          @click.stop="handleOpen(row.path)"
+          :aria-label="t('common.browse', 'Browse')"
+          :title="t('common.browse', 'Browse')"
+          @click.stop="handleChange(row.index)"
         >
           <FolderOpen :size="14" aria-hidden="true" />
         </button>

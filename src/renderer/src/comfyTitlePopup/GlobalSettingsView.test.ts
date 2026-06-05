@@ -160,14 +160,18 @@ describe('GlobalSettingsView', () => {
     ])
   })
 
-  it('Storage tab opens a models dir through the bridge', async () => {
+  it('Storage tab browses and re-points a models dir through the bridge', async () => {
     const bridge = installMockBridge()
+    bridge.browseFolderReturn = '/mnt/new/models'
     const wrapper = mountView()
     await wrapper.findAll('.gs-tab').find((t) => t.text() === 'Storage')!.trigger('click')
     await nextTick()
-    const openBtns = wrapper.findAll('.models-dir-row .models-dir-action')
-    await openBtns[0]!.trigger('click')
-    expect(bridge.openPathCalls).toEqual(['/home/u/ComfyUI/models'])
+    const browseBtns = wrapper.findAll('.models-dir-row .models-dir-action')
+    await browseBtns[0]!.trigger('click')
+    await flushPromises()
+    expect(bridge.setModelsDirsCalls).toEqual([
+      ['/mnt/new/models', '/mnt/extra/models'],
+    ])
   })
 
   // Covers the Shared Directories field-write path, not just the model-dir actions.
