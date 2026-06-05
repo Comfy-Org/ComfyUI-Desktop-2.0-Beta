@@ -92,6 +92,7 @@ async function attach(id: string): Promise<void> {
 
   pushSize()
   applyRestore(await api.terminalSubscribe(id))
+  requestAnimationFrame(pushSize)
 }
 
 async function restart(): Promise<void> {
@@ -162,6 +163,19 @@ onBeforeUnmount(teardown)
   inset: 0;
   padding: 8px;
   overflow: hidden;
+}
+
+/* xterm injects its own DOM at runtime, outside Vue's scoped templates, so
+ * `:deep()` is required to reach it. Without clamping these layers they
+ * overflow the host and capture pointer events across the settings window,
+ * which reads as the whole UI freezing. */
+.console-host :deep(.xterm) {
+  overflow: hidden;
+}
+
+.console-host :deep(.xterm-screen) {
+  overflow: hidden;
+  background-color: #171717;
 }
 
 .console-ended {
