@@ -225,6 +225,10 @@ const comfyReloads = new Map<string, () => void>()
 const comfyZoomResets = new Map<string, () => void>()
 /** Counter for generating unique relaunch tokens. */
 let relaunchTokenCounter = 0
+/** Per-install token guarding the async splash-then-reveal in the `onLaunch`
+ *  existing-window reuse path, so a newer relaunch supersedes an older one's
+ *  pending reveal/navigation instead of both firing. */
+const comfyRevealTokens = new Map<string, number>()
 
 async function onModelFolderRelaunch({
   installationId
@@ -423,6 +427,8 @@ function onLaunch({
       // the stale error page while ComfyUI boots its frontend. Mirrors the
       // in-place model-folder relaunch flow.
       comfyFailRetryTimerCancels.get(installationId)?.()
+      const revealToken = (comfyRevealTokens.get(installationId) ?? 0) + 1
+      comfyRevealTokens.set(installationId, revealToken)
       void (async () => {
         existing.comfyView.setBackgroundColor(SPLASH_DARK.bg)
         await showSplashPage(comfyContents, SPLASH_DARK, {
@@ -430,6 +436,9 @@ function onLaunch({
           desc: i18n.t('launch.launchSplashDesc'),
         }).catch(() => {})
         if (
+          // A newer relaunch superseded this one during the splash paint —
+          // let it own the reveal/navigation so they don't both fire.
+          comfyRevealTokens.get(installationId) !== revealToken ||
           existing.window.isDestroyed() ||
           comfyContents.isDestroyed() ||
           existing.installationId !== installationId

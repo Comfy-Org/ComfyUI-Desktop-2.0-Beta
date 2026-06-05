@@ -336,6 +336,18 @@ describe('useSessionStore', () => {
       expect(err?.lastStderr).toBe('boom')
     })
 
+    it('does not hydrate a crash for an install that is mid-launch', async () => {
+      installApi({
+        launching: [{ installationId: 'inst-1', installationName: 'My Install' }],
+        crashes: [{ installationId: 'inst-1', installationName: 'My Install', crashed: true, exitCode: 1 }],
+      })
+
+      await store.init()
+
+      expect(store.isLaunching('inst-1')).toBe(true)
+      expect(store.errorInstances.has('inst-1')).toBe(false)
+    })
+
     it('does not hydrate a crash for an install that is already running', async () => {
       installApi({
         running: [{ installationId: 'inst-1', installationName: 'My Install', port: 8188, mode: 'window' }],

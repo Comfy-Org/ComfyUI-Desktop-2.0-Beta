@@ -176,11 +176,12 @@ export const useSessionStore = defineStore('session', () => {
 
     // Hydrate retained crashes so a freshly-opened dashboard shows error tiles
     // for crashes that happened before it existed. Op-failure errors are
-    // renderer-owned and not covered here (see issue #900). Skip running ids —
-    // the crash buffer clears on relaunch, but guard defensively.
+    // renderer-owned and not covered here (see issue #900). Skip running /
+    // launching ids — the crash buffer clears on relaunch, but guard
+    // defensively so an in-flight launch shows "Starting…", not a stale crash.
     const crashes = (await window.api.getCrashInstances?.()) ?? []
     for (const c of crashes) {
-      if (!runningInstances.has(c.installationId)) {
+      if (!runningInstances.has(c.installationId) && !launchingInstances.has(c.installationId)) {
         errorInstances.set(c.installationId, {
           installationName: c.installationName,
           exitCode: c.exitCode,
