@@ -65,6 +65,8 @@ export function buildElectronApi(): ElectronApi {
     closeHostWindow: () => ipcRenderer.invoke('close-host-window'),
     returnToDashboard: () => ipcRenderer.invoke('return-to-dashboard'),
     closeCurrentPanel: () => ipcRenderer.send('comfy-window:close-current-panel'),
+    resolveStartupRestoreReveal: (result) =>
+      ipcRenderer.send('comfy-window:startup-restore-reveal', { result }),
     openGlobalSettings: () => ipcRenderer.send('comfy-titlepopup:open-global-settings'),
     openInstancePicker: (opts) =>
       ipcRenderer.send('comfy-window:open-instance-picker-for-install', {
@@ -443,6 +445,7 @@ export function buildElectronApi(): ElectronApi {
             actionId?: string
             version?: string | null
             settingsTab?: 'comfy' | 'directories' | 'downloads' | 'global'
+            startupRestore?: boolean
           }
         )
       ipcRenderer.on('panel-trigger-overlay', handler)

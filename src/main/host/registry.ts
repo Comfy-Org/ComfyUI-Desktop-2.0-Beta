@@ -353,6 +353,18 @@ export function revealColdStartHostIfPending(windowKey: number): void {
   bringToFront(entry.window)
 }
 
+/** Reveal a host whose cold-start reveal was deferred by the caller (the
+ *  startup-restore flow holds the window hidden until its launch takeover is
+ *  up, so the dashboard never flashes). Reveals regardless of the
+ *  `coldStartPendingReveal` flag — the caller owns the timing. */
+export function forceRevealHostWindow(windowKey: number): void {
+  const entry = comfyWindows.get(windowKey)
+  if (!entry || entry.window.isDestroyed()) return
+  entry.coldStartPendingReveal = false
+  entry.layoutViews()
+  bringToFront(entry.window)
+}
+
 /** Late-bound host-window factories, set by `index.ts` so the registry can
  *  spawn a chooser host without importing host-construction code (cycle). */
 interface HostFactories {

@@ -1333,7 +1333,18 @@ export function applyChooserHostThemeToAll(): void {
  *  The comfyView still exists so `layoutViews` doesn't have to
  *  special-case its absence, but is sized to zero and never made
  *  visible. */
-export function openChooserHostWindow(initialPanel: ComfyPanelKey = 'comfy'): BrowserWindow {
+export interface OpenChooserHostWindowOptions {
+  /** Hold the window hidden after construction: skip the titlebar/panel/backstop
+   *  cold-start reveal and leave `coldStartPendingReveal` off, so only an
+   *  explicit `forceRevealHostWindow()` shows it. Used by startup restore to
+   *  keep the dashboard from flashing before the launch takeover is up. */
+  deferColdStartReveal?: boolean
+}
+
+export function openChooserHostWindow(
+  initialPanel: ComfyPanelKey = 'comfy',
+  opts: OpenChooserHostWindowOptions = {},
+): BrowserWindow {
   // Install-less wrapper. The shared `createHostWindow()` builds
   // the BrowserWindow + 2 views skeleton, layoutViews, macOS
   // fullscreen, bounds-save listeners, close / closed handlers,
@@ -1393,7 +1404,9 @@ export function openChooserHostWindow(initialPanel: ComfyPanelKey = 'comfy'): Br
     initiallyHidden: true,
   })
 
-  entry.coldStartPendingReveal = true
+  // Startup restore holds the window hidden (no pending cold-start reveal) until
+  // its launch takeover is up; everyone else reveals on first paint.
+  entry.coldStartPendingReveal = !opts.deferColdStartReveal
 
   // Seed the requested initial panel (default 'comfy' → chooser body for
   // an install-less host). "+ New Instance" passes 'new-install' so the
@@ -1404,6 +1417,10 @@ export function openChooserHostWindow(initialPanel: ComfyPanelKey = 'comfy'): Br
   entry.layoutViews()
 
   const revealKey = entry.windowKey
+
+  // Deferred reveal: the caller owns the timing (it will call
+  // `forceRevealHostWindow`), so skip the auto-reveal hooks entirely.
+  if (opts.deferColdStartReveal) return comfyWindow
 
   // Fast-path reveal: the title-bar bundle is ~25 KB and finishes its
   // first paint in well under 200 ms even on a Windows cold start,
