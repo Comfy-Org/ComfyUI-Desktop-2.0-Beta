@@ -231,7 +231,7 @@ describe('ComfyUISettingsContent', () => {
       expect(w.find('.op-overlay').exists()).toBe(false)
     })
 
-    it('renders the overlay for snapshot-restore on a NON-snapshots tab', async () => {
+    it('auto-switches to the snapshots tab when a snapshot-restore op starts on another tab', async () => {
       const w = await mountContent({
         initialTab: 'update',
         activeOperation: {
@@ -241,8 +241,47 @@ describe('ComfyUISettingsContent', () => {
           percent: 30, status: 'Loading snapshot…', cancellable: true, title: '',
         },
       })
+      // Routed to the snapshots tab so its dedicated rail shows progress;
+      // the generic overlay must stay hidden to avoid double progress UI.
+      expect(w.find('[data-testid="snapshots-view-stub"]').exists()).toBe(true)
+      expect(w.find('.op-overlay').exists()).toBe(false)
+    })
+
+    it('auto-switches to the Update tab when a non-snapshot op starts on the snapshots tab', async () => {
+      const w = await mountContent({
+        initialTab: 'snapshots',
+        activeOperation: {
+          actionId: 'copy', actionData: {},
+          done: false, ok: null, error: null,
+          percent: 30, status: '', cancellable: true, title: '',
+        },
+      })
+      // The snapshots pane can't render a non-snapshot op's progress, so the
+      // host moves to the Update tab where the overlay is shown.
+      expect(w.find('[data-testid="snapshots-view-stub"]').exists()).toBe(false)
       expect(w.find('.op-overlay').exists()).toBe(true)
-      expect(w.find('.op-title').text()).toBe('Restoring snapshot…')
+      expect(w.find('.op-title').text()).toBe('Copying…')
+    })
+
+    it('switches to the op home tab when selecting an already-operating install', async () => {
+      // Viewing an idle install on the snapshots tab...
+      const w = await mountContent({ initialTab: 'snapshots', activeOperation: null })
+      expect(w.find('[data-testid="snapshots-view-stub"]').exists()).toBe(true)
+
+      // ...then selecting a different install that already has an in-flight op
+      // (e.g. one updating from another window's shelf) routes to its progress.
+      await w.setProps({
+        installation: { ...SAMPLE_INSTALL, id: 'inst-2' },
+        activeOperation: {
+          actionId: 'release-update', actionData: {},
+          done: false, ok: null, error: null,
+          percent: 30, status: '', cancellable: true, title: '',
+        },
+      })
+      await flushPromises()
+      expect(w.find('[data-testid="snapshots-view-stub"]').exists()).toBe(false)
+      expect(w.find('.op-overlay').exists()).toBe(true)
+      expect(w.find('.op-title').text()).toBe('Updating…')
     })
 
     it('renders the overlay on the Update tab when a copy op is in flight', async () => {
@@ -265,7 +304,8 @@ describe('ComfyUISettingsContent', () => {
       ['copy-update',           { actionData: {} }, 'Copying & updating…', 'Copy complete'],
       ['delete',                { actionData: {} }, 'Deleting…',          'Deleted'],
       ['release-update',        { actionData: {} }, 'Updating…',          'Update complete'],
-      ['snapshot-restore',      { actionData: {} }, 'Restoring snapshot…', 'Snapshot restored'],
+      // snapshot-restore is intentionally absent: it renders in the snapshots
+      // tab's dedicated rail, not the generic overlay (see "overlay routing").
       ['migrate-to-standalone', { actionData: {} }, 'Migrating…',         'Migration complete'],
     ])('actionId=%s → in-flight %s / success %s', async (actionId, extras, inflight, success) => {
       const wIn = await mountContent({

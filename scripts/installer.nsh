@@ -252,21 +252,51 @@
   # straight through still gets a shortcut (no UX regression for the 90%
   # who don't change defaults); only users who actively uncheck skip it.
   #
-  # MUI2 trick: setting MUI_FINISHPAGE_SHOWREADME to an empty string makes
-  # the checkbox call the FUNCTION instead of trying to open a file/URL.
+  # Earlier iteration used the MUI2 `MUI_FINISHPAGE_SHOWREADME=""` +
+  # `MUI_FINISHPAGE_SHOWREADME_FUNCTION` trick. Per-MUI2 source that pattern
+  # IS valid (checkbox renders, leave handler Calls the function when
+  # checked), but field reports came in that the shortcut wasn't being
+  # created on Finish even when the box was left checked. Switched to an
+  # explicit nsDialogs checkbox wired through MUI_PAGE_CUSTOMFUNCTION_SHOW /
+  # _LEAVE so there's no MUI2 magic between the user toggling the box and
+  # our shortcut-creation call — easier to reason about + debug.
+  #
   # Shortcut creation mirrors what electron-builder's addDesktopLink macro
   # would have done (CreateShortCut → SetLnkAUMI → SHChangeNotify) so the
-  # resulting .lnk is identical to the previous always-on path.
+  # resulting .lnk is identical to the previous always-on path. The
+  # `SHCNE_CREATE | SHCNE_UPDATEDIR` notify (0x2 | 0x1000 = 0x1002) tells
+  # Explorer to refresh the Desktop folder so the new icon shows up
+  # immediately on Finish — the prior `SHCNE_ASSOCCHANGED` (0x8000000) is
+  # for file-association changes and is the wrong event for a new shortcut.
   Function CreateUserDesktopShortcut
     CreateShortCut "$newDesktopLink" "$appExe" "" "$appExe" 0 "" "" "${APP_DESCRIPTION}"
     ClearErrors
     WinShell::SetLnkAUMI "$newDesktopLink" "${APP_ID}"
-    System::Call 'Shell32::SHChangeNotify(i 0x8000000, i 0, i 0, i 0)'
+    System::Call 'Shell32::SHChangeNotify(i 0x1002, i 0, i 0, i 0)'
   FunctionEnd
 
-  !define MUI_FINISHPAGE_SHOWREADME ""
-  !define MUI_FINISHPAGE_SHOWREADME_TEXT "Add a desktop shortcut"
-  !define MUI_FINISHPAGE_SHOWREADME_FUNCTION "CreateUserDesktopShortcut"
+  # Explicit nsDialogs checkbox + leave handler. Position (120u, 110u) +
+  # size (195u, 10u) match what MUI2 would have used for its readme
+  # checkbox under the Run row, so the layout doesn't visually shift from
+  # what users were getting on the old code path.
+  Var ComfyDesktopShortcutCheckbox
+  Var ComfyDesktopShortcutState
+
+  Function FinishPageShowDesktopShortcutCheckbox
+    ${NSD_CreateCheckbox} 120u 110u 195u 10u "Add a desktop shortcut"
+    Pop $ComfyDesktopShortcutCheckbox
+    ${NSD_SetState} $ComfyDesktopShortcutCheckbox ${BST_CHECKED}
+  FunctionEnd
+
+  Function FinishPageLeaveDesktopShortcut
+    ${NSD_GetState} $ComfyDesktopShortcutCheckbox $ComfyDesktopShortcutState
+    ${If} $ComfyDesktopShortcutState == ${BST_CHECKED}
+      Call CreateUserDesktopShortcut
+    ${EndIf}
+  FunctionEnd
+
+  !define MUI_PAGE_CUSTOMFUNCTION_SHOW FinishPageShowDesktopShortcutCheckbox
+  !define MUI_PAGE_CUSTOMFUNCTION_LEAVE FinishPageLeaveDesktopShortcut
 
   # NOTE: there was a longer effort to enable a working Cancel button +
   # title-bar X on the Finish page (MUI_FINISHPAGE_CANCEL_ENABLED +

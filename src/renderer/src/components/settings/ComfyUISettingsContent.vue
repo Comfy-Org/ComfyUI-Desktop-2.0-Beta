@@ -501,6 +501,38 @@ const showOpOverlay = computed(() => {
 
 const opBlocksFooter = computed(() => opInflight.value)
 
+// The tab that renders progress for the active op. Only snapshot-restore
+// has its own rail in SnapshotsView (matching `showOpOverlay`); every
+// other op — including snapshot-save/delete — surfaces in the Update
+// tab's inline overlay.
+const opHomeTab = computed<ComfyUISettingsTab | null>(() => {
+  const op = props.activeOperation
+  if (!op) return null
+  return op.actionId === 'snapshot-restore' ? 'snapshots' : 'update'
+})
+
+// Locking the other tabs during an op is meant to force the user onto
+// the progress view, but the lock alone doesn't move them there. Switch
+// to the op's home tab whenever the selected install has an in-flight op
+// so progress is always visible. Covers op-start, mount, async tab load,
+// and selecting an already-operating install (e.g. from another window's
+// shelf). Sets `activeTab` directly because `selectTab` is locked mid-op.
+watch(
+  [
+    () => opInflight.value,
+    () => props.installation?.id ?? null,
+    () => tabs.value.map((tab) => tab.key).join(',')
+  ],
+  () => {
+    if (!opInflight.value) return
+    const home = opHomeTab.value
+    if (!home || activeTab.value === home) return
+    if (!tabs.value.some((tab) => tab.key === home)) return
+    activeTab.value = home
+  },
+  { immediate: true }
+)
+
 const successCountdown = ref(0)
 let countdownTimer: ReturnType<typeof setInterval> | null = null
 

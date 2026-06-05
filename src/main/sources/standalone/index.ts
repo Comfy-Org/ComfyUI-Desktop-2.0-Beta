@@ -93,11 +93,18 @@ export const standalone: SourcePlugin = {
     const r2Release = vd?.r2Release
     const variantId = vd?.variantId || ''
     const isCpu = stripPlatform(variantId) === 'cpu' || stripPlatform(variantId).startsWith('cpu-')
-    // The release dropdown values now match the IPP channel ids:
-    // 'stable' triggers the post-install update-to-stable step;
-    // 'latest' (master HEAD) leaves the bundle's checked-in commit
-    // alone and only persists `updateChannel` so the IPP Update tab
-    // opens on the picked channel.
+    // The release dropdown values now match the IPP channel ids.
+    // BOTH options trigger the post-install update step — the bundle
+    // ships with whatever commit was current when the R2 artefact was
+    // built, which is necessarily behind master AND usually behind the
+    // latest stable tag too. So:
+    //   - 'stable' → autoUpdateComfyUI + updateChannel='stable' →
+    //     post-install checks out the latest stable tag.
+    //   - 'latest' → autoUpdateComfyUI + updateChannel='latest' →
+    //     post-install fast-forwards to master HEAD ('Latest on GitHub'
+    //     means actually-on-GitHub, not bundle-time).
+    // The same `updateChannel` is consumed by the IPP Update tab so
+    // future channel-switches stay consistent with the install-time pick.
     const isStable = selections.release?.value === 'stable'
     const isLatest = selections.release?.value === 'latest'
     const releaseTag = r2Release?.tag || (selections.release?.value || 'unknown')
@@ -118,7 +125,8 @@ export const standalone: SourcePlugin = {
       launchArgs: isCpu ? `${DEFAULT_LAUNCH_ARGS} --cpu` : DEFAULT_LAUNCH_ARGS,
       launchMode: 'window',
       browserPartition: 'unique',
-      ...(isStable ? { autoUpdateComfyUI: true } : {}),
+      ...(isStable || isLatest ? { autoUpdateComfyUI: true } : {}),
+      ...(isStable ? { updateChannel: 'stable' } : {}),
       ...(isLatest ? { updateChannel: 'latest' } : {}),
     }
   },
