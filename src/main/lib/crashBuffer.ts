@@ -54,6 +54,12 @@ export function getCrash(installationId: string): ComfyExitedData | null {
   return _crashes.get(installationId) ?? null
 }
 
+/** Snapshot of every retained crash, so a freshly-opened window can hydrate
+ *  its error state instead of missing the live `comfy-exited` broadcasts. */
+export function getAllCrashes(): ComfyExitedData[] {
+  return Array.from(_crashes.values())
+}
+
 /** Test-only reset hook. */
 export function _resetCrashBuffer(): void {
   _crashes.clear()

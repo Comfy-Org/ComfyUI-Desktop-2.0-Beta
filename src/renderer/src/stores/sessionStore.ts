@@ -75,6 +75,19 @@ export const useSessionStore = defineStore('session', () => {
     }
   }
 
+  /** Mark an install as stopping with a safety auto-clear, in case the
+   *  matching `instance-stopped` is missed (window opened mid-stop, etc.).
+   *  Idempotent — resets the timer rather than stacking timeouts. */
+  function markStopping(installationId: string): void {
+    stoppingInstances.add(installationId)
+    const existing = stoppingTimeouts.get(installationId)
+    if (existing) clearTimeout(existing)
+    stoppingTimeouts.set(
+      installationId,
+      setTimeout(() => clearStoppingState(installationId), 30_000)
+    )
+  }
+
   function setActiveSession(installationId: string, label: string): void {
     activeSessions.set(installationId, { label: label || '' })
     errorInstances.delete(installationId)
@@ -144,10 +157,49 @@ export const useSessionStore = defineStore('session', () => {
       runningInstances.set(inst.installationId, inst)
     }
 
+    // Hydrate in-flight launches too — a window opened mid-launch missed the
+    // one-shot `instance-launching` broadcast, so without this snapshot its
+    // dashboard would show no "Starting…" pill. Skip ids already running (the
+    // launch finished between the two snapshots).
+    const launching = (await window.api.getLaunchingInstances?.()) ?? []
+    for (const inst of launching) {
+      if (!runningInstances.has(inst.installationId)) {
+        launchingInstances.set(inst.installationId, { installationName: inst.installationName })
+      }
+    }
+
+    // Hydrate in-flight stops so a window opened mid-stop shows "Stopping…".
+    // No running-guard: an install briefly appears in both sets during the
+    // stop, and stopping should win.
+    const stopping = (await window.api.getStoppingInstances?.()) ?? []
+    for (const id of stopping) markStopping(id)
+
+    // Hydrate retained crashes so a freshly-opened dashboard shows error tiles
+    // for crashes that happened before it existed. Op-failure errors are
+    // renderer-owned and not covered here (see issue #900). Skip running /
+    // launching ids — the crash buffer clears on relaunch, but guard
+    // defensively so an in-flight launch shows "Starting…", not a stale crash.
+    const crashes = (await window.api.getCrashInstances?.()) ?? []
+    for (const c of crashes) {
+      if (!runningInstances.has(c.installationId) && !launchingInstances.has(c.installationId)) {
+        errorInstances.set(c.installationId, {
+          installationName: c.installationName,
+          exitCode: c.exitCode,
+          signal: c.signal,
+          lastStderr: c.lastStderr,
+          crashedAtMs: c.crashedAtMs,
+        })
+      }
+    }
+
     cleanups.push(
       window.api.onInstanceLaunching(
         (data: { installationId: string; installationName: string }) => {
           launchingInstances.set(data.installationId, { installationName: data.installationName })
+          // A new launch supersedes any prior crash — clear the error so the
+          // dashboard tile drops its red/error state (main already cleared its
+          // crash buffer at launch start via `clearCrash`).
+          errorInstances.delete(data.installationId)
         }
       ),
       window.api.onInstanceLaunchFailed((data: { installationId: string }) => {
@@ -156,17 +208,16 @@ export const useSessionStore = defineStore('session', () => {
       window.api.onInstanceStarted((data: RunningInstance) => {
         launchingInstances.delete(data.installationId)
         runningInstances.set(data.installationId, data)
+        // Backstop in case the `instance-launching` broadcast was missed
+        // (window opened mid-launch, etc.) — a running instance is not errored.
+        errorInstances.delete(data.installationId)
       }),
       window.api.onInstanceStopped((data: { installationId: string }) => {
         runningInstances.delete(data.installationId)
         clearStoppingState(data.installationId)
       }),
       window.api.onInstanceStopping((data: { installationId: string }) => {
-        stoppingInstances.add(data.installationId)
-        const timeout = setTimeout(() => {
-          clearStoppingState(data.installationId)
-        }, 30_000)
-        stoppingTimeouts.set(data.installationId, timeout)
+        markStopping(data.installationId)
       }),
       window.api.onComfyOutput((data: ComfyOutputData) => {
         appendOutput(data.installationId, data.text)
@@ -180,15 +231,18 @@ export const useSessionStore = defineStore('session', () => {
             : 'Process exited'
           session.output += `\n\n--- ${msg} ---\n`
         }
-        if (data.crashed) {
-          errorInstances.set(data.installationId, {
-            installationName: data.installationName,
-            exitCode: data.exitCode,
-            signal: data.signal,
-            lastStderr: data.lastStderr,
-            crashedAtMs: Date.now()
-          })
-        }
+      }),
+      // Crash error state is driven off the `instance-crashed` broadcast (not
+      // the sender-only `comfy-exited`) so a dashboard window that didn't
+      // launch the instance still turns its tile red live.
+      window.api.onInstanceCrashed((data: ComfyExitedData) => {
+        errorInstances.set(data.installationId, {
+          installationName: data.installationName,
+          exitCode: data.exitCode,
+          signal: data.signal,
+          lastStderr: data.lastStderr,
+          crashedAtMs: data.crashedAtMs ?? Date.now()
+        })
       })
     )
 

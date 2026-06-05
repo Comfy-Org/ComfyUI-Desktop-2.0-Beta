@@ -165,6 +165,9 @@ describe('useSessionStore', () => {
       handlers = {}
       ;(window as Record<string, unknown>).api = {
         getRunningInstances: vi.fn().mockResolvedValue([]),
+        getLaunchingInstances: vi.fn().mockResolvedValue([]),
+        getStoppingInstances: vi.fn().mockResolvedValue([]),
+        getCrashInstances: vi.fn().mockResolvedValue([]),
         onInstanceLaunching: vi.fn((cb: (data: unknown) => void) => {
           handlers['instance-launching'] = cb
           return () => {}
@@ -187,6 +190,10 @@ describe('useSessionStore', () => {
         }),
         onComfyOutput: vi.fn(() => () => {}),
         onComfyExited: vi.fn(() => () => {}),
+        onInstanceCrashed: vi.fn((cb: (data: unknown) => void) => {
+          handlers['instance-crashed'] = cb
+          return () => {}
+        }),
       }
       await store.init()
     })
@@ -216,6 +223,160 @@ describe('useSessionStore', () => {
 
       expect(store.isLaunching('inst-1')).toBe(false)
       expect(store.isRunning('inst-1')).toBe(true)
+    })
+
+    it('records an error from the broadcast instance-crashed event', () => {
+      handlers['instance-crashed']!({
+        installationId: 'inst-1',
+        installationName: 'My Install',
+        crashed: true,
+        exitCode: 1,
+        signal: undefined,
+        lastStderr: 'boom',
+        crashedAtMs: 123,
+      })
+
+      expect(store.errorInstances.has('inst-1')).toBe(true)
+      const err = store.errorInstances.get('inst-1')
+      expect(err?.installationName).toBe('My Install')
+      expect(err?.exitCode).toBe(1)
+      expect(err?.lastStderr).toBe('boom')
+      expect(err?.crashedAtMs).toBe(123)
+    })
+
+    it('clears a prior error when the install is relaunched (instance-launching)', () => {
+      store.errorInstances.set('inst-1', { installationName: 'My Install', exitCode: 1 })
+      handlers['instance-launching']!({ installationId: 'inst-1', installationName: 'My Install' })
+
+      expect(store.errorInstances.has('inst-1')).toBe(false)
+    })
+
+    it('clears a prior error when the install reaches running (instance-started)', () => {
+      store.errorInstances.set('inst-1', { installationName: 'My Install', exitCode: 1 })
+      handlers['instance-started']!({
+        installationId: 'inst-1',
+        installationName: 'My Install',
+        port: 8188,
+        mode: 'window',
+      })
+
+      expect(store.errorInstances.has('inst-1')).toBe(false)
+    })
+  })
+
+  describe('init hydration', () => {
+    function installApi(
+      snapshots: { running?: unknown[]; launching?: unknown[]; stopping?: unknown[]; crashes?: unknown[] } = {},
+    ): void {
+      ;(window as Record<string, unknown>).api = {
+        getRunningInstances: vi.fn().mockResolvedValue(snapshots.running ?? []),
+        getLaunchingInstances: vi.fn().mockResolvedValue(snapshots.launching ?? []),
+        getStoppingInstances: vi.fn().mockResolvedValue(snapshots.stopping ?? []),
+        getCrashInstances: vi.fn().mockResolvedValue(snapshots.crashes ?? []),
+        onInstanceLaunching: vi.fn(() => () => {}),
+        onInstanceLaunchFailed: vi.fn(() => () => {}),
+        onInstanceStarted: vi.fn(() => () => {}),
+        onInstanceStopped: vi.fn(() => () => {}),
+        onInstanceStopping: vi.fn(() => () => {}),
+        onComfyOutput: vi.fn(() => () => {}),
+        onComfyExited: vi.fn(() => () => {}),
+        onInstanceCrashed: vi.fn(() => () => {}),
+      }
+    }
+
+    it('hydrates in-flight launches so a window opened mid-launch shows the launching state', async () => {
+      installApi({ launching: [{ installationId: 'inst-1', installationName: 'My Install' }] })
+
+      await store.init()
+
+      expect(store.isLaunching('inst-1')).toBe(true)
+      expect(store.launchingInstances.get('inst-1')?.installationName).toBe('My Install')
+    })
+
+    it('does not re-mark an install as launching when it already hydrated as running', async () => {
+      installApi({
+        running: [{ installationId: 'inst-1', installationName: 'My Install', port: 8188, mode: 'window' }],
+        launching: [{ installationId: 'inst-1', installationName: 'My Install' }],
+      })
+
+      await store.init()
+
+      expect(store.isRunning('inst-1')).toBe(true)
+      expect(store.isLaunching('inst-1')).toBe(false)
+    })
+
+    it('hydrates in-flight stops so a window opened mid-stop shows the stopping state', async () => {
+      installApi({ stopping: ['inst-1'] })
+
+      await store.init()
+
+      expect(store.isStopping('inst-1')).toBe(true)
+    })
+
+    it('hydrates retained crashes so a freshly-opened window shows the error state', async () => {
+      installApi({
+        crashes: [
+          {
+            installationId: 'inst-1',
+            installationName: 'My Install',
+            crashed: true,
+            exitCode: 1,
+            lastStderr: 'boom',
+            crashedAtMs: 123,
+          },
+        ],
+      })
+
+      await store.init()
+
+      expect(store.errorInstances.has('inst-1')).toBe(true)
+      const err = store.errorInstances.get('inst-1')
+      expect(err?.installationName).toBe('My Install')
+      expect(err?.exitCode).toBe(1)
+      expect(err?.lastStderr).toBe('boom')
+    })
+
+    it('does not hydrate a crash for an install that is mid-launch', async () => {
+      installApi({
+        launching: [{ installationId: 'inst-1', installationName: 'My Install' }],
+        crashes: [{ installationId: 'inst-1', installationName: 'My Install', crashed: true, exitCode: 1 }],
+      })
+
+      await store.init()
+
+      expect(store.isLaunching('inst-1')).toBe(true)
+      expect(store.errorInstances.has('inst-1')).toBe(false)
+    })
+
+    it('does not hydrate a crash for an install that is already running', async () => {
+      installApi({
+        running: [{ installationId: 'inst-1', installationName: 'My Install', port: 8188, mode: 'window' }],
+        crashes: [{ installationId: 'inst-1', installationName: 'My Install', crashed: true, exitCode: 1 }],
+      })
+
+      await store.init()
+
+      expect(store.isRunning('inst-1')).toBe(true)
+      expect(store.errorInstances.has('inst-1')).toBe(false)
+    })
+
+    it('tolerates a preload without the snapshot hydration methods', async () => {
+      ;(window as Record<string, unknown>).api = {
+        getRunningInstances: vi.fn().mockResolvedValue([]),
+        onInstanceLaunching: vi.fn(() => () => {}),
+        onInstanceLaunchFailed: vi.fn(() => () => {}),
+        onInstanceStarted: vi.fn(() => () => {}),
+        onInstanceStopped: vi.fn(() => () => {}),
+        onInstanceStopping: vi.fn(() => () => {}),
+        onComfyOutput: vi.fn(() => () => {}),
+        onComfyExited: vi.fn(() => () => {}),
+        onInstanceCrashed: vi.fn(() => () => {}),
+      }
+
+      await expect(store.init()).resolves.toBeUndefined()
+      expect(store.launchingInstances.size).toBe(0)
+      expect(store.stoppingInstances.size).toBe(0)
+      expect(store.errorInstances.size).toBe(0)
     })
   })
 })
