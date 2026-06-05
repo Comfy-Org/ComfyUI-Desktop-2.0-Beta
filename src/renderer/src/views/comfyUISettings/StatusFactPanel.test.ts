@@ -1,11 +1,18 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
+import { createTestingPinia } from '@pinia/testing'
+import { setActivePinia } from 'pinia'
 import { nextTick } from 'vue'
 
 import { en } from '../../lib/i18nMessages.ts'
+import { useSessionStore } from '../../stores/sessionStore'
 import StatusFactPanel from './StatusFactPanel.vue'
-import type { Installation } from '../../types/ipc'
+import type { DetailSection, Installation } from '../../types/ipc'
+
+beforeEach(() => {
+  setActivePinia(createTestingPinia({ stubActions: false }))
+})
 
 function makeI18n() {
   return createI18n({ legacy: false, locale: 'en', messages: { en } })
@@ -24,6 +31,7 @@ function makeInstall(name: string): Installation {
 
 function mountPanel(props: {
   installation: Installation | null
+  sections?: DetailSection[]
   onRename?: (newName: string) => Promise<boolean>
 }) {
   return mount(StatusFactPanel, {
@@ -87,5 +95,46 @@ describe('StatusFactPanel — hero name', () => {
     await wrapper.setProps({ installation: makeInstall('Second') })
     await nextTick()
     expect(wrapper.find('.status-fact-hero-name').text()).toBe('Second')
+  })
+})
+
+describe('StatusFactPanel — active details', () => {
+  it('shows the running port under an Active details group', async () => {
+    const store = useSessionStore()
+    store.runningInstances.set('inst-1', {
+      installationId: 'inst-1',
+      installationName: 'Maanil',
+      port: 8188,
+      mode: 'window',
+    })
+    const wrapper = mountPanel({ installation: makeInstall('Maanil') })
+    await nextTick()
+
+    const titles = wrapper.findAll('.status-fact-group-title').map((n) => n.text())
+    expect(titles).toContain('Active details')
+    expect(wrapper.text()).toContain('8188')
+  })
+
+  it('omits Active details when the install is not running', async () => {
+    const wrapper = mountPanel({ installation: makeInstall('Maanil') })
+    await nextTick()
+
+    const titles = wrapper.findAll('.status-fact-group-title').map((n) => n.text())
+    expect(titles).not.toContain('Active details')
+  })
+
+  it('omits Active details when running without a port', async () => {
+    const store = useSessionStore()
+    store.runningInstances.set('inst-1', {
+      installationId: 'inst-1',
+      installationName: 'Maanil',
+      port: 0,
+      mode: 'window',
+    })
+    const wrapper = mountPanel({ installation: makeInstall('Maanil') })
+    await nextTick()
+
+    const titles = wrapper.findAll('.status-fact-group-title').map((n) => n.text())
+    expect(titles).not.toContain('Active details')
   })
 })
