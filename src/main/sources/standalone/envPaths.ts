@@ -1,5 +1,7 @@
 import fs from 'fs'
 import path from 'path'
+import { getActiveVenvDir } from '../../lib/pythonEnv'
+import type { InstallationRecord } from '../../installations'
 export {
   getUvPath, getActivePythonPath, getActiveUvPath, getVenvDir, getVenvPythonPath,
 } from '../../lib/pythonEnv'
@@ -44,6 +46,23 @@ export function findSitePackages(envRoot: string): string | null {
   try {
     const pyDir = fs.readdirSync(libDir).find((d) => d.startsWith('python'))
     if (pyDir) return path.join(libDir, pyDir, 'site-packages')
+  } catch {}
+  return null
+}
+
+/**
+ * Resolve the installed PyTorch version by reading the `torch-<version>.dist-info`
+ * directory left in the venv's site-packages. Synchronous and cheap; returns null
+ * when the venv, site-packages, or torch package can't be found.
+ */
+export function getTorchVersion(installation: InstallationRecord): string | null {
+  const sitePackages = findSitePackages(getActiveVenvDir(installation))
+  if (!sitePackages) return null
+  try {
+    for (const entry of fs.readdirSync(sitePackages)) {
+      const match = entry.match(/^torch-(.+?)\.dist-info$/i)
+      if (match) return match[1]!
+    }
   } catch {}
   return null
 }

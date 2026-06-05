@@ -860,10 +860,12 @@ defineExpose({ open, resetContinue })
           </div>
           <button
             class="brand-primary start-continue"
+            :class="{ 'start-continue--locked': !acceptedTos }"
             type="button"
             data-testid="first-use-continue"
             :disabled="isContinuing || pickedChoice === null"
             :aria-busy="isContinuing"
+            :aria-disabled="!acceptedTos"
             @click="onContinue"
           >
             <Loader2
@@ -1283,6 +1285,15 @@ defineExpose({ open, resetContinue })
   align-items: center;
   justify-content: center;
   gap: 8px;
+}
+
+.start-continue--locked {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.start-continue--locked:hover {
+  background: var(--comfy-yellow);
+  border-color: var(--comfy-yellow);
 }
 .start-continue__spinner {
   animation: start-continue-spin 750ms linear infinite;

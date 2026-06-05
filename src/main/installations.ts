@@ -10,6 +10,11 @@ import type { ComfyVersion } from './lib/version'
  *  list-affecting mutation and is rebroadcast as `installations-changed`. */
 export const installationEvents = new EventEmitter()
 
+/** Source id of the always-seeded Comfy Cloud entry. */
+export const CLOUD_SOURCE_ID = 'cloud'
+/** Canonical, non-user-editable name of the Comfy Cloud entry (issue #922). */
+export const CLOUD_INSTALL_NAME = 'Comfy Cloud'
+
 export interface InstallationRecord {
   id: string
   name: string
@@ -196,6 +201,27 @@ export async function ensureExists(sourceId: string, data: Record<string, unknow
     return true
   })
   if (added) installationEvents.emit('changed')
+}
+
+/** Force the seeded Cloud entry back to its canonical name. The Cloud install
+ *  is not user-renamable (issue #922); this self-heals any entry that a prior
+ *  build let the user rename. No-op when the name already matches or no Cloud
+ *  entry exists. */
+export async function enforceCloudName(): Promise<void> {
+  const updated = await enqueue(async () => {
+    const all = await load()
+    const index = all.findIndex((i) => i.sourceId === CLOUD_SOURCE_ID)
+    if (index === -1) return null
+    const existing = all[index]!
+    if (existing.name === CLOUD_INSTALL_NAME) return null
+    all[index] = { ...existing, name: CLOUD_INSTALL_NAME } as InstallationRecord
+    await save(all)
+    return all[index]!
+  })
+  if (updated) {
+    installationEvents.emit('updated', updated)
+    installationEvents.emit('changed')
+  }
 }
 
 /**
