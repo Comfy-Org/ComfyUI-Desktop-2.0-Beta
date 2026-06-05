@@ -457,9 +457,9 @@ describe('TitleBarApp', () => {
     bridgeState.sourceCategoryChangedCallbacks.forEach((cb) => cb('cloud'))
     await flushPromises()
     expect(wrapper.find('.title-install-type-icon').attributes('title')).toBe('Cloud')
-    bridgeState.sourceCategoryChangedCallbacks.forEach((cb) => cb('desktop'))
+    bridgeState.sourceCategoryChangedCallbacks.forEach((cb) => cb('remote'))
     await flushPromises()
-    expect(wrapper.find('.title-install-type-icon').attributes('title')).toBe('Legacy Desktop')
+    expect(wrapper.find('.title-install-type-icon').attributes('title')).toBe('Remote')
   })
 
   it('suppresses the install-type icon on install-less host windows even when a category arrives', async () => {
