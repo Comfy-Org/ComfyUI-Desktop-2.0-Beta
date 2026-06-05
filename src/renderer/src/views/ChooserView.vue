@@ -103,9 +103,9 @@ const baseTileCount = computed(() => 2 + nonCloudInstalls.value.length)
 
 const TILES_PER_ROW = 4
 
-/** Unfiltered tile rows. Unitless — CSS turns it into a viewport-aware top
- *  offset (see the `--cluster-top` clamp). Raw count, so search never shifts
- *  the cluster. */
+/** Unfiltered tile rows. Drives the grid's reserved `min-height` so the box
+ *  doesn't shrink while filtering — that's what keeps the centered cluster
+ *  from shifting when the user types in search. */
 const clusterRows = computed(() => Math.ceil(baseTileCount.value / TILES_PER_ROW))
 
 /** Freeze a leaving tile's box so it doesn't collapse under `position:
@@ -201,7 +201,10 @@ function viewError(inst: Installation): void {
   let message = err.message
   if (!message) {
     if (err.signal && err.exitCode != null) {
-      message = t('comfyLifecycle.crashedDescWithCodeAndSignal', { code: err.exitCode, signal: err.signal })
+      message = t('comfyLifecycle.crashedDescWithCodeAndSignal', {
+        code: err.exitCode,
+        signal: err.signal
+      })
     } else if (err.signal) {
       message = t('comfyLifecycle.crashedDescWithSignal', { signal: err.signal })
     } else if (err.exitCode != null) {
@@ -330,10 +333,20 @@ function handleNewInstallClick(): void {
             <span
               v-if="dashboardCapacityStatus !== 'normal'"
               class="chooser-tile-pill chooser-tile-pill--capacity"
-              :class="{ 'chooser-tile-pill--capacity-disabled': dashboardCapacityStatus === 'disabled' }"
-              :title="dashboardCapacityStatus === 'disabled' ? t('cloud.capacityDisabledHint') : t('cloud.capacityDegradedHint')"
+              :class="{
+                'chooser-tile-pill--capacity-disabled': dashboardCapacityStatus === 'disabled'
+              }"
+              :title="
+                dashboardCapacityStatus === 'disabled'
+                  ? t('cloud.capacityDisabledHint')
+                  : t('cloud.capacityDegradedHint')
+              "
             >
-              {{ dashboardCapacityStatus === 'disabled' ? t('cloud.capacityDisabled') : t('cloud.capacityDegraded') }}
+              {{
+                dashboardCapacityStatus === 'disabled'
+                  ? t('cloud.capacityDisabled')
+                  : t('cloud.capacityDegraded')
+              }}
             </span>
             <span
               v-else
@@ -390,49 +403,30 @@ function handleNewInstallClick(): void {
 }
 
 /* Unitless tile-row count from JS (see `clusterRows`). Registered as <integer>
- * so it's a typed number usable in the `--cluster-top` calc() below. */
+ * so it's a typed number usable in the grid's reserved-height calc() below. */
 @property --rows {
   syntax: '<integer>';
   inherits: true;
   initial-value: 1;
 }
 
-/* `--cluster-top` drives the top spacer (resolved from `--rows` + vh below).
- * Registered as a <length> so it interpolates — a bare custom property won't
- * transition. */
-@property --cluster-top {
-  syntax: '<length>';
-  inherits: true;
-  initial-value: 220px;
-}
-
 .chooser-view {
-  /* Only the top spacer flexes; wordmark/search/grid stay tight. Shrinking
-   * `--cluster-top` raises the cluster and hands height to the grid, which
-   * scrolls internally once the bottom spacer (1fr) runs out.
+  /* Symmetric top + bottom spacers (both 1fr) center the wordmark→grid block
+   * as a group whenever it fits — looks deliberate at any viewport height.
+   * When the (unfiltered) content is taller than the viewport, the
+   * `minmax(0, 1fr)` spacers collapse to 0 and the grid scrolls internally.
    * Rows: [top spacer] [wordmark] [search] [grid] [bottom spacer]
    *
-   * Resting top spacer, viewport-aware: `base` is the 1-row hero offset scaled
-   * to height, `shed` is the height surrendered per extra row. The clamp
-   * caps map to the legacy JS constants (220 cap / 110 shed-cap / 16 floor) so
-   * tall monitors keep the hero feel while short ones sit the cluster much
-   * higher. vh re-evaluates on resize, so this responds to window height with
-   * no JS listener. */
-  --cluster-base: clamp(16px, 20vh, 220px);
-  --cluster-shed: clamp(40px, 11vh, 110px);
-  --cluster-top: max(
-    16px,
-    calc(var(--cluster-base) - max(0, var(--rows) - 1) * var(--cluster-shed))
-  );
-  /* Vertical rhythm tightens on short viewports so the second tile row isn't
-   * pushed off-screen; horizontal padding stays fixed. */
+   * No-shift guarantee: the grid row reserves its height from the UNFILTERED
+   * `--rows` (see `.chooser-grid` min-height), so typing in search empties
+   * tiles without shrinking the grid box — the centered cluster stays put. */
   --chooser-pad-y: clamp(12px, 2.5vh, 24px);
   --chooser-row-gap: clamp(16px, 3.5vh, 32px);
   flex: 1 1 auto;
   min-height: 0;
   display: grid;
   grid-template-rows:
-    var(--cluster-top)
+    minmax(0, 1fr)
     auto
     auto
     minmax(0, auto)
@@ -443,13 +437,6 @@ function handleNewInstallClick(): void {
   max-width: 1280px;
   padding: var(--chooser-pad-y) 24px;
   row-gap: var(--chooser-row-gap);
-  transition: --cluster-top 260ms cubic-bezier(0.32, 0.72, 0, 1);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .chooser-view {
-    transition-duration: 1ms;
-  }
 }
 
 .chooser-wordmark {
@@ -506,11 +493,17 @@ function handleNewInstallClick(): void {
    * fixed-track contract from the comment below intact while letting
    * wide viewports surface a 4-up row instead of capping at 3. */
   max-width: 1168px;
-  /* When the row collapses (tall grid in a short viewport), the grid
-   * stops growing and scrolls internally. `min-height: 0` + an
-   * explicit `max-height: 100%` are required so the grid can't push
-   * its row past the viewport. */
-  min-height: 0;
+  /* Reserve height for the UNFILTERED row count so the grid box doesn't
+   * shrink while typing in search — that's what keeps the centered cluster
+   * from jumping (replaces the old top-anchor no-shift trick). One tile is
+   * 280px × 280·156.678/246 ≈ 178px tall; rows are 178px + a 16px gap each.
+   * `max-height: 100%` still caps it on short viewports, where the grid
+   * scrolls internally and the 1fr spacers collapse to 0. */
+  --tile-h: 178px;
+  min-height: min(
+    100%,
+    calc(var(--rows) * var(--tile-h) + max(0, var(--rows) - 1) * 16px + 2 * var(--chooser-fade))
+  );
   max-height: 100%;
   overflow-y: auto;
   display: grid;
@@ -586,5 +579,4 @@ function handleNewInstallClick(): void {
     transform: none;
   }
 }
-
 </style>
