@@ -1145,6 +1145,15 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
       }
     })
 
+    // Hide the bar on every window (incl. window.open popups) while keeping
+    // its accelerators live — the app uses a custom title bar throughout.
+    if (process.platform !== 'darwin') {
+      app.on('browser-window-created', (_event, window) => {
+        window.setMenuBarVisibility(false)
+        window.autoHideMenuBar = true
+      })
+    }
+
     // Bring up main-process telemetry as early as possible so install/migrate
     // sub-step events can fire even before the renderer mounts.
     //

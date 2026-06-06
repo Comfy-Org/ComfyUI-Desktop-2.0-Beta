@@ -34,28 +34,22 @@ export function installAppMenu(
       : undefined
 
   if (platform !== 'darwin') {
-    if (!routedDevTools) {
-      Menu.setApplicationMenu(null)
-      return
-    }
-    Menu.setApplicationMenu(
-      Menu.buildFromTemplate([
+    const viewSubmenu: MenuItemConstructorOptions[] = [{ role: 'togglefullscreen' }]
+    if (routedDevTools) {
+      viewSubmenu.push(
+        { type: 'separator' },
+        { role: 'reload' },
+        { role: 'forceReload' },
         {
-          label: 'View',
-          submenu: [
-            { role: 'reload' },
-            { role: 'forceReload' },
-            {
-              label: 'Toggle Developer Tools',
-              accelerator: 'Control+Shift+I',
-              click: (_menuItem, bw) => {
-                routedDevTools(bw)
-              },
-            },
-          ],
+          label: 'Toggle Developer Tools',
+          accelerator: 'Control+Shift+I',
+          click: (_menuItem, bw) => {
+            routedDevTools(bw)
+          },
         },
-      ]),
-    )
+      )
+    }
+    Menu.setApplicationMenu(Menu.buildFromTemplate([{ label: 'View', submenu: viewSubmenu }]))
     return
   }
   const onCheckForUpdates =
@@ -111,6 +105,7 @@ export function installAppMenu(
       submenu: [
         { role: 'minimize' },
         { role: 'zoom' },
+        { role: 'togglefullscreen' },
         { type: 'separator' },
         { role: 'front' },
       ],
