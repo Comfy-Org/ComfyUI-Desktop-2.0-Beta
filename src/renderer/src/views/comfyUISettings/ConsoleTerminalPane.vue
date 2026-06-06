@@ -64,6 +64,16 @@ function pushSize(): void {
   void api.terminalResize(currentId, dims.cols, dims.rows)
 }
 
+/** Force the shared PTY to this view's size. Unlike {@link pushSize}, this skips
+ *  the "local dims unchanged" guard: another window may have resized the PTY out
+ *  from under us, so on focus we must re-assert our size even if our own xterm
+ *  hasn't changed, or the shell's cursor stays misaligned. */
+function reclaimPtySize(): void {
+  if (!terminal || !currentId) return
+  if (!hostRef.value?.offsetParent) return
+  void api.terminalResize(currentId, terminal.cols, terminal.rows)
+}
+
 const debouncedPushSize = useDebounceFn(pushSize, 50)
 
 async function attach(id: string): Promise<void> {
@@ -78,8 +88,20 @@ async function attach(id: string): Promise<void> {
   disposers.push(terminal.onData((data) => void api.terminalWrite(id, data)).dispose)
   disposers.push(
     api.onTerminalOutput((payload) => {
-      if (payload.installationId === id) terminal?.write(payload.data)
+      if (payload.installationId !== id) return
+      // Output only flows from a live shell, so a restart triggered from
+      // another window (no exit/start event reaches us) revives the session:
+      // clear the "session ended" banner so input works again.
+      if (exited.value) exited.value = false
+      terminal?.write(payload.data)
     })
+  )
+  // The PTY is shared with the ComfyUI window's terminal and holds one size.
+  // Reclaim it for this view on focus so the shell's cursor matches what we
+  // render here.
+  terminal.element?.addEventListener('focusin', reclaimPtySize)
+  disposers.push(() =>
+    terminal?.element?.removeEventListener('focusin', reclaimPtySize)
   )
   disposers.push(
     api.onTerminalExited((payload) => {

@@ -39,17 +39,20 @@ function getDefaultShell(): string {
 }
 
 /** Commands written into a fresh shell: activate the install's venv and make
- *  `pip` route through the bundled uv, mirroring legacy desktop. */
+ *  `pip` route through the bundled uv, mirroring legacy desktop. A final clear
+ *  hides the activation echo so the session opens on a clean prompt. */
 function initCommands(venvDir: string, uvPath: string): string[] {
   if (process.platform === 'win32') {
     return [
       `& "${venvDir}\\Scripts\\Activate.ps1"`,
       `function pip { & "${uvPath}" pip $args }`,
+      'Clear-Host',
     ]
   }
   return [
     `source "${venvDir}/bin/activate"`,
     `alias pip='"${uvPath}" pip'`,
+    'clear',
   ]
 }
 
@@ -78,7 +81,6 @@ class InstallTerminal {
   /** Kill any existing shell and start a fresh one. Clears scrollback. */
   async restart(): Promise<void> {
     this.#killPty()
-    this.sessionBuffer.length = 0
     await this.#spawn()
   }
 
@@ -128,6 +130,9 @@ class InstallTerminal {
     if (!inst || !inst.installPath) {
       throw new Error(`Installation not found: ${this.installationId}`)
     }
+    // A fresh shell starts with a fresh scrollback; otherwise a respawn after
+    // the user typed `exit` would leak the dead session's buffer into restore.
+    this.sessionBuffer.length = 0
     const venvDir = getActiveVenvDir(inst)
     const uvPath = getActiveUvPath(inst)
     const instance = pty.spawn(getDefaultShell(), [], {
