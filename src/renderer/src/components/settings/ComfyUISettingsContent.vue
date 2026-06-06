@@ -114,6 +114,7 @@ const {
   updateField,
   renameInstallation,
   pendingRestartFieldIds,
+  clearPendingRestart,
   fieldErrorMessages,
   runAction,
   runningActionIds,
@@ -414,6 +415,26 @@ function handleArgsUpdate(value: string): void {
   if (f) void updateField(f, value)
 }
 
+/** Live `remoteUrl` field from the status sections (remote connections only). */
+const remoteUrlField = computed<DetailField | null>(() => {
+  for (const s of sectionsForTab('status').value) {
+    for (const f of s.fields ?? []) {
+      if (f.id === 'remoteUrl') return f
+    }
+  }
+  return null
+})
+
+/** Commit a remote-URL edit through `updateField` (optimistic write, rollback,
+ *  error pill, restart-dirty + telemetry). Resolves `false` on rejection so
+ *  StatusFactPanel reverts; success is read back from the field-error map. */
+async function handleUrlUpdate(value: string): Promise<boolean> {
+  const field = remoteUrlField.value
+  if (!field) return false
+  await updateField(field, value)
+  return !fieldErrorMessages.value.has(field.id)
+}
+
 function handleSnapshotAction(action: ActionDef): void {
   void runAction(action)
 }
@@ -449,7 +470,14 @@ const primaryActionLabel = computed(() => {
 })
 
 function handlePrimaryAction(): void {
-  if (!installation.value) return
+  const selectedInstall = installation.value
+  if (!selectedInstall) return
+  // The restart-in-place click IS the restart: main stops + relaunches with the
+  // freshly-saved values, so consume the pending-restart state now. A remote
+  // relaunch surfaces no observable lifecycle dip, so the watchers can't clear it.
+  if (installCta.restartInPlace.value && pendingRestartFieldIds.value.size > 0) {
+    clearPendingRestart(selectedInstall.id)
+  }
   emit('primary-action', installCta.restartInPlace.value)
 }
 
@@ -695,6 +723,8 @@ defineExpose({
                 :sections="statusSections"
                 :disk-usage="diskUsageItem"
                 :on-rename="renameInstallation"
+                :on-update-url="handleUrlUpdate"
+                :url-restart-pending="pendingRestartFieldIds.has('remoteUrl')"
               />
             </div>
             <div

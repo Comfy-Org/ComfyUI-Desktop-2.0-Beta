@@ -80,7 +80,7 @@ export function createUrlSource(config: UrlSourceConfig): SourcePlugin {
 
     getDetailSections(installation: InstallationRecord): Record<string, unknown>[] {
       const urlField: Record<string, unknown> = editableUrl
-        ? { id: 'remoteUrl', label: t('remote.url'), value: (installation.remoteUrl as string) || '—', editable: true }
+        ? { id: 'remoteUrl', label: t('remote.url'), value: (installation.remoteUrl as string) || '—', editable: true, requiresRestart: true }
         : { label: t('remote.url'), value: (installation.remoteUrl as string) || '—' }
 
       const actions: Record<string, unknown>[] = [

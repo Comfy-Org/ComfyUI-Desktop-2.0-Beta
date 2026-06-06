@@ -16,6 +16,10 @@ interface Props {
   diskUsage: { label: string; value: string } | null
   /** Commit a rename, resolving `true` on success; a function prop (not an emit) so blur can await and revert only on failure. */
   onRename?: (newName: string) => Promise<boolean>
+  /** Commit a remote-URL change, resolving `true` on success. Same function-prop rationale as `onRename`: blur awaits and reverts only on failure. */
+  onUpdateUrl?: (newUrl: string) => Promise<boolean>
+  /** True when the remote URL was edited while running and a reconnect is pending. Owned by the composable so it clears on stop/restart like the footer button. */
+  urlRestartPending?: boolean
 }
 
 const props = defineProps<Props>()
@@ -82,6 +86,107 @@ async function handleNameBlur(event: FocusEvent): Promise<void> {
   }
   // Empty / whitespace-only / unchanged: restore the canonical name now.
   syncName()
+}
+
+// --- Remote connection URL: inline-editable, mirroring the name-edit pattern above. ---
+
+// Only the Remote Connection source exposes an editable `remoteUrl`; Cloud's URL stays read-only.
+const urlEditable = computed(() => props.installation?.sourceCategory === 'remote')
+
+// Mirrors main's `parseUrl`: a scheme-less value is tried as `http://<value>` and must yield a hostname.
+function isValidConnectionUrl(raw: string): boolean {
+  const trimmed = raw.trim()
+  if (!trimmed) return false
+  try {
+    const parsed = new URL(trimmed.includes('://') ? trimmed : `http://${trimmed}`)
+    return parsed.hostname.length > 0
+  } catch {
+    return false
+  }
+}
+
+// The live session is pinned to the launch-time URL, so an edit while running
+// only takes effect on restart. Visibility is owned by the composable's
+// restart-dirty state (via `urlRestartPending`), which clears on stop/restart —
+// gated here on `isRunning` so the tag hides the instant the instance stops.
+const showUrlRestart = computed(() => {
+  const id = props.installation?.id
+  return !!props.urlRestartPending && !!id && sessionStore.isRunning(id)
+})
+
+// Same imperative-sync rationale as the name hero (pencil sibling can't live inside the contenteditable).
+// A `ref` on an element inside `v-for` resolves to an array; the URL row renders at most once, so unwrap to the single node.
+const urlElRaw = useTemplateRef<HTMLElement | HTMLElement[]>('urlEl')
+const urlEl = computed<HTMLElement | null>(() =>
+  Array.isArray(urlElRaw.value) ? (urlElRaw.value[0] ?? null) : (urlElRaw.value ?? null),
+)
+// Source the canonical URL from the `remoteUrl` detail field (always present in
+// the sections) rather than `installation.remoteUrl`, which the picker snapshot
+// may omit. Falls back to the installation field if the section value is a placeholder.
+function currentUrl(): string {
+  for (const section of props.sections) {
+    for (const field of section.fields ?? []) {
+      if (field.id === 'remoteUrl') {
+        const v = typeof field.value === 'string' ? field.value : ''
+        if (v && v !== '—') return v
+      }
+    }
+  }
+  const fallback = props.installation?.remoteUrl
+  return typeof fallback === 'string' ? fallback : ''
+}
+function syncUrl(): void {
+  const el = urlEl.value
+  if (!el) return
+  const url = currentUrl()
+  if (el.textContent !== url) el.textContent = url
+}
+// Repaint the canonical URL when it changes externally (e.g. main re-normalised
+// it), without stomping the caret mid-edit.
+watch(
+  [() => currentUrl(), urlEl],
+  () => {
+    if (document.activeElement !== urlEl.value) syncUrl()
+  },
+  { immediate: true, flush: 'post' },
+)
+
+function handleUrlEscape(): void {
+  syncUrl()
+  urlEl.value?.blur()
+}
+
+// Pencil click: focus the URL field and drop the caret at the end so the user can edit immediately.
+function focusUrlField(): void {
+  const el = urlEl.value
+  if (!el) return
+  el.focus()
+  const range = document.createRange()
+  range.selectNodeContents(el)
+  range.collapse(false)
+  const sel = window.getSelection()
+  sel?.removeAllRanges()
+  sel?.addRange(range)
+}
+
+// The editable URL row is the remote source's `remoteUrl` fact (matched on the field id carried into the row).
+function isUrlRow(row: { id: string }): boolean {
+  return urlEditable.value && row.id === 'remoteUrl'
+}
+
+async function handleUrlBlur(event: FocusEvent): Promise<void> {
+  const el = event.target as HTMLElement
+  const current = currentUrl()
+  const next = el.textContent?.trim() ?? ''
+  if (!next || next === current || !isValidConnectionUrl(next)) {
+    // Empty / unchanged / invalid: restore the canonical value, no commit.
+    syncUrl()
+    return
+  }
+  // On rejection, revert; on success the composable sets the restart-pending
+  // state (when running) and main normalises the URL — the watcher repaints it.
+  const committed = await props.onUpdateUrl?.(next)
+  if (committed === false) syncUrl()
 }
 
 interface FactRow {
@@ -278,7 +383,35 @@ const groups = computed<FactGroup[]>(() => {
       <dl class="status-fact-list">
         <div v-for="row in group.rows" :key="row.id" class="status-fact-row">
           <dt>{{ row.label }}</dt>
-          <dd>
+          <dd v-if="isUrlRow(row)" class="status-fact-url-dd">
+            <span class="status-fact-url-edit">
+              <span
+                ref="urlEl"
+                class="status-fact-value status-fact-url-editable"
+                role="textbox"
+                :aria-label="t('statusFactPanel.editUrl', 'Edit connection URL')"
+                contenteditable="plaintext-only"
+                spellcheck="false"
+                :title="row.value"
+                @blur="handleUrlBlur"
+                @keydown.enter.prevent="($event.target as HTMLElement).blur()"
+                @keydown.esc.prevent="handleUrlEscape"
+              />
+              <button
+                type="button"
+                class="status-fact-url-edit-btn"
+                :aria-label="t('statusFactPanel.editUrl', 'Edit connection URL')"
+                :title="t('statusFactPanel.editUrl', 'Edit connection URL')"
+                @click="focusUrlField"
+              >
+                <Pencil :size="12" aria-hidden="true" />
+              </button>
+            </span>
+            <span v-if="showUrlRestart" class="status-fact-restart-tag" role="status">
+              {{ t('statusFactPanel.restartToApply', 'Restart to apply') }}
+            </span>
+          </dd>
+          <dd v-else>
             <span
               class="status-fact-value"
               :class="{ 'is-truncate-start': row.truncate === 'start' }"
@@ -451,5 +584,93 @@ const groups = computed<FactGroup[]>(() => {
 .status-fact-value.is-truncate-start {
   direction: rtl;
   text-align: left;
+}
+
+/* Editable URL row: stack the field over the reconnect hint, keeping the right alignment of the fact list. */
+.status-fact-url-dd {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  row-gap: 4px;
+}
+
+/* Name + pencil as siblings (the pencil can't live inside the contenteditable — `textContent =` would wipe it). */
+.status-fact-url-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.status-fact-url-editable {
+  padding: 2px 6px;
+  margin-right: -6px;
+  border-radius: 6px;
+  outline: none;
+  cursor: text;
+  text-align: right;
+  transition: background-color 120ms ease;
+}
+
+.status-fact-url-editable:hover {
+  background: var(--brand-surface-bg-hover);
+}
+
+.status-fact-url-editable:focus-visible {
+  background: var(--brand-surface-bg-hover);
+  box-shadow: 0 0 0 2px var(--focus-ring, var(--neutral-50));
+  /* Let the full URL show while editing rather than ellipsizing. */
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.status-fact-url-edit-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity 120ms ease,
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+/* Reveal on row hover or whenever the field/button itself has focus, so keyboard users can find it. */
+.status-fact-url-edit:hover .status-fact-url-edit-btn,
+.status-fact-url-edit:focus-within .status-fact-url-edit-btn {
+  opacity: 0.6;
+}
+
+.status-fact-url-edit-btn:hover,
+.status-fact-url-edit-btn:focus-visible {
+  opacity: 1;
+  background: var(--brand-surface-bg-hover);
+  color: var(--text);
+  outline: none;
+}
+
+/* Reconnect hint: restart-tag shape in the warning ramp (mirrors SettingsSectionList's `.settings-v2-restart-tag`). */
+.status-fact-restart-tag {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: 9999px;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 14px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warning) 36%, transparent);
+  white-space: nowrap;
 }
 </style>

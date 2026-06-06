@@ -34,6 +34,7 @@ import * as releaseCache from '../release-cache'
 import { runStartupReleaseChecks } from '../release-cache-startup'
 import { _broadcastToRenderer } from './shared'
 import { hasGitDir } from '../git'
+import { parseUrl } from '../util'
 import { restoreSnapshotIntoInstallation } from '../standaloneMigration'
 import * as mainTelemetry from '../telemetry'
 import { recordIpcInvocation } from '../e2eOverrides'
@@ -411,9 +412,16 @@ export function registerInstallationHandlers(): void {
       }
       const filtered: Record<string, unknown> = {}
       for (const key of Object.keys(data)) {
-        if (allowedIds.has(key)) {
-          filtered[key] = key === 'envVars' ? sanitizeEnvVars(data[key]) : data[key]
+        if (!allowedIds.has(key)) continue
+        if (key === 'remoteUrl') {
+          const parsed = parseUrl(data[key] as string)
+          if (!parsed) return { ok: false, message: i18n.t('errors.invalidUrl') }
+          // Store the normalized href (scheme-completed, trailing slash
+          // stripped) so it matches creation's `buildInstallation`.
+          filtered[key] = parsed.href
+          continue
         }
+        filtered[key] = key === 'envVars' ? sanitizeEnvVars(data[key]) : data[key]
       }
       if (filtered.name && filtered.name !== inst.name) {
         if (await installations.hasNameConflict(installationId, filtered.name as string)) {

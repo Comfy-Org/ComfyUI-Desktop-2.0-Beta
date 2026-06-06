@@ -80,6 +80,11 @@ export interface UseComfyUISettingsApi {
    *  drives the "Restart to apply" pill. Held per-install. */
   pendingRestartFieldIds: ComputedRef<Set<string>>
 
+  /** Consume the pending-restart + error state for an install. Called when the
+   *  user initiates the restart, since a remote relaunch surfaces no observable
+   *  lifecycle dip to clear it automatically. */
+  clearPendingRestart: (installId: string) => void
+
   /** Per-install field error messages from failed `updateField` IPCs. */
   fieldErrorMessages: ComputedRef<Map<string, string>>
 
@@ -673,8 +678,21 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     if (noticeTimer) clearTimeout(noticeTimer)
   })
 
-  // Drop the per-install dirty + error entries when the install stops; it
-  // picks up new values on next launch, so nothing is left to apply.
+  // Drop the per-install dirty + error entries once a (re)launch has consumed
+  // the new values, so the "Restart to apply" state clears after the restart.
+  function clearRestartAndErrors(installId: string): void {
+    if (restartBaselines.value.has(installId)) {
+      const next = new Map(restartBaselines.value)
+      next.delete(installId)
+      restartBaselines.value = next
+    }
+    if (errorMessages.value.has(installId)) {
+      const next = new Map(errorMessages.value)
+      next.delete(installId)
+      errorMessages.value = next
+    }
+  }
+
   watch(
     () => {
       const inst = toValue(opts.installation)
@@ -686,18 +704,25 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
       // Refetch so the "Running details" port row (sourced from main) appears
       // on launch and clears on stop. Race-safe via reload()'s requestSeq.
       void reload()
-      if (wasRunning && !running) {
-        if (restartBaselines.value.has(inst.id)) {
-          const next = new Map(restartBaselines.value)
-          next.delete(inst.id)
-          restartBaselines.value = next
-        }
-        if (errorMessages.value.has(inst.id)) {
-          const next = new Map(errorMessages.value)
-          next.delete(inst.id)
-          errorMessages.value = next
-        }
-      }
+      // Stop edge: nothing is left to apply (next launch picks up new values).
+      if (wasRunning && !running) clearRestartAndErrors(inst.id)
+    }
+  )
+
+  // A restart may not surface a running→stopped dip (e.g. a remote connection
+  // has no process to kill, so the snapshot can coalesce stop+relaunch into one
+  // running broadcast). Catch the relaunch via the launching edge instead: any
+  // (re)launch re-reads the persisted values, so the pending-restart state is
+  // satisfied the moment a new launch begins.
+  watch(
+    () => {
+      const inst = toValue(opts.installation)
+      return inst ? sessionStore.isLaunching(inst.id) : false
+    },
+    (launching, wasLaunching) => {
+      const inst = toValue(opts.installation)
+      if (!inst) return
+      if (launching && !wasLaunching) clearRestartAndErrors(inst.id)
     }
   )
 
@@ -718,6 +743,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     updateField,
     renameInstallation,
     pendingRestartFieldIds,
+    clearPendingRestart: clearRestartAndErrors,
     fieldErrorMessages,
     runAction,
     runningActionIds,
