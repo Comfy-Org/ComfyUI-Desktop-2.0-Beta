@@ -55,6 +55,16 @@ export function buildSettingsSections(): SettingsSection[] {
           type: 'boolean',
           value: s.autoInstallUpdates !== false
         },
+        // Local-only users have asked us to make the Cloud tile go away.
+        // Cloud is still a first-class peer; this is an opt-out, not a
+        // removal — default off, surface as a plain toggle.
+        {
+          id: 'hideCloudFromPicker',
+          label: i18n.t('settings.hideCloudFromPicker'),
+          type: 'boolean',
+          value: s.hideCloudFromPicker === true,
+          tooltip: i18n.t('settings.hideCloudFromPickerDescription')
+        },
         // onAppClose field hidden while docking-to-tray is disabled.
         ...(isChinese ? [chineseMirrorsField] : [])
       ]
