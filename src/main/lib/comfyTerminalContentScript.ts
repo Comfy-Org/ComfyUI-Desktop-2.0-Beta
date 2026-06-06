@@ -162,6 +162,31 @@ function renderTerminal(container) {
   }).catch(function () {});
 }
 
+// Dedupe guard. The frontend ships a native flag-gated 'command-terminal'
+// bottom-panel tab via the companion ComfyUI_frontend PR; when that lands
+// it registers itself before we tick. Bail out if we see it so the user
+// never gets two tabs with the same id. Defensive over both shapes that
+// ComfyUI exposes (an extensions array, and a future-proof tab registry).
+function alreadyHasTerminalTab(app) {
+  try {
+    var exts = (app && app.extensions) || [];
+    for (var i = 0; i < exts.length; i++) {
+      var ext = exts[i] || {};
+      if (ext.name === 'Comfy.Desktop.TerminalStopgap') continue;
+      var tabs = ext.bottomPanelTabs || [];
+      for (var j = 0; j < tabs.length; j++) {
+        if (tabs[j] && tabs[j].id === 'command-terminal') return true;
+      }
+    }
+  } catch (e) {}
+  try {
+    var registry =
+      app && (app.bottomPanelTabRegistry || (app.workbench && app.workbench.bottomPanelTabRegistry));
+    if (registry && typeof registry.get === 'function' && registry.get('command-terminal')) return true;
+  } catch (e) {}
+  return false;
+}
+
 function waitForRegister(timeoutMs) {
   var startedAt = Date.now();
   (function tick() {
@@ -169,6 +194,11 @@ function waitForRegister(timeoutMs) {
     var app = window.comfyAPI && window.comfyAPI.app && window.comfyAPI.app.app;
     var reg = app && app.registerExtension;
     if (typeof reg === 'function') {
+      // Native frontend tab already mounted — leave it alone.
+      if (alreadyHasTerminalTab(app)) {
+        STATE.registered = true;
+        return;
+      }
       try {
         reg.call(app, {
           name: 'Comfy.Desktop.TerminalStopgap',

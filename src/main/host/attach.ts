@@ -3,7 +3,6 @@ import { getAppVersion } from '../lib/ipc'
 import { attachSessionDownloadHandler } from '../lib/comfyDownloadManager'
 import { getModelDownloadContentScript } from '../lib/comfyContentScript'
 import { getComfyTerminalContentScript } from '../lib/comfyTerminalContentScript'
-import { isCachedFeatureFlagAvailable } from '../lib/comfy-feature-flags'
 import { _operationAborts, sourceMap } from '../lib/ipc/shared'
 import { TITLEBAR_BG } from '../lib/theme'
 import * as mainTelemetry from '../lib/telemetry'
@@ -385,16 +384,18 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
     comfyContents.executeJavaScript(COMFY_THEME_OBSERVER_JS).catch(() => {})
     const preamble = isLocal ? '' : 'window.__comfyDesktop2Remote = true;\n'
     comfyContents.executeJavaScript(preamble + getModelDownloadContentScript()).catch(() => {})
-    // Stopgap: inject a fallback bottom-panel Terminal tab for standalone
-    // installs whose ComfyUI doesn't advertise `supports_terminal`, the exact
-    // case where the real flag-gated frontend tab can't appear. The transport
-    // (__comfyDesktop2.Terminal) exists regardless of the flag. Remove once the
-    // official tab ships in a stable release.
-    if (
-      isLocal &&
-      installation.sourceId === 'standalone' &&
-      !isCachedFeatureFlagAvailable(installationId, 'supports_terminal')
-    ) {
+    // Always inject the Terminal bottom-panel tab on standalone installs.
+    //
+    // Originally gated on `!supports_terminal` to avoid duplicating the
+    // flag-gated frontend tab. Day-3 launch feedback put terminal
+    // discoverability ("Why u delete cmd?") in the top tier of complaints,
+    // and the companion ComfyUI / ComfyUI_frontend PRs that would deliver
+    // the native tab are still in flight. So we ship the injection
+    // always-on now and dedupe in JS instead: the injected script checks
+    // `bottomPanelTabs` for an existing `command-terminal` entry and
+    // bails out before registering a second copy. See
+    // `comfyTerminalContentScript.ts` for the dedupe guard.
+    if (isLocal && installation.sourceId === 'standalone') {
       comfyContents.executeJavaScript(getComfyTerminalContentScript()).catch(() => {})
     }
     // Cloud-only patches (popup-blocked toast suppression + post-signin
