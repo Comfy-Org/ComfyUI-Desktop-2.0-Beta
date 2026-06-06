@@ -47,6 +47,19 @@ watch(
   { immediate: true, flush: 'post' },
 )
 
+// Clicking the pencil should behave like clicking into the field: focus the editable name and place the caret at the end.
+function focusName(): void {
+  const el = nameEl.value
+  if (!el) return
+  el.focus()
+  const range = document.createRange()
+  range.selectNodeContents(el)
+  range.collapse(false)
+  const sel = window.getSelection()
+  sel?.removeAllRanges()
+  sel?.addRange(range)
+}
+
 function handleNameSelectAll(event: KeyboardEvent): void {
   event.preventDefault()
   const el = event.currentTarget as HTMLElement
@@ -244,6 +257,7 @@ const groups = computed<FactGroup[]>(() => {
         <span class="status-fact-hero-name-wrap">
           <span
             v-if="nameEditable"
+            id="status-fact-hero-name"
             ref="nameEl"
             class="status-fact-hero-name"
             role="textbox"
@@ -260,12 +274,16 @@ const groups = computed<FactGroup[]>(() => {
           <span v-else class="status-fact-hero-name status-fact-hero-name-static">{{
             installation.name
           }}</span>
-          <Pencil
+          <button
             v-if="nameEditable"
-            :size="13"
-            class="status-fact-hero-edit-hint"
-            aria-hidden="true"
-          />
+            type="button"
+            class="status-fact-hero-edit-btn"
+            :aria-label="t('statusFactPanel.editName', 'Edit installation name')"
+            aria-controls="status-fact-hero-name"
+            @click="focusName"
+          >
+            <Pencil :size="13" class="status-fact-hero-edit-hint" aria-hidden="true" />
+          </button>
         </span>
         <span v-if="installation.sourceLabel" class="status-fact-hero-badge">
           {{ installation.sourceLabel }}
@@ -355,18 +373,49 @@ const groups = computed<FactGroup[]>(() => {
   box-shadow: 0 0 0 2px var(--focus-ring, var(--neutral-50));
 }
 
-/* Pencil hint fades up on hover/focus. */
+.status-fact-hero-edit-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 0;
+  margin-left: -6px;
+  padding: 0;
+  overflow: hidden;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition:
+    width 120ms ease,
+    margin-left 120ms ease;
+}
+
+.status-fact-hero-edit-btn:focus-visible {
+  outline: 2px solid var(--focus-ring, var(--neutral-50));
+  outline-offset: 1px;
+}
+
+
+.status-fact-hero-name-wrap:hover .status-fact-hero-edit-btn,
+.status-fact-hero-edit-btn:focus-visible,
+.status-fact-hero-name:focus-visible ~ .status-fact-hero-edit-btn {
+  width: 17px;
+  margin-left: 0;
+}
+
+
 .status-fact-hero-edit-hint {
   flex-shrink: 0;
   color: var(--text-muted);
   opacity: 0;
   transition: opacity 120ms ease;
   user-select: none;
-  pointer-events: none;
 }
 
 .status-fact-hero-name-wrap:hover .status-fact-hero-edit-hint,
-.status-fact-hero-name:focus-visible ~ .status-fact-hero-edit-hint {
+.status-fact-hero-edit-btn:focus-visible .status-fact-hero-edit-hint,
+.status-fact-hero-name:focus-visible ~ .status-fact-hero-edit-btn .status-fact-hero-edit-hint {
   opacity: 0.6;
 }
 
