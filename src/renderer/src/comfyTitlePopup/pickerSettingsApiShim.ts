@@ -31,6 +31,13 @@ const API_MAP = {
   previewDesktopMigration: 'pickerSettingsPreviewDesktopMigration',
   previewLocalMigration: 'pickerSettingsPreviewLocalMigration',
   onReleaseCacheEnriched: 'pickerSettingsOnReleaseCacheEnriched',
+  terminalSubscribe: 'terminalSubscribe',
+  terminalUnsubscribe: 'terminalUnsubscribe',
+  terminalWrite: 'terminalWrite',
+  terminalResize: 'terminalResize',
+  terminalRestart: 'terminalRestart',
+  onTerminalOutput: 'onTerminalOutput',
+  onTerminalExited: 'onTerminalExited',
 } as const satisfies Record<string, keyof ComfyTitlePopupBridge>
 
 type ShimApi = {

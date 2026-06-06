@@ -46,6 +46,10 @@ export const TID = {
   snapshotsOpCardRetry: 'snapshots-op-card-retry',
   snapshotsOpCardDismiss: 'snapshots-op-card-dismiss',
 
+  consoleTerminal: 'console-terminal',
+  consoleSessionEnded: 'console-session-ended',
+  consoleRestart: 'console-restart',
+
   progressErrorMessage: 'progress-error-message',
   progressLogs: 'progress-logs',
   progressReboot: 'progress-reboot',
