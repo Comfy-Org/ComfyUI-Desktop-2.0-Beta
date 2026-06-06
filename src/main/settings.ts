@@ -31,6 +31,11 @@ export interface KnownSettings {
   /** `true` once the first-use takeover is finished. Mid-flow cancel does NOT
    *  flip this, so the takeover replays from step 1 next launch. */
   firstUseCompleted?: boolean
+  /** When true, hide the Cloud tile (and the Try-Cloud CTA) from the
+   *  Dashboard / Instance Picker. Local-only users who never use Cloud
+   *  can opt out of seeing it without us removing the feature. Default
+   *  false — Cloud stays visible. */
+  hideCloudFromPicker?: boolean
   oemManagedModelDirs?: string[]
   oemWorkflowImportVersion?: number
 }
@@ -68,6 +73,7 @@ const SETTINGS_SCHEMA = {
   chineseMirrorsPrompted: { nullable: false },
   telemetryEnabled: { nullable: false },
   firstUseCompleted: { nullable: false },
+  hideCloudFromPicker: { nullable: false },
   oemManagedModelDirs: { nullable: false },
   oemWorkflowImportVersion: { nullable: false },
 } as const satisfies Record<keyof KnownSettings, { nullable: boolean }>
