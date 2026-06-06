@@ -55,6 +55,14 @@ export function buildSettingsSections(): SettingsSection[] {
           type: 'boolean',
           value: s.autoInstallUpdates !== false
         },
+        // Restore the last-used instance window on launch (Jedrzej #939)
+        // so power users don't need to reopen the picker every cold start.
+        {
+          id: 'reopenLastInstanceOnLaunch',
+          label: i18n.t('settings.reopenLastInstanceOnLaunch'),
+          type: 'boolean',
+          value: s.reopenLastInstanceOnLaunch !== false
+        },
         // Local-only users have asked us to make the Cloud tile go away.
         // Cloud is still a first-class peer; this is an opt-out, not a
         // removal — default off, surface as a plain toggle.

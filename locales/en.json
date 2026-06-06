@@ -397,6 +397,7 @@
     "closeQuitDownloads": "Downloading",
     "autoUpdate": "Check for updates on startup",
     "autoInstallUpdates": "Automatically install Desktop updates",
+    "reopenLastInstanceOnLaunch": "Reopen last instance on launch",
     "hideCloudFromPicker": "Hide Cloud from the Instance Picker",
     "hideCloudFromPickerDescription": "For local-only users — hides the Cloud tile (and the Try Cloud CTA) from the Dashboard. Cloud remains fully functional; you can re-enable this any time.",
     "checkForUpdates": "Check for updates",

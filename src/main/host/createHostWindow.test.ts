@@ -21,7 +21,7 @@ import type { InstallationRecord } from '../installations'
 import {
   cascadeOffsetForCollisions,
   expectedPartitionFor,
-  shouldBailAfterCloseConfirm,
+  shouldBailAfterCloseChoice,
   shouldBailAfterConsult,
   shouldDetachLastInstallWindowToDashboard,
   shouldShowInstallCloseConfirm,
@@ -118,40 +118,44 @@ describe('shouldBailAfterConsult', () => {
 
 describe('shouldShowInstallCloseConfirm', () => {
   it('shows the modal for a host that would kill a local session on a defer consult', () => {
-    expect(shouldShowInstallCloseConfirm('defer', true, false)).toBe(true)
+    expect(shouldShowInstallCloseConfirm('defer', true, false, false)).toBe(true)
+  })
+
+  it('shows the modal for the last install window even with no local session at risk (closing quits)', () => {
+    expect(shouldShowInstallCloseConfirm('defer', false, false, true)).toBe(true)
   })
 
   it('skips the modal when the caller pre-cleared the close', () => {
     // Force-close paths must not block on an extra user prompt.
-    expect(shouldShowInstallCloseConfirm('defer', true, true)).toBe(false)
+    expect(shouldShowInstallCloseConfirm('defer', true, true, true)).toBe(false)
   })
 
-  it('skips the modal for a chooser host or a cloud/remote-backed host (no local session at risk)', () => {
-    expect(shouldShowInstallCloseConfirm('defer', false, false)).toBe(false)
+  it('skips the modal for a non-last cloud/remote-backed host (no local session at risk)', () => {
+    expect(shouldShowInstallCloseConfirm('defer', false, false, false)).toBe(false)
   })
 
   it('skips the modal on a cleared or aborted consult', () => {
     // `cleared` → renderer already handled it; `aborted` → we already
     // bailed in the prior check (this case is unreachable in practice).
-    expect(shouldShowInstallCloseConfirm('cleared', true, false)).toBe(false)
-    expect(shouldShowInstallCloseConfirm('aborted', true, false)).toBe(false)
+    expect(shouldShowInstallCloseConfirm('cleared', true, false, true)).toBe(false)
+    expect(shouldShowInstallCloseConfirm('aborted', true, false, true)).toBe(false)
   })
 })
 
-describe('shouldBailAfterCloseConfirm', () => {
-  it('bails when the user dismissed the close-confirm modal', () => {
-    expect(shouldBailAfterCloseConfirm(false, false)).toBe(true)
+describe('shouldBailAfterCloseChoice', () => {
+  it('bails when the user cancelled the close-confirm modal', () => {
+    expect(shouldBailAfterCloseChoice('cancel', false)).toBe(true)
   })
 
-  it('does not bail when the user confirmed the close-confirm modal', () => {
-    expect(shouldBailAfterCloseConfirm(true, false)).toBe(false)
-    expect(shouldBailAfterCloseConfirm(true, true)).toBe(false)
+  it('does not bail when the user chose to close or return to the dashboard', () => {
+    expect(shouldBailAfterCloseChoice('close', false)).toBe(false)
+    expect(shouldBailAfterCloseChoice('return-to-dashboard', false)).toBe(false)
   })
 
-  it('does not bail when a force-close lands mid-modal even on user dismiss', () => {
+  it('does not bail when a force-close lands mid-modal even on user cancel', () => {
     // Mirrors the consult re-check: a caller-side force-close that
     // arrives while the modal is open must override the user's cancel.
-    expect(shouldBailAfterCloseConfirm(false, true)).toBe(false)
+    expect(shouldBailAfterCloseChoice('cancel', true)).toBe(false)
   })
 })
 

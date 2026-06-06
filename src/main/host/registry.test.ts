@@ -29,6 +29,8 @@ import {
   hostInstallEvents,
   indexInstallationId,
   nextWindowKey,
+  forceRevealHostWindow,
+  hasRunningSessionForEntry,
   raiseAllHostWindows,
   registerHostEntry,
   setHostFactories,
@@ -214,6 +216,63 @@ describe('shouldConfirmKillForEntry', () => {
   it('returns false for null/undefined entries', () => {
     expect(shouldConfirmKillForEntry(null)).toBe(false)
     expect(shouldConfirmKillForEntry(undefined)).toBe(false)
+  })
+})
+
+describe('hasRunningSessionForEntry', () => {
+  // Rule: "is this an install-backed window showing a live ComfyUI view?" — true only when
+  // the install has a session in `_runningSessions` (local OR cloud/remote). Drives whether
+  // the window is a healthy "last active surface" worth restoring on next boot.
+  it('returns true for an install-backed host with a running session', () => {
+    const entry = makeEntry({ installationId: 'inst-A', sourceCategory: 'local' })
+    _runningSessions.set('inst-A', {} as never)
+    expect(hasRunningSessionForEntry(entry)).toBe(true)
+  })
+
+  it('returns true for a running cloud/remote-backed host', () => {
+    _runningSessions.set('inst-cloud', {} as never)
+    expect(
+      hasRunningSessionForEntry(makeEntry({ installationId: 'inst-cloud', sourceCategory: 'cloud' })),
+    ).toBe(true)
+  })
+
+  it('returns false for an install-backed host with no running session (stopped/crashed)', () => {
+    expect(
+      hasRunningSessionForEntry(makeEntry({ installationId: 'inst-A', sourceCategory: 'local' })),
+    ).toBe(false)
+  })
+
+  it('returns false for a chooser/install-less host', () => {
+    expect(hasRunningSessionForEntry(makeEntry({ installationId: null }))).toBe(false)
+  })
+
+  it('returns false for null/undefined entries', () => {
+    expect(hasRunningSessionForEntry(null)).toBe(false)
+    expect(hasRunningSessionForEntry(undefined)).toBe(false)
+  })
+})
+
+describe('forceRevealHostWindow', () => {
+  it('reveals a deferred host regardless of the coldStartPendingReveal flag', () => {
+    const entry = makeEntry({ installationId: null })
+    entry.coldStartPendingReveal = false // deferred restore leaves the flag off
+    registerHostEntry(entry)
+
+    forceRevealHostWindow(entry.windowKey)
+
+    expect(entry.coldStartPendingReveal).toBe(false)
+    expect((entry.window as unknown as FakeWindow).raised).toContain('show')
+  })
+
+  it('no-ops for a destroyed window', () => {
+    const entry = makeEntry({ installationId: null, destroyed: true })
+    registerHostEntry(entry)
+    forceRevealHostWindow(entry.windowKey)
+    expect((entry.window as unknown as FakeWindow).raised).not.toContain('show')
+  })
+
+  it('no-ops for an unknown window key', () => {
+    expect(() => forceRevealHostWindow(999_999)).not.toThrow()
   })
 })
 

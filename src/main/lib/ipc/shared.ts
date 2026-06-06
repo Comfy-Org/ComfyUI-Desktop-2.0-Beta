@@ -123,6 +123,9 @@ export interface StopCallbackInfo {
 
 export interface ExitCallbackInfo {
   installationId?: string
+  /** True when the process exited unexpectedly (non-zero code or a signal),
+   *  as opposed to a clean user-initiated stop. */
+  crashed?: boolean
 }
 
 export interface RestartCallbackInfo {

@@ -37,7 +37,7 @@ export {
   getActiveDetails,
   cancelAll
 } from './shared'
-export type { RegisterCallbacks } from './shared'
+export type { RegisterCallbacks, ExitCallbackInfo } from './shared'
 
 // Idempotent guard so a re-run (tests/hot-reload) doesn't double-subscribe.
 let _releaseCacheBridgeWired = false

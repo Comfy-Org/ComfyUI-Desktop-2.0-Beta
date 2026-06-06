@@ -244,6 +244,17 @@ export function shouldConfirmKillForEntry(
 }
 
 /**
+ * Predicate: this entry has a live ComfyUI session (i.e. its body shows the
+ * running ComfyUI view, not the lifecycle/crash panel). Used to decide whether
+ * the install is a healthy "last active surface" worth restoring on next boot.
+ */
+export function hasRunningSessionForEntry(
+  entry: ComfyWindowEntry | null | undefined,
+): entry is ComfyWindowEntry & { installationId: string } {
+  return !!entry && isInstallHost(entry) && _runningSessions.has(entry.installationId)
+}
+
+/**
  * Decide what fills a comfy window's body. Install-backed: the Comfy pill →
  * live ComfyUI view (running) or lifecycle panel (stopped). Install-less: the
  * Comfy pill → chooser. Centralised so layout and body swaps can't disagree.
@@ -337,6 +348,18 @@ export function bringToFront(win: BrowserWindow): void {
 export function revealColdStartHostIfPending(windowKey: number): void {
   const entry = comfyWindows.get(windowKey)
   if (!entry?.coldStartPendingReveal || entry.window.isDestroyed()) return
+  entry.coldStartPendingReveal = false
+  entry.layoutViews()
+  bringToFront(entry.window)
+}
+
+/** Reveal a host whose cold-start reveal was deferred by the caller (the
+ *  startup-restore flow holds the window hidden until its launch takeover is
+ *  up, so the dashboard never flashes). Reveals regardless of the
+ *  `coldStartPendingReveal` flag — the caller owns the timing. */
+export function forceRevealHostWindow(windowKey: number): void {
+  const entry = comfyWindows.get(windowKey)
+  if (!entry || entry.window.isDestroyed()) return
   entry.coldStartPendingReveal = false
   entry.layoutViews()
   bringToFront(entry.window)

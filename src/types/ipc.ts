@@ -972,6 +972,12 @@ export interface ElectronApi {
    *  the comfy/chooser root. Fire-and-forget; the panel will receive
    *  the resulting `panel-switch` like any other navigation. */
   closeCurrentPanel(): void
+  /** Boot-time restore reveal handshake. The restore window is opened
+   *  hidden; the panel calls this once it knows whether its launch
+   *  takeover came up (`'takeover-ready'` → reveal the launching surface)
+   *  or it fell back to the dashboard (`'dashboard-fallback'`). Main
+   *  reveals the sender's hidden host either way. Fire-and-forget. */
+  resolveStartupRestoreReveal(result: 'takeover-ready' | 'dashboard-fallback'): void
   /** Open the Global Settings popup for the panel's host window. Used
    *  by the panel-side file-menu "Settings" item and the
    *  `comfy://open-settings?tab=global` deep link. Main reuses the
@@ -1408,6 +1414,10 @@ export interface ElectronApi {
       settingsTab?: 'comfy' | 'directories' | 'downloads' | 'global'
       title?: string
       cancellable?: boolean
+      /** Picker-only (`picker-pick-install`): set on boot-time restore. The
+       *  panel takes the dashboard-fallback path on a missing launch action
+       *  (instead of opening new-install) and resolves the reveal handshake. */
+      startupRestore?: boolean
       triggersInstanceStart?: boolean
       opKind?: 'launch' | 'install' | 'update' | 'destructive' | 'snapshot' | 'generic'
       isRestart?: boolean
