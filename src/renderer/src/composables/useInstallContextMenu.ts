@@ -3,6 +3,7 @@ import { useI18n } from 'vue-i18n'
 import { useSessionStore } from '../stores/sessionStore'
 import { useProgressStore } from '../stores/progressStore'
 import { useModal } from './useModal'
+import { useStopAction } from './useStopAction'
 import { revealInFolderLabel } from './usePlatform'
 import { progressOpKindForActionId, destroysInstanceForActionId } from '../lib/progressOpKind'
 import { shareLatestSnapshot } from '../lib/snapshots'
@@ -22,6 +23,7 @@ export type InstallMenuActionId =
   | 'update'
   | 'migrate'
   | 'restore-snapshot'
+  | 'stop'
   | 'reveal-in-folder'
   | 'share'
   | 'copy-install'
@@ -46,6 +48,10 @@ export function useInstallContextMenu(opts: {
 } = {}) {
   const { t } = useI18n()
   const modal = useModal()
+  const { confirmAndStop } = useStopAction({
+    confirm: (o) => modal.confirm({ ...o, confirmStyle: 'danger' }),
+    alert: (o) => modal.alert(o),
+  })
   const sessionStore = useSessionStore()
   const progressStore = useProgressStore()
 
@@ -134,27 +140,29 @@ export function useInstallContextMenu(opts: {
       })
     }
 
-    // Destructive bucket — Untrack (registry only) + Delete (also wipes
-    // disk) share one separator group. Untrack is hidden for adopted
-    // installs since the legacy marker would re-track them anyway and
-    // their legacy launch args wouldn't survive re-adoption.
+    // Bottom cluster — Stop (running only) + Untrack (registry only, hidden for
+    // adopted installs whose legacy marker would re-track them) + Delete (wipes
+    // disk). Built as one group so only its first item draws the divider.
+    const cluster: ContextMenuItem[] = []
+    if (isLocalLikeInstall(inst) && sessionStore.isRunning(inst.id)) {
+      cluster.push({ id: 'stop', label: t('actions.stop', 'Stop'), style: 'danger' })
+    }
     if (isInstalled(inst) && isLocalLikeInstall(inst)) {
       if (!inst.adopted) {
-        items.push({
-          id: 'untrack',
-          label: t('actions.untrack'),
-          separator: items.length > 0,
-          style: 'danger',
-        })
+        cluster.push({ id: 'untrack', label: t('actions.untrack'), style: 'danger' })
       }
-      items.push({
+      cluster.push({
         id: 'delete',
         label: t('chooser.menuDelete'),
         disabled: stoppedActionGated,
         title: gatedTitle,
-        separator: !inst.adopted ? false : items.length > 0,
         style: 'danger',
       })
+    }
+    const [clusterHead] = cluster
+    if (clusterHead) {
+      clusterHead.separator = items.length > 0
+      items.push(...cluster)
     }
 
     if (sessionStore.errorInstances.has(inst.id)) {
@@ -223,6 +231,11 @@ export function useInstallContextMenu(opts: {
       opts.onManage?.(inst, { autoAction: 'migrate-to-standalone' })
     } else if (id === 'restore-snapshot') {
       opts.onManage?.(inst, { initialTab: 'snapshots' })
+    } else if (id === 'stop') {
+      // Stop the Python backend but leave the window/frontend alive (main's
+      // onComfyExited swaps the body to the lifecycle card). Shared confirm +
+      // stop logic lives in useStopAction.
+      await confirmAndStop(inst.id)
     } else if (id === 'reveal-in-folder') {
       await runInstantActionWithAlert(inst, 'open-folder', revealInFolderLabel(window.api?.platform))
     } else if (id === 'share') {

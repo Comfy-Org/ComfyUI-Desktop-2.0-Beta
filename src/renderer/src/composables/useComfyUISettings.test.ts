@@ -306,15 +306,17 @@ describe('useComfyUISettings.runAction — stop-warning augment + self-stopping 
   function mountComposable(installation: Installation | null, onShowProgress = vi.fn()): {
     composable: ReturnType<typeof useComfyUISettings>
     onShowProgress: ReturnType<typeof vi.fn>
+    onDismissPreview: ReturnType<typeof vi.fn>
     scope: ReturnType<typeof effectScope>
   } {
     const installationRef = ref<Installation | null>(installation)
     const scope = effectScope()
+    const onDismissPreview = vi.fn()
     let composable!: ReturnType<typeof useComfyUISettings>
     scope.run(() => {
-      composable = useComfyUISettings({ installation: installationRef, onShowProgress })
+      composable = useComfyUISettings({ installation: installationRef, onShowProgress, onDismissPreview })
     })
-    return { composable, onShowProgress, scope }
+    return { composable, onShowProgress, onDismissPreview, scope }
   }
 
   it('prepends the willStopRunning warning to the action confirm message when the install is running', async () => {
@@ -369,6 +371,53 @@ describe('useComfyUISettings.runAction — stop-warning augment + self-stopping 
     expect(dialogsSpies.confirm).toHaveBeenCalledTimes(1)
     const callArg = dialogsSpies.confirm.mock.calls[0]![0] as { message: string }
     expect(callArg.message).toBe('This will pull the latest ComfyUI.')
+    scope.stop()
+  })
+
+  it('stop: shows a danger confirm, stops the backend, and dismisses the preview on confirm', async () => {
+    const api = installMockApi()
+    markRunning('a', 'A')
+    dialogsSpies.confirm.mockResolvedValue('primary')
+    const { composable, onDismissPreview, scope } = mountComposable(makeInstall('a', 'A'))
+
+    await composable.runAction({ id: 'stop', label: 'Stop' } as ActionDef)
+
+    expect(dialogsSpies.confirm).toHaveBeenCalledTimes(1)
+    const callArg = dialogsSpies.confirm.mock.calls[0]![0] as { title: string; tone: string }
+    expect(callArg.title).toBe('Stop ComfyUI')
+    expect(callArg.tone).toBe('danger')
+    expect(api.stopComfyUI).toHaveBeenCalledTimes(1)
+    expect(api.stopComfyUI).toHaveBeenCalledWith('a')
+    // Preview dismissed so the window lands on the stopped-relaunch card.
+    expect(onDismissPreview).toHaveBeenCalledTimes(1)
+    scope.stop()
+  })
+
+  it('stop: does not stop the backend or dismiss the preview when the confirm is cancelled', async () => {
+    const api = installMockApi()
+    markRunning('a', 'A')
+    dialogsSpies.confirm.mockResolvedValue(false)
+    const { composable, onDismissPreview, scope } = mountComposable(makeInstall('a', 'A'))
+
+    await composable.runAction({ id: 'stop', label: 'Stop' } as ActionDef)
+
+    expect(api.stopComfyUI).not.toHaveBeenCalled()
+    expect(onDismissPreview).not.toHaveBeenCalled()
+    scope.stop()
+  })
+
+  it('stop: keeps the preview open and alerts when stopComfyUI fails', async () => {
+    const api = installMockApi({ stopComfyUI: vi.fn().mockRejectedValue(new Error('kill failed')) })
+    markRunning('a', 'A')
+    dialogsSpies.confirm.mockResolvedValue('primary')
+    const { composable, onDismissPreview, scope } = mountComposable(makeInstall('a', 'A'))
+
+    await composable.runAction({ id: 'stop', label: 'Stop' } as ActionDef)
+
+    expect(api.stopComfyUI).toHaveBeenCalledTimes(1)
+    expect(onDismissPreview).not.toHaveBeenCalled()
+    expect(dialogsSpies.alert).toHaveBeenCalledTimes(1)
+    expect(dialogsSpies.alert.mock.calls[0]![0].message).toBe('kill failed')
     scope.stop()
   })
 

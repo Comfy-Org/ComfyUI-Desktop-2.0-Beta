@@ -32,6 +32,7 @@ const apiMock = {
   onErrorDetail: vi.fn(() => () => {}),
   getSnapshots: vi.fn().mockResolvedValue({ snapshots: [] }),
   exportSnapshot: vi.fn().mockResolvedValue({ ok: true }),
+  stopComfyUI: vi.fn().mockResolvedValue(undefined),
 }
 vi.stubGlobal('window', {
   ...window,
@@ -59,6 +60,10 @@ const messages = {
       deleteConfirmMessage:
         'This permanently removes this ComfyUI installation and all its files. Other installations and ComfyUI itself are unaffected. This cannot be undone.',
       share: 'Share',
+      stop: 'Stop',
+      stopConfirmTitle: 'Stop ComfyUI',
+      stopConfirmMessage:
+        'This will stop ComfyUI. Any unsaved work will be lost. The window stays open so you can relaunch anytime.',
     },
     snapshots: {
       noSnapshotsToShare: 'There are no snapshots to share yet.',
@@ -481,5 +486,76 @@ describe('useInstallContextMenu — share (export latest snapshot)', () => {
     await menu.triggerAction('share', inst)
     expect(modalMock.alert).toHaveBeenCalledTimes(1)
     expect(modalMock.alert.mock.calls[0]![0].message).toBe('Disk full')
+  })
+})
+
+describe('useInstallContextMenu — stop (shut down backend, keep window)', () => {
+  beforeEach(() => {
+    apiMock.stopComfyUI.mockClear()
+    modalMock.confirm.mockReset()
+    modalMock.alert.mockReset()
+  })
+
+  it('shows the Stop item only when the install is running', () => {
+    const inst = makeInstall()
+    const { menu: idle } = mountHarness(inst)
+    expect(findItem(idle.ctxMenuItems.value, 'stop')).toBeUndefined()
+
+    const { menu: running } = mountHarness(inst, ({ session }) => {
+      session.runningInstances.set(inst.id, {
+        installationId: inst.id,
+        installationName: inst.name,
+      } as never)
+    })
+    expect(findItem(running.ctxMenuItems.value, 'stop')).toBeTruthy()
+  })
+
+  it('hides the Stop item for cloud installs (no local Python to stop)', () => {
+    const inst = makeInstall({ sourceCategory: 'cloud' })
+    const { menu } = mountHarness(inst, ({ session }) => {
+      session.runningInstances.set(inst.id, {
+        installationId: inst.id,
+        installationName: inst.name,
+      } as never)
+    })
+    expect(findItem(menu.ctxMenuItems.value, 'stop')).toBeUndefined()
+  })
+
+  it('shows a danger confirm and stops the backend on confirm', async () => {
+    modalMock.confirm.mockResolvedValue(true)
+    const inst = makeInstall()
+    const { menu } = mountHarnessWithManage(() => {})
+
+    await menu.triggerAction('stop', inst)
+
+    expect(modalMock.confirm).toHaveBeenCalledTimes(1)
+    const args = modalMock.confirm.mock.calls[0]![0]
+    expect(args.title).toBe('Stop ComfyUI')
+    expect(args.confirmLabel).toBe('Stop')
+    expect(args.confirmStyle).toBe('danger')
+    expect(apiMock.stopComfyUI).toHaveBeenCalledTimes(1)
+    expect(apiMock.stopComfyUI).toHaveBeenCalledWith(inst.id)
+  })
+
+  it('does not stop the backend when the confirm is cancelled', async () => {
+    modalMock.confirm.mockResolvedValue(false)
+    const inst = makeInstall()
+    const { menu } = mountHarnessWithManage(() => {})
+
+    await menu.triggerAction('stop', inst)
+
+    expect(apiMock.stopComfyUI).not.toHaveBeenCalled()
+  })
+
+  it('surfaces a stop failure via an alert', async () => {
+    modalMock.confirm.mockResolvedValue(true)
+    apiMock.stopComfyUI.mockRejectedValueOnce(new Error('kill failed'))
+    const inst = makeInstall()
+    const { menu } = mountHarnessWithManage(() => {})
+
+    await menu.triggerAction('stop', inst)
+
+    expect(modalMock.alert).toHaveBeenCalledTimes(1)
+    expect(modalMock.alert.mock.calls[0]![0].message).toBe('kill failed')
   })
 })

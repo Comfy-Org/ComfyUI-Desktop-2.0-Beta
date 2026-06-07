@@ -74,6 +74,9 @@ const emit = defineEmits<{
   /** Install was removed; host should close and tear down the window. */
   'navigate-list': []
   'request-close': []
+  /** Backend stopped from the preview; host dismisses the whole popup so the
+   *  window's stopped-relaunch card shows. */
+  'request-dismiss': []
   /** Footer primary CTA. `restartInPlace` is true only when the install
    *  runs in this host window; false when it runs in a different window
    *  so the host routes to `pickInstall` and raises the existing one. */
@@ -125,7 +128,8 @@ const {
   installation,
   onShowProgress: (opts) => emit('show-progress', opts),
   onNavigateList: () => emit('navigate-list'),
-  onClose: () => emit('request-close')
+  onClose: () => emit('request-close'),
+  onDismissPreview: () => emit('request-dismiss')
 })
 
 // Fires the named action once per prop transition, after sections load.

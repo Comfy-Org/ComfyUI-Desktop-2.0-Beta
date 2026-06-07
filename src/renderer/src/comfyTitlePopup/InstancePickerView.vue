@@ -602,6 +602,7 @@ async function handleExpandedPrimaryAction(restartInPlace: boolean): Promise<voi
               @show-progress="handleSettingsShowProgress"
               @navigate-list="handleSettingsNavigateList"
               @request-close="handleSettingsNavigateList"
+              @request-dismiss="handleClose"
               @primary-action="handleExpandedPrimaryAction"
               @op-cancel="handleInlineProgressCancel"
               @op-retry="handleInlineProgressRetry"

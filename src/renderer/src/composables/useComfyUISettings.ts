@@ -11,6 +11,7 @@ import {
 import { useI18n } from 'vue-i18n'
 import { useModal } from './useModal'
 import { useDialogs } from './useDialogs'
+import { useStopAction } from './useStopAction'
 import { useActionGuard } from './useActionGuard'
 import { useMigrateAction } from './useMigrateAction'
 import { useSessionStore } from '../stores/sessionStore'
@@ -52,6 +53,9 @@ export interface UseComfyUISettingsOpts {
   /** Install was removed (delete/untrack); host closes the drawer + window. */
   onNavigateList?: () => void
   onClose?: () => void
+  /** Backend was stopped from the preview; host should dismiss the whole
+   *  preview/popup so the window's stopped-relaunch card shows underneath. */
+  onDismissPreview?: () => void
 }
 
 export interface UseComfyUISettingsApi {
@@ -117,6 +121,10 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
   const { t } = useI18n()
   const modal = useModal()
   const dialogs = useDialogs()
+  const { confirmAndStop } = useStopAction({
+    confirm: (o) => dialogs.confirm({ ...o, tone: 'danger' }),
+    alert: (o) => dialogs.alert(o),
+  })
   const actionGuard = useActionGuard()
   const { confirmMigration } = useMigrateAction()
   const sessionStore = useSessionStore()
@@ -426,6 +434,14 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     const inst = toValue(opts.installation)
     if (!inst) return
 
+    // Synthetic footer action handled renderer-side (no main `stop` action);
+    // dismiss the preview on success so the window shows its stopped card.
+    if (action.id === 'stop') {
+      const stopped = await confirmAndStop(inst.id)
+      if (stopped) opts.onDismissPreview?.()
+      return
+    }
+
     // Share is a renderer-side IPC (export + native dialog), not a source
     // action, so intercept it before the dispatch chain. Cancel is a no-op.
     if (action.id === 'share') {
@@ -620,6 +636,17 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     )
     const inst = toValue(opts.installation)
     if (!inst) return acts
+    // Synthetic Stop — shut down the running backend while keeping the window
+    // alive. Renderer-only (running-state lives here, not in main), mirroring
+    // how `restart` is synthesized from `launch`. Local-like + running only;
+    // cloud/remote have no local Python process to stop. Grouped at the head of
+    // the destructive cluster (Forget/Uninstall) and styled danger to match.
+    if (inst.sourceCategory !== 'cloud' && sessionStore.isRunning(inst.id)) {
+      const stopAction: ActionDef = { id: 'stop', label: t('actions.stop', 'Stop'), style: 'danger', enabled: true }
+      const firstDanger = acts.findIndex((a) => a.style === 'danger')
+      if (firstDanger === -1) acts.push(stopAction)
+      else acts.splice(firstDanger, 0, stopAction)
+    }
     return acts
   })
 
