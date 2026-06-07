@@ -30,6 +30,10 @@ const messages = {
         'The ComfyUI process was terminated by {signal} (exit code {code}). You can restart it below.',
       crashedDescLogsHint: 'See the logs for details.',
       restart: 'Restart ComfyUI',
+      stoppedTitle: 'ComfyUI is stopped',
+      stoppedDesc:
+        "The ComfyUI server is stopped. This window stayed open — relaunch it below whenever you're ready.",
+      relaunch: 'Relaunch ComfyUI',
       launchProgressTitle: 'Starting ComfyUI',
     },
     dashboard: {
@@ -115,11 +119,41 @@ describe('ComfyLifecycleView', () => {
     useSessionStore().ready = true
   })
 
-  it('renders nothing in the default (no-error, not-running) state — the host ComfyUI view covers the panel', async () => {
+  it('renders the stopped surface in the not-running state so a clean stop is not a black window', async () => {
+    // A user-initiated Stop leaves no live ComfyUI view covering the panel, so
+    // the not-running state must paint its own relaunch card (regression: it
+    // previously rendered nothing → black window).
     const wrapper = mountView()
     await flushPromises()
-    expect(wrapper.find('.brand-progress__banner').exists()).toBe(false)
+    expect(wrapper.text()).toContain('ComfyUI is stopped')
+    // Neutral surface, not the crashed/error chrome.
+    expect(wrapper.find('.brand-progress__banner--error').exists()).toBe(false)
     expect(wrapper.find('.lifecycle-placeholder').exists()).toBe(false)
+    const button = wrapper.find('button.brand-primary')
+    expect(button.exists()).toBe(true)
+    expect(button.text()).toContain('Relaunch ComfyUI')
+  })
+
+  it('labels the stopped-surface back button "Return to Dashboard" and routes to the dashboard', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    const back = wrapper.findAll('button').find((b) => b.text().includes('Return to Dashboard'))
+    expect(back?.exists()).toBe(true)
+    expect(back!.classes()).toContain('brand-ghost')
+    await back!.trigger('click')
+    await flushPromises()
+    const api = (window as unknown as { api: MockApi }).api
+    expect(api.returnToDashboard).toHaveBeenCalled()
+  })
+
+  it('relaunches from the stopped surface via a launch show-progress', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.find('button.brand-primary').trigger('click')
+    const evts = wrapper.emitted('show-progress')
+    expect(evts).toBeTruthy()
+    const opts = evts![0]![0] as { opKind: string; apiCall: () => unknown }
+    expect(opts.opKind).toBe('launch')
   })
 
   it('shows the in-flight placeholder while sessionStore reports the install as launching', async () => {

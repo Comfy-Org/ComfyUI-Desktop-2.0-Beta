@@ -1,10 +1,11 @@
 <script setup lang="ts">
-// Crash/error takeover surface for the lifecycle view. Class names mirror
-// ProgressModal's `brand-progress__*` subtree on purpose so the two surfaces
-// look identical for the same crash; keep them in sync.
+// Terminal takeover surface for the lifecycle view, serving both the crash
+// (`tone="error"`) and clean-stop (`tone="neutral"`) states. The
+// `brand-progress__*` class names are layout-only and shared with ProgressModal
+// so the surfaces stay visually identical; keep them in sync.
 import { ref, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { X, ChevronDown } from 'lucide-vue-next'
+import { X, Power, ChevronDown } from 'lucide-vue-next'
 import BrandTakeoverLayout from './BrandTakeoverLayout.vue'
 import BrandProgressGlyph from './icons/BrandProgressGlyph.vue'
 import ComfyWordmark from './icons/ComfyWordmark.vue'
@@ -19,6 +20,9 @@ interface Props {
   /** Override for the "View logs" label; defaults to `launch.viewLogs`. */
   logsLabel?: string
   ariaLabel?: string
+  /** `'error'` (default) is the red crash chrome; `'neutral'` is the calm
+   *  surface for a deliberate stop. */
+  tone?: 'error' | 'neutral'
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -26,6 +30,7 @@ const props = withDefaults(defineProps<Props>(), {
   logs: undefined,
   logsLabel: undefined,
   ariaLabel: undefined,
+  tone: 'error',
 })
 
 const { t } = useI18n()
@@ -50,15 +55,20 @@ function getLogText(): string {
       <div class="brand-progress__stack">
         <ComfyWordmark class="brand-progress__wordmark" />
         <div
-          class="brand-progress__banner brand-progress__banner--error"
+          class="brand-progress__banner"
+          :class="`brand-progress__banner--${tone}`"
           aria-live="polite"
         >
-          <X :size="20" />
+          <X v-if="tone === 'error'" :size="20" />
+          <Power v-else :size="20" />
           <span>{{ title }}</span>
         </div>
         <div v-if="message" class="brand-progress__error-row">
           <div class="brand-progress__error-message">{{ message }}</div>
+          <!-- Copy only makes sense for an error message worth pasting into a
+               bug report — a neutral status line ("ComfyUI is stopped") doesn't. -->
           <BaseCopyButton
+            v-if="tone === 'error'"
             :value="message"
             :aria-label="t('common.copy')"
             class="brand-progress__error-copy"
@@ -180,7 +190,13 @@ function getLogText(): string {
   font-size: var(--takeover-fs-body);
   letter-spacing: 0.01em;
   min-height: 1.5em;
+  color: var(--text);
+}
+.brand-progress__banner--error {
   color: var(--semantic-danger, #ff7a7a);
+}
+.brand-progress__banner--neutral {
+  color: var(--text);
 }
 .brand-progress__banner :deep(svg) {
   flex: none;

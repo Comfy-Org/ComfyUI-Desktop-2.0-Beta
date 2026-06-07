@@ -99,6 +99,9 @@
     "crashedDescWithCodeAndSignal": "The ComfyUI process was terminated by {signal} (exit code {code}). You can restart it below.",
     "crashedDescLogsHint": "See the logs for details.",
     "restart": "Restart ComfyUI",
+    "stoppedTitle": "ComfyUI is stopped",
+    "stoppedDesc": "The ComfyUI server is stopped. This window stayed open — relaunch it below whenever you're ready.",
+    "relaunch": "Relaunch ComfyUI",
     "launchProgressTitle": "Starting ComfyUI"
   },
 
