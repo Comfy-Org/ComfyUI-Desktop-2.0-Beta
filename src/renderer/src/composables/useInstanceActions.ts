@@ -18,8 +18,10 @@ export interface InstanceActionsBridge {
   /** Restart the install running in the current window. `confirmed` tells main
    *  the renderer already prompted, so it skips its own system-modal. */
   restartInstall: (installationId: string, opts?: { confirmed?: boolean }) => void
-  /** Land the install in its own window, leaving the current one untouched. */
-  openInstallNewWindow?: (installationId: string) => void
+  /** Land the install in its own window, leaving the current one untouched.
+   *  `allowDuplicate` opens a second window for an install that already owns
+   *  one (cloud-self only). */
+  openInstallNewWindow?: (installationId: string, opts?: { allowDuplicate?: boolean }) => void
   /** Open the new-install wizard. */
   openNewInstall?: () => void
 }
@@ -63,7 +65,7 @@ export function useInstanceActions(deps: InstanceActionsDeps): InstanceActions {
         return
       }
       case 'open-new': {
-        bridge.openInstallNewWindow?.(target.id)
+        bridge.openInstallNewWindow?.(target.id, { allowDuplicate: decision.allowDuplicate })
         return
       }
       case 'focus': {

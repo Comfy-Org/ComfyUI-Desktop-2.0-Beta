@@ -1430,11 +1430,16 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     // short-circuit, but the no-window case spawns a FRESH chooser host and
     // launches into it instead of swapping the parent — so the user's current
     // instance keeps running (the "Open in new window" caret affordance).
-    const openInstallInNewWindow = (installationId: string): void => {
+    const openInstallInNewWindow = (
+      installationId: string,
+      opts?: { allowDuplicate?: boolean }
+    ): void => {
       const existing = getEntryByInstallationId(installationId)
-      if (existing && !existing.window.isDestroyed()) {
-        // An install runs in at most one window (its local process can't run
-        // twice) — focus it rather than spawning a duplicate.
+      // An install runs in at most one window (its local process can't run
+      // twice) — focus it rather than spawning a duplicate. `allowDuplicate`
+      // lifts this for cloud-self, where two windows are just two views of the
+      // same remote session (matrix row 16).
+      if (existing && !existing.window.isDestroyed() && !opts?.allowDuplicate) {
         existing.window.show()
         existing.window.focus()
         return

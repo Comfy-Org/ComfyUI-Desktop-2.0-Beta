@@ -209,8 +209,9 @@ export interface ComfyTitlePopupBridge {
   /** Picker → pick install (focus-or-launch). Dismissed before launch. */
   pickInstall(installationId: string): void
   /** Picker → open install in its OWN window (focus-existing else spawn a fresh
-   *  chooser host), leaving the picker's host untouched. */
-  openInstallNewWindow(installationId: string): void
+   *  chooser host), leaving the picker's host untouched. `allowDuplicate` opens
+   *  a second window for an install that already owns one (cloud-self only). */
+  openInstallNewWindow(installationId: string, opts?: { allowDuplicate?: boolean }): void
   /** Picker → "+ New Install" row, landing on the same surface as the file
    *  menu's New Install. */
   openNewInstall(): void
@@ -538,8 +539,11 @@ const bridge: ComfyTitlePopupBridge = {
   pickInstall: (installationId) => {
     ipcRenderer.send('comfy-titlepopup:pick-install', { installationId })
   },
-  openInstallNewWindow: (installationId) => {
-    ipcRenderer.send('comfy-titlepopup:open-install-new-window', { installationId })
+  openInstallNewWindow: (installationId, opts) => {
+    ipcRenderer.send('comfy-titlepopup:open-install-new-window', {
+      installationId,
+      allowDuplicate: opts?.allowDuplicate === true
+    })
   },
   openNewInstall: () => {
     ipcRenderer.send('comfy-titlepopup:open-new-install')

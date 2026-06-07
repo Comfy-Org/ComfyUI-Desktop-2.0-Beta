@@ -134,7 +134,7 @@ interface PickerBridge {
   activate?: (id: string) => void
   close?: () => void
   pickInstall: (installationId: string) => void
-  openInstallNewWindow: (installationId: string) => void
+  openInstallNewWindow: (installationId: string, opts?: { allowDuplicate?: boolean }) => void
   openNewInstall: () => void
   restartInstall: (installationId: string, opts?: { confirmed?: boolean }) => void
   setPickerSelectedInstall: (installationId: string | null) => void

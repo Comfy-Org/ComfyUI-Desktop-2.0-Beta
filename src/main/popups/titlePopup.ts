@@ -1574,8 +1574,10 @@ export interface TitlePopupHostBindings {
   pickInstallFromPicker: (installationId: string, parentEntryId: number) => Promise<void> | void
   /** Picker → "Open in new window". Opens `installationId` in its OWN window
    *  (focus-existing else spawn a fresh chooser host + launch into it), leaving
-   *  the picker's host untouched so the current instance keeps running. */
-  openInstallInNewWindow: (installationId: string) => void
+   *  the picker's host untouched so the current instance keeps running.
+   *  `allowDuplicate` opens a second window for an install that already owns one
+   *  (cloud-self; no local process to collide). */
+  openInstallInNewWindow: (installationId: string, opts?: { allowDuplicate?: boolean }) => void
   /** Picker → Restart on a running install. Gracefully stops the running
    *  session and re-launches via the same focus-or-launch path the picker
    *  normally uses. `parentEntryId` threads the picker's host through so
@@ -2600,13 +2602,13 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
   // touching the picker's host, so the current instance keeps running.
   ipcMain.on(
     'comfy-titlepopup:open-install-new-window',
-    (event, payload: { installationId?: unknown }) => {
+    (event, payload: { installationId?: unknown; allowDuplicate?: unknown }) => {
       const entry = titlePopupsByWebContents.get(event.sender.id)
       if (!entry) return
       const installationId = payload?.installationId
       if (typeof installationId !== 'string' || installationId.length === 0) return
       hideTitlePopup(entry, { releaseFocusToParent: false })
-      bindings.openInstallInNewWindow(installationId)
+      bindings.openInstallInNewWindow(installationId, { allowDuplicate: payload?.allowDuplicate === true })
     }
   )
 

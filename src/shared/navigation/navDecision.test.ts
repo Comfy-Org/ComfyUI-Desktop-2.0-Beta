@@ -102,22 +102,26 @@ describe('decideNavigation — the CURRENT-behavior matrix (baseline before #926
     expect(decision.verb).toBe('focus')
     expect(decision.secondary).toHaveLength(0)
   })
-  it('Instance → Cloud (closed): same window today (Phase 3b will flip to new)', () => {
+  it('Instance → Cloud (closed): NEW window, keeps the instance running', () => {
     const decision = decisionFor('instance', 'cloud', 'stopped', 'local')
-    expect(decision).toMatchObject({ window: 'same', verb: 'switch' })
+    expect(decision).toMatchObject({ window: 'new', verb: 'open-new', primaryLabel: NAV_LABEL.openCloud })
   })
 
   // ── Cloud → X ──
-  it('Cloud → Dashboard: SAME window (matches matrix; no local process to keep)', () => {
+  // NOTE: documentation cell — the dashboard chip routes through the hardcoded
+  // `activate('new-window')` path, so the app opens a new window for all hosts.
+  // The matrix asks for same-window; tracked as a known deviation.
+  it('Cloud → Dashboard: new window today (chip is not table-driven)', () => {
     const decision = decisionFor('cloud', 'dashboard', 'self', 'cloud')
-    expect(decision).toMatchObject({ window: 'same', verb: 'switch', primaryLabel: NAV_LABEL.openDashboard })
+    expect(decision).toMatchObject({ window: 'new', verb: 'open-new', primaryLabel: NAV_LABEL.openDashboard })
   })
-  it('Cloud → Instance (stopped): same window today (Phase 3b will flip to new)', () => {
+  it('Cloud → Instance (stopped): NEW window, keeps the cloud session running', () => {
     const decision = decisionFor('cloud', 'instance', 'stopped', 'cloud')
-    expect(decision).toMatchObject({ window: 'same', verb: 'switch' })
+    expect(decision).toMatchObject({ window: 'new', verb: 'open-new', primaryLabel: NAV_LABEL.startNewWindow })
   })
-  it('Cloud → self: no-op today (Phase 3d adds second cloud window)', () => {
-    expect(decisionFor('cloud', 'cloud', 'self', 'cloud').verb).toBe('no-op')
+  it('Cloud → self: opens a second cloud window (allowDuplicate)', () => {
+    const decision = decisionFor('cloud', 'cloud', 'self', 'cloud')
+    expect(decision).toMatchObject({ window: 'new', verb: 'open-new', allowDuplicate: true })
   })
   it('Cloud → New Instance: install wizard in a new window', () => {
     const decision = decisionFor('cloud', 'new-instance', 'stopped', 'cloud')

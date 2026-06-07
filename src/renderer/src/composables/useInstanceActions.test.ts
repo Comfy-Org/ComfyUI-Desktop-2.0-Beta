@@ -76,7 +76,16 @@ describe('useInstanceActions.dispatch', () => {
   it('routes open-new → openInstallNewWindow', async () => {
     const bridge = makeBridge()
     await useInstanceActions(makeDeps(bridge)).dispatch(decision({ verb: 'open-new', window: 'new' }), installation())
-    expect(bridge.openInstallNewWindow).toHaveBeenCalledWith('a')
+    expect(bridge.openInstallNewWindow).toHaveBeenCalledWith('a', { allowDuplicate: undefined })
+  })
+
+  it('passes allowDuplicate through for the cloud-self second window', async () => {
+    const bridge = makeBridge()
+    await useInstanceActions(makeDeps(bridge)).dispatch(
+      decision({ verb: 'open-new', window: 'new', allowDuplicate: true }),
+      installation({ sourceCategory: 'cloud' }),
+    )
+    expect(bridge.openInstallNewWindow).toHaveBeenCalledWith('a', { allowDuplicate: true })
   })
 
   it('routes focus → pickInstall (main short-circuits to focus when already up)', async () => {

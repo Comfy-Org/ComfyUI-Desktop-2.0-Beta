@@ -74,6 +74,10 @@ export interface NavDecision {
   secondary: NavDecision[]
   /** Telemetry event to emit when this decision executes, if any. */
   telemetry: 'instance.switched' | 'instance.opened_new_window' | null
+  /** Allow a SECOND window for an install that already owns one — set only for
+   *  cloud-self (matrix row 16), where two views of one remote session are
+   *  legitimate. Bypasses `openInstallInNewWindow`'s focus-existing guard. */
+  allowDuplicate?: true
 }
 
 export interface NavInput {
@@ -194,8 +198,14 @@ const TABLE: ReadonlyMap<CellKey, NavDecision> = new Map<CellKey, NavDecision>([
   ],
   [
     cellKey('instance', 'cloud', 'stopped'),
-    // CURRENT: swap cloud into this window. Phase 3b flips to window:'new'.
-    dec({ window: 'same', verb: 'switch', primaryLabel: NAV_LABEL.openCloud, telemetry: 'instance.switched' }),
+    // Matrix: cloud always opens in a NEW window — it's lightweight and the
+    // local instance A keeps running. No swap, no kill-confirm.
+    dec({
+      window: 'new',
+      verb: 'open-new',
+      primaryLabel: NAV_LABEL.openCloud,
+      telemetry: 'instance.opened_new_window',
+    }),
   ],
   [
     cellKey('instance', 'cloud', 'running-elsewhere'),
@@ -210,14 +220,22 @@ const TABLE: ReadonlyMap<CellKey, NavDecision> = new Map<CellKey, NavDecision>([
   // Cloud → X
   [
     cellKey('cloud', 'dashboard', 'self'),
-    // CURRENT == matrix: dashboard in the SAME window (cloud has no local
-    // process to keep alive; the session survives server-side).
-    dec({ window: 'same', verb: 'switch', primaryLabel: NAV_LABEL.openDashboard }),
+    // NOTE: the dashboard chip is NOT table-driven — it routes through the
+    // shared `activate('new-window')` path, so today this opens a NEW window
+    // for all hosts. The matrix asks for same-window here; left as new-window
+    // for now. This cell is documentation only until the chip consults the table.
+    dec({ window: 'new', verb: 'open-new', primaryLabel: NAV_LABEL.openDashboard }),
   ],
   [
     cellKey('cloud', 'instance', 'stopped'),
-    // CURRENT: swap instance into the cloud window. Phase 3b flips to new window.
-    dec({ window: 'same', verb: 'switch', primaryLabel: NAV_LABEL.start, telemetry: 'instance.switched' }),
+    // Matrix: start the instance in a NEW window so the cloud session keeps
+    // running. Label reads "Start (new window)".
+    dec({
+      window: 'new',
+      verb: 'open-new',
+      primaryLabel: NAV_LABEL.startNewWindow,
+      telemetry: 'instance.opened_new_window',
+    }),
   ],
   [
     cellKey('cloud', 'instance', 'running-elsewhere'),
@@ -225,9 +243,16 @@ const TABLE: ReadonlyMap<CellKey, NavDecision> = new Map<CellKey, NavDecision>([
   ],
   [
     cellKey('cloud', 'cloud', 'self'),
-    // CURRENT: picking the cloud host's own install is a no-op. Phase 3d turns
-    // this into a second cloud window via a cloud-only carve-out.
-    NO_OP,
+    // Matrix row 16: open a SECOND cloud window. Cloud has no local process, so
+    // two windows are just two views of the same remote session — the one
+    // install = one window rule (local-process-bound) doesn't apply.
+    // `allowDuplicate` tells main to bypass its focus-existing guard.
+    dec({
+      window: 'new',
+      verb: 'open-new',
+      primaryLabel: NAV_LABEL.openInNewWindow,
+      allowDuplicate: true,
+    }),
   ],
   [
     cellKey('cloud', 'new-instance', 'stopped'),
