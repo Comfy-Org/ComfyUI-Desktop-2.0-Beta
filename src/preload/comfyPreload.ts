@@ -24,20 +24,30 @@ export interface TerminalRestore {
 /**
  * Interactive terminal bridge for the served ComfyUI frontend.
  *
- * The frontend has no idea which installation it belongs to; the main process
- * resolves that from the sending webContents, so every call here omits the
- * installationId. The session is per-install and shared across windows.
+ * Main resolves the installationId from the sending webContents when no
+ * explicit one is passed. The inline injection (running inside the
+ * comfyView) omits it; the pop-out window passes its installationId
+ * explicitly because its webContents isn't registered as a comfyView.
+ * Per-install shared shell — multiple subscribers see the same output.
  */
 const Terminal = {
   /** Spawn the shell if needed, register this view as a subscriber, and
    *  return the current scrollback/size/exited state. */
-  subscribe: (): Promise<TerminalRestore> => ipcRenderer.invoke('terminal-subscribe', null),
-  unsubscribe: (): Promise<void> => ipcRenderer.invoke('terminal-unsubscribe', null),
-  write: (data: string): Promise<void> => ipcRenderer.invoke('terminal-write', null, data),
-  resize: (cols: number, rows: number): Promise<void> =>
-    ipcRenderer.invoke('terminal-resize', null, cols, rows),
+  subscribe: (installationId?: string): Promise<TerminalRestore> =>
+    ipcRenderer.invoke('terminal-subscribe', installationId ?? null),
+  unsubscribe: (installationId?: string): Promise<void> =>
+    ipcRenderer.invoke('terminal-unsubscribe', installationId ?? null),
+  write: (data: string, installationId?: string): Promise<void> =>
+    ipcRenderer.invoke('terminal-write', installationId ?? null, data),
+  resize: (cols: number, rows: number, installationId?: string): Promise<void> =>
+    ipcRenderer.invoke('terminal-resize', installationId ?? null, cols, rows),
   /** Kill the current shell (if any) and start a fresh one. */
-  restart: (): Promise<TerminalRestore> => ipcRenderer.invoke('terminal-restart', null),
+  restart: (installationId?: string): Promise<TerminalRestore> =>
+    ipcRenderer.invoke('terminal-restart', installationId ?? null),
+  /** Open a separate Electron window subscribed to the same shell. Main
+   *  resolves the installationId from the caller's comfyView sender so
+   *  the inline injection doesn't need to know its own ID. */
+  openPopout: (): Promise<void> => ipcRenderer.invoke('terminal-popout-open', null),
   onOutput: (callback: (data: string) => void): (() => void) => {
     const handler = (_event: IpcRendererEvent, payload: { data: string }) =>
       callback(payload.data)
@@ -48,6 +58,42 @@ const Terminal = {
     const handler = () => callback()
     ipcRenderer.on('terminal-exited', handler)
     return () => ipcRenderer.removeListener('terminal-exited', handler)
+  },
+}
+
+export interface LogsRestore {
+  installationId: string
+  buffer: string[]
+}
+
+export interface LogsOutputMsg {
+  installationId: string
+  text: string
+}
+
+/**
+ * Read-only logs bridge. Subscribes to the shared per-install log
+ * broadcast that mirrors every `comfy-output` IPC send. Used by the
+ * pop-out logs window and (eventually) any other surface that wants the
+ * raw stdout/stderr stream without owning the launcher.
+ */
+const Logs = {
+  /** Register as a subscriber and return the current ring-buffer
+   *  contents for an immediate paint. Subsequent chunks arrive on
+   *  the `onOutput` channel. */
+  subscribe: (installationId?: string): Promise<LogsRestore> =>
+    ipcRenderer.invoke('logs-subscribe', installationId ?? null),
+  unsubscribe: (installationId?: string): Promise<void> =>
+    ipcRenderer.invoke('logs-unsubscribe', installationId ?? null),
+  /** Open a separate Electron window subscribed to the same broadcast.
+   *  Main resolves the installationId from the caller's comfyView sender
+   *  so the inline injection doesn't need to know its own ID. */
+  openPopout: (): Promise<void> => ipcRenderer.invoke('logs-popout-open', null),
+  onOutput: (callback: (msg: LogsOutputMsg) => void): (() => void) => {
+    const handler = (_event: IpcRendererEvent, payload: LogsOutputMsg) =>
+      callback(payload)
+    ipcRenderer.on('logs-output', handler)
+    return () => ipcRenderer.removeListener('logs-output', handler)
   },
 }
 
@@ -79,4 +125,5 @@ contextBridge.exposeInMainWorld('__comfyDesktop2', {
     ipcRenderer.send('desktop2-theme-report', { bg, text })
   },
   Terminal,
+  Logs,
 })

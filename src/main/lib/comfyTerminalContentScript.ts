@@ -159,6 +159,10 @@ function renderTerminal(container) {
     if (m.disposed) return;
     if (restore && restore.exited) doRestart();
     else applyRestore(restore);
+    // Force an immediate fit; ResizeObserver may not fire on first mount if
+    // the container's layout was already settled before we attached. Decides
+    // whether the user sees a 0×0 invisible xterm or an actual 80×24 prompt.
+    window.requestAnimationFrame(function () { doFit(true); });
   }).catch(function () {});
 }
 
@@ -211,12 +215,178 @@ function waitForRegister(timeoutMs) {
           }]
         });
         STATE.registered = true;
+        startTerminalTabPopoutInjector();
       } catch (e) {}
       return;
     }
     if (Date.now() - startedAt > timeoutMs) return;
     setTimeout(tick, 100);
   })();
+}
+
+// Inject a small ↗ "open in new window" button onto the Terminal tab's
+// header (the bottom-panel tab strip), positioned right after the
+// "Terminal" label. Vue re-renders that strip on tab switches, so we
+// keep a MutationObserver running for the page's lifetime and re-add
+// the button whenever the previous one disappears. Idempotent: each
+// pass checks for our existing button before re-injecting.
+function startTerminalTabPopoutInjector() {
+  if (STATE.tabBarInjectorStarted) return;
+  STATE.tabBarInjectorStarted = true;
+
+  // Find the bottom-panel header strip — the row that contains both
+  // "Terminal" and "Logs" tab labels. Lock onto its close (✕) button
+  // (the only unique landmark with a stable accessibility label), then
+  // walk up to the smallest ancestor that ALSO has both tabs as leaf
+  // descendants. From there we can enumerate the tab buttons.
+  function findBottomPanelHeader() {
+    var closes = document.querySelectorAll(
+      'button[aria-label="Close"], [role="button"][aria-label="Close"], button[title="Close"]'
+    );
+    for (var i = 0; i < closes.length; i++) {
+      var close = closes[i];
+      if (!close) continue;
+      if (close.classList && close.classList.contains('__comfy-desktop-popout-btn')) continue;
+      var testid = (close.getAttribute && close.getAttribute('data-testid')) || '';
+      if (/minimap/i.test(testid)) continue;
+      var anc = close.parentElement;
+      for (var depth = 0; depth < 6 && anc; depth++) {
+        if (containsLeafText(anc, 'Terminal') && containsLeafText(anc, 'Logs')) {
+          return anc;
+        }
+        anc = anc.parentElement;
+      }
+    }
+    return null;
+  }
+
+  function containsLeafText(root, target) {
+    if (!root || !root.querySelectorAll) return false;
+    var leaves = root.querySelectorAll('*');
+    var pattern = new RegExp('^' + target + '$', 'i');
+    for (var i = 0; i < leaves.length; i++) {
+      var e = leaves[i];
+      if (!e || e.children.length > 0) continue;
+      var txt = (e.textContent || '').trim();
+      if (pattern.test(txt)) return true;
+    }
+    return false;
+  }
+
+  // Inside the bottom-panel header, find each tab BUTTON by walking up
+  // from the leaf that holds the label text. We want the smallest
+  // interactive ancestor (button / role=tab / clickable div) so the
+  // popout icon sits in the same row as the label without disrupting
+  // the tab's own hit area.
+  function findTabButton(headerRoot, labelText) {
+    if (!headerRoot) return null;
+    var leaves = headerRoot.querySelectorAll('*');
+    var pattern = new RegExp('^' + labelText + '$', 'i');
+    for (var i = 0; i < leaves.length; i++) {
+      var leaf = leaves[i];
+      if (!leaf || leaf.children.length > 0) continue;
+      if (leaf.classList && leaf.classList.contains('__comfy-desktop-popout-btn')) continue;
+      var txt = (leaf.textContent || '').trim();
+      if (!pattern.test(txt)) continue;
+      var cur = leaf;
+      for (var d = 0; d < 6 && cur && cur.parentElement; d++) {
+        var p = cur.parentElement;
+        if (p === headerRoot) break;
+        var role = p.getAttribute && p.getAttribute('role');
+        var tag = (p.tagName || '').toLowerCase();
+        var cls = (p.className && p.className.baseVal != null ? p.className.baseVal : p.className) || '';
+        if (role === 'tab' || tag === 'button' || tag === 'a' || /tab/i.test(String(cls))) {
+          return p;
+        }
+        cur = p;
+      }
+      // Fall back to the leaf's parent — better than nothing.
+      return leaf.parentElement || leaf;
+    }
+    return null;
+  }
+
+  function findInsertionPoint() {
+    var close = findCloseButtonNearTerminalAndLogs();
+    if (close && close.parentElement) {
+      return { parent: close.parentElement, before: close };
+    }
+    return null;
+  }
+
+  function makePopoutButton(kind) {
+    var btn = document.createElement('button');
+    btn.className = '__comfy-desktop-popout-btn';
+    btn.setAttribute('data-popout-kind', kind);
+    btn.type = 'button';
+    var ariaLabel = kind === 'terminal'
+      ? 'Open terminal in a new window'
+      : 'Open logs in a new window';
+    btn.title = 'Open in a new window';
+    btn.setAttribute('aria-label', ariaLabel);
+    btn.style.cssText =
+      'display:inline-flex;align-items:center;justify-content:center;' +
+      'width:18px;height:18px;margin-left:6px;padding:0;border:0;' +
+      'background:transparent;color:currentColor;cursor:pointer;' +
+      'opacity:0.55;border-radius:4px;transition:opacity 120ms ease, background 120ms ease;' +
+      'vertical-align:middle;';
+    btn.innerHTML =
+      '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" ' +
+      'stroke="currentColor" stroke-width="2.4" stroke-linecap="round" ' +
+      'stroke-linejoin="round" aria-hidden="true">' +
+      '<path d="M14 3h7v7"/><path d="M21 3l-9 9"/>' +
+      '<path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/>' +
+      '</svg>';
+    btn.addEventListener('mouseenter', function () {
+      btn.style.opacity = '1';
+      btn.style.background = 'rgba(255,255,255,0.08)';
+    });
+    btn.addEventListener('mouseleave', function () {
+      btn.style.opacity = '0.55';
+      btn.style.background = 'transparent';
+    });
+    btn.addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (kind === 'terminal') {
+        try { window.__comfyDesktop2.Terminal.openPopout(); } catch (err) {}
+      } else {
+        try { window.__comfyDesktop2.Logs.openPopout(); } catch (err) {}
+      }
+    });
+    return btn;
+  }
+
+  function injectIntoTab(headerRoot, label, kind) {
+    var tab = findTabButton(headerRoot, label);
+    if (!tab) return false;
+    // Don't double-inject if our previous pass already added a button.
+    var existing = tab.querySelector('.__comfy-desktop-popout-btn[data-popout-kind="' + kind + '"]');
+    if (existing) return true;
+    tab.appendChild(makePopoutButton(kind));
+    return true;
+  }
+
+  function tryInject() {
+    var header = findBottomPanelHeader();
+    if (!header) return;
+    injectIntoTab(header, 'Terminal', 'terminal');
+    injectIntoTab(header, 'Logs', 'logs');
+  }
+
+  // Initial attempt + periodic retry while the page is settling.
+  tryInject();
+  var settleTries = 0;
+  var settleInterval = setInterval(function () {
+    settleTries++;
+    tryInject();
+    if (settleTries > 50) clearInterval(settleInterval);
+  }, 200);
+
+  // Persistent observer — re-add the button whenever Vue re-renders
+  // the tab strip. Throttled by re-checking inside tryInject().
+  var observer = new MutationObserver(function () { tryInject(); });
+  observer.observe(document.body, { childList: true, subtree: true });
 }
 
 waitForRegister(30000);
@@ -238,7 +408,7 @@ export function getComfyTerminalContentScript(): string {
     `'use strict';\n` +
     `if (typeof window === 'undefined' || !window.__comfyDesktop2 || !window.__comfyDesktop2.Terminal) return;\n` +
     `if (window.__comfyDesktopTerminalStopgap) return;\n` +
-    `window.__comfyDesktopTerminalStopgap = { started: true, registered: false };\n` +
+    `window.__comfyDesktopTerminalStopgap = { started: true, registered: false, tabBarInjectorStarted: false };\n` +
     // Capture the UMD modules into locals so we never touch window.Terminal.
     `var __xt = { exports: {} };\n` +
     `(function () { var module = __xt; var exports = __xt.exports;\n${xtermJs}\n}).call(window);\n` +

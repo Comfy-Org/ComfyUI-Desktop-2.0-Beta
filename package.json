@@ -71,6 +71,7 @@
   },
   "devDependencies": {
     "@datadog/datadog-ci": "^5.9.0",
+    "@electron/rebuild": "^3.7.2",
     "@eslint/js": "^10.0.1",
     "@pinia/testing": "^1.0.3",
     "@playwright/test": "^1.58.2",

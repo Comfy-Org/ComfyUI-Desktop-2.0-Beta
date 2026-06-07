@@ -10,6 +10,7 @@ import {
   getTerminalRestore,
   type TerminalRestore,
 } from '../terminal'
+import { openTerminalPopout } from '../terminalPopoutWindow'
 
 /**
  * IPC for the interactive per-installation console.
@@ -81,6 +82,19 @@ export function registerTerminalHandlers(): void {
       const id = resolveInstallationId(event, installationId)
       if (!id) return EMPTY_RESTORE
       return getTerminalRestore(id) ?? EMPTY_RESTORE
+    },
+  )
+
+  // Pop the inline terminal out into a standalone Electron window.
+  // Caller (the inline injection in the comfyView) doesn't pass an
+  // installationId — we resolve it from the sender's registered
+  // comfyView so the popout always targets the right shell.
+  ipcMain.handle(
+    'terminal-popout-open',
+    async (event, installationId?: string | null): Promise<void> => {
+      const id = resolveInstallationId(event, installationId)
+      if (!id) return
+      await openTerminalPopout(id)
     },
   )
 }

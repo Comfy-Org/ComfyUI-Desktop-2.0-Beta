@@ -26,6 +26,7 @@ import { registerSnapshotHandlers } from './registerSnapshotHandlers'
 import { registerSettingsHandlers } from './registerSettingsHandlers'
 import { registerSessionHandlers } from './registerSessionHandlers'
 import { registerTerminalHandlers } from './registerTerminalHandlers'
+import { registerLogsHandlers } from './registerLogsHandlers'
 import { registerCrashHandlers } from './registerCrashHandlers'
 import { registerTelemetryHandlers } from './registerTelemetryHandlers'
 
@@ -211,6 +212,7 @@ export function register(callbacks: RegisterCallbacks = {}): void {
   registerSettingsHandlers()
   registerSessionHandlers()
   registerTerminalHandlers()
+  registerLogsHandlers()
   registerCrashHandlers()
   registerTelemetryHandlers()
 }

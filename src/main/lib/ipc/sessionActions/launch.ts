@@ -27,6 +27,7 @@ import { rotateLogFiles, getLogDir } from '../../logRotation'
 import { createExecutionTap } from '../../executionTap'
 import { clearCrash, recordCrash } from '../../crashBuffer'
 import * as telemetry from '../../telemetry'
+import { appendLog } from '../../logsBroadcast'
 import { ensureManagerMirrorConfig } from '../../managerConfig'
 import type { WriteStream } from 'fs'
 
@@ -375,6 +376,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     if (!sender.isDestroyed()) {
       sender.send('comfy-output', { installationId, text })
     }
+    appendLog(installationId, text)
   }
 
   const logStream = await openLogStream(inst.installPath)
@@ -418,6 +420,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     if (!sender.isDestroyed()) {
       sender.send('comfy-output', { installationId, text: `> ${cmdLine}\n\n` })
     }
+    appendLog(installationId, `> ${cmdLine}\n\n`)
     // Explicit boot-attempt event. `installation_started` already fires
     // on successful boot with `boot_time_ms`, and `comfyui.exited` carries
     // `crashed=true` on failure — but boot success rate needed inferred
