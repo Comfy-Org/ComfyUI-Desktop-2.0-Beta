@@ -79,6 +79,28 @@ async function ensureVcRedist(context) {
 }
 
 /**
+ * Compute the platform-correct path to `app.asar.unpacked/` inside the
+ * built bundle. The previous version of this hook hardcoded
+ * `${appOutDir}/resources/...`, which is only correct on Linux/Windows —
+ * on macOS the resources sit under `${productFilename}.app/Contents/
+ * Resources/...`. As a result, every chmod this hook tried to apply on
+ * macOS was pointed at a path that didn't exist, the calls silently
+ * no-op'd against a missing tree, and the unpacked binaries shipped with
+ * the npm tarball's `0644` mode. `extract.ts` masks the 7za side via a
+ * runtime chmod, and `terminal.ts` does the same for spawn-helper, but
+ * fixing the pack-time hook means future native helpers don't each need
+ * their own runtime workaround.
+ *
+ * `context.packager.getResourcesDir(appOutDir)` is the electron-builder
+ * API that already encodes the per-platform layout — use it instead of
+ * re-deriving the path.
+ */
+function unpackedNodeModulesDir(context) {
+  const resourcesDir = context.packager.getResourcesDir(context.appOutDir)
+  return path.join(resourcesDir, 'app.asar.unpacked', 'node_modules')
+}
+
+/**
  * electron-builder afterPack hook.
  * Ensures bundled native helpers have the execute permission in the packaged
  * output. Without this, the unpacked binaries inherit `0644` from the npm
@@ -102,12 +124,11 @@ export default async function afterPack(context) {
     return
   }
 
-  const unpackedRoot = path.join(
-    context.appOutDir,
-    'resources',
-    'app.asar.unpacked',
-    'node_modules',
-  )
+  const unpackedRoot = unpackedNodeModulesDir(context)
+  if (!fs.existsSync(unpackedRoot)) {
+    console.log(`afterPack: unpacked node_modules not found at ${unpackedRoot}; skipping chmods`)
+    return
+  }
 
   // 7zip-bin / 7za (used during install for the standalone-python tarball).
   const sevenZipRoot = path.join(unpackedRoot, '7zip-bin')
