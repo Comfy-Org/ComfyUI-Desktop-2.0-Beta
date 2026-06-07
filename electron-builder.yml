@@ -19,6 +19,7 @@ extraResources:
     to: lib
 asarUnpack:
   - node_modules/7zip-bin/**/*
+  - node_modules/node-pty/**/*
 afterPack: ./scripts/afterPack.mjs
 publish:
   provider: github

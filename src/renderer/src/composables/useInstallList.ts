@@ -49,12 +49,22 @@ export interface UseInstallListApi {
 // Shared install-list state for the dashboard and the instance picker.
 // Pure-data (no IPC/Pinia/DOM); Cloud is always split out as its own surface.
 // Owns a 60s `now` tick so relative time labels stay fresh.
+//
+// The `hideCloudFromPicker` setting is read once on mount; subsequent
+// toggles in Global Settings take effect on the next dashboard render
+// (no live IPC broadcast for it — settings updates already trigger a
+// re-render via the snapshot pipeline).
 export function useInstallList(opts: UseInstallListOpts): UseInstallListApi {
   const { t } = useI18n()
   const { installations } = opts
 
   const searchQuery = ref('')
   const activeFilter = ref<FilterKey>('all')
+  // Module-local copy of the `hideCloudFromPicker` setting. `false` while
+  // the IPC fetch is in flight so Cloud renders by default and only
+  // disappears if the user actually opted in. Re-fetched on mount so
+  // the Settings toggle applies after a dashboard reload.
+  const hideCloudFromPicker = ref<boolean>(false)
 
   function matchesQuery(name: string): boolean {
     const q = searchQuery.value.trim().toLowerCase()
@@ -97,6 +107,10 @@ export function useInstallList(opts: UseInstallListOpts): UseInstallListApi {
   })
 
   const showCloudCard = computed<boolean>(() => {
+    // Opt-out: user toggled "Hide Cloud from picker" in Global Settings.
+    // Gates BOTH the per-install tile (when a cloud install exists) and
+    // the generic Try-Cloud CTA so the user truly never sees it.
+    if (hideCloudFromPicker.value) return false
     const inCategory = activeFilter.value === 'all' || activeFilter.value === 'cloud'
     if (!inCategory) return false
     // When a real cloud install exists, gate visibility on the query —
@@ -116,13 +130,42 @@ export function useInstallList(opts: UseInstallListOpts): UseInstallListApi {
   // 60-second tick so "Nm ago" / "Nh ago" labels stay fresh.
   const now = ref(Date.now())
   let nowTimer: ReturnType<typeof setInterval> | null = null
+  // Live updates: any setting change on main broadcasts here, so the
+  // dashboard re-fetches `hideCloudFromPicker` without the user having to
+  // close + reopen the window after toggling in Global Settings.
+  let unsubSettingsChanged: (() => void) | null = null
+
+  const refetchHideCloud = async (): Promise<void> => {
+    try {
+      const value = await window.api.getSetting('hideCloudFromPicker')
+      hideCloudFromPicker.value = value === true
+    } catch {
+      hideCloudFromPicker.value = false
+    }
+  }
+
   onMounted(() => {
     nowTimer = setInterval(() => {
       now.value = Date.now()
     }, 60_000)
+    // Best-effort initial read. Failures resolve to `false` so Cloud
+    // renders by default — never silently hide on a missing IPC bridge
+    // (e.g. tests or pre-attach mounts).
+    void refetchHideCloud()
+    // Re-read on any settings broadcast keyed to hideCloudFromPicker so
+    // toggling the Global Settings opt-out takes effect immediately on
+    // the live dashboard (no close + reopen required).
+    try {
+      unsubSettingsChanged = window.api.onSettingsChanged((data) => {
+        if (data?.key === 'hideCloudFromPicker') void refetchHideCloud()
+      })
+    } catch {
+      // tests / older preloads without the listener: fall back to mount-only
+    }
   })
   onBeforeUnmount(() => {
     if (nowTimer) clearInterval(nowTimer)
+    if (unsubSettingsChanged) unsubSettingsChanged()
   })
 
   function timeAgo(timestamp: number): string {

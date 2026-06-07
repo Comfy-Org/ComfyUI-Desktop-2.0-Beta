@@ -860,6 +860,7 @@ async function handleExpandedPrimaryAction(restartInPlace: boolean): Promise<voi
 .picker-detail {
   position: relative;
   flex: 1 1 0;
+  min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;

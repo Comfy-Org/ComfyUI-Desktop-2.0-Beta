@@ -29,6 +29,8 @@ import {
 import * as mainTelemetry from '../lib/telemetry'
 import { forwardDatadogError } from '../lib/processErrorHandlers'
 import { isQuitInProgress } from '../lib/quit-state'
+import { recordDashboardSurface, recordInstanceSurface } from '../lib/lastSession'
+import * as settings from '../settings'
 import * as updater from '../lib/updater'
 import { getSavedBounds, getWindowOptions, saveWindowBounds } from '../lib/windowState'
 import { ensureSystemModal } from '../popups/systemModal'
@@ -39,6 +41,7 @@ import {
   comfyWindows,
   computeBodyMode,
   dropAttachClaimsForWindow,
+  hasRunningSessionForEntry,
   isChooserHost,
   isInstallHost,
   nextWindowKey,
@@ -62,6 +65,13 @@ const DEFAULT_HOST_HEIGHT = 900
  *  {@link HostWindowFactories.consultPanelRendererClose}. */
 export type CloseConsultResult = 'cleared' | 'aborted' | 'defer'
 
+/** User's pick from the close-window confirm:
+ *   - `close`               — tear the window down (last window → app quits)
+ *   - `cancel`              — keep the window open
+ *   - `return-to-dashboard` — flip the window in place to the dashboard (only
+ *     offered on the last window, so the user isn't forced to quit) */
+export type CloseWindowChoice = 'close' | 'cancel' | 'return-to-dashboard'
+
 /** Should the close handler bail after the renderer consult?
  *
  *  A `forceClose` snapshot (caller pre-cleared via `preClearedClose`)
@@ -73,37 +83,46 @@ export function shouldBailAfterConsult(consult: CloseConsultResult, forceClose: 
   return consult === 'aborted' && !forceClose
 }
 
-/** Should the install-host close-confirm modal run? Only fires when
- *  the renderer deferred (no overlay), the host would kill a local
- *  process, and the caller hasn't pre-cleared. Cloud/remote-backed
- *  windows skip the modal (issue #654) — closing them never kills a
- *  local ComfyUI. The "entry still exists" check is folded into
- *  `killsLocalSession` (its `shouldConfirmKillForEntry` source rejects
- *  a missing entry). */
+/** Should the install-host close-confirm modal run? Fires when the renderer
+ *  deferred (no overlay), the caller hasn't pre-cleared, AND either the host
+ *  would kill a local process OR this is the last install window (closing it
+ *  quits the app, so the user must get the confirm + the dashboard escape).
+ *  Cloud/remote non-last windows skip the modal (issue #654) — closing them
+ *  never kills a local ComfyUI and the app stays alive. The "entry still
+ *  exists" check is folded into `killsLocalSession` (its
+ *  `shouldConfirmKillForEntry` source rejects a missing entry); the
+ *  last-install-window branch carries its own entry check at the call site. */
 export function shouldShowInstallCloseConfirm(
   consult: CloseConsultResult,
   killsLocalSession: boolean,
   forceClose: boolean,
+  isLastInstallWindow: boolean,
 ): boolean {
-  return consult === 'defer' && killsLocalSession && !forceClose
+  return consult === 'defer' && !forceClose && (killsLocalSession || isLastInstallWindow)
 }
 
 /** Should the close handler bail after the install-host close-confirm
- *  modal? Same force-close override as {@link shouldBailAfterConsult}
- *  — a pre-cleared close lands mid-modal must still proceed. */
-export function shouldBailAfterCloseConfirm(confirmed: boolean, forceClose: boolean): boolean {
-  return !confirmed && !forceClose
+ *  modal? `cancel` keeps the window open, but a force-close override
+ *  (the caller pre-cleared mid-modal) must still proceed — same override
+ *  as {@link shouldBailAfterConsult}. */
+export function shouldBailAfterCloseChoice(choice: CloseWindowChoice, forceClose: boolean): boolean {
+  return choice === 'cancel' && !forceClose
 }
 
 /** Should the close handler detach the last install-backed window to
- *  the dashboard instead of tearing it down?
+ *  the dashboard instead of tearing it down — as the FALLBACK when no
+ *  explicit close choice was made (the confirm was skipped)?
  *
- *  The OS ✕ on the last install window flips the host to chooser mode
- *  in place so the app stays alive on the dashboard — that's why
- *  `isLastWindow` exists. A force-close (launch-guard eviction, bulk
- *  Exit-All) is a different intent: the caller already wants the
- *  window gone, and leaving a stray dashboard window behind after a
- *  swap-installs flow is noise. Force-close therefore skips the
+ *  The normal close of the last install window now shows a three-way
+ *  confirm (Quit Desktop / Return to Dashboard / Cancel); the user's
+ *  pick drives the outcome directly. This guard only covers the paths
+ *  that reach teardown WITHOUT that confirm (e.g. a rare overlay-cancel
+ *  consult that cleared) — there, defaulting the last install window to
+ *  the dashboard preserves the invariant that we never quit the last
+ *  window without an explicit user choice. A force-close (launch-guard
+ *  eviction, bulk Exit-All) is a different intent: the caller already
+ *  wants the window gone, and leaving a stray dashboard window behind
+ *  after a swap-installs flow is noise. Force-close therefore skips the
  *  detach branch and falls through to the normal teardown.
  *
  *  Same logic applies when `app.quit()` is in flight (Cmd+Q, app menu
@@ -160,12 +179,15 @@ export interface HostWindowFactories {
     panelView: WebContentsView | null | undefined,
   ) => Promise<'cleared' | 'aborted' | 'defer'>
   /** Shell-level "Close Window" confirm, owned by main so a hidden panel
-   *  renderer can't swallow it. Shared with the Close Window menu entry. */
+   *  renderer can't swallow it. Shared with the Close Window menu entry.
+   *  The last window adds a "Return to Dashboard" option so closing it
+   *  isn't a forced quit; `stopsLocalComfy` tailors the copy. */
   confirmCloseInstanceWindow: (
     window: BrowserWindow,
     isLastWindow: boolean,
+    stopsLocalComfy: boolean,
     theme: { bg: string; text: string },
-  ) => Promise<boolean>
+  ) => Promise<CloseWindowChoice>
   /** Detach the install currently bound to a host entry (in-place flip). */
   detachInstallImpl: (entry: ComfyWindowEntry) => void
   /** WeakSet of host windows whose close was pre-cleared by the
@@ -730,6 +752,16 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
     if (entry?.installationId) {
       setLastFocusedInstallationId(entry.installationId)
     }
+    // Persist which surface was last active so the next boot can restore it.
+    // Only a *running* instance is a healthy restore target — a stopped or
+    // crashed install-backed window shows the lifecycle panel, so record it as
+    // the dashboard to avoid relaunching straight into a crash next boot. The
+    // record helpers no-op while quitting: windows can take focus as siblings
+    // are destroyed, which would otherwise clobber the surface the user left.
+    if (entry) {
+      if (hasRunningSessionForEntry(entry)) recordInstanceSurface(entry.installationId)
+      else recordDashboardSurface()
+    }
   })
 
   // Push the initial state once the title bar's preload signals readiness.
@@ -854,24 +886,45 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
           : await fx.consultPanelRendererClose(entry?.panelView)
         if (shouldBailAfterConsult(consult, fx.preClearedClose.has(comfyWindow))) return
         // Step 2 — for an install-backed host with no overlay, main shows
-        // the same Close Window confirm as the menu item. The dashboard
-        // closes with no prompt.
+        // the same Close Window confirm as the menu item. The last window
+        // gets a three-way choice (Quit Desktop / Return to Dashboard /
+        // Cancel) so closing it isn't a forced quit; non-last windows get
+        // the plain Close/Cancel confirm. The dashboard closes with no
+        // prompt.
         const entryForClose = comfyWindows.get(windowKey)
         const isInstallHostWindow = !!entryForClose && !isChooserHost(entryForClose)
+        const isLastInstallWindow = isLastWindow && isInstallHostWindow
+        // `null` = no confirm was shown (so no explicit user choice).
+        let closeChoice: CloseWindowChoice | null = null
         if (
           shouldShowInstallCloseConfirm(
             consult,
             shouldConfirmKillForEntry(entryForClose),
             fx.preClearedClose.has(comfyWindow),
+            isLastInstallWindow,
           )
           && entryForClose
         ) {
-          const confirmed = await fx.confirmCloseInstanceWindow(
-            comfyWindow,
-            isLastWindow,
-            entryForClose.lastTheme,
-          )
-          if (shouldBailAfterCloseConfirm(confirmed, fx.preClearedClose.has(comfyWindow))) return
+          // Last install window: skip the three-way modal entirely and
+          // pick the outcome from the user's setting.
+          //  - `closeDirectlyOnLastWindow` true  → quit Desktop ('close')
+          //  - false (default)                   → return to dashboard
+          // Non-last windows still go through the existing 2-way confirm
+          // because running processes / pending downloads need an "are
+          // you sure" gate.
+          if (isLastInstallWindow) {
+            const closeDirectly =
+              (settings.get('closeDirectlyOnLastWindow') as boolean | undefined) === true
+            closeChoice = closeDirectly ? 'close' : 'return-to-dashboard'
+          } else {
+            closeChoice = await fx.confirmCloseInstanceWindow(
+              comfyWindow,
+              isLastWindow,
+              shouldConfirmKillForEntry(entryForClose),
+              entryForClose.lastTheme,
+            )
+            if (shouldBailAfterCloseChoice(closeChoice, fx.preClearedClose.has(comfyWindow))) return
+          }
         }
         // Capture the force-close intent before we drain the flag.
         // Either the initial snapshot (`skipConsult`) or a late-arriving
@@ -880,15 +933,24 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
         const forceClose = skipConsult || fx.preClearedClose.has(comfyWindow)
         fx.preClearedClose.delete(comfyWindow)
         if (comfyWindow.isDestroyed()) return
-        // Last install-backed window → return to the dashboard rather
-        // than tear down + quit. `detachInstall` runs the same
-        // `_installCleanup` (stopRunning, listeners off) the teardown
-        // below would, then flips the window to chooser mode in place.
-        // Force-close skips this — the caller wants the window gone
-        // (e.g. launch-guard swapping installs shouldn't leave a stray
-        // dashboard window behind).
+        // Explicit "Return to Dashboard" pick → flip in place rather than
+        // tearing down. `detachInstall` runs the same `_installCleanup`
+        // (stopRunning, listeners off) the teardown below would, then
+        // flips the window to chooser mode. Force-close ignores the pick —
+        // the caller wants the window gone.
+        if (closeChoice === 'return-to-dashboard' && !forceClose && isInstallHostWindow && entryForClose) {
+          entryForClose.detachInstall()
+          return
+        }
+        // No explicit choice (the confirm was skipped — consult cleared
+        // or pre-cleared close). Default: keep the last install window
+        // on the dashboard rather than quitting silently. EXCEPT when
+        // the user has opted into `closeDirectlyOnLastWindow`, in which
+        // case the consult-cleared path must still honor that intent
+        // and let the teardown run.
         if (
-          shouldDetachLastInstallWindowToDashboard(
+          closeChoice === null
+          && shouldDetachLastInstallWindowToDashboard(
             isInstallHostWindow,
             !!entryForClose,
             isLastWindow,
@@ -897,8 +959,13 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
           )
           && entryForClose
         ) {
-          entryForClose.detachInstall()
-          return
+          const closeDirectly =
+            isLastInstallWindow &&
+            (settings.get('closeDirectlyOnLastWindow') as boolean | undefined) === true
+          if (!closeDirectly) {
+            entryForClose.detachInstall()
+            return
+          }
         }
         // Each cleanup step is wrapped via `safeTeardown` so a single
         // throw can't skip the BrowserWindow.destroy() at the end.
@@ -1288,7 +1355,18 @@ export function applyChooserHostThemeToAll(): void {
  *  The comfyView still exists so `layoutViews` doesn't have to
  *  special-case its absence, but is sized to zero and never made
  *  visible. */
-export function openChooserHostWindow(initialPanel: ComfyPanelKey = 'comfy'): BrowserWindow {
+export interface OpenChooserHostWindowOptions {
+  /** Hold the window hidden after construction: skip the titlebar/panel/backstop
+   *  cold-start reveal and leave `coldStartPendingReveal` off, so only an
+   *  explicit `forceRevealHostWindow()` shows it. Used by startup restore to
+   *  keep the dashboard from flashing before the launch takeover is up. */
+  deferColdStartReveal?: boolean
+}
+
+export function openChooserHostWindow(
+  initialPanel: ComfyPanelKey = 'comfy',
+  opts: OpenChooserHostWindowOptions = {},
+): BrowserWindow {
   // Install-less wrapper. The shared `createHostWindow()` builds
   // the BrowserWindow + 2 views skeleton, layoutViews, macOS
   // fullscreen, bounds-save listeners, close / closed handlers,
@@ -1348,7 +1426,9 @@ export function openChooserHostWindow(initialPanel: ComfyPanelKey = 'comfy'): Br
     initiallyHidden: true,
   })
 
-  entry.coldStartPendingReveal = true
+  // Startup restore holds the window hidden (no pending cold-start reveal) until
+  // its launch takeover is up; everyone else reveals on first paint.
+  entry.coldStartPendingReveal = !opts.deferColdStartReveal
 
   // Seed the requested initial panel (default 'comfy' → chooser body for
   // an install-less host). "+ New Instance" passes 'new-install' so the
@@ -1359,6 +1439,10 @@ export function openChooserHostWindow(initialPanel: ComfyPanelKey = 'comfy'): Br
   entry.layoutViews()
 
   const revealKey = entry.windowKey
+
+  // Deferred reveal: the caller owns the timing (it will call
+  // `forceRevealHostWindow`), so skip the auto-reveal hooks entirely.
+  if (opts.deferColdStartReveal) return comfyWindow
 
   // Fast-path reveal: the title-bar bundle is ~25 KB and finishes its
   // first paint in well under 200 ms even on a Windows cold start,

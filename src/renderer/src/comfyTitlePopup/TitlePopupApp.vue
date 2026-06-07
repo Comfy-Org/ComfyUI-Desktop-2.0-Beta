@@ -91,6 +91,7 @@ interface GlobalSettingsModelsDir {
 
 interface GlobalSettingsSnapshot {
   generalFields: Record<string, unknown>[]
+  languageFields: Record<string, unknown>[]
   telemetryFields: Record<string, unknown>[]
   desktopUpdateFields: Record<string, unknown>[]
   cacheFields: Record<string, unknown>[]
@@ -183,6 +184,7 @@ const pickerSnapshot = ref<PickerSnapshot>({
 })
 const globalSettingsSnapshot = ref<GlobalSettingsSnapshot>({
   generalFields: [],
+  languageFields: [],
   telemetryFields: [],
   desktopUpdateFields: [],
   cacheFields: [],

@@ -34,8 +34,10 @@ import * as releaseCache from '../release-cache'
 import { runStartupReleaseChecks } from '../release-cache-startup'
 import { _broadcastToRenderer } from './shared'
 import { hasGitDir } from '../git'
+import { parseUrl } from '../util'
 import { restoreSnapshotIntoInstallation } from '../standaloneMigration'
 import * as mainTelemetry from '../telemetry'
+import { appendLog } from '../logsBroadcast'
 import { recordIpcInvocation } from '../e2eOverrides'
 
 /** Fire-and-forget: refresh the shared ComfyUI release cache for the
@@ -270,6 +272,7 @@ export function registerInstallationHandlers(): void {
             try {
               if (!sender.isDestroyed()) sender.send('comfy-output', { installationId, text })
             } catch {}
+            appendLog(installationId, text)
           }
           const update = (data: Record<string, unknown>): Promise<void> =>
             installations.update(installationId, data).then(() => {})
@@ -411,9 +414,16 @@ export function registerInstallationHandlers(): void {
       }
       const filtered: Record<string, unknown> = {}
       for (const key of Object.keys(data)) {
-        if (allowedIds.has(key)) {
-          filtered[key] = key === 'envVars' ? sanitizeEnvVars(data[key]) : data[key]
+        if (!allowedIds.has(key)) continue
+        if (key === 'remoteUrl') {
+          const parsed = parseUrl(data[key] as string)
+          if (!parsed) return { ok: false, message: i18n.t('errors.invalidUrl') }
+          // Store the normalized href (scheme-completed, trailing slash
+          // stripped) so it matches creation's `buildInstallation`.
+          filtered[key] = parsed.href
+          continue
         }
+        filtered[key] = key === 'envVars' ? sanitizeEnvVars(data[key]) : data[key]
       }
       if (filtered.name && filtered.name !== inst.name) {
         if (await installations.hasNameConflict(installationId, filtered.name as string)) {

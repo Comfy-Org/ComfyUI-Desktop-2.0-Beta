@@ -9,12 +9,19 @@ import type { ChildProcess } from 'child_process'
 import todesktop from '@todesktop/runtime'
 import * as ipc from './lib/ipc'
 import { getAppVersion } from './lib/ipc'
+import type { ExitCallbackInfo } from './lib/ipc'
 import * as updater from './lib/updater'
 import * as settings from './settings'
 import { installAppMenu } from './menu'
 import * as i18n from './lib/i18n'
 import { migrateXdgPaths } from './lib/paths'
 import { saveWindowBounds } from './lib/windowState'
+import {
+  clearLastActiveSurface,
+  flushLastSessionSync,
+  getLastActiveSurface,
+  recordDashboardSurface
+} from './lib/lastSession'
 import { registerProcessErrorHandlers } from './lib/processErrorHandlers'
 import { registerTitleTooltipIpc } from './popups/titleTooltip'
 import { registerTitleCoachmarkIpc } from './popups/titleCoachmark'
@@ -80,6 +87,7 @@ import {
   dropAttachClaimsForWindow,
   findEntryByTitleBarSender,
   findEntryByHostWindow,
+  forceRevealHostWindow,
   getEntryByInstallationId,
   isChooserHost,
   isInstallHost,
@@ -193,8 +201,108 @@ function quitApp(): void {
   app.quit()
 }
 
-function onComfyExited({ installationId }: { installationId?: string } = {}): void {
+/** Restore windows are opened hidden and revealed only once their launch
+ *  takeover is up (or a fallback fires); this guards against a renderer that
+ *  never reaches the restore handler, so the window can't stay invisible. */
+const STARTUP_RESTORE_REVEAL_BACKSTOP_MS = 10_000
+const pendingStartupRestoreRevealTimers = new Map<number, ReturnType<typeof setTimeout>>()
+
+function clearStartupRestoreRevealTimer(windowKey: number): void {
+  const timer = pendingStartupRestoreRevealTimers.get(windowKey)
+  if (timer) clearTimeout(timer)
+  pendingStartupRestoreRevealTimers.delete(windowKey)
+}
+
+/** Give up on the in-place restore and just show the dashboard: the surface the
+ *  user lands on is now the dashboard, so persist that and reveal the window. */
+function revealStartupRestoreDashboard(windowKey: number): void {
+  clearStartupRestoreRevealTimer(windowKey)
+  recordDashboardSurface()
+  forceRevealHostWindow(windowKey)
+}
+
+/**
+ * Boot surface. Normally just opens the chooser host (dashboard). When the
+ * reopen setting is on and the user last left an instance window, instead open
+ * the chooser host HIDDEN and restore that instance on top of it via the
+ * dashboard's own launch path (the `picker-pick-install` deep link →
+ * `performChooserLaunch`), revealing the window only once its launch takeover is
+ * showing — so the dashboard never flashes. Any failure (install gone, launch
+ * error, console/external mode, slow/absent renderer) falls back to revealing
+ * the dashboard.
+ */
+function openStartupSurface(): void {
+  // Read the persisted surface BEFORE opening the chooser host: showing the
+  // chooser fires its `focus` handler, which would record 'dashboard' and
+  // clobber the instance we're about to restore.
+  const surface = getLastActiveSurface()
+  const restoreEnabled =
+    settings.get('reopenLastInstanceOnLaunch') !== false &&
+    settings.get('firstUseCompleted') === true
+  const shouldRestore = restoreEnabled && surface?.kind === 'instance'
+
+  // Restore opens hidden (revealed on takeover-ready / fallback); the plain
+  // dashboard boot reveals on first paint as before.
+  const chooserWindow = shouldRestore
+    ? openChooserHostWindow('comfy', { deferColdStartReveal: true })
+    : openOrFocusChooserHostWindow()
+
+  if (!shouldRestore) return
+  const installationId = surface.installationId
+
+  void (async () => {
+    const entry = findEntryByHostWindow(chooserWindow)
+    if (!entry || entry.window.isDestroyed() || !isChooserHost(entry)) {
+      // Lost the entry right after creating it (shouldn't happen) — reveal the
+      // raw window so a hidden restore window can't get stranded invisible.
+      if (!chooserWindow.isDestroyed()) chooserWindow.show()
+      return
+    }
+
+    // Backstop: if the renderer never resolves the reveal (failed load, hung
+    // guard), show the dashboard rather than leaving the window invisible.
+    const timer = setTimeout(
+      () => revealStartupRestoreDashboard(entry.windowKey),
+      STARTUP_RESTORE_REVEAL_BACKSTOP_MS,
+    )
+    pendingStartupRestoreRevealTimers.set(entry.windowKey, timer)
+
+    const inst = await getInstallation(installationId)
+    if (!inst) {
+      // The remembered install was deleted — drop the stale state so we don't
+      // retry forever, and reveal the dashboard.
+      clearLastActiveSurface()
+      revealStartupRestoreDashboard(entry.windowKey)
+      return
+    }
+    const panelView =
+      entry.panelView ?? ensurePanelView(entry.windowKey, entry, computeBodyMode(entry))
+    if (panelView.webContents.isDestroyed()) {
+      revealStartupRestoreDashboard(entry.windowKey)
+      return
+    }
+    // `sendToPanelDeferred` holds the IPC until the panel renderer's
+    // `did-finish-load`; the deep-link handler then awaits its own bootstrap
+    // before launching, so this is safe to fire immediately after open. The
+    // `startupRestore` flag tells the renderer to (a) take the dashboard-
+    // fallback path on a missing launch action instead of opening new-install,
+    // and (b) resolve the reveal once the launch takeover is up.
+    sendToPanelDeferred(panelView, 'panel-trigger-overlay', {
+      kind: 'picker-pick-install',
+      installationId,
+      startupRestore: true
+    })
+  })()
+}
+
+function onComfyExited({ installationId, crashed }: ExitCallbackInfo = {}): void {
   if (!installationId) return
+  // A crashed instance is no longer a healthy restore target: drop it back to
+  // the dashboard so the next boot doesn't relaunch straight into the crash.
+  // `recordDashboardSurface` only overwrites when this install is still the
+  // recorded surface's intent (it's a simple last-writer), which is correct
+  // here — the crashed window is the one the user was on.
+  if (crashed) recordDashboardSurface()
   // The window stays alive — exit (clean or crash) just swaps the body to the
   // lifecycle panel so the user can re-launch, look at logs, or close the
   // window themselves. Window destruction only happens via explicit close
@@ -593,6 +701,31 @@ ipcMain.handle('app:relaunch', () => {
 ipcMain.handle('reset-zoom', () => {
   // no-op
 })
+
+/**
+ * Startup-restore reveal handshake. The boot flow opens the restore window
+ * hidden and asks the panel renderer to launch the remembered instance; the
+ * renderer fires this once it knows the outcome:
+ *   - `'takeover-ready'`     → the launch takeover is up, reveal the window so
+ *     the user lands on the launching surface (no dashboard flash).
+ *   - `'dashboard-fallback'` → the launch didn't produce a takeover (already
+ *     running, missing action, console/external mode, error), so reveal the
+ *     dashboard instead.
+ * Resolved by sender so we reveal the exact hidden host that asked.
+ */
+ipcMain.on(
+  'comfy-window:startup-restore-reveal',
+  (event, payload: { result?: unknown }) => {
+    const result = payload?.result === 'dashboard-fallback' ? 'dashboard-fallback' : 'takeover-ready'
+    for (const [windowKey, entry] of comfyWindows) {
+      if (entry.panelView?.webContents !== event.sender) continue
+      clearStartupRestoreRevealTimer(windowKey)
+      if (result === 'dashboard-fallback') recordDashboardSurface()
+      forceRevealHostWindow(windowKey)
+      return
+    }
+  }
+)
 
 /**
  * First-use takeover step plumbing.
@@ -1144,6 +1277,15 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
         void updater.runCheck('app-menu').catch(() => {})
       }
     })
+
+    // Hide the bar on every window (incl. window.open popups) while keeping
+    // its accelerators live — the app uses a custom title bar throughout.
+    if (process.platform !== 'darwin') {
+      app.on('browser-window-created', (_event, window) => {
+        window.setMenuBarVisibility(false)
+        window.autoHideMenuBar = true
+      })
+    }
 
     // Bring up main-process telemetry as early as possible so install/migrate
     // sub-step events can fire even before the renderer mounts.
@@ -1833,8 +1975,10 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     // The install-less chooser host is the primary surface. Each
     // install gets its own ComfyUI window via openComfyWindow()
     // when launched, and the chooser host is the entry-point for
-    // picking / creating installs.
-    openOrFocusChooserHostWindow()
+    // picking / creating installs. When the user last left an instance
+    // window (and the reopen setting is on), restore that instance
+    // in-place on top of the freshly-opened chooser host.
+    openStartupSurface()
 
     // Single subscription rebroadcasts every install-list mutation
     // (add/remove/update/markLaunched/reorder/...) to all renderers as
@@ -1911,6 +2055,10 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
       _stopPeriodicReleaseChecks()
       _stopPeriodicReleaseChecks = null
     }
+    // Persist any pending last-active-surface write so the next boot can
+    // restore it. Synchronous: the app exits without awaiting promises, so an
+    // async write would be torn down mid-flight and lose a just-made change.
+    flushLastSessionSync()
     cleanupTempDownloads()
   })
 

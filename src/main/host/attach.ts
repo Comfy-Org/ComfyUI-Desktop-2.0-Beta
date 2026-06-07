@@ -2,11 +2,13 @@ import * as ipc from '../lib/ipc'
 import { getAppVersion } from '../lib/ipc'
 import { attachSessionDownloadHandler } from '../lib/comfyDownloadManager'
 import { getModelDownloadContentScript } from '../lib/comfyContentScript'
+import { getComfyTerminalContentScript } from '../lib/comfyTerminalContentScript'
 import { _operationAborts, sourceMap } from '../lib/ipc/shared'
 import { TITLEBAR_BG } from '../lib/theme'
 import * as mainTelemetry from '../lib/telemetry'
 import { refreshCloudUserTier } from '../lib/userTier'
 import { forwardDatadogError } from '../lib/processErrorHandlers'
+import { recordInstanceSurface } from '../lib/lastSession'
 import { installationEvents, type InstallationRecord } from '../installations'
 import {
   dropInstallationIndex,
@@ -137,6 +139,11 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
   // null) install on the next dock-icon click.
   if (comfyWindow.isFocused()) {
     setLastFocusedInstallationId(installationId)
+    // An attach onto the focused host makes this install the active surface;
+    // persist it so the next boot restores this instance (no fresh focus
+    // event fires for an in-place attach). The record helper no-ops while
+    // quitting.
+    recordInstanceSurface(installationId)
   }
 
   // OS-level window title is rebuilt whenever the page title or the
@@ -377,6 +384,20 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
     comfyContents.executeJavaScript(COMFY_THEME_OBSERVER_JS).catch(() => {})
     const preamble = isLocal ? '' : 'window.__comfyDesktop2Remote = true;\n'
     comfyContents.executeJavaScript(preamble + getModelDownloadContentScript()).catch(() => {})
+    // Always inject the Terminal bottom-panel tab on standalone installs.
+    //
+    // Originally gated on `!supports_terminal` to avoid duplicating the
+    // flag-gated frontend tab. Day-3 launch feedback put terminal
+    // discoverability ("Why u delete cmd?") in the top tier of complaints,
+    // and the companion ComfyUI / ComfyUI_frontend PRs that would deliver
+    // the native tab are still in flight. So we ship the injection
+    // always-on now and dedupe in JS instead: the injected script checks
+    // `bottomPanelTabs` for an existing `command-terminal` entry and
+    // bails out before registering a second copy. See
+    // `comfyTerminalContentScript.ts` for the dedupe guard.
+    if (isLocal && installation.sourceId === 'standalone') {
+      comfyContents.executeJavaScript(getComfyTerminalContentScript()).catch(() => {})
+    }
     // Cloud-only patches (popup-blocked toast suppression + post-signin
     // flicker hide). Skipped for local installs — they don't load cloud
     // frontend, never see the toast or the redirect flash.

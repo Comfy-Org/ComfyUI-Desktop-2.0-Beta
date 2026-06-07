@@ -38,6 +38,9 @@ export function buildSettingsSections(): SettingsSection[] {
     {
       title: i18n.t('settings.general'),
       fields: [
+        // Locale picker first — most users only ever touch this once and
+        // then forget the panel exists. Keeping it at the top so it's
+        // discoverable.
         {
           id: 'language',
           label: i18n.t('settings.language'),
@@ -47,8 +50,41 @@ export function buildSettingsSections(): SettingsSection[] {
         },
         // Theme picker hidden (app is dark-only); the theme plumbing stays
         // wired so re-adding this field is the only change needed to restore it.
-        // autoInstallUpdates toggles silent-install vs prompt; the auto-check
-        // loop itself always runs.
+
+        // Window-behavior block — these two travel together:
+        //   reopenLastInstanceOnLaunch + closeDirectlyOnLastWindow
+        // together implement the "feel like a single-app workspace" flow
+        // (quit closes the instance, next launch boots straight back in).
+        {
+          id: 'reopenLastInstanceOnLaunch',
+          label: i18n.t('settings.reopenLastInstanceOnLaunch'),
+          type: 'boolean',
+          value: s.reopenLastInstanceOnLaunch !== false
+        },
+        {
+          id: 'closeDirectlyOnLastWindow',
+          label: i18n.t('settings.closeDirectlyOnLastWindow'),
+          type: 'boolean',
+          value: s.closeDirectlyOnLastWindow === true,
+          tooltip: i18n.t('settings.closeDirectlyOnLastWindowDescription')
+        },
+
+        // Cloud opt-out — pure visibility toggle, doesn't affect any
+        // running behavior. Kept after the window-behavior block so
+        // users who don't care about Cloud find it without scrolling
+        // past the more invasive ones.
+        {
+          id: 'hideCloudFromPicker',
+          label: i18n.t('settings.hideCloudFromPicker'),
+          type: 'boolean',
+          value: s.hideCloudFromPicker === true,
+          tooltip: i18n.t('settings.hideCloudFromPickerDescription')
+        },
+
+        // autoInstallUpdates is filtered out of generalFields by
+        // buildGlobalSettingsSnapshot — it renders inside the Updates
+        // tab. Keeping the field definition here so the schema stays
+        // single-source.
         {
           id: 'autoInstallUpdates',
           label: i18n.t('settings.autoInstallUpdates'),

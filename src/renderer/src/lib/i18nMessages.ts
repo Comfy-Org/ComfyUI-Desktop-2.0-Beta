@@ -34,7 +34,12 @@ export const en = {
       'Restart the application (or close and reopen) for these changes to take effect.'
   },
   statusFactPanel: {
-    editName: 'Edit installation name'
+    editName: 'Edit installation name',
+    editUrl: 'Edit connection URL',
+    restartToApply: 'Restart to apply'
+  },
+  errors: {
+    invalidUrl: 'Enter a valid URL (e.g. http://localhost:8188).'
   },
   models: {
     addDir: 'Add directory',

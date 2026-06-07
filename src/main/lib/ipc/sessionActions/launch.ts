@@ -27,6 +27,7 @@ import { rotateLogFiles, getLogDir } from '../../logRotation'
 import { createExecutionTap } from '../../executionTap'
 import { clearCrash, recordCrash } from '../../crashBuffer'
 import * as telemetry from '../../telemetry'
+import { appendLog } from '../../logsBroadcast'
 import { ensureManagerMirrorConfig } from '../../managerConfig'
 import type { WriteStream } from 'fs'
 
@@ -34,6 +35,10 @@ import type { WriteStream } from 'fs'
 // install's --list-feature-flags registry so we never inject unrecognized keys.
 const DESKTOP_FEATURE_FLAGS: Record<string, string> = {
   show_signin_button: 'true',
+  // Advertises that an interactive terminal host is available, so the frontend
+  // may surface its bottom-panel terminal. The actual transport is the
+  // __comfyDesktop2.Terminal bridge; the flag only gates visibility.
+  supports_terminal: 'true',
 }
 
 // A clean exit is code 0 with no signal; anything else (non-zero code or a
@@ -270,7 +275,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
       if (!sender.isDestroyed()) {
         sender.send('comfy-exited', exitedPayload)
       }
-      if (_onComfyExited) _onComfyExited({ installationId })
+      if (_onComfyExited) _onComfyExited({ installationId, crashed })
     })
 
     if (_onLaunch) {
@@ -371,6 +376,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     if (!sender.isDestroyed()) {
       sender.send('comfy-output', { installationId, text })
     }
+    appendLog(installationId, text)
   }
 
   const logStream = await openLogStream(inst.installPath)
@@ -414,6 +420,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     if (!sender.isDestroyed()) {
       sender.send('comfy-output', { installationId, text: `> ${cmdLine}\n\n` })
     }
+    appendLog(installationId, `> ${cmdLine}\n\n`)
     // Explicit boot-attempt event. `installation_started` already fires
     // on successful boot with `boot_time_ms`, and `comfyui.exited` carries
     // `crashed=true` on failure — but boot success rate needed inferred
@@ -671,7 +678,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
       if (!sender.isDestroyed()) {
         sender.send('comfy-exited', exitedPayload)
       }
-      if (_onComfyExited) _onComfyExited({ installationId })
+      if (_onComfyExited) _onComfyExited({ installationId, crashed })
     })
   }
   attachExitHandler(proc)

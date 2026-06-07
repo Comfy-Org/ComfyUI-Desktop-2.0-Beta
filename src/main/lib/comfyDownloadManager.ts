@@ -650,6 +650,10 @@ export function attachSessionDownloadHandler(sess: Electron.Session): void {
       // General download — browser-like save dialog
       const suggestedName = item.getFilename()
       const downloadsDir = app.getPath('downloads')
+      // Seed the dialog with the directory the user last saved to, matching
+      // browser behavior. Fall back to Downloads if unset or no longer present.
+      const remembered = settings.get('lastSaveDialogDir')
+      const startDir = remembered && fs.existsSync(remembered) ? remembered : downloadsDir
       // `webContents` is null for `session.downloadURL(...)`-initiated downloads
       // (Electron only sets it for page-initiated ones), so fall back to the
       // focused window for the Save dialog parent.
@@ -659,22 +663,23 @@ export function attachSessionDownloadHandler(sess: Electron.Session): void {
       let savePath: string | undefined
       if (win) {
         const filePath = dialog.showSaveDialogSync(win, {
-          defaultPath: path.join(downloadsDir, suggestedName),
+          defaultPath: path.join(startDir, suggestedName),
         })
         if (filePath) {
           savePath = filePath
+          settings.set('lastSaveDialogDir', path.dirname(filePath))
         } else {
           item.cancel()
           return
         }
       } else {
         // setSavePath must be synchronous within will-download
-        let candidate = path.join(downloadsDir, suggestedName)
+        let candidate = path.join(startDir, suggestedName)
         let i = 1
         while (fs.existsSync(candidate)) {
           const ext = path.extname(suggestedName)
           const base = path.basename(suggestedName, ext)
-          candidate = path.join(downloadsDir, `${base} (${i})${ext}`)
+          candidate = path.join(startDir, `${base} (${i})${ext}`)
           i++
         }
         savePath = candidate

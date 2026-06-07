@@ -4,6 +4,7 @@ import {
   _operationAborts,
 } from '../shared'
 import type { ActionContext, ActionResult } from './types'
+import { appendLog } from '../../logsBroadcast'
 
 export async function handleDelegateToSource({ event, installationId, inst, actionData }: ActionContext, actionId: string): Promise<ActionResult> {
   const abort = new AbortController()
@@ -14,6 +15,7 @@ export async function handleDelegateToSource({ event, installationId, inst, acti
   }
   const sendOutput = (text: string): void => {
     try { if (!sender.isDestroyed()) sender.send('comfy-output', { installationId, text }) } catch {}
+    appendLog(installationId, text)
   }
   const update = (data: Record<string, unknown>): Promise<void> =>
     installations.update(installationId, data).then(() => {})

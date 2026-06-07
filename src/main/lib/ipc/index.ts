@@ -25,6 +25,8 @@ import { registerInstallationHandlers } from './registerInstallationHandlers'
 import { registerSnapshotHandlers } from './registerSnapshotHandlers'
 import { registerSettingsHandlers } from './registerSettingsHandlers'
 import { registerSessionHandlers } from './registerSessionHandlers'
+import { registerTerminalHandlers } from './registerTerminalHandlers'
+import { registerLogsHandlers } from './registerLogsHandlers'
 import { registerCrashHandlers } from './registerCrashHandlers'
 import { registerTelemetryHandlers } from './registerTelemetryHandlers'
 
@@ -37,7 +39,7 @@ export {
   getActiveDetails,
   cancelAll
 } from './shared'
-export type { RegisterCallbacks } from './shared'
+export type { RegisterCallbacks, ExitCallbackInfo } from './shared'
 
 // Idempotent guard so a re-run (tests/hot-reload) doesn't double-subscribe.
 let _releaseCacheBridgeWired = false
@@ -209,6 +211,8 @@ export function register(callbacks: RegisterCallbacks = {}): void {
   registerSnapshotHandlers()
   registerSettingsHandlers()
   registerSessionHandlers()
+  registerTerminalHandlers()
+  registerLogsHandlers()
   registerCrashHandlers()
   registerTelemetryHandlers()
 }

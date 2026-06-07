@@ -80,6 +80,17 @@ describe('settings unset/default semantics', () => {
     expect(persisted).not.toHaveProperty('onAppClose')
   })
 
+  it('persists and clears the nullable lastSaveDialogDir', () => {
+    const dir = path.join(homePath, 'Pictures', 'renders')
+    settings.set('lastSaveDialogDir', dir)
+    expect(settings.get('lastSaveDialogDir')).toBe(dir)
+    expect(readPersistedSettings()['lastSaveDialogDir']).toBe(dir)
+
+    settings.set('lastSaveDialogDir', undefined)
+    expect(settings.get('lastSaveDialogDir')).toBeUndefined()
+    expect(readPersistedSettings()).not.toHaveProperty('lastSaveDialogDir')
+  })
+
   it('normalizes legacy null values to unset on write', () => {
     fs.mkdirSync(path.dirname(settingsPath), { recursive: true })
     fs.writeFileSync(

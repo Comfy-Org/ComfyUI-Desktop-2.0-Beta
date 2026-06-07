@@ -434,6 +434,14 @@ export interface ComfyOutputData {
   text: string
 }
 
+/** Snapshot for repainting an interactive console: the retained scrollback,
+ *  the shell's current size, and whether the session has been killed. */
+export interface TerminalRestore {
+  buffer: string[]
+  size: { cols: number; rows: number }
+  exited: boolean
+}
+
 export interface ComfyExitedData {
   installationId: string
   installationName: string
@@ -937,6 +945,16 @@ export interface ElectronApi {
    *  to `true` when a window (or external process window) was focused,
    *  `false` when none exists. */
   focusComfyWindow(installationId: string): Promise<boolean>
+
+  // Interactive console (per-installation shell, shared across windows)
+  /** Spawn the install's shell if needed, subscribe this surface, and return
+   *  the current scrollback/size/exited state to repaint. */
+  terminalSubscribe(installationId: string): Promise<TerminalRestore>
+  terminalUnsubscribe(installationId: string): Promise<void>
+  terminalWrite(installationId: string, data: string): Promise<void>
+  terminalResize(installationId: string, cols: number, rows: number): Promise<void>
+  /** Kill the current shell (if any) and start a fresh one. */
+  terminalRestart(installationId: string): Promise<TerminalRestore>
   /** Open a window for the install backing `installationId`. Focuses
    *  any existing install-backed window; otherwise opens a fresh
    *  chooser host so the user can pick the install from the dashboard.
@@ -972,6 +990,12 @@ export interface ElectronApi {
    *  the comfy/chooser root. Fire-and-forget; the panel will receive
    *  the resulting `panel-switch` like any other navigation. */
   closeCurrentPanel(): void
+  /** Boot-time restore reveal handshake. The restore window is opened
+   *  hidden; the panel calls this once it knows whether its launch
+   *  takeover came up (`'takeover-ready'` → reveal the launching surface)
+   *  or it fell back to the dashboard (`'dashboard-fallback'`). Main
+   *  reveals the sender's hidden host either way. Fire-and-forget. */
+  resolveStartupRestoreReveal(result: 'takeover-ready' | 'dashboard-fallback'): void
   /** Open the Global Settings popup for the panel's host window. Used
    *  by the panel-side file-menu "Settings" item and the
    *  `comfy://open-settings?tab=global` deep link. Main reuses the
@@ -991,7 +1015,7 @@ export interface ElectronApi {
    *  `comfy://open-settings?tab=comfy`). */
   openInstancePicker(opts?: {
     installationId?: string | null
-    initialTab?: 'config' | 'status' | 'update' | 'snapshots' | 'storage'
+    initialTab?: 'config' | 'status' | 'update' | 'snapshots' | 'storage' | 'console'
     autoAction?: string | null
   }): void
   /** Push the first-use takeover's current step to main so it can
@@ -1228,6 +1252,10 @@ export interface ElectronApi {
    *  reaches the launching window). Lets any open dashboard show the red
    *  error tile live. */
   onInstanceCrashed(callback: (data: ComfyExitedData) => void): Unsubscribe
+  onTerminalOutput(
+    callback: (data: { installationId: string; data: string }) => void
+  ): Unsubscribe
+  onTerminalExited(callback: (data: { installationId: string }) => void): Unsubscribe
   onComfyBootLog(callback: (data: ComfyBootLogData) => void): Unsubscribe
   onInstanceLaunching(
     callback: (data: { installationId: string; installationName: string }) => void
@@ -1408,6 +1436,10 @@ export interface ElectronApi {
       settingsTab?: 'comfy' | 'directories' | 'downloads' | 'global'
       title?: string
       cancellable?: boolean
+      /** Picker-only (`picker-pick-install`): set on boot-time restore. The
+       *  panel takes the dashboard-fallback path on a missing launch action
+       *  (instead of opening new-install) and resolves the reveal handshake. */
+      startupRestore?: boolean
       triggersInstanceStart?: boolean
       opKind?: 'launch' | 'install' | 'update' | 'destructive' | 'snapshot' | 'generic'
       isRestart?: boolean

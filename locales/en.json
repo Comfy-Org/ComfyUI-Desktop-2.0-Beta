@@ -78,6 +78,7 @@
     "tabUpdate": "Update",
     "tabSnapshots": "Snapshots",
     "tabStorage": "Storage",
+    "tabConsole": "Console",
     "relaunch": "Relaunch",
     "more": "More",
     "diskUsage": "Disk Usage",
@@ -372,7 +373,9 @@
     "disconnect": "Disconnect",
     "connectedTo": "Connected to {url}",
     "processExited": "Process exited",
-    "processCrashed": "Process crashed (exit code {code})"
+    "processCrashed": "Process crashed (exit code {code})",
+    "sessionEnded": "This console session ended. Restart it to keep using the shell.",
+    "restartSession": "Restart console"
   },
 
   "settingsModal": {
@@ -384,7 +387,7 @@
 
   "settings": {
     "title": "Settings",
-    "general": "General",
+    "general": "Preferences",
     "theme": "Theme",
     "themeSystem": "Match system",
     "themeDark": "Dark",
@@ -400,6 +403,12 @@
     "closeQuitDownloads": "Downloading",
     "autoUpdate": "Check for updates on startup",
     "autoInstallUpdates": "Automatically install Desktop updates",
+    "appBehavior": "App Behavior",
+    "reopenLastInstanceOnLaunch": "Auto-restart last instance on launch",
+    "closeDirectlyOnLastWindow": "Close Comfy Desktop on last window (don't return to Dashboard)",
+    "closeDirectlyOnLastWindowDescription": "When you close the last ComfyUI instance window, quit Comfy Desktop immediately instead of returning to the Dashboard.",
+    "hideCloudFromPicker": "Hide Cloud from the Instance Picker",
+    "hideCloudFromPickerDescription": "For local-only users — hides the Cloud tile (and the Try Cloud CTA) from the Dashboard. Cloud remains fully functional; you can re-enable this any time.",
     "checkForUpdates": "Check for updates",
     "checkingForUpdates": "Checking…",
     "telemetry": "Telemetry",
@@ -678,7 +687,7 @@
 
   "cloud": {
     "label": "Cloud",
-    "desc": "Connect to Comfy Cloud for remote GPU-powered workflows.",
+    "desc": "Run workflows on managed GPUs.",
     "signInBanner": {
       "message": "We opened your browser to sign in. Didn’t open?",
       "copy": "Copy link",
@@ -1010,6 +1019,7 @@
   },
 
   "errors": {
+    "invalidUrl": "Enter a valid URL (e.g. http://localhost:8188).",
     "noLaunchSupport": "This source does not support launching yet.",
     "noEnvFound": "Cannot launch: no Python environment found. Create one first.",
     "alreadyRunning": "ComfyUI is already running. Stop it before launching again.",
@@ -1049,6 +1059,7 @@
   "tooltips": {
     "instances": "A separate ComfyUI installation with its own version, models, and settings.",
     "snapshots": "A saved point-in-time state of an installation (versions + custom nodes) you can restore later.",
+    "console": "An interactive shell running in this installation's folder. Works whether ComfyUI is running or stopped.",
     "standalone": "A self-contained install with its own bundled Python and dependencies. Easy to update and manage.",
     "portable": "The official portable Windows build with embedded Python. Runs from a single folder without a system-wide install.",
     "git": "A git-based install cloned from the ComfyUI repository. Requires git and Python to be installed on your system.",

@@ -58,6 +58,16 @@ export function buildElectronApi(): ElectronApi {
     // Running
     stopComfyUI: (installationId) => ipcRenderer.invoke('stop-comfyui', installationId),
     focusComfyWindow: (installationId) => ipcRenderer.invoke('focus-comfy-window', installationId),
+
+    // Interactive console
+    terminalSubscribe: (installationId) => ipcRenderer.invoke('terminal-subscribe', installationId),
+    terminalUnsubscribe: (installationId) =>
+      ipcRenderer.invoke('terminal-unsubscribe', installationId),
+    terminalWrite: (installationId, data) =>
+      ipcRenderer.invoke('terminal-write', installationId, data),
+    terminalResize: (installationId, cols, rows) =>
+      ipcRenderer.invoke('terminal-resize', installationId, cols, rows),
+    terminalRestart: (installationId) => ipcRenderer.invoke('terminal-restart', installationId),
     openInstallWindow: (installationId) =>
       ipcRenderer.invoke('open-install-window', installationId),
     closeComfyWindow: (installationId, opts) =>
@@ -65,6 +75,8 @@ export function buildElectronApi(): ElectronApi {
     closeHostWindow: () => ipcRenderer.invoke('close-host-window'),
     returnToDashboard: () => ipcRenderer.invoke('return-to-dashboard'),
     closeCurrentPanel: () => ipcRenderer.send('comfy-window:close-current-panel'),
+    resolveStartupRestoreReveal: (result) =>
+      ipcRenderer.send('comfy-window:startup-restore-reveal', { result }),
     openGlobalSettings: () => ipcRenderer.send('comfy-titlepopup:open-global-settings'),
     openInstancePicker: (opts) =>
       ipcRenderer.send('comfy-window:open-instance-picker-for-install', {
@@ -222,6 +234,18 @@ export function buildElectronApi(): ElectronApi {
         callback(data as Parameters<typeof callback>[0])
       ipcRenderer.on('instance-crashed', handler)
       return () => ipcRenderer.removeListener('instance-crashed', handler)
+    },
+    onTerminalOutput: (callback) => {
+      const handler = (_event: IpcRendererEvent, data: unknown) =>
+        callback(data as Parameters<typeof callback>[0])
+      ipcRenderer.on('terminal-output', handler)
+      return () => ipcRenderer.removeListener('terminal-output', handler)
+    },
+    onTerminalExited: (callback) => {
+      const handler = (_event: IpcRendererEvent, data: unknown) =>
+        callback(data as Parameters<typeof callback>[0])
+      ipcRenderer.on('terminal-exited', handler)
+      return () => ipcRenderer.removeListener('terminal-exited', handler)
     },
     onComfyBootLog: (callback) => {
       const handler = (_event: IpcRendererEvent, data: unknown) =>
@@ -443,6 +467,7 @@ export function buildElectronApi(): ElectronApi {
             actionId?: string
             version?: string | null
             settingsTab?: 'comfy' | 'directories' | 'downloads' | 'global'
+            startupRestore?: boolean
           }
         )
       ipcRenderer.on('panel-trigger-overlay', handler)

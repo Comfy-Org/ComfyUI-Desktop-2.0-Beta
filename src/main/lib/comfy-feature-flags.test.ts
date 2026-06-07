@@ -1,5 +1,11 @@
-import { describe, it, expect } from 'vitest'
-import { parseFeatureFlagOutput } from './comfy-feature-flags'
+import { describe, it, expect, beforeEach } from 'vitest'
+import {
+  parseFeatureFlagOutput,
+  getCachedFeatureFlagRegistry,
+  isCachedFeatureFlagAvailable,
+  clearFeatureFlagRegistryCache,
+  getComfyFeatureFlagRegistry,
+} from './comfy-feature-flags'
 
 describe('parseFeatureFlagOutput', () => {
   it('parses valid JSON output', () => {
@@ -45,5 +51,41 @@ describe('parseFeatureFlagOutput', () => {
     const reg = parseFeatureFlagOutput(stdout)
     expect(Object.keys(reg)).toEqual(['flag_a', 'flag_b'])
     expect(reg['flag_b']?.default).toBe(10)
+  })
+})
+
+describe('feature-flag registry cache accessors', () => {
+  const installationId = 'cache-test-install'
+  // A path that can't be executed, so discovery fails and caches {} —
+  // exercising the spawn-free accessors without needing a real Python.
+  const badPython = '/nonexistent/python-binary'
+
+  beforeEach(() => {
+    clearFeatureFlagRegistryCache(installationId)
+  })
+
+  it('returns null before any discovery has run', () => {
+    expect(getCachedFeatureFlagRegistry(installationId)).toBeNull()
+    expect(isCachedFeatureFlagAvailable(installationId, 'supports_terminal')).toBe(false)
+  })
+
+  it('caches an empty registry after a failed discovery and reports flags absent', async () => {
+    await getComfyFeatureFlagRegistry(badPython, 'main.py', process.cwd(), installationId, '1.0.0')
+    expect(getCachedFeatureFlagRegistry(installationId)).toEqual({})
+    expect(isCachedFeatureFlagAvailable(installationId, 'supports_terminal')).toBe(false)
+  })
+
+  it('matches a cached version and rejects a mismatched one', async () => {
+    await getComfyFeatureFlagRegistry(badPython, 'main.py', process.cwd(), installationId, '1.0.0')
+    expect(getCachedFeatureFlagRegistry(installationId, '1.0.0')).toEqual({})
+    expect(getCachedFeatureFlagRegistry(installationId, '2.0.0')).toBeNull()
+    // A version-less query always hits the cache.
+    expect(getCachedFeatureFlagRegistry(installationId)).toEqual({})
+  })
+
+  it('clears the cache back to a miss', async () => {
+    await getComfyFeatureFlagRegistry(badPython, 'main.py', process.cwd(), installationId, '1.0.0')
+    clearFeatureFlagRegistryCache(installationId)
+    expect(getCachedFeatureFlagRegistry(installationId)).toBeNull()
   })
 })

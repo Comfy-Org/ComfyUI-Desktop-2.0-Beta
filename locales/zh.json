@@ -268,6 +268,7 @@
     "closeQuitConfirm": "退出",
     "autoUpdate": "启动时检查更新",
     "autoInstallUpdates": "自动安装桌面更新",
+    "reopenLastInstanceOnLaunch": "启动时重新打开上次的实例",
     "checkForUpdates": "检查更新",
     "checkingForUpdates": "检查中…",
     "telemetry": "遥测",

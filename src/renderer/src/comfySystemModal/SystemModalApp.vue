@@ -11,6 +11,8 @@ import BaseAlert from '../components/ui/BaseAlert.vue'
  */
 
 type SystemModalConfirmStyle = 'primary' | 'danger'
+type SystemModalSecondaryStyle = 'primary' | 'danger' | 'default'
+type SystemModalAction = 'confirm' | 'cancel' | 'secondary'
 
 interface SystemModalDetailGroup {
   label: string
@@ -25,11 +27,13 @@ interface SystemModalSpec {
   confirmLabel: string
   cancelLabel: string
   confirmStyle?: SystemModalConfirmStyle
+  secondaryLabel?: string
+  secondaryStyle?: SystemModalSecondaryStyle
   theme: { bg: string; text: string }
 }
 
 interface Bridge {
-  action(payload: { modalId: string; action: 'confirm' | 'cancel' }): void
+  action(payload: { modalId: string; action: SystemModalAction }): void
   ready(): void
   notifyRendered(): void
   onModal(cb: (spec: SystemModalSpec) => void): () => void
@@ -43,7 +47,7 @@ const tone = computed<'primary' | 'danger'>(() =>
   spec.value?.confirmStyle === 'danger' ? 'danger' : 'primary',
 )
 
-function ack(action: 'confirm' | 'cancel'): void {
+function ack(action: SystemModalAction): void {
   const current = spec.value
   if (!current) return
   bridge?.action({ modalId: current.id, action })
@@ -79,9 +83,12 @@ onUnmounted(() => {
     :button-label="spec?.confirmLabel ?? ''"
     :cancel-label="spec?.cancelLabel ?? ''"
     :tone="tone"
+    :secondary-label="spec?.secondaryLabel"
+    :secondary-tone="spec?.secondaryStyle ?? 'default'"
     show-cancel
     @close="ack('confirm')"
     @cancel="ack('cancel')"
+    @secondary="ack('secondary')"
   >
     <!-- When the spec carries `details`, render `message` then each group as a bulleted list. -->
     <template v-if="spec?.details && spec.details.length > 0" #default>

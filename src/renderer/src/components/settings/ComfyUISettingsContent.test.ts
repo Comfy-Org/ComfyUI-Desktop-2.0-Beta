@@ -24,12 +24,15 @@ const messages = {
       tabUpdate: 'Update',
       tabSnapshots: 'Snapshots',
       tabStorage: 'Storage',
+      tabConsole: 'Console',
       relaunch: 'Relaunch',
       more: 'More',
     },
     tooltips: {
       snapshots:
         'A saved point-in-time state of an installation (versions + custom nodes) you can restore later.',
+      console:
+        "An interactive shell running in this installation's folder. Works whether ComfyUI is running or stopped.",
     },
     instancePicker: {
       open: 'Start',
@@ -114,6 +117,9 @@ vi.mock('../../views/comfyUISettings/StatusFactPanel.vue', () => ({
 }))
 vi.mock('../../views/comfyUISettings/StoragePane.vue', () => ({
   default: { template: '<div />' },
+}))
+vi.mock('../../views/comfyUISettings/ConsoleTerminalPane.vue', () => ({
+  default: { name: 'ConsoleTerminalPane', props: ['installationId'], template: '<div data-testid="console-terminal-pane-stub" />' },
 }))
 vi.mock('../../views/comfyUISettings/ArgsBuilderPage.vue', () => ({
   default: { template: '<div />' },
@@ -414,13 +420,16 @@ describe('ComfyUISettingsContent', () => {
 
     const SNAPSHOTS_TOOLTIP =
       'A saved point-in-time state of an installation (versions + custom nodes) you can restore later.'
+    const CONSOLE_TOOLTIP =
+      "An interactive shell running in this installation's folder. Works whether ComfyUI is running or stopped."
+    const CONCEPT_TOOLTIPS = new Set([SNAPSHOTS_TOOLTIP, CONSOLE_TOOLTIP])
 
-    /** Disabled flags for tabs that only echo their label (excludes Snapshots,
-     *  which carries a real concept tooltip). */
+    /** Disabled flags for tabs that only echo their label (excludes Snapshots
+     *  and Console, which carry real concept tooltips). */
     function labelEchoDisabledFlags(w: VueWrapper): boolean[] {
       return w
         .findAllComponents({ name: 'Tooltip' })
-        .filter((tt) => tt.props('text') !== SNAPSHOTS_TOOLTIP)
+        .filter((tt) => !CONCEPT_TOOLTIPS.has(tt.props('text') as string))
         .map((tt) => tt.props('disabled') as boolean)
     }
 

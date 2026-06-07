@@ -22,6 +22,7 @@ import { extractNested as extract } from '../extract'
 import { deleteDir, formatDeleteStatus } from '../delete'
 import { deleteAction, untrackAction } from '../actions'
 import { _broadcastToRenderer } from './broadcast'
+import { appendLog } from '../logsBroadcast'
 import {
   spawnProcess, waitForPort, waitForUrl, killProcessTree, killByPort,
   findPidsByPort, getProcessInfo, looksLikeComfyUI, setPortArg,
@@ -123,6 +124,9 @@ export interface StopCallbackInfo {
 
 export interface ExitCallbackInfo {
   installationId?: string
+  /** True when the process exited unexpectedly (non-zero code or a signal),
+   *  as opposed to a clean user-initiated stop. */
+  crashed?: boolean
 }
 
 export interface RestartCallbackInfo {
@@ -728,6 +732,7 @@ export function makeSendProgress(sender: Electron.WebContents, installationId: s
 export function makeSendOutput(sender: Electron.WebContents, installationId: string): (text: string) => void {
   return (text: string): void => {
     try { if (!sender.isDestroyed()) sender.send('comfy-output', { installationId, text }) } catch {}
+    appendLog(installationId, text)
   }
 }
 

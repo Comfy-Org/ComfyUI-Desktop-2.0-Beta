@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, toRef, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { CheckCircle, XCircle, ChevronUp, HardDrive, SlidersHorizontal, Info, RefreshCw, History } from 'lucide-vue-next'
+import { CheckCircle, XCircle, ChevronUp, HardDrive, SlidersHorizontal, Info, RefreshCw, History, SquareTerminal } from 'lucide-vue-next'
 import { useComfyUISettings } from '../../composables/useComfyUISettings'
 import { useInstallCta } from '../../composables/useInstallCta'
 import { useCloudCapacity } from '../../composables/useCloudCapacity'
@@ -12,6 +12,7 @@ import SnapshotsView from '../../views/comfyUISettings/SnapshotsView.vue'
 import StatusFactPanel from '../../views/comfyUISettings/StatusFactPanel.vue'
 import SettingsSectionList from '../../views/comfyUISettings/SettingsSectionList.vue'
 import StoragePane, { type StorageSnapshot } from '../../views/comfyUISettings/StoragePane.vue'
+import ConsoleTerminalPane from '../../views/comfyUISettings/ConsoleTerminalPane.vue'
 import Tooltip from '../ui/Tooltip.vue'
 import type { PickerTab, SectionTab } from '../../lib/pickerTabs'
 import { humanizeOpStatus, operationInflightLabel, operationSuccessLabel } from '../../lib/progressStatusLabel'
@@ -117,6 +118,7 @@ const {
   updateField,
   renameInstallation,
   pendingRestartFieldIds,
+  clearPendingRestart,
   fieldErrorMessages,
   runAction,
   runningActionIds,
@@ -255,17 +257,36 @@ const ALL_TABS: TabDef[] = [
     icon: HardDrive
   },
   {
+    key: 'console',
+    sectionTab: 'console',
+    label: t('comfyUISettings.tabConsole', 'Console'),
+    icon: SquareTerminal,
+    tooltip: t('tooltips.console')
+  },
+  {
     key: 'status',
     sectionTab: 'status',
     label: t('comfyUISettings.tabStatus', 'About'),
     icon: Info
   }
 ]
+
+// The console tab has no backend `sections` — it's a live PTY view — so it
+// can't be section-gated like the others. Show it for any local install
+// (cloud installs run no local process to attach a shell to).
+const showConsoleTab = computed(
+  () => installation.value != null && installation.value.sourceCategory !== 'cloud'
+)
+
 const tabs = computed<TabDef[]>(() => {
   // Cloud runs no local process, so the `config` tab carries no real
   // startup args — relabel it "Storage" to match its contents.
   const isCloud = installation.value?.sourceCategory === 'cloud'
-  return ALL_TABS.filter((tab) => sectionsForTab(tab.sectionTab).value.length > 0).map((tab) =>
+  return ALL_TABS.filter((tab) =>
+    tab.key === 'console'
+      ? showConsoleTab.value
+      : sectionsForTab(tab.sectionTab).value.length > 0
+  ).map((tab) =>
     isCloud && tab.key === 'config'
       ? { ...tab, label: t('comfyUISettings.tabStorage', 'Storage'), icon: HardDrive }
       : tab
@@ -418,6 +439,26 @@ function handleArgsUpdate(value: string): void {
   if (f) void updateField(f, value)
 }
 
+/** Live `remoteUrl` field from the status sections (remote connections only). */
+const remoteUrlField = computed<DetailField | null>(() => {
+  for (const s of sectionsForTab('status').value) {
+    for (const f of s.fields ?? []) {
+      if (f.id === 'remoteUrl') return f
+    }
+  }
+  return null
+})
+
+/** Commit a remote-URL edit through `updateField` (optimistic write, rollback,
+ *  error pill, restart-dirty + telemetry). Resolves `false` on rejection so
+ *  StatusFactPanel reverts; success is read back from the field-error map. */
+async function handleUrlUpdate(value: string): Promise<boolean> {
+  const field = remoteUrlField.value
+  if (!field) return false
+  await updateField(field, value)
+  return !fieldErrorMessages.value.has(field.id)
+}
+
 function handleSnapshotAction(action: ActionDef): void {
   void runAction(action)
 }
@@ -453,7 +494,14 @@ const primaryActionLabel = computed(() => {
 })
 
 function handlePrimaryAction(): void {
-  if (!installation.value) return
+  const selectedInstall = installation.value
+  if (!selectedInstall) return
+  // The restart-in-place click IS the restart: main stops + relaunches with the
+  // freshly-saved values, so consume the pending-restart state now. A remote
+  // relaunch surfaces no observable lifecycle dip, so the watchers can't clear it.
+  if (installCta.restartInPlace.value && pendingRestartFieldIds.value.size > 0) {
+    clearPendingRestart(selectedInstall.id)
+  }
   emit('primary-action', installCta.restartInPlace.value)
 }
 
@@ -634,13 +682,13 @@ defineExpose({
         {{ t('comfyUISettings.emptyInstallLess', 'Open a ComfyUI install to view its settings.') }}
       </p>
       <p
-        v-else-if="loading && !visibleSections.length"
+        v-else-if="loading && !visibleSections.length && activeTab !== 'console'"
         class="empty"
         :data-testid="TID.pickerSettingsLoading"
       >
         {{ t('common.loading', 'Loading…') }}
       </p>
-      <p v-else-if="error" class="empty error">{{ error }}</p>
+      <p v-else-if="error && activeTab !== 'console'" class="empty error">{{ error }}</p>
 
       <Transition v-else :name="subPageTransition" mode="out-in">
         <ArgsBuilderPage
@@ -699,6 +747,8 @@ defineExpose({
                 :sections="statusSections"
                 :disk-usage="diskUsageItem"
                 :on-rename="renameInstallation"
+                :on-update-url="handleUrlUpdate"
+                :url-restart-pending="pendingRestartFieldIds.has('remoteUrl')"
               />
             </div>
             <div
@@ -717,6 +767,13 @@ defineExpose({
                 :running-action-ids="runningActionIds"
                 @update-field="updateField"
               />
+            </div>
+            <div
+              v-else-if="activeTab === 'console' && installation"
+              :key="`tab-console-${paneInstallKey}`"
+              class="settings-v2-tab-pane settings-v2-tab-pane--console"
+            >
+              <ConsoleTerminalPane :installation-id="installation.id" />
             </div>
             <div v-else :key="`tab-${activeTab}-${paneInstallKey}`" class="settings-v2-tab-pane">
               <Transition name="op-overlay" mode="out-in">
