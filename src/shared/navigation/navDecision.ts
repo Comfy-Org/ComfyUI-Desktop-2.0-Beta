@@ -176,9 +176,17 @@ const TABLE: ReadonlyMap<CellKey, NavDecision> = new Map<CellKey, NavDecision>([
   ],
   [
     cellKey('instance', 'instance', 'stopped'),
-    // CURRENT: switch in place (2-way kill-confirm filled at the boundary).
-    // Phase 3a flips `confirm` to 'switch-3way' and adds the new-window caret.
-    dec({ window: 'same', verb: 'switch', primaryLabel: NAV_LABEL.switch, telemetry: 'instance.switched' }),
+    // Primary "Switch" swaps B into this window (kill-confirm filled at the
+    // boundary). The caret offers "Open in new window" so the user can keep A
+    // running. When the per-version flag is on, main upgrades the swap confirm
+    // to a 3-way modal that folds both choices into one prompt (Phase 3a).
+    dec({
+      window: 'same',
+      verb: 'switch',
+      primaryLabel: NAV_LABEL.switch,
+      secondary: [OPEN_NEW_WINDOW_SECONDARY],
+      telemetry: 'instance.switched',
+    }),
   ],
   [
     cellKey('instance', 'instance', 'running-elsewhere'),

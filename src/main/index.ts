@@ -25,7 +25,7 @@ import {
 import { registerProcessErrorHandlers } from './lib/processErrorHandlers'
 import { registerTitleTooltipIpc } from './popups/titleTooltip'
 import { registerTitleCoachmarkIpc } from './popups/titleCoachmark'
-import { openSystemModal, openSystemModalAsync, registerSystemModalIpc } from './popups/systemModal'
+import { openSystemModal, openSystemModalAsync, openSystemModalChoiceAsync, registerSystemModalIpc } from './popups/systemModal'
 import {
   registerTitlePopupIpc,
   triggerPickerSnapshotBroadcast,
@@ -1480,7 +1480,12 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
           } catch {
             // Name lookup is cosmetic — fall through with the id as the label.
           }
-          const confirmed = await openSystemModalAsync({
+          // Three-way choice (issue #926, matrix row 9): the current local
+          // instance is running, so offer to keep it alive in a separate window
+          // instead of only "stop it and switch". `secondary` routes to
+          // `openInstallInNewWindow` (parent untouched); `confirm` falls through
+          // to the in-place swap below.
+          const choice = await openSystemModalChoiceAsync({
             parent: parentEntry.window,
             spec: {
               title: 'Switch instance?',
@@ -1489,18 +1494,23 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
                 {
                   label: 'Heads up',
                   items: [
-                    'The current instance will be stopped and replaced in this window.',
-                    'Any unsaved work in the workflow will be lost.'
+                    'Switch stops the current instance and replaces it in this window.',
+                    'Open in new window keeps the current instance running.'
                   ]
                 }
               ],
               confirmLabel: 'Switch',
+              secondaryLabel: 'Open in new window',
               cancelLabel: 'Cancel',
               confirmStyle: 'primary',
               theme: parentEntry.lastTheme
             }
           })
-          if (!confirmed) return
+          if (choice === 'cancel') return
+          if (choice === 'secondary') {
+            openInstallInNewWindow(installationId)
+            return
+          }
         }
         // Multi-instance validation signal. Fired once per picker swap
         // (with or without a confirm); other paths (fresh chooser pick,

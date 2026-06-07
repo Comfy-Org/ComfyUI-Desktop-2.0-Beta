@@ -90,9 +90,12 @@ describe('decideNavigation — the CURRENT-behavior matrix (baseline before #926
     const decision = decisionFor('instance', 'instance', 'self', 'local')
     expect(decision).toMatchObject({ window: 'same', verb: 'restart', primaryLabel: NAV_LABEL.restart })
   })
-  it('Instance → Instance B (stopped): switch in place, 2-way kill confirm (current)', () => {
+  it('Instance → Instance B (stopped): switch in place + new-window caret (matrix row 9)', () => {
     const decision = decisionFor('instance', 'instance', 'stopped', 'local')
     expect(decision).toMatchObject({ window: 'same', verb: 'switch', confirm: 'kill-local' })
+    // The caret offers "Open in new window" so the user can keep A running; the
+    // main-side 3-way modal also surfaces this on the primary Switch click.
+    expect(decision.secondary.some((alt) => alt.window === 'new' && alt.verb === 'open-new')).toBe(true)
   })
   it('Instance → Instance B (running elsewhere): focus, no caret', () => {
     const decision = decisionFor('instance', 'instance', 'running-elsewhere', 'local')
