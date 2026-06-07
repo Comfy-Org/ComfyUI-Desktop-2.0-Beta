@@ -1,7 +1,53 @@
 import pty from 'node-pty'
+import fs from 'fs'
+import path from 'path'
+import { createRequire } from 'module'
 import type { WebContents } from 'electron'
 import * as installations from '../installations'
 import { getActiveVenvDir, getActiveUvPath } from './pythonEnv'
+
+const requireFromHere = createRequire(__filename)
+
+/**
+ * On Unix, node-pty's `pty.fork()` exec's a small `spawn-helper` binary
+ * shipped under `node-pty/prebuilds/<plat>-<arch>/`. The npm tarball
+ * ships that helper with mode `0644`, and neither electron-builder's
+ * `afterPack` hook nor ToDesktop's wrapper actually applies the chmod we
+ * set there in production builds (the same issue `extract.ts` works
+ * around for `7za` at runtime). Without `+x`, `pty.fork()` returns
+ * `EACCES` inside the native layer and the JS surface just shows a dead
+ * PTY — the user sees a black canvas with no prompt. Set the bit at
+ * module load so every spawn that follows is safe; best-effort, since on
+ * Windows there's nothing to do and a missing helper would already fail
+ * loudly. */
+function ensureSpawnHelperExecutable(): void {
+  if (process.platform === 'win32') return
+  try {
+    const pkgDir = path.dirname(requireFromHere.resolve('node-pty/package.json'))
+    const platformDir = `${process.platform}-${process.arch}`
+    const prebuiltHelper = path
+      .join(pkgDir, 'prebuilds', platformDir, 'spawn-helper')
+      .replace('app.asar', 'app.asar.unpacked')
+    if (fs.existsSync(prebuiltHelper)) {
+      fs.chmodSync(prebuiltHelper, 0o755)
+    }
+    // Dev / locally-rebuilt copy lives under `build/Release/`. node-pty's
+    // loader prefers that path when present, so chmod it too — otherwise
+    // a rebuilt local install hits the same EACCES.
+    const builtHelper = path
+      .join(pkgDir, 'build', 'Release', 'spawn-helper')
+      .replace('app.asar', 'app.asar.unpacked')
+    if (fs.existsSync(builtHelper)) {
+      fs.chmodSync(builtHelper, 0o755)
+    }
+  } catch {
+    // Resolution failure means we're in a context where node-pty isn't
+    // installed (tests, CI without deps). The spawn itself would have
+    // failed already; leave the no-op.
+  }
+}
+
+ensureSpawnHelperExecutable()
 
 /**
  * Interactive per-installation shell sessions.
