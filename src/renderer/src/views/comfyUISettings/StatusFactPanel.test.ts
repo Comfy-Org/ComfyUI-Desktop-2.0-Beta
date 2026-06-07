@@ -161,15 +161,15 @@ describe('StatusFactPanel — running details', () => {
     expect(titles).not.toContain('Running details')
   })
 
-  it('keeps the port out of the Install details group', async () => {
+  it('keeps the port out of the Instance details group', async () => {
     markRunning()
     const wrapper = mountPanel({ installation: makeInstall('Maanil'), sections: [portSection(8188)] })
     await nextTick()
 
     const installGroup = wrapper.findAll('.status-fact-group').find(
-      (g) => g.find('.status-fact-group-title').text() === 'Install details',
+      (g) => g.find('.status-fact-group-title').text() === 'Instance details',
     )
-    // The only field is the port, which belongs to Running details, so there is no Install details group.
+    // The only field is the port, which belongs to Running details, so there is no Instance details group.
     expect(installGroup).toBeUndefined()
   })
 

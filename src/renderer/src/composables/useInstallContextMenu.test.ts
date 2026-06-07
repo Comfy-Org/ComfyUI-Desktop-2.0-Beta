@@ -50,11 +50,11 @@ const messages = {
       menuDelete: 'Uninstall',
     },
     actions: {
-      copyInstallation: 'Copy Install',
+      copyInstallation: 'Duplicate Instance',
       untrack: 'Forget',
-      untrackConfirmTitle: 'Forget Install',
+      untrackConfirmTitle: 'Forget Instance',
       untrackConfirmMessage:
-        'This will remove the install from the app. The files will not be deleted.',
+        'This will remove the instance from the app. The files will not be deleted.',
       delete: 'Delete',
       deleteConfirmTitle: 'Delete Install',
       deleteConfirmMessage:
@@ -355,7 +355,7 @@ describe('useInstallContextMenu — untrack confirm-then-remove', () => {
 
     expect(modalMock.confirm).toHaveBeenCalledTimes(1)
     const args = modalMock.confirm.mock.calls[0]![0]
-    expect(args.title).toBe('Forget Install')
+    expect(args.title).toBe('Forget Instance')
     expect(args.confirmLabel).toBe('Forget')
     expect(args.confirmStyle).toBe('danger')
     expect(onManage).not.toHaveBeenCalled()
