@@ -34,6 +34,15 @@ export interface UpdateOrchestrationOptions {
   dryRunConflictCheck?: boolean
   saveRollback?: boolean
   preUpdateSnapshot?: boolean
+  /** Force `uv pip install --upgrade -r requirements.txt` to run after the git
+   *  update, even when the requirements.txt content is byte-identical pre/post.
+   *  Used by the post-install auto-update in `install.ts` to reconcile the
+   *  pre-extracted standalone bundle's venv (which can ship deps lagging
+   *  ComfyUI's own pinned versions — most visibly `comfy-aimdo`, which crashes
+   *  loading with `'ModelMMAP' object has no attribute 'get_file_handle'` or
+   *  `ModuleNotFoundError: No module named 'comfy_aimdo.vram_buffer'` when the
+   *  bundled aimdo lags the source's import surface). */
+  forceDepsSync?: boolean
 }
 
 export interface UpdateOrchestrationResult {
@@ -228,7 +237,16 @@ export async function runComfyUIUpdate(opts: UpdateOrchestrationOptions): Promis
   let postReqs = ''
   try { postReqs = await fs.promises.readFile(reqPath, 'utf-8') } catch {}
 
-  if (preReqs !== postReqs && postReqs.length > 0) {
+  // Re-sync deps when reqs changed (the historical trigger), OR when git HEAD
+  // moved (source can import new APIs without bumping requirements.txt — saw
+  // this with `comfy_aimdo.vram_buffer` showing up in `model_management.py`
+  // between aimdo bumps), OR when the caller demands it (first-run auto-update
+  // reconciling the bundled venv against the bundled requirements.txt).
+  const headMoved = !!(markers.PRE_UPDATE_HEAD && markers.POST_UPDATE_HEAD && markers.PRE_UPDATE_HEAD !== markers.POST_UPDATE_HEAD)
+  const reqsChanged = preReqs !== postReqs
+  const shouldSyncDeps = (reqsChanged || headMoved || !!opts.forceDepsSync) && postReqs.length > 0
+
+  if (shouldSyncDeps) {
     const uvPath = getActiveUvPath(installation)
     const activeEnvPython = getActivePythonPath(installation)
 
@@ -244,7 +262,7 @@ export async function runComfyUIUpdate(opts: UpdateOrchestrationOptions): Promis
           if (signal?.aborted) return { ok: false, message: 'Cancelled', installation }
 
           const dryRunResult = await spawnCommand(
-            uvPath, ['pip', 'install', '--dry-run', '-r', filteredReqPath, '--python', activeEnvPython, ...indexArgs],
+            uvPath, ['pip', 'install', '--dry-run', '--upgrade', '-r', filteredReqPath, '--python', activeEnvPython, ...indexArgs],
             installPath, undefined, undefined, signal
           )
 
@@ -259,7 +277,7 @@ export async function runComfyUIUpdate(opts: UpdateOrchestrationOptions): Promis
           sendProgress('deps', { percent: -1, status: t('standalone.updateDepsInstalling') })
 
           const pipResult = await spawnCommand(
-            uvPath, ['pip', 'install', '-r', filteredReqPath, '--python', activeEnvPython, ...indexArgs],
+            uvPath, ['pip', 'install', '--upgrade', '-r', filteredReqPath, '--python', activeEnvPython, ...indexArgs],
             installPath, sendOutput, sendOutput, signal
           )
 
@@ -274,7 +292,7 @@ export async function runComfyUIUpdate(opts: UpdateOrchestrationOptions): Promis
         const logFn = sendOutput ?? console.log
         const installResult = await installFilteredRequirements(
           reqPath, uvPath, activeEnvPython, installPath,
-          '.post-install-reqs.txt', logFn, signal, settings.getMirrorConfig()
+          '.post-install-reqs.txt', logFn, signal, settings.getMirrorConfig(), true
         )
         if (installResult !== 0) {
           console.warn(`Post-install requirements install exited with code ${installResult}`)
