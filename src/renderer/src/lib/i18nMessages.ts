@@ -56,6 +56,16 @@ export const en = {
       'A separate ComfyUI instance with its own version, models, and settings.',
     snapshots:
       'A saved point-in-time state of an instance (versions + custom nodes) you can restore later.',
+    console:
+      'An interactive shell running in this instance\'s folder. Works whether ComfyUI is running or stopped.',
+    tabUpdate:
+      'Check for and install updates to this ComfyUI instance. Pick a release channel and review release notes before updating.',
+    tabConfig:
+      'Command-line arguments passed to ComfyUI on launch — port, low-VRAM mode, custom directories, and other startup overrides.',
+    tabStorage:
+      'Disk usage for this instance and the shared model, input, and output directories it reads from.',
+    tabStatus:
+      'Instance details — version, install location, last launched, source, and other metadata about this instance.',
     sharedModels:
       "Folders shared across all instances so models aren't downloaded twice. Newly downloaded models go to the primary folder. The primary folder can't be removed while it's in use — pick a different primary first.",
     modelsPrimary:
