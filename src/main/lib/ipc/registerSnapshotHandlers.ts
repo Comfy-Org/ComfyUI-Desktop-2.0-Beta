@@ -489,7 +489,12 @@ export function registerSnapshotHandlers(): void {
       const baseGpu = strippedVariant.replace(/-.*$/, '')
 
       const source = sourceMap['standalone']!
-      const releaseOptions = await source.getFieldOptions!('release', {}, {})
+      // `includeLatestStable: true` opens the standalone source's release list
+      // (see `standalone/index.ts:328`). Without it the source returns an
+      // empty array and create-from-snapshot bails with "No releases available."
+      // even when there *are* releases. Mirrors the InstallWizard / QuickInstall
+      // call shape on the renderer side.
+      const releaseOptions = await source.getFieldOptions!('release', {}, { includeLatestStable: true })
       if (releaseOptions.length === 0) return { ok: false, message: 'No releases available.' }
 
       let selectedRelease: FieldOption
