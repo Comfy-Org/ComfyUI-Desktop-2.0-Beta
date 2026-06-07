@@ -39,6 +39,12 @@ export interface KnownSettings {
    *  can opt out of seeing it without us removing the feature. Default
    *  false — Cloud stays visible. */
   hideCloudFromPicker?: boolean
+  /** When true, closing the last ComfyUI instance window quits Desktop
+   *  directly — no modal, no return-to-dashboard fallback. For power
+   *  users who treat the instance window as the whole app. Default
+   *  false — closing the last instance window returns to the dashboard.
+   *  Replaces the three-way close modal from the bundle iteration. */
+  closeDirectlyOnLastWindow?: boolean
   oemManagedModelDirs?: string[]
   oemWorkflowImportVersion?: number
 }
@@ -78,6 +84,7 @@ const SETTINGS_SCHEMA = {
   telemetryEnabled: { nullable: false },
   firstUseCompleted: { nullable: false },
   hideCloudFromPicker: { nullable: false },
+  closeDirectlyOnLastWindow: { nullable: false },
   oemManagedModelDirs: { nullable: false },
   oemWorkflowImportVersion: { nullable: false },
 } as const satisfies Record<keyof KnownSettings, { nullable: boolean }>

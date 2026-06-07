@@ -130,24 +130,42 @@ export function useInstallList(opts: UseInstallListOpts): UseInstallListApi {
   // 60-second tick so "Nm ago" / "Nh ago" labels stay fresh.
   const now = ref(Date.now())
   let nowTimer: ReturnType<typeof setInterval> | null = null
+  // Live updates: any setting change on main broadcasts here, so the
+  // dashboard re-fetches `hideCloudFromPicker` without the user having to
+  // close + reopen the window after toggling in Global Settings.
+  let unsubSettingsChanged: (() => void) | null = null
+
+  const refetchHideCloud = async (): Promise<void> => {
+    try {
+      const value = await window.api.getSetting('hideCloudFromPicker')
+      hideCloudFromPicker.value = value === true
+    } catch {
+      hideCloudFromPicker.value = false
+    }
+  }
+
   onMounted(() => {
     nowTimer = setInterval(() => {
       now.value = Date.now()
     }, 60_000)
-    // Best-effort read of the "Hide Cloud from picker" opt-out. Failures
-    // resolve to `false` so Cloud renders by default — never silently
-    // hide on a missing IPC bridge (e.g. tests or pre-attach mounts).
-    void (async () => {
-      try {
-        const value = await window.api.getSetting('hideCloudFromPicker')
-        hideCloudFromPicker.value = value === true
-      } catch {
-        hideCloudFromPicker.value = false
-      }
-    })()
+    // Best-effort initial read. Failures resolve to `false` so Cloud
+    // renders by default — never silently hide on a missing IPC bridge
+    // (e.g. tests or pre-attach mounts).
+    void refetchHideCloud()
+    // Re-read on any settings broadcast keyed to hideCloudFromPicker so
+    // toggling the Global Settings opt-out takes effect immediately on
+    // the live dashboard (no close + reopen required).
+    try {
+      unsubSettingsChanged = window.api.onSettingsChanged((data) => {
+        if (data?.key === 'hideCloudFromPicker') void refetchHideCloud()
+      })
+    } catch {
+      // tests / older preloads without the listener: fall back to mount-only
+    }
   })
   onBeforeUnmount(() => {
     if (nowTimer) clearInterval(nowTimer)
+    if (unsubSettingsChanged) unsubSettingsChanged()
   })
 
   function timeAgo(timestamp: number): string {

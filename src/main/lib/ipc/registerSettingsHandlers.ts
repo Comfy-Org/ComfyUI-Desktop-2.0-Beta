@@ -38,6 +38,9 @@ export function buildSettingsSections(): SettingsSection[] {
     {
       title: i18n.t('settings.general'),
       fields: [
+        // Locale picker first — most users only ever touch this once and
+        // then forget the panel exists. Keeping it at the top so it's
+        // discoverable.
         {
           id: 'language',
           label: i18n.t('settings.language'),
@@ -47,31 +50,46 @@ export function buildSettingsSections(): SettingsSection[] {
         },
         // Theme picker hidden (app is dark-only); the theme plumbing stays
         // wired so re-adding this field is the only change needed to restore it.
-        // autoInstallUpdates toggles silent-install vs prompt; the auto-check
-        // loop itself always runs.
-        {
-          id: 'autoInstallUpdates',
-          label: i18n.t('settings.autoInstallUpdates'),
-          type: 'boolean',
-          value: s.autoInstallUpdates !== false
-        },
-        // Restore the last-used instance window on launch (Jedrzej #939)
-        // so power users don't need to reopen the picker every cold start.
+
+        // Window-behavior block — these two travel together:
+        //   reopenLastInstanceOnLaunch + closeDirectlyOnLastWindow
+        // together implement the "feel like a single-app workspace" flow
+        // (quit closes the instance, next launch boots straight back in).
         {
           id: 'reopenLastInstanceOnLaunch',
           label: i18n.t('settings.reopenLastInstanceOnLaunch'),
           type: 'boolean',
           value: s.reopenLastInstanceOnLaunch !== false
         },
-        // Local-only users have asked us to make the Cloud tile go away.
-        // Cloud is still a first-class peer; this is an opt-out, not a
-        // removal — default off, surface as a plain toggle.
+        {
+          id: 'closeDirectlyOnLastWindow',
+          label: i18n.t('settings.closeDirectlyOnLastWindow'),
+          type: 'boolean',
+          value: s.closeDirectlyOnLastWindow === true,
+          tooltip: i18n.t('settings.closeDirectlyOnLastWindowDescription')
+        },
+
+        // Cloud opt-out — pure visibility toggle, doesn't affect any
+        // running behavior. Kept after the window-behavior block so
+        // users who don't care about Cloud find it without scrolling
+        // past the more invasive ones.
         {
           id: 'hideCloudFromPicker',
           label: i18n.t('settings.hideCloudFromPicker'),
           type: 'boolean',
           value: s.hideCloudFromPicker === true,
           tooltip: i18n.t('settings.hideCloudFromPickerDescription')
+        },
+
+        // autoInstallUpdates is filtered out of generalFields by
+        // buildGlobalSettingsSnapshot — it renders inside the Updates
+        // tab. Keeping the field definition here so the schema stays
+        // single-source.
+        {
+          id: 'autoInstallUpdates',
+          label: i18n.t('settings.autoInstallUpdates'),
+          type: 'boolean',
+          value: s.autoInstallUpdates !== false
         },
         // onAppClose field hidden while docking-to-tray is disabled.
         ...(isChinese ? [chineseMirrorsField] : [])

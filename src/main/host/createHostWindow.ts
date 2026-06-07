@@ -30,6 +30,7 @@ import * as mainTelemetry from '../lib/telemetry'
 import { forwardDatadogError } from '../lib/processErrorHandlers'
 import { isQuitInProgress } from '../lib/quit-state'
 import { recordDashboardSurface, recordInstanceSurface } from '../lib/lastSession'
+import * as settings from '../settings'
 import * as updater from '../lib/updater'
 import { getSavedBounds, getWindowOptions, saveWindowBounds } from '../lib/windowState'
 import { ensureSystemModal } from '../popups/systemModal'
@@ -904,13 +905,26 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
           )
           && entryForClose
         ) {
-          closeChoice = await fx.confirmCloseInstanceWindow(
-            comfyWindow,
-            isLastWindow,
-            shouldConfirmKillForEntry(entryForClose),
-            entryForClose.lastTheme,
-          )
-          if (shouldBailAfterCloseChoice(closeChoice, fx.preClearedClose.has(comfyWindow))) return
+          // Last install window: skip the three-way modal entirely and
+          // pick the outcome from the user's setting.
+          //  - `closeDirectlyOnLastWindow` true  → quit Desktop ('close')
+          //  - false (default)                   → return to dashboard
+          // Non-last windows still go through the existing 2-way confirm
+          // because running processes / pending downloads need an "are
+          // you sure" gate.
+          if (isLastInstallWindow) {
+            const closeDirectly =
+              (settings.get('closeDirectlyOnLastWindow') as boolean | undefined) === true
+            closeChoice = closeDirectly ? 'close' : 'return-to-dashboard'
+          } else {
+            closeChoice = await fx.confirmCloseInstanceWindow(
+              comfyWindow,
+              isLastWindow,
+              shouldConfirmKillForEntry(entryForClose),
+              entryForClose.lastTheme,
+            )
+            if (shouldBailAfterCloseChoice(closeChoice, fx.preClearedClose.has(comfyWindow))) return
+          }
         }
         // Capture the force-close intent before we drain the flag.
         // Either the initial snapshot (`skipConsult`) or a late-arriving
@@ -928,9 +942,12 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
           entryForClose.detachInstall()
           return
         }
-        // No explicit choice (the confirm was skipped) → keep the last
-        // install window on the dashboard rather than quitting silently,
-        // so the app never exits without the user deciding to.
+        // No explicit choice (the confirm was skipped — consult cleared
+        // or pre-cleared close). Default: keep the last install window
+        // on the dashboard rather than quitting silently. EXCEPT when
+        // the user has opted into `closeDirectlyOnLastWindow`, in which
+        // case the consult-cleared path must still honor that intent
+        // and let the teardown run.
         if (
           closeChoice === null
           && shouldDetachLastInstallWindowToDashboard(
@@ -942,8 +959,13 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
           )
           && entryForClose
         ) {
-          entryForClose.detachInstall()
-          return
+          const closeDirectly =
+            isLastInstallWindow &&
+            (settings.get('closeDirectlyOnLastWindow') as boolean | undefined) === true
+          if (!closeDirectly) {
+            entryForClose.detachInstall()
+            return
+          }
         }
         // Each cleanup step is wrapped via `safeTeardown` so a single
         // throw can't skip the BrowserWindow.destroy() at the end.

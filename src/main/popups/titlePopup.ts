@@ -14,6 +14,7 @@ import { installationEvents } from '../installations'
 import * as mainTelemetry from '../lib/telemetry'
 import * as updater from '../lib/updater'
 import * as i18n from '../lib/i18n'
+import * as settings from '../settings'
 import { defaultInstallDir } from '../lib/paths'
 import {
   openPath as openPathHelper,
@@ -184,6 +185,7 @@ export interface GlobalSettingsModelsDir {
  *  `Record<string, unknown>` to keep the preload boundary type-safe
  *  without dragging renderer types into main. */
 export interface GlobalSettingsSnapshot {
+  languageFields: Record<string, unknown>[]
   generalFields: Record<string, unknown>[]
   telemetryFields: Record<string, unknown>[]
   desktopUpdateFields: Record<string, unknown>[]
@@ -297,8 +299,17 @@ export function resolvePickerSelectedInstallId(
 export function buildInstancePickerSnapshot(
   args: BuildInstancePickerSnapshotArgs
 ): InstancePickerSnapshot {
+  // Respect the global `hideCloudFromPicker` opt-out across the IPP too,
+  // not just the dashboard chooser. When on, strip cloud installs from
+  // the picker payload so the user truly never sees Cloud in the app's
+  // top dropdown. The setting is a pure visibility toggle — Cloud
+  // sessions themselves are unaffected.
+  const hideCloud = settings.get('hideCloudFromPicker') === true
+  const installs = hideCloud
+    ? args.installs.filter((i) => i.sourceCategory !== 'cloud')
+    : args.installs
   return {
-    installs: args.installs,
+    installs,
     // Use the real attached install when available; fall back to the
     // chooser's preview claim (set by `applyAttachHostPreview` when
     // the chooser stakes an in-place attach claim ahead of a launch).
@@ -2011,8 +2022,13 @@ function buildGlobalSettingsSnapshot(): GlobalSettingsSnapshot {
   const mediaSections = buildMediaSections()
   const modelsPayload = buildModelsPayload()
   const generalRaw = findSettingsFields(settingsSections, 'settings.general', 0)
+  // Locale picker lives above the "App Behavior" microsection without a
+  // header of its own, so it gets pulled out of generalFields here.
   const desktopUpdateFields = generalRaw.filter((f) => f.id === 'autoInstallUpdates')
-  const generalFields = generalRaw.filter((f) => f.id !== 'autoInstallUpdates')
+  const languageFields = generalRaw.filter((f) => f.id === 'language')
+  const generalFields = generalRaw.filter(
+    (f) => f.id !== 'autoInstallUpdates' && f.id !== 'language'
+  )
   const telemetryFields = findSettingsFields(settingsSections, 'settings.telemetry', 1)
   const cache = findSettingsFields(settingsSections, 'settings.cache', 2)
   const advanced = findSettingsFields(settingsSections, 'settings.advanced', 3)
@@ -2026,6 +2042,7 @@ function buildGlobalSettingsSnapshot(): GlobalSettingsSnapshot {
   const githubStars = getCachedGithubStarCount('comfy-org/ComfyUI')
   const githubStarsLoading = githubStars == null && !githubStarsFetchAttempted
   return {
+    languageFields,
     generalFields,
     telemetryFields,
     desktopUpdateFields,
