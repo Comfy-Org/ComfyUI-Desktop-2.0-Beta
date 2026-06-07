@@ -80,8 +80,17 @@ async function ensureVcRedist(context) {
 
 /**
  * electron-builder afterPack hook.
- * Ensures the 7zip-bin binary has the execute permission in the packaged output.
- * This is necessary because AppImage mounts are read-only, so runtime chmod fails.
+ * Ensures bundled native helpers have the execute permission in the packaged
+ * output. Without this, the unpacked binaries inherit `0644` from the npm
+ * tarball and fail with EACCES at exec time:
+ *   - `7za` is invoked when extracting the bundled standalone-python tarball.
+ *   - `node-pty/prebuilds/<plat>/spawn-helper` is exec'd by `pty.fork()` to
+ *     launch the user's shell. Without +x the Terminal tab and the Settings
+ *     Console come up as a black canvas with no prompt — node-pty's native
+ *     code fails silently because the exec returns EACCES inside C++ and
+ *     the JS layer never sees it.
+ * AppImage mounts are read-only, so runtime chmod fails — has to happen at
+ * pack time.
  *
  * Switches on `context.electronPlatformName` (the *target* platform) rather
  * than `process.platform` (the *host*), so cross-builds — e.g. ToDesktop's
@@ -93,22 +102,36 @@ export default async function afterPack(context) {
     return
   }
 
-  const unpackedDir = path.join(
+  const unpackedRoot = path.join(
     context.appOutDir,
     'resources',
     'app.asar.unpacked',
     'node_modules',
-    '7zip-bin',
   )
 
-  if (!fs.existsSync(unpackedDir)) return
+  // 7zip-bin / 7za (used during install for the standalone-python tarball).
+  const sevenZipRoot = path.join(unpackedRoot, '7zip-bin')
+  if (fs.existsSync(sevenZipRoot)) {
+    for (const entry of fs.readdirSync(sevenZipRoot, { recursive: true })) {
+      if (path.basename(String(entry)) === '7za') {
+        const binPath = path.join(sevenZipRoot, String(entry))
+        fs.chmodSync(binPath, 0o755)
+        console.log(`afterPack: set +x on ${binPath}`)
+      }
+    }
+  }
 
-  // Find all 7za binaries under the unpacked 7zip-bin directory
-  for (const entry of fs.readdirSync(unpackedDir, { recursive: true })) {
-    if (path.basename(String(entry)) === '7za') {
-      const binPath = path.join(unpackedDir, String(entry))
-      fs.chmodSync(binPath, 0o755)
-      console.log(`afterPack: set +x on ${binPath}`)
+  // node-pty's prebuilt `spawn-helper` per platform. The native pty.fork
+  // exec()s this on every PTY spawn; without +x the helper returns EACCES
+  // and the terminal stays black.
+  const nodePtyPrebuilds = path.join(unpackedRoot, 'node-pty', 'prebuilds')
+  if (fs.existsSync(nodePtyPrebuilds)) {
+    for (const entry of fs.readdirSync(nodePtyPrebuilds, { recursive: true })) {
+      if (path.basename(String(entry)) === 'spawn-helper') {
+        const binPath = path.join(nodePtyPrebuilds, String(entry))
+        fs.chmodSync(binPath, 0o755)
+        console.log(`afterPack: set +x on ${binPath}`)
+      }
     }
   }
 }
