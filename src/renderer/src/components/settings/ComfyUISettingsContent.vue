@@ -235,13 +235,15 @@ const ALL_TABS: TabDef[] = [
     key: 'update',
     sectionTab: 'update',
     label: t('comfyUISettings.tabUpdate', 'Update'),
-    icon: RefreshCw
+    icon: RefreshCw,
+    tooltip: t('tooltips.tabUpdate')
   },
   {
     key: 'config',
     sectionTab: 'settings',
     label: t('comfyUISettings.tabConfig', 'Startup Args'),
-    icon: SlidersHorizontal
+    icon: SlidersHorizontal,
+    tooltip: t('tooltips.tabConfig')
   },
   {
     key: 'snapshots',
@@ -254,7 +256,8 @@ const ALL_TABS: TabDef[] = [
     key: 'storage',
     sectionTab: 'storage',
     label: t('comfyUISettings.tabStorage', 'Storage'),
-    icon: HardDrive
+    icon: HardDrive,
+    tooltip: t('tooltips.tabStorage')
   },
   {
     key: 'console',
@@ -267,7 +270,8 @@ const ALL_TABS: TabDef[] = [
     key: 'status',
     sectionTab: 'status',
     label: t('comfyUISettings.tabStatus', 'About'),
-    icon: Info
+    icon: Info,
+    tooltip: t('tooltips.tabStatus')
   }
 ]
 
