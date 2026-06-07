@@ -422,24 +422,39 @@ describe('ComfyUISettingsContent', () => {
       'A saved point-in-time state of an installation (versions + custom nodes) you can restore later.'
     const CONSOLE_TOOLTIP =
       "An interactive shell running in this installation's folder. Works whether ComfyUI is running or stopped."
-    const CONCEPT_TOOLTIPS = new Set([SNAPSHOTS_TOOLTIP, CONSOLE_TOOLTIP])
 
-    /** Disabled flags for tabs that only echo their label (excludes Snapshots
-     *  and Console, which carry real concept tooltips). */
-    function labelEchoDisabledFlags(w: VueWrapper): boolean[] {
+    /** Static text labels carried by tabs that have no concept tooltip wired.
+     *  Every current tab carries a concept tooltip, so finding a Tooltip whose
+     *  text is one of these would mean the tab fell back to the label-echo
+     *  path — what these tests are guarding against. */
+    const TAB_LABELS = new Set(['Update', 'Startup Args', 'Snapshots', 'Storage', 'Console', 'About'])
+
+    function tabTooltips(w: VueWrapper) {
       return w
         .findAllComponents({ name: 'Tooltip' })
-        .filter((tt) => !CONCEPT_TOOLTIPS.has(tt.props('text') as string))
-        .map((tt) => tt.props('disabled') as boolean)
+        .filter((tt) => !TAB_LABELS.has(tt.props('text') as string))
     }
 
-    it('disables label-echo tab tooltips at full width (label is visible → pure echo)', async () => {
+    it('wires a concept tooltip on every install-settings tab (no label-echo fallback in use)', async () => {
       const w = await mountContent()
       roHandles.forEach((h) => h.fire(900))
       await nextTick()
-      const flags = labelEchoDisabledFlags(w)
-      expect(flags.length).toBeGreaterThan(0)
-      expect(flags.every((d) => d === true)).toBe(true)
+      const allTabTooltips = w.findAllComponents({ name: 'Tooltip' })
+      const concept = tabTooltips(w)
+      // No tab fell back to label-echo. Reflects the new "every tab has its
+      // own one-line description" wiring — the previous shape kept Update /
+      // Startup Args / Storage / About on the label-echo path so they had
+      // no hover description at full width.
+      expect(concept.length).toBe(allTabTooltips.length)
+      expect(concept.length).toBeGreaterThan(0)
+      const texts = concept.map((tt) => tt.props('text') as string)
+      // The two canonical entries still carry their original copy; guards
+      // against an accidental rewire that would change visible UX text.
+      expect(texts).toContain(SNAPSHOTS_TOOLTIP)
+      expect(texts).toContain(CONSOLE_TOOLTIP)
+      // Every concept tooltip is live at full width — the collapse-only
+      // fallback has nothing to disable.
+      expect(concept.every((tt) => tt.props('disabled') === false)).toBe(true)
     })
 
     it('always shows the Snapshots concept tooltip regardless of strip width', async () => {
@@ -458,17 +473,15 @@ describe('ComfyUISettingsContent', () => {
       expect(snapshotTip()?.props('disabled')).toBe(false)
     })
 
-    it('keeps the tooltip on collapsed icon-only tabs but not the active one', async () => {
+    it('keeps every tab tooltip live when the strip collapses to icon-only', async () => {
       const w = await mountContent({ initialTab: 'update' })
       roHandles.forEach((h) => h.fire(300))
       await nextTick()
-      const tooltips = w.findAllComponents({ name: 'Tooltip' })
-      // Active tab keeps its label → tooltip disabled.
-      const updateTip = tooltips.find((tt) => tt.props('text') === 'Update')
-      expect(updateTip?.props('disabled')).toBe(true)
-      // Collapsed inactive tab hides its label → tooltip live.
-      const statusTip = tooltips.find((tt) => tt.props('text') === 'About')
-      expect(statusTip?.props('disabled')).toBe(false)
+      // Concept tooltips ignore the collapse breakpoint — width changes
+      // should not flip any of them off.
+      const tips = tabTooltips(w)
+      expect(tips.length).toBeGreaterThan(0)
+      expect(tips.every((tt) => tt.props('disabled') === false)).toBe(true)
     })
   })
 
