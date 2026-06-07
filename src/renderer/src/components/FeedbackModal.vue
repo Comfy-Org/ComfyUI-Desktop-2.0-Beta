@@ -103,26 +103,16 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-/* The typeform page is white, so repaint the panel to avoid a coloured
- * frame around the form from the default dark BaseModal chrome. */
+/* The typeform page is dark, so let the BaseModal's default dark chrome
+ * show through — the previous white override left the close X invisible
+ * against the dark form. Only the body padding override remains so the
+ * iframe sits flush against the panel edge. */
 :global(.base-modal-panel.feedback-modal-panel) {
-  background: #ffffff;
-  border-color: transparent;
   min-height: 0;
 }
 :global(.feedback-modal-panel .base-modal-body) {
   padding: 0;
   overflow: hidden;
-}
-:global(.feedback-modal-panel .base-modal-close) {
-  background: transparent;
-  border-color: transparent;
-  color: var(--neutral-900, #111);
-  opacity: 0.55;
-}
-:global(.feedback-modal-panel .base-modal-close:hover) {
-  background: color-mix(in oklab, #000 8%, transparent);
-  opacity: 1;
 }
 
 .feedback-modal-body {
@@ -130,7 +120,6 @@ onBeforeUnmount(() => {
   width: 100%;
   height: clamp(520px, 76vh, 820px);
   overflow: hidden;
-  background: #ffffff;
 }
 
 .feedback-modal-frame {
@@ -148,7 +137,7 @@ onBeforeUnmount(() => {
   display: grid;
   place-items: center;
   font-size: 13px;
-  color: color-mix(in oklab, #000 55%, transparent);
+  color: color-mix(in oklab, var(--neutral-100, #fff) 65%, transparent);
   pointer-events: none;
 }
 </style>
