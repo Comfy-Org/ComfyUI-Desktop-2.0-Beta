@@ -82,6 +82,7 @@ test.afterAll(async () => {
 test.beforeEach(async () => {
   await closeTitlePopupIfOpen(ctx.app)
   await resetIpcInvocations(ctx.app, 'open-install-new-window')
+  await clearRunningSessions(ctx.app)
 })
 
 test('cloud target with no window: opens a new window @lifecycle', async () => {

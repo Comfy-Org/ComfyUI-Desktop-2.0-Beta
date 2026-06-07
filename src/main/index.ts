@@ -1386,34 +1386,14 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
         findEntryByHostWindow(parent)?.titleBarView.webContents ?? null
     })
     registerSystemModalIpc()
-    // Swap-in-place contract: when the user picks a different install
-    // from a Comfy-instance window, the picked install replaces the
-    // current install IN THE SAME WINDOW (workflow continuity from the
-    // user's perspective — they stay in the window they were in). The
-    // current install's session is stopped first; on confirm the
-    // window detaches (flips to chooser-shape briefly) and then
-    // re-attaches the picked install via the same in-place attach
-    // claim path the dashboard chooser uses.
-    //
-    // Three exits short-circuit the swap:
-    // - Target already running in another window → focus that
-    // window. Avoids spawning a duplicate session of the same
-    // install and keeps the user's other window intact.
-    // - Target equals the host's own install → no-op. Picker already
-    // dismissed at the IPC boundary; refocusing the window would
-    // be redundant.
-    // - User cancels the swap-confirm dialog → no-op.
-    //
-    // The renderer-side `useLocalInstanceGuard` handles cross-window
-    // local-instance conflicts (port collision on the same port) via
-    // a modal that renders inside the panel — naturally visible after
-    // the detach since the host is now chooser-shape with the panel
-    // on top.
-    // Land `installationId` into `entry` (which must be chooser-shaped): ensure
-    // the panelView, then defer a `picker-pick-install` overlay until the panel
-    // renderer acks `did-finish-load`. PanelApp's `useDeepLinkRouter` stakes an
-    // attach claim against this window; `onLaunch` consumes it and attaches in
-    // place. Shared by the in-place swap and the new-window paths.
+
+    /**
+     * Land `installationId` into `entry` (which must be chooser-shaped): ensure
+     * the panelView, then defer a `picker-pick-install` overlay until the panel
+     * renderer acks `did-finish-load`. PanelApp's `useDeepLinkRouter` stakes an
+     * attach claim; `onLaunch` consumes it and attaches in place. Shared by the
+     * in-place swap and the new-window paths.
+     */
     const deliverPickToEntry = (entry: ComfyWindowEntry, installationId: string): void => {
       if (entry.window.isDestroyed()) return
       const panelView =
@@ -1425,20 +1405,19 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
       })
     }
 
-    // Open `installationId` in its OWN window, never disturbing the host that
-    // opened the picker. Mirrors `pickInstallFromPicker`'s focus-existing
-    // short-circuit, but the no-window case spawns a FRESH chooser host and
-    // launches into it instead of swapping the parent — so the user's current
-    // instance keeps running (the "Open in new window" caret affordance).
+    /**
+     * Open `installationId` in its OWN window without disturbing the host that
+     * opened the picker: focus its existing window, else spawn a fresh chooser
+     * host and launch into it. `allowDuplicate` permits a second window for an
+     * install that already owns one (cloud-self: two views of one remote
+     * session). Fails closed — a window-construction throw is logged, never
+     * propagated to the IPC listener.
+     */
     const openInstallInNewWindow = (
       installationId: string,
       opts?: { allowDuplicate?: boolean }
     ): void => {
       const existing = getEntryByInstallationId(installationId)
-      // An install runs in at most one window (its local process can't run
-      // twice) — focus it rather than spawning a duplicate. `allowDuplicate`
-      // lifts this for cloud-self, where two windows are just two views of the
-      // same remote session (matrix row 16).
       const willFocusExisting = !!existing && !existing.window.isDestroyed() && !opts?.allowDuplicate
       recordIpcInvocation('open-install-new-window', {
         installationId,
@@ -1450,15 +1429,31 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
         existing.window.focus()
         return
       }
-      mainTelemetry.emit('comfy.desktop.instance.opened_new_window', {
-        to_installation_id: installationId,
-        method: 'picker'
-      })
-      const target = findEntryByHostWindow(openChooserHostWindow())
-      if (!target) return
-      deliverPickToEntry(target, installationId)
+      try {
+        const target = findEntryByHostWindow(openChooserHostWindow())
+        if (!target) {
+          console.error('openInstallInNewWindow: spawned chooser host not in registry', { installationId })
+          return
+        }
+        mainTelemetry.emit('comfy.desktop.instance.opened_new_window', {
+          to_installation_id: installationId,
+          method: 'picker'
+        })
+        deliverPickToEntry(target, installationId)
+      } catch (err) {
+        console.error('openInstallInNewWindow failed:', err)
+      }
     }
 
+    /**
+     * Swap-in-place: picking a different install from a Comfy-instance window
+     * replaces the current install IN THE SAME WINDOW (workflow continuity). The
+     * current session is stopped, the window detaches to chooser-shape, then
+     * re-attaches the picked install via the dashboard chooser's attach-claim
+     * path. Short-circuits: target running elsewhere → focus it; target is the
+     * host's own install → no-op; user cancels the confirm → no-op. Cross-window
+     * port collisions are handled by the renderer's `useLocalInstanceGuard`.
+     */
     const pickInstallFromPicker = async (
       installationId: string,
       parentEntryId: number

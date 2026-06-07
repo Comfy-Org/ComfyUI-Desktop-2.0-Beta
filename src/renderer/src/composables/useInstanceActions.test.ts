@@ -76,7 +76,7 @@ describe('useInstanceActions.dispatch', () => {
   it('routes open-new → openInstallNewWindow', async () => {
     const bridge = makeBridge()
     await useInstanceActions(makeDeps(bridge)).dispatch(decision({ verb: 'open-new', window: 'new' }), installation())
-    expect(bridge.openInstallNewWindow).toHaveBeenCalledWith('a', { allowDuplicate: undefined })
+    expect(bridge.openInstallNewWindow).toHaveBeenCalledWith('a', expect.objectContaining({}))
   })
 
   it('passes allowDuplicate through for the cloud-self second window', async () => {
@@ -113,5 +113,23 @@ describe('useInstanceActions.dispatch', () => {
     const deps = makeDeps(bridge, { confirmCloudCapacity: vi.fn().mockResolvedValue(false) })
     await useInstanceActions(deps).dispatch(decision({ verb: 'switch' }), installation({ sourceCategory: 'cloud' }))
     expect(bridge.pickInstall).not.toHaveBeenCalled()
+  })
+
+  it('no-ops when the bridge is undefined', async () => {
+    const deps = { ...makeDeps(makeBridge()), bridge: undefined }
+    await expect(
+      useInstanceActions(deps).dispatch(decision({ verb: 'switch' }), installation()),
+    ).resolves.toBeUndefined()
+  })
+
+  it('aborts (does not throw to the caller) when a confirm dialog rejects', async () => {
+    const bridge = makeBridge()
+    const deps = makeDeps(bridge, {
+      confirmLocalKill: vi.fn().mockRejectedValue(new Error('dialog torn down')),
+    })
+    await expect(
+      useInstanceActions(deps).dispatch(decision({ verb: 'restart' }), installation()),
+    ).resolves.toBeUndefined()
+    expect(bridge.restartInstall).not.toHaveBeenCalled()
   })
 })

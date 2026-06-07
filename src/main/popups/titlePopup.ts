@@ -2595,7 +2595,9 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
     const installationId = payload?.installationId
     if (typeof installationId !== 'string' || installationId.length === 0) return
     hideTitlePopup(entry, { releaseFocusToParent: false })
-    void bindings.pickInstallFromPicker(installationId, entry.parentEntryId)
+    Promise.resolve(bindings.pickInstallFromPicker(installationId, entry.parentEntryId)).catch(
+      (err) => console.error('pickInstallFromPicker failed:', err),
+    )
   })
 
   // Picker → "Open in new window". Opens the install in its OWN window without
@@ -2629,7 +2631,9 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
       if (typeof installationId !== 'string' || installationId.length === 0) return
       const confirmed = payload?.confirmed === true
       hideTitlePopup(entry, { releaseFocusToParent: false })
-      void bindings.restartInstallFromPicker(installationId, entry.parentEntryId, { confirmed })
+      Promise.resolve(
+        bindings.restartInstallFromPicker(installationId, entry.parentEntryId, { confirmed }),
+      ).catch((err) => console.error('restartInstallFromPicker failed:', err))
     }
   )
 

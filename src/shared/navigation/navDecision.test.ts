@@ -6,7 +6,6 @@ import {
   type NavInput,
   type TargetKind,
   type TargetRun,
-  type Verb,
 } from './navDecision'
 import type { NavClass, ViewKind } from '../viewKind'
 
@@ -168,12 +167,22 @@ describe('decideNavigation — boundary rules', () => {
   })
 })
 
-describe('decideNavigation — cloud ≡ remote', () => {
-  // Remote is folded into cloud upstream (navClass), so a remote target is
-  // indistinguishable from a cloud target here: identical decisions.
-  it('treats a remote target identically to a cloud target', () => {
-    const asCloud = decideNavigation(input({ currentView: 'dashboard', target: 'cloud', targetClass: 'cloud', targetRun: 'stopped' }))
-    const verbs: Verb[] = ['switch', 'focus', 'open-new', 'no-op']
-    expect(verbs).toContain(asCloud.verb)
+describe('decideNavigation — caret (new-window intent)', () => {
+  it('instance host → stopped instance B: caret selects the new-window alternative', () => {
+    const primary = decideNavigation(
+      input({ currentView: 'instance', currentClass: 'local', target: 'instance', targetRun: 'stopped', intent: 'primary' }),
+    )
+    expect(primary).toMatchObject({ window: 'same', verb: 'switch' })
+    const caret = decideNavigation(
+      input({ currentView: 'instance', currentClass: 'local', target: 'instance', targetRun: 'stopped', intent: 'new-window' }),
+    )
+    expect(caret).toMatchObject({ window: 'new', verb: 'open-new', primaryLabel: NAV_LABEL.openInNewWindow })
+  })
+
+  it('dashboard host → open cloud: caret selects the new-window alternative', () => {
+    const caret = decideNavigation(
+      input({ currentView: 'dashboard', currentClass: null, target: 'cloud', targetRun: 'stopped', intent: 'new-window' }),
+    )
+    expect(caret).toMatchObject({ window: 'new', verb: 'open-new', primaryLabel: NAV_LABEL.openInNewWindow })
   })
 })

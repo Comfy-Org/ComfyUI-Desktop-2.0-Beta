@@ -41,46 +41,54 @@ export interface InstanceActions {
 }
 
 export function useInstanceActions(deps: InstanceActionsDeps): InstanceActions {
+  /**
+   * Route a decision's verb onto the bridge. A rejected confirm dialog (e.g. the
+   * host tears down mid-prompt) is treated as "not confirmed" — the action
+   * aborts instead of surfacing an unhandled rejection to the caller.
+   */
   async function dispatch(decision: NavDecision, target: Installation): Promise<void> {
     const { bridge } = deps
     if (!bridge) return
 
-    // Cloud capacity gate first — applies to any cloud action that lands a
-    // session (matches the ChooserView path so the two can't diverge).
-    if (target.sourceCategory === 'cloud' && !(await deps.confirmCloudCapacity(target))) return
+    try {
+      // Cloud capacity gate first — applies to any cloud action that lands a
+      // session (matches the ChooserView path so the two can't diverge).
+      if (target.sourceCategory === 'cloud' && !(await deps.confirmCloudCapacity(target))) return
 
-    switch (decision.verb) {
-      case 'restart': {
-        // Local restarts confirm in-drawer; `confirmed: true` tells main to skip
-        // its own modal. Non-local installs resolve true (no process to kill).
-        if (!(await deps.confirmLocalKill(target))) return
-        bridge.restartInstall(target.id, { confirmed: true })
-        return
+      switch (decision.verb) {
+        case 'restart': {
+          // Local restarts confirm in-drawer; `confirmed: true` tells main to
+          // skip its own modal. Non-local installs resolve true (no process).
+          if (!(await deps.confirmLocalKill(target))) return
+          bridge.restartInstall(target.id, { confirmed: true })
+          return
+        }
+        case 'switch': {
+          // An in-place switch over a local current host carries `kill-local`;
+          // confirm before detaching.
+          if (decision.confirm === 'kill-local' && !(await deps.confirmLocalKill(target))) return
+          bridge.pickInstall(target.id)
+          return
+        }
+        case 'open-new': {
+          bridge.openInstallNewWindow?.(target.id, { allowDuplicate: decision.allowDuplicate })
+          return
+        }
+        case 'focus': {
+          // Same bridge call as a pick — main short-circuits to `window.focus()`
+          // when the install is already up. No confirm: nothing is killed.
+          bridge.pickInstall(target.id)
+          return
+        }
+        case 'install-wizard': {
+          bridge.openNewInstall?.()
+          return
+        }
+        case 'no-op':
+          return
       }
-      case 'switch': {
-        // An in-place switch over a local current host carries `kill-local`;
-        // confirm before detaching. (The 3-way upgrade lands in Phase 3a.)
-        if (decision.confirm === 'kill-local' && !(await deps.confirmLocalKill(target))) return
-        bridge.pickInstall(target.id)
-        return
-      }
-      case 'open-new': {
-        bridge.openInstallNewWindow?.(target.id, { allowDuplicate: decision.allowDuplicate })
-        return
-      }
-      case 'focus': {
-        // Focusing an already-running window is the same bridge call as a pick —
-        // main short-circuits to `window.focus()` when the install is already
-        // up. No confirm: nothing is killed.
-        bridge.pickInstall(target.id)
-        return
-      }
-      case 'install-wizard': {
-        bridge.openNewInstall?.()
-        return
-      }
-      case 'no-op':
-        return
+    } catch (err) {
+      console.error('useInstanceActions.dispatch failed:', err)
     }
   }
 

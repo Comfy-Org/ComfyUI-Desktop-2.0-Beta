@@ -219,6 +219,12 @@ describe('computeViewKind', () => {
       computeViewKind(makeEntry({ installationId: 'inst-A', sourceCategory: null })),
     ).toBe('cloud')
   })
+
+  it('treats an unrecognised category string as cloud (does not throw)', () => {
+    expect(
+      computeViewKind(makeEntry({ installationId: 'inst-A', sourceCategory: 'future-value' })),
+    ).toBe('cloud')
+  })
 })
 
 describe('shouldConfirmKillForEntry', () => {

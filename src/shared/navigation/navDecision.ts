@@ -6,18 +6,14 @@
  * which is what makes it snapshot-testable and impossible to drift between
  * processes.
  *
- * The decision space is the finite product `ViewKind × TargetKind × TargetRun`.
- * It is modelled as a total transition table keyed by a canonical tuple encoding
- * (`CellKey`), so a lookup is O(1) and a missing cell falls through to an
- * explicit no-op. The table is *data*; the matrix is reviewed by reading it.
+ * The decision space is the finite product `ViewKind × TargetKind × TargetRun`,
+ * modelled as a total transition table keyed by a canonical tuple encoding
+ * (`CellKey`): a lookup is O(1) and a missing cell falls through to an explicit
+ * no-op. The table is *data*; the matrix is reviewed by reading it. To change a
+ * behavior, edit the cell and its snapshot test — nothing else.
  *
- * IMPORTANT (rollout): this file currently encodes **current** behavior — the
- * pre-#926 baseline — so phases 0-2 are behavior-identical. Each Phase-3 delta
- * flips exactly one cell here (and its snapshot test), making the behavior
- * change the entire review surface.
- *
- * `remote` is folded into `cloud` before this function is called (see
- * `navClass` in ../viewKind); there are no `remote` cells.
+ * `remote` is folded into `cloud` before this function is called (see `navClass`
+ * in ../viewKind); there are no `remote` cells.
  */
 import type { NavClass, ViewKind } from '../viewKind'
 
@@ -32,21 +28,24 @@ export type TargetRun = 'stopped' | 'running-here' | 'running-elsewhere' | 'self
 /** Which affordance the user used: the primary CTA, or a caret/dropdown item. */
 export type Intent = 'primary' | 'new-window'
 
-/** The action to perform. Maps 1:1 onto an existing main-process primitive (see
- *  the dispatcher in the renderer / the handlers in src/main/index.ts). */
-export type Verb =
-  | 'switch' // detach current install, attach target into THIS window (pickInstall)
-  | 'restart' // restart the current install in place (restartInstall)
-  | 'open-new' // land target in a window, leaving the current one alone
-  | 'focus' // bring the target's existing window to front
-  | 'no-op' // nothing to do
-  | 'install-wizard' // open the new-install flow
+/**
+ * The action to perform. Maps 1:1 onto a main-process primitive (the renderer
+ * dispatcher / the handlers in `src/main/index.ts`):
+ *   - `switch` — detach the current install, attach the target into THIS window
+ *   - `restart` — restart the current install in place
+ *   - `open-new` — land the target in its own window, leaving the current alone
+ *   - `focus` — bring the target's existing window to front
+ *   - `no-op` — nothing to do
+ *   - `install-wizard` — open the new-install flow
+ */
+export type Verb = 'switch' | 'restart' | 'open-new' | 'focus' | 'no-op' | 'install-wizard'
 
-/** Confirmation gate the verb must pass before executing. */
-export type Confirm =
-  | 'kill-local' // 2-way "stop the local process?" (current behavior)
-  | 'switch-3way' // 3-way "stop & switch / open new window / cancel" (Phase 3a)
-  | null
+/**
+ * Confirmation gate the verb must pass before executing. `kill-local` prompts
+ * before stopping a local process; `null` skips the prompt (cloud/remote, or a
+ * non-destructive verb).
+ */
+export type Confirm = 'kill-local' | null
 
 /** i18n KEYS (not resolved text) for the primary CTA label, by cell. The
  *  renderer resolves these via `t(...)`. */
@@ -126,13 +125,13 @@ const OPEN_NEW_WINDOW_SECONDARY: NavDecision = dec({
   telemetry: 'instance.opened_new_window',
 })
 
-// ── the transition table (CURRENT behavior — baseline before #926 deltas) ─────
-//
-// Rows mirror the CTO matrix grouping. Reachable cells only; unreachable tuples
-// fall through to NO_OP via the lookup miss path. Every "cloud" row also covers
-// remote (folded upstream). `confirm` for in-place switches is filled at the
-// boundary (decideNavigation) from the current host's class, since the table is
-// class-agnostic.
+/**
+ * The transition table. Rows mirror the CTO matrix grouping; only reachable
+ * cells are listed (unreachable tuples fall through to `NO_OP`). Every "cloud"
+ * row also covers remote (folded upstream). `confirm` for in-place switches is
+ * filled at the boundary in `decideNavigation` from the current host's class,
+ * since the table is class-agnostic.
+ */
 const TABLE: ReadonlyMap<CellKey, NavDecision> = new Map<CellKey, NavDecision>([
   // Dashboard → X
   [cellKey('dashboard', 'dashboard', 'self'), NO_OP],
@@ -180,10 +179,12 @@ const TABLE: ReadonlyMap<CellKey, NavDecision> = new Map<CellKey, NavDecision>([
   ],
   [
     cellKey('instance', 'instance', 'stopped'),
-    // Primary "Switch" swaps B into this window (kill-confirm filled at the
-    // boundary). The caret offers "Open in new window" so the user can keep A
-    // running. When the per-version flag is on, main upgrades the swap confirm
-    // to a 3-way modal that folds both choices into one prompt (Phase 3a).
+    /**
+     * Primary "Switch" swaps B into this window (kill-confirm filled at the
+     * boundary), and the caret offers "Open in new window" so the user can keep
+     * A running. Main's swap confirm is a 3-way modal that folds both choices
+     * (Switch / Open in new window / Cancel) into one prompt.
+     */
     dec({
       window: 'same',
       verb: 'switch',
@@ -220,10 +221,12 @@ const TABLE: ReadonlyMap<CellKey, NavDecision> = new Map<CellKey, NavDecision>([
   // Cloud → X
   [
     cellKey('cloud', 'dashboard', 'self'),
-    // NOTE: the dashboard chip is NOT table-driven — it routes through the
-    // shared `activate('new-window')` path, so today this opens a NEW window
-    // for all hosts. The matrix asks for same-window here; left as new-window
-    // for now. This cell is documentation only until the chip consults the table.
+    /**
+     * Documentation-only cell: the "Open Dashboard" chip is not table-driven —
+     * it routes through the shared `activate('new-window')` path, so it opens a
+     * new window for all hosts. The CTO matrix specifies same-window here; this
+     * is a tracked deviation until the chip consults the table.
+     */
     dec({ window: 'new', verb: 'open-new', primaryLabel: NAV_LABEL.openDashboard }),
   ],
   [

@@ -108,7 +108,10 @@ test('Instance B via "Open in new window": spawns a new window (no swap of the h
     return calls.some((c) => c.installationId === INSTALL_B_ID && c.focusedExisting === false)
   }, { timeout: 5_000, intervals: [100, 250] }).toBe(true)
 
+  // A fresh window was added (a swap would keep the count flat) and the host was
+  // not focused away — the picker's host is left untouched.
   await expect.poll(() => liveWindowCount(), { timeout: 5_000, intervals: [200, 400] }).toBe(before + 1)
+  expect((await getIpcInvocations(ctx.app, 'focus-comfy-window')).length).toBe(0)
 })
 
 test('Instance B (running elsewhere): focus its existing window @lifecycle', async () => {
