@@ -1,6 +1,6 @@
 import { EventEmitter } from 'events'
 import type { BrowserWindow, WebContents, WebContentsView } from 'electron'
-import { _runningSessions } from '../lib/ipc/shared'
+import { _runningSessions, _isStopping } from '../lib/ipc/shared'
 import type { FirstUseMode } from '../../shared/firstUseMode'
 
 /**
@@ -254,6 +254,9 @@ export function computeBodyMode(entry: ComfyWindowEntry): BodyMode {
     return entry.activePanel === 'comfy' ? 'chooser' : entry.activePanel
   }
   if (entry.activePanel !== 'comfy') return entry.activePanel
+  // Stopping shows the lifecycle ("Stopping…") panel even though the session is
+  // still present — otherwise the dead canvas reads as black during the kill.
+  if (_isStopping(entry.installationId)) return 'comfy-lifecycle'
   return _runningSessions.has(entry.installationId) ? 'comfy' : 'comfy-lifecycle'
 }
 

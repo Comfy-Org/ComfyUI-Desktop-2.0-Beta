@@ -213,12 +213,19 @@ export function _clearLaunchingFailed(installationId: string): void {
 /**
  * Installs currently being stopped (between `instance-stopping` and `instance-stopped`).
  * Lets a window opened mid-stop hydrate the "Stopping…" state instead of missing the
- * one-shot broadcast. Maintained by `stopRunning`.
+ * one-shot broadcast. Maintained by `stopRunning`; read via `_isStopping`. Exported
+ * (like `_runningSessions`) so unit tests can seed body-mode scenarios.
  */
-const _stoppingInstallationIds = new Set<string>()
+export const _stoppingInstallationIds = new Set<string>()
 
 export function _getStoppingInstallationIds(): string[] {
   return Array.from(_stoppingInstallationIds)
+}
+
+/** O(1) membership test for the body-mode computation, which runs on every
+ *  layout pass and shouldn't allocate an array. */
+export function _isStopping(installationId: string): boolean {
+  return _stoppingInstallationIds.has(installationId)
 }
 
 export interface PickerOperationStatus {
@@ -724,12 +731,25 @@ export function makeSendOutput(sender: Electron.WebContents, installationId: str
   }
 }
 
-export async function stopRunning(installationId?: string): Promise<void> {
+/**
+ * Stop running session(s) and kill their process tree(s).
+ *
+ * @param onEnterStopping Fires once an install is flagged stopping, before the
+ *   slow `killProcessTree` await. The interactive `stop-comfyui` handler uses it
+ *   to show the "Stopping…" panel up front (avoiding a black flash mid-kill);
+ *   quit/detach/update callers omit it so the primitive stays free of host-
+ *   layout side effects.
+ */
+export async function stopRunning(
+  installationId?: string,
+  onEnterStopping?: (info: { installationId: string }) => void,
+): Promise<void> {
   if (installationId) {
     const session = _runningSessions.get(installationId)
     if (!session) return
     _stoppingInstallationIds.add(installationId)
     _broadcastToRenderer('instance-stopping', { installationId })
+    onEnterStopping?.({ installationId })
     if (session.port) removePortLock(session.port)
     _runningSessions.delete(installationId)
     if (session.proc && !session.proc.killed) {
@@ -743,6 +763,7 @@ export async function stopRunning(installationId?: string): Promise<void> {
     for (const [id] of sessions) {
       _stoppingInstallationIds.add(id)
       _broadcastToRenderer('instance-stopping', { installationId: id })
+      onEnterStopping?.({ installationId: id })
     }
     for (const [, session] of sessions) {
       if (session.port) removePortLock(session.port)
