@@ -747,10 +747,10 @@ export function buildTitlePopupMenuItems(entry: ComfyWindowEntry): TitlePopupMen
   const items: TitlePopupMenuItem[] = [
     { id: 'new-window', label: 'New Window', labelKey: 'fileMenu.newWindow' },
     { kind: 'separator' },
-    { id: 'new-install', label: 'New Install', labelKey: 'fileMenu.newInstall' },
+    { id: 'new-install', label: 'New Instance', labelKey: 'fileMenu.newInstall' },
     {
       id: 'track',
-      label: 'Add Existing Install',
+      label: 'Add Existing Instance',
       labelKey: 'fileMenu.addExistingInstall'
     },
     { id: 'load-snapshot', label: 'Load Snapshot', labelKey: 'fileMenu.loadSnapshot' },

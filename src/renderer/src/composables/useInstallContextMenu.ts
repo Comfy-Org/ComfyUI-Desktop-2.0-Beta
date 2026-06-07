@@ -264,10 +264,10 @@ export function useInstallContextMenu(opts: {
     } else if (id === 'untrack') {
       const untrackLabel = t('actions.untrack', 'Forget')
       const confirmed = await modal.confirm({
-        title: t('actions.untrackConfirmTitle', 'Forget Install'),
+        title: t('actions.untrackConfirmTitle', 'Forget Instance'),
         message: t(
           'actions.untrackConfirmMessage',
-          'This will remove the install from the app. The files will not be deleted.',
+          'This will remove the instance from the app. The files will not be deleted.',
         ),
         confirmLabel: untrackLabel,
         confirmStyle: 'danger',

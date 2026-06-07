@@ -683,7 +683,7 @@ defineExpose({
 
     <section class="settings-v2-body">
       <p v-if="!installation" class="empty">
-        {{ t('comfyUISettings.emptyInstallLess', 'Open a ComfyUI install to view its settings.') }}
+        {{ t('comfyUISettings.emptyInstallLess', 'Open a ComfyUI instance to view its settings.') }}
       </p>
       <p
         v-else-if="loading && !visibleSections.length && activeTab !== 'console'"
