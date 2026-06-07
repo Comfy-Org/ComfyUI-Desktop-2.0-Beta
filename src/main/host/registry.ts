@@ -2,6 +2,8 @@ import { EventEmitter } from 'events'
 import type { BrowserWindow, WebContents, WebContentsView } from 'electron'
 import { _runningSessions, _isStopping } from '../lib/ipc/shared'
 import type { FirstUseMode } from '../../shared/firstUseMode'
+import { normaliseCategory, viewKindFor } from '../../shared/viewKind'
+import type { ViewKind } from '../../shared/viewKind'
 
 /**
  * Bus for host-window install attachment changes. `'changed'` fires when the
@@ -269,6 +271,17 @@ export function computeBodyMode(entry: ComfyWindowEntry): BodyMode {
   // still present — otherwise the dead canvas reads as black during the kill.
   if (_isStopping(entry.installationId)) return 'comfy-lifecycle'
   return _runningSessions.has(entry.installationId) ? 'comfy' : 'comfy-lifecycle'
+}
+
+/**
+ * Classify a host window for the navigation matrix. Install-less (chooser) host
+ * → `'dashboard'`; a cloud OR remote install → `'cloud'` (the two share
+ * navigation behavior, so `remote` folds into `cloud`); a local install →
+ * `'instance'`. Centralised here so the picker's view-kind can't disagree with
+ * the body-mode it sits beside (`computeBodyMode`).
+ */
+export function computeViewKind(entry: ComfyWindowEntry): ViewKind {
+  return viewKindFor(entry.installationId, normaliseCategory(entry.sourceCategory))
 }
 
 /**

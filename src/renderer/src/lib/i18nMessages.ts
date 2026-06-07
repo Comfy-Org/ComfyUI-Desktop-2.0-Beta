@@ -188,6 +188,9 @@ export const en = {
     open: 'Start',
     restart: 'Restart',
     switch: 'Switch',
+    openCloud: 'Open Cloud',
+    openInNewWindow: 'Open in new window',
+    startNewWindow: 'Start (new window)',
     restartConfirmTitle: 'Restart this instance?',
     restartConfirmDetail:
       'Restarting will stop the running session. Any unsaved work in the workflow will be lost.',

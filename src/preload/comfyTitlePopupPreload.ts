@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type { IpcRendererEvent } from 'electron'
 import { PICKER_SETTINGS_CHANNELS as CH } from '../types/ipc'
 import type { TerminalRestore } from '../types/ipc'
+import type { Category, ViewKind } from '../shared/viewKind'
 
 /** Bridge for the title-bar dropdown popup (waffle menu, downloads tray,
  *  instance-picker, global-settings), which share one reused child
@@ -38,6 +39,12 @@ export interface PopupInstancePickerInstall {
 export interface PopupInstancePickerSnapshot {
   installs: PopupInstancePickerInstall[]
   activeInstallationId: string | null
+  /** Host view-kind for the navigation matrix (`'cloud'` covers cloud AND
+   *  remote). Optional for back-compat with older bundles. */
+  currentView?: ViewKind
+  /** Raw active-install source category (`null` on a dashboard host); navigation
+   *  collapses remote ⇒ cloud. Optional for back-compat with older bundles. */
+  currentCategory?: Category | null
   runningInstallationIds: string[]
   /** Selected install in the picker's right pane; defaults to the host's active
    *  install on open. */
@@ -201,6 +208,9 @@ export interface ComfyTitlePopupBridge {
   ): () => void
   /** Picker → pick install (focus-or-launch). Dismissed before launch. */
   pickInstall(installationId: string): void
+  /** Picker → open install in its OWN window (focus-existing else spawn a fresh
+   *  chooser host), leaving the picker's host untouched. */
+  openInstallNewWindow(installationId: string): void
   /** Picker → "+ New Install" row, landing on the same surface as the file
    *  menu's New Install. */
   openNewInstall(): void
@@ -527,6 +537,9 @@ const bridge: ComfyTitlePopupBridge = {
   },
   pickInstall: (installationId) => {
     ipcRenderer.send('comfy-titlepopup:pick-install', { installationId })
+  },
+  openInstallNewWindow: (installationId) => {
+    ipcRenderer.send('comfy-titlepopup:open-install-new-window', { installationId })
   },
   openNewInstall: () => {
     ipcRenderer.send('comfy-titlepopup:open-new-install')

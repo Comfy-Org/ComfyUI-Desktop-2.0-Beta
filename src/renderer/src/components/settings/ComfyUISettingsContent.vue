@@ -4,7 +4,10 @@ import { useI18n } from 'vue-i18n'
 import { CheckCircle, XCircle, ChevronUp, HardDrive, SlidersHorizontal, Info, RefreshCw, History, SquareTerminal } from 'lucide-vue-next'
 import { useComfyUISettings } from '../../composables/useComfyUISettings'
 import { useInstallCta } from '../../composables/useInstallCta'
+import { useInstanceNavState } from '../../composables/useInstanceNavState'
 import { useCloudCapacity } from '../../composables/useCloudCapacity'
+import { decideNavigation, type NavDecision } from '../../../../shared/navigation/navDecision'
+import type { Category, ViewKind } from '../../../../shared/viewKind'
 import { findActionById } from '../../lib/findAction'
 import MoreMenu from '../../views/comfyUISettings/MoreMenu.vue'
 import ArgsBuilderPage from '../../views/comfyUISettings/ArgsBuilderPage.vue'
@@ -54,6 +57,12 @@ interface Props {
    *  primary action restarts in-place (this window) or focuses the
    *  install's already-open window (another window). */
   activeInstallationId?: string | null
+  /** Host view-kind (from the picker snapshot). Drives the state-aware
+   *  navigation decision for the footer CTA + caret. Defaults to a dashboard
+   *  host for callers that don't pass it. */
+  currentView?: ViewKind
+  /** Raw active-install category of the host (`null` on a dashboard host). */
+  currentCategory?: Category | null
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -63,6 +72,8 @@ const props = withDefaults(defineProps<Props>(), {
   autoActionNonce: 0,
   activeOperation: null,
   activeInstallationId: null,
+  currentView: 'dashboard',
+  currentCategory: null,
   globalSettingsSnapshot: () => ({
     sharedDirectoriesFields: [],
     modelsDirs: [],
@@ -78,10 +89,12 @@ const emit = defineEmits<{
   /** Backend stopped from the preview; host dismisses the whole popup so the
    *  window's stopped-relaunch card shows. */
   'request-dismiss': []
-  /** Footer primary CTA. `restartInPlace` is true only when the install
-   *  runs in this host window; false when it runs in a different window
-   *  so the host routes to `pickInstall` and raises the existing one. */
-  'primary-action': [restartInPlace: boolean]
+  /** Footer primary CTA. Carries the resolved `NavDecision`; the picker routes
+   *  its verb through the instance-action dispatcher. */
+  'primary-action': [decision: NavDecision]
+  /** Caret split-button item (e.g. "Open in new window"). Carries the secondary
+   *  `NavDecision` the user picked. */
+  'open-new-window': [decision: NavDecision]
   'op-cancel': []
   'op-retry': []
   'op-dismiss': []
@@ -487,6 +500,15 @@ const isCloudCapacityBlocked = computed(
     cloudCapacity.effectiveStatus() === 'disabled'
 )
 
+// State-aware navigation: the footer CTA verb/label and the caret items both
+// come from one `decideNavigation` call, so they can't drift.
+const navState = useInstanceNavState(installation, {
+  currentView: () => props.currentView,
+  currentCategory: () => props.currentCategory,
+  activeInstallationId: () => props.activeInstallationId,
+})
+const primaryDecision = computed<NavDecision>(() => decideNavigation(navState.navInput('primary')))
+
 const primaryActionLabel = computed(() => {
   if (isCloudCapacityBlocked.value) {
     return t('cloud.capacityDisabled', 'Temporarily unavailable')
@@ -494,19 +516,37 @@ const primaryActionLabel = computed(() => {
   if (hasPendingRestart.value) {
     return t('instancePicker.restartToApply', 'Restart to apply changes')
   }
-  return installCta.label.value
+  return t(primaryDecision.value.primaryLabel)
 })
+
+/** Caret items, mapped from the decision's `secondary` list. Empty ⇒ no caret. */
+const caretActions = computed<ActionDef[]>(() =>
+  primaryDecision.value.secondary.map((alt) => ({ id: alt.primaryLabel, label: t(alt.primaryLabel) }))
+)
 
 function handlePrimaryAction(): void {
   const selectedInstall = installation.value
   if (!selectedInstall) return
-  // The restart-in-place click IS the restart: main stops + relaunches with the
+  // A restart click IS the restart: main stops + relaunches with the
   // freshly-saved values, so consume the pending-restart state now. A remote
   // relaunch surfaces no observable lifecycle dip, so the watchers can't clear it.
-  if (installCta.restartInPlace.value && pendingRestartFieldIds.value.size > 0) {
+  if (primaryDecision.value.verb === 'restart' && pendingRestartFieldIds.value.size > 0) {
     clearPendingRestart(selectedInstall.id)
   }
-  emit('primary-action', installCta.restartInPlace.value)
+  emit('primary-action', primaryDecision.value)
+}
+
+const caretMenuOpen = ref(false)
+function toggleCaretMenu(): void {
+  caretMenuOpen.value = !caretMenuOpen.value
+}
+function closeCaretMenu(): void {
+  caretMenuOpen.value = false
+}
+function handleCaretPick(action: ActionDef): void {
+  if (!installation.value) return
+  const picked = primaryDecision.value.secondary.find((alt) => alt.primaryLabel === action.id)
+  if (picked) emit('open-new-window', picked)
 }
 
 const opInflight  = computed(() => props.activeOperation != null && !props.activeOperation.done)
@@ -882,16 +922,43 @@ defineExpose({
         </span>
       </Transition>
 
-      <button
-        type="button"
-        class="primary settings-v2-relaunch"
-        :class="{ 'is-pending-restart': hasPendingRestart, 'is-capacity-disabled': isCloudCapacityBlocked }"
-        :disabled="!installation || opBlocksFooter || isCloudCapacityBlocked"
-        :title="isCloudCapacityBlocked ? $t('cloud.capacityDisabledHint') : undefined"
-        @click="handlePrimaryAction"
-      >
-        {{ primaryActionLabel }}
-      </button>
+      <div class="settings-v2-cta-wrap" :class="{ 'has-caret': caretActions.length > 0 }">
+        <button
+          type="button"
+          class="primary settings-v2-relaunch"
+          :class="{
+            'is-pending-restart': hasPendingRestart,
+            'is-capacity-disabled': isCloudCapacityBlocked,
+            'is-split': caretActions.length > 0,
+          }"
+          :disabled="!installation || opBlocksFooter || isCloudCapacityBlocked"
+          :title="isCloudCapacityBlocked ? $t('cloud.capacityDisabledHint') : undefined"
+          @click="handlePrimaryAction"
+        >
+          {{ primaryActionLabel }}
+        </button>
+        <template v-if="caretActions.length > 0">
+          <button
+            type="button"
+            class="primary settings-v2-cta-caret"
+            data-more-trigger
+            :class="{ 'is-active': caretMenuOpen }"
+            aria-haspopup="menu"
+            :aria-expanded="caretMenuOpen"
+            :aria-label="t('instancePicker.openInNewWindow', 'Open in new window')"
+            :disabled="!installation || opBlocksFooter || isCloudCapacityBlocked"
+            @click="toggleCaretMenu"
+          >
+            <ChevronUp :size="14" />
+          </button>
+          <MoreMenu
+            :open="caretMenuOpen"
+            :actions="caretActions"
+            @close="closeCaretMenu"
+            @pick="handleCaretPick"
+          />
+        </template>
+      </div>
 
       <div class="settings-v2-more-wrap">
         <button
@@ -1294,6 +1361,34 @@ defineExpose({
   background: var(--neutral-50);
   border-color: var(--neutral-50);
   color: var(--neutral-950);
+}
+
+/* Split-button: the primary CTA (label fills the left, clicking it runs the
+ * primary action) glued to a chevron zone that opens the navigation
+ * alternatives. The two read as one control. */
+.settings-v2-cta-wrap {
+  position: relative;
+  display: inline-flex;
+  flex: 0 1 auto;
+}
+.settings-v2-cta-wrap.has-caret .settings-v2-relaunch.is-split {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.settings-v2-cta-caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  width: 30px;
+  padding: 0;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  /* Hairline divider against the primary so the split reads as two zones. */
+  border-left: 1px solid color-mix(in srgb, var(--neutral-950) 18%, transparent);
+}
+.settings-v2-cta-caret.is-active {
+  filter: brightness(0.94);
 }
 
 .settings-v2-more-wrap {

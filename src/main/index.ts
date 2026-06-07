@@ -97,6 +97,7 @@ import {
   setHostFactories,
   shouldConfirmKillForEntry
 } from './host/registry'
+import type { ComfyWindowEntry } from './host/registry'
 import {
   applyChooserHostThemeToAll,
   createHostWindow,
@@ -1408,6 +1409,45 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     // a modal that renders inside the panel — naturally visible after
     // the detach since the host is now chooser-shape with the panel
     // on top.
+    // Land `installationId` into `entry` (which must be chooser-shaped): ensure
+    // the panelView, then defer a `picker-pick-install` overlay until the panel
+    // renderer acks `did-finish-load`. PanelApp's `useDeepLinkRouter` stakes an
+    // attach claim against this window; `onLaunch` consumes it and attaches in
+    // place. Shared by the in-place swap and the new-window paths.
+    const deliverPickToEntry = (entry: ComfyWindowEntry, installationId: string): void => {
+      if (entry.window.isDestroyed()) return
+      const panelView =
+        entry.panelView ?? ensurePanelView(entry.windowKey, entry, computeBodyMode(entry))
+      if (panelView.webContents.isDestroyed()) return
+      sendToPanelDeferred(panelView, 'panel-trigger-overlay', {
+        kind: 'picker-pick-install',
+        installationId
+      })
+    }
+
+    // Open `installationId` in its OWN window, never disturbing the host that
+    // opened the picker. Mirrors `pickInstallFromPicker`'s focus-existing
+    // short-circuit, but the no-window case spawns a FRESH chooser host and
+    // launches into it instead of swapping the parent — so the user's current
+    // instance keeps running (the "Open in new window" caret affordance).
+    const openInstallInNewWindow = (installationId: string): void => {
+      const existing = getEntryByInstallationId(installationId)
+      if (existing && !existing.window.isDestroyed()) {
+        // An install runs in at most one window (its local process can't run
+        // twice) — focus it rather than spawning a duplicate.
+        existing.window.show()
+        existing.window.focus()
+        return
+      }
+      mainTelemetry.emit('comfy.desktop.instance.opened_new_window', {
+        to_installation_id: installationId,
+        method: 'picker'
+      })
+      const target = findEntryByHostWindow(openChooserHostWindow())
+      if (!target) return
+      deliverPickToEntry(target, installationId)
+    }
+
     const pickInstallFromPicker = async (
       installationId: string,
       parentEntryId: number
@@ -1479,27 +1519,11 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
         parentEntry.detachInstall()
       }
 
-      // Route through the chooser-pick path. After the detach (or for
-      // a parent that was already chooser-shape), the host is
-      // chooser-shape; PanelApp's `useDeepLinkRouter` branches the
-      // picker-pick-install payload to `handleChooserPick`, which
-      // stakes an attach claim against this same window. `onLaunch`
-      // consumes the claim and runs `attachInstall` against the
-      // existing host — the user perceives one in-place swap, not a
-      // detach + relaunch.
-      //
-      // The newly-remounted panel renderer takes a beat to load + ack
-      // `did-finish-load`. `sendToPanelDeferred` queues the IPC until
-      // that ack arrives so the listener has been registered by the
-      // time the payload fires.
-      const panelView =
-        parentEntry.panelView ??
-        ensurePanelView(parentEntryId, parentEntry, computeBodyMode(parentEntry))
-      if (panelView.webContents.isDestroyed()) return
-      sendToPanelDeferred(panelView, 'panel-trigger-overlay', {
-        kind: 'picker-pick-install',
-        installationId
-      })
+      // Route through the chooser-pick path. After the detach (or for a parent
+      // that was already chooser-shape), the host is chooser-shape and
+      // `deliverPickToEntry` stakes the in-place attach claim — the user
+      // perceives one swap, not a detach + relaunch.
+      deliverPickToEntry(parentEntry, installationId)
     }
 
     registerTitlePopupIpc({
@@ -1860,6 +1884,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
         }
       },
       pickInstallFromPicker,
+      openInstallInNewWindow,
       restartInstallFromPicker: async (installationId, parentEntryId, opts) => {
         // Restart: same install, same window. The session is stopped
         // and a fresh launch is triggered; `onLaunch`'s existing-
