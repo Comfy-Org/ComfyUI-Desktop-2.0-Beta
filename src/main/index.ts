@@ -1439,7 +1439,13 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
       // twice) — focus it rather than spawning a duplicate. `allowDuplicate`
       // lifts this for cloud-self, where two windows are just two views of the
       // same remote session (matrix row 16).
-      if (existing && !existing.window.isDestroyed() && !opts?.allowDuplicate) {
+      const willFocusExisting = !!existing && !existing.window.isDestroyed() && !opts?.allowDuplicate
+      recordIpcInvocation('open-install-new-window', {
+        installationId,
+        allowDuplicate: opts?.allowDuplicate === true,
+        focusedExisting: willFocusExisting
+      })
+      if (willFocusExisting) {
         existing.window.show()
         existing.window.focus()
         return

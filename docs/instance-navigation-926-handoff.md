@@ -132,5 +132,45 @@ installs (A, B) and the Cloud entry available.
 | Main: swap / 3-way modal / new-window primitive | [`src/main/index.ts`](../src/main/index.ts) (`pickInstallFromPicker`, `openInstallInNewWindow`) |
 | 3-way modal infra | [`src/main/popups/systemModal.ts`](../src/main/popups/systemModal.ts) (`openSystemModalChoiceAsync`) |
 
-**Tests:** `navDecision.test.ts` covers every cell + the full input cross-product;
-`useInstanceActions.test.ts` covers verb→bridge routing.
+---
+
+## 5. Test coverage
+
+Coverage is split across two layers by design: **unit** tests pin the *decision*
+(which verb/window for every cell), **e2e** tests pin the *wiring* (bridge → IPC →
+main → real window). Together they cover every matrix cell; a few cells are
+intentionally only unit/manual (noted below with the reason).
+
+### Unit (fast, exhaustive)
+| File | Covers |
+|---|---|
+| [`navDecision.test.ts`](../src/shared/navigation/navDecision.test.ts) | **Every matrix cell** explicitly + the full `ViewKind × TargetKind × TargetRun × class × intent` cross-product (totality — no cell can silently break) |
+| [`useInstanceActions.test.ts`](../src/renderer/src/composables/useInstanceActions.test.ts) | Verb → bridge routing for all verbs; cloud-capacity gate; kill-confirm gate; `allowDuplicate` passthrough; focus-vs-spawn decision |
+| [`useInstanceNavState.test.ts`](../src/renderer/src/composables/useInstanceNavState.test.ts) | Run-state derivation (self / running-here / running-elsewhere / stopped); remote⇒cloud fold |
+| [`registry.test.ts`](../src/main/host/registry.test.ts) | `computeViewKind` (dashboard / instance / cloud; remote fold) |
+
+### E2E (real app: bridge → IPC → window)
+Assert via recorded IPC (`getIpcInvocations`) + live `BrowserWindow` counts.
+
+| Spec | Test | Matrix cell |
+|---|---|---|
+| `nav-matrix-dashboard` | stopped instance: same-window launch | Dashboard → Instance (stopped) |
+| | running instance: focus existing | Dashboard → Instance (running) |
+| | cloud via "Open in new window" | Dashboard → Cloud caret |
+| `nav-matrix-instance` | B via "Open in new window": spawns new window | Instance → Instance B caret |
+| | B running elsewhere: focus | Instance → Instance B (running) |
+| `nav-matrix-cloud` | cloud target with no window: new window | Instance/Cloud → Cloud (new window, Phase 3b) |
+| | cloud self + allowDuplicate: second window | Cloud → Cloud self (row 16, Phase 3d) |
+| | allowDuplicate threaded to main intact | (plumbing for the focus-vs-spawn branch) |
+
+### Intentionally NOT e2e'd (with reason)
+| Cell / behavior | Why not e2e | Where it's covered |
+|---|---|---|
+| **3-way modal rendering** (Switch / Open in new window / Cancel buttons + clicking each) | Fires only when the picker's parent host is a *truly attached local instance*, which needs a live ComfyUI process the e2e harness can't spawn. The new-window **routing** it triggers IS e2e'd. | Unit (`useInstanceActions.test.ts`) + manual §3 |
+| **Focus-existing for an already-windowed install** (one process = one window) | Needs a real attached window in the registry (`installationIdToWindowKey` only populates on a real `attachInstall`). | Unit (`useInstanceActions.test.ts`) |
+| Dashboard → Dashboard (no-op), → New Instance; Instance → self (restart), → Dashboard; Cloud → Dashboard, → New Instance | Trivial / unchanged / already covered by existing e2e (`lifecycle-picker-cluster`, `picker-stop-confirm`). | Unit + existing e2e suites |
+| Cloud-host *view* setup for cloud→X tests | Attaching a real Cloud host needs a `cloud.comfy.org` launch (network + flaky). `openInstallInNewWindow` depends on the TARGET, not the calling view, so the cloud-target deltas are driven from the chooser host instead. | The view→primitive mapping is unit-tested in `navDecision.test.ts` |
+
+**Run e2e:** `npx playwright test e2e/nav-matrix-*.test.ts --project=<os>` (note:
+rebuild with `pnpm run build` first if main-process code changed — e2e runs the
+built `out/` bundle).
