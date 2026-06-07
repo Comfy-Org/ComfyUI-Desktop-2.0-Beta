@@ -33,6 +33,9 @@ export interface KnownSettings {
   firstUseCompleted?: boolean
   oemManagedModelDirs?: string[]
   oemWorkflowImportVersion?: number
+  /** Directory the user last chose in the general "Save image/file" dialog.
+   *  Used to seed the dialog's defaultPath so it matches browser behavior. */
+  lastSaveDialogDir?: string
 }
 
 export type Settings = KnownSettings & Record<string, unknown>
@@ -70,6 +73,7 @@ const SETTINGS_SCHEMA = {
   firstUseCompleted: { nullable: false },
   oemManagedModelDirs: { nullable: false },
   oemWorkflowImportVersion: { nullable: false },
+  lastSaveDialogDir: { nullable: true },
 } as const satisfies Record<keyof KnownSettings, { nullable: boolean }>
 
 export type KnownSettingKey = keyof typeof SETTINGS_SCHEMA
