@@ -129,7 +129,12 @@ async function loadReleaseOptions(): Promise<void> {
     if (gen !== optionsGeneration) return
     detectedGpu.value = gpu
 
-    const options = await window.api.getFieldOptions('standalone', 'release', {})
+    // `includeLatestStable: true` is the gate that opens the standalone source's
+    // release list (see `standalone/index.ts:328`). Without it the source returns
+    // an empty array and the Create Installation button stays disabled with no
+    // visible reason. Mirrors the InstallWizardModal / QuickInstallModal calls
+    // — the snapshot-import path was the only place that forgot to pass it.
+    const options = await window.api.getFieldOptions('standalone', 'release', {}, { includeLatestStable: true })
     if (gen !== optionsGeneration) return
     releaseOptions.value = options
 

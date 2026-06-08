@@ -172,6 +172,14 @@ export async function postInstall(installation: InstallationRecord, { sendProgre
           update,
           sendProgress: sendProgress as (step: string, data: Record<string, unknown>) => void,
           signal,
+          // The standalone bundle ships a pre-extracted venv whose pinned
+          // versions can lag ComfyUI's own `requirements.txt` (most visibly
+          // `comfy-aimdo`, which crashes on import when the venv's copy is
+          // older than what ComfyUI's source expects). Force a `pip install
+          // --upgrade -r requirements.txt` after the post-install git update,
+          // even when the file is byte-identical pre/post, so the venv always
+          // ends up in sync with ComfyUI's pins before the user runs anything.
+          forceDepsSync: true,
         })
         installation = result.installation
         if (result.ok) {

@@ -48,7 +48,10 @@ export interface PipMirrorConfig {
   useChineseMirrors?: boolean
 }
 
-/** Install a requirements file via `uv pip install -r`, filtering out PyTorch packages first. */
+/** Install a requirements file via `uv pip install -r`, filtering out PyTorch packages first.
+ *  Pass `upgrade: true` to add `--upgrade` so already-installed packages whose pinned versions
+ *  drifted (e.g. the bundled venv's `comfy-aimdo` lagging ComfyUI's `requirements.txt`) get
+ *  reconciled instead of skipped by uv's satisfaction check. */
 export async function installFilteredRequirements(
   reqPath: string,
   uvPath: string,
@@ -57,7 +60,8 @@ export async function installFilteredRequirements(
   tempName: string,
   sendOutput: (text: string) => void,
   signal?: AbortSignal,
-  mirrors?: PipMirrorConfig
+  mirrors?: PipMirrorConfig,
+  upgrade = false,
 ): Promise<number> {
   const content = await fs.promises.readFile(reqPath, 'utf-8')
   const filtered = content.split('\n').filter((l) => !PYTORCH_RE.test(l.trim())).join('\n')
@@ -66,7 +70,8 @@ export async function installFilteredRequirements(
 
   try {
     const indexArgs = getPipIndexArgs(mirrors?.pypiMirror, mirrors?.useChineseMirrors)
-    return await runUvPip(uvPath, ['pip', 'install', '-r', filteredPath, '--python', pythonPath, ...indexArgs], installPath, sendOutput, signal)
+    const upgradeArg = upgrade ? ['--upgrade'] : []
+    return await runUvPip(uvPath, ['pip', 'install', ...upgradeArg, '-r', filteredPath, '--python', pythonPath, ...indexArgs], installPath, sendOutput, signal)
   } finally {
     try { await fs.promises.unlink(filteredPath) } catch {}
   }

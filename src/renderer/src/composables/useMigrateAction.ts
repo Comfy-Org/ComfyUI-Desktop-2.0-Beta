@@ -212,7 +212,11 @@ export function useMigrateAction(opts?: { surface?: 'modal' | 'takeover' }) {
     let migrateRelease: FieldOption | null = null
     let autoPickedVariant: FieldOption | null = null
     try {
-      const releaseOptions = await window.api.getFieldOptions('standalone', 'release', {})
+      // `includeLatestStable: true` opens the standalone release list — same
+      // gate the install wizard passes (`standalone/index.ts:328`). Without it
+      // releaseOptions is empty, `migrateRelease` ends up null, and the
+      // migrate flow silently gives up without picking a variant.
+      const releaseOptions = await window.api.getFieldOptions('standalone', 'release', {}, { includeLatestStable: true })
       migrateRelease = releaseOptions[0] || null
       if (migrateRelease) {
         const variantOptions = await window.api.getFieldOptions('standalone', 'variant', { release: toRaw(migrateRelease) })
