@@ -15,6 +15,7 @@ import StoragePane, { type StorageSnapshot } from '../../views/comfyUISettings/S
 import ConsoleTerminalPane from '../../views/comfyUISettings/ConsoleTerminalPane.vue'
 import Tooltip from '../ui/Tooltip.vue'
 import type { PickerTab, SectionTab } from '../../lib/pickerTabs'
+import { isTabAllowedForCategory } from '../../lib/pickerTabs'
 import { humanizeOpStatus, operationInflightLabel, operationSuccessLabel } from '../../lib/progressStatusLabel'
 import type { ActionDef, DetailField, Installation, ShowProgressOpts } from '../../types/ipc'
 import { TID } from '../../../../shared/testIds'
@@ -276,10 +277,13 @@ const ALL_TABS: TabDef[] = [
 ]
 
 // The console tab has no backend `sections` — it's a live PTY view — so it
-// can't be section-gated like the others. Show it for any local install
-// (cloud installs run no local process to attach a shell to).
+// can't be section-gated like the others. Visibility by instance type is
+// centralized in `isTabAllowedForCategory` (cloud + remote run no local
+// process to attach a shell to).
 const showConsoleTab = computed(
-  () => installation.value != null && installation.value.sourceCategory !== 'cloud'
+  () =>
+    installation.value != null &&
+    isTabAllowedForCategory('console', installation.value.sourceCategory)
 )
 
 const tabs = computed<TabDef[]>(() => {
