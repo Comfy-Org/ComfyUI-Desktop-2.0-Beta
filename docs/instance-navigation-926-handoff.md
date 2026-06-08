@@ -34,7 +34,7 @@ The first 8 columns are the **original CTO matrix, reproduced verbatim**. The
 | 11 | Instance A | Cloud | Not running | Behavior inconsistent verify | Always open in new window (cloud is lightweight; A keeps running) | Open Cloud | – | ✅ |
 | 12 | Instance A | Cloud | Already open | Behavior inconsistent verify | Focus existing cloud window | Switch | Open in new window | ✅ |
 | 13 | Cloud | Dashboard | n/a | Verify | Switch in same window | Open Dashboard | – | ⚠️ **DEVIATION — ships new-window** (§1a) |
-| 14 | Cloud | Instance A | Not running | Verify | Open in new window (cloud window keeps running) | Start (in new window) | – | ✅ |
+| 14 | Cloud | Instance A | Not running | Verify | Open in new window (cloud window keeps running) | Start (in new window) | – | ✅ (CTA reads "Open in new window") |
 | 15 | Cloud | Instance A | Already open | Verify | Focus existing window of A | Switch | Restart (defer? — open call for Maanil) | ✅ (Restart **deferred** — no caret) |
 | 16 | Cloud | Cloud | Self | No-op or no button verify | Open a second Cloud window | Open in new window | – | ✅ |
 | 17 | Cloud | + New Instance | n/a | Verify | Open install wizard in new window | New Install | – | ✅ |
@@ -115,7 +115,7 @@ installs (A, B) and the Cloud entry available.
 | Do this | Expect |
 |---|---|
 | Click **Open Dashboard** | Dashboard opens (currently **new** window — known deviation) |
-| Select stopped instance → **Start (new window)** | Instance launches in a **new** window; **Cloud keeps running** |
+| Select stopped instance → **Open in new window** | Instance launches in a **new** window; **Cloud keeps running** |
 | Select instance **running** elsewhere → **Switch** | That window is **focused** |
 | Select the **Cloud install itself** → **Open in new window** | A **second** Cloud window opens (two views of the same session) |
 | Click **+ New Instance** | Install wizard opens in a new window |

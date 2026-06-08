@@ -200,7 +200,6 @@ export const en = {
     switch: 'Switch',
     openCloud: 'Open Cloud',
     openInNewWindow: 'Open in new window',
-    startNewWindow: 'Start (new window)',
     windowOptions: 'Window options',
     moreWindowOptions: 'More window options',
     restartConfirmTitle: 'Restart this instance?',

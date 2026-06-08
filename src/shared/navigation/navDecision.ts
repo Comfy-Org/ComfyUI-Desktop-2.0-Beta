@@ -49,7 +49,6 @@ export const NAV_LABEL = {
   openDashboard: 'instancePicker.openDashboard',
   openCloud: 'instancePicker.openCloud',
   openInNewWindow: 'instancePicker.openInNewWindow',
-  startNewWindow: 'instancePicker.startNewWindow',
   newInstall: 'instancePicker.newInstance',
 } as const
 export type NavLabelKey = (typeof NAV_LABEL)[keyof typeof NAV_LABEL]
@@ -219,11 +218,11 @@ const TABLE: ReadonlyMap<CellKey, NavDecision> = new Map<CellKey, NavDecision>([
   [
     cellKey('cloud', 'instance', 'stopped'),
     // Matrix: start the instance in a NEW window so the cloud session keeps
-    // running. Label reads "Start (new window)".
+    // running. Labelled "Open in new window" (it spawns a window, not a swap).
     dec({
       window: 'new',
       verb: 'open-new',
-      primaryLabel: NAV_LABEL.startNewWindow,
+      primaryLabel: NAV_LABEL.openInNewWindow,
       telemetry: 'instance.opened_new_window',
     }),
   ],

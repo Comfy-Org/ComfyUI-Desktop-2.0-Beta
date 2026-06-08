@@ -116,7 +116,7 @@ describe('decideNavigation — the CURRENT-behavior matrix (baseline before #926
   })
   it('Cloud → Instance (stopped): NEW window, keeps the cloud session running', () => {
     const decision = decisionFor('cloud', 'instance', 'stopped', 'cloud')
-    expect(decision).toMatchObject({ window: 'new', verb: 'open-new', primaryLabel: NAV_LABEL.startNewWindow })
+    expect(decision).toMatchObject({ window: 'new', verb: 'open-new', primaryLabel: NAV_LABEL.openInNewWindow })
   })
   it('Cloud → self: opens a second cloud window (allowDuplicate)', () => {
     const decision = decisionFor('cloud', 'cloud', 'self', 'cloud')
