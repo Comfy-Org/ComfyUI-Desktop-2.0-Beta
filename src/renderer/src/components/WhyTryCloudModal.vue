@@ -17,7 +17,6 @@ const benefits = computed<string[]>(() => {
 })
 
 const overlayRef = ref<HTMLDivElement | null>(null)
-const closeBtnRef = ref<HTMLButtonElement | null>(null)
 const mouseDownOnOverlay = ref(false)
 // Element focused before open; restored on close to return focus to the trigger.
 let returnFocusTo: HTMLElement | null = null
@@ -36,7 +35,9 @@ function onKeydown(e: KeyboardEvent) {
 onMounted(() => {
   document.addEventListener('keydown', onKeydown)
   returnFocusTo = document.activeElement instanceof HTMLElement ? document.activeElement : null
-  void nextTick(() => closeBtnRef.value?.focus())
+  // Focus the dialog container, not the close button — keeps focus trapped for
+  // keyboard/AT without painting a focus-visible ring on open.
+  void nextTick(() => overlayRef.value?.focus())
 })
 onUnmounted(() => {
   document.removeEventListener('keydown', onKeydown)
@@ -53,12 +54,12 @@ onUnmounted(() => {
         role="dialog"
         aria-modal="true"
         :aria-label="$t('firstUse.whyCloud.title')"
+        tabindex="-1"
         @mousedown="onOverlayMouseDown"
         @click="onOverlayClick"
       >
         <div class="why-cloud-content modal-fade-panel">
           <button
-            ref="closeBtnRef"
             class="why-cloud-close"
             type="button"
             :aria-label="$t('common.close')"

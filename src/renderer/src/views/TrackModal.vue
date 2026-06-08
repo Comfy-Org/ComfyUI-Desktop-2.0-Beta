@@ -45,10 +45,11 @@ watch(isOpen, async (open) => {
     document.addEventListener('keydown', onKeydown)
     returnFocusTo = document.activeElement instanceof HTMLElement ? document.activeElement : null
     await nextTick()
-    const target = cardRef.value?.querySelector<HTMLElement>(
-      'input, button, select, [tabindex]:not([tabindex="-1"])'
-    )
-    target?.focus()
+    // Prefer a real field (user types right away); otherwise focus the dialog
+    // container itself — never a button — so opening doesn't paint a focus-
+    // visible ring. Focus stays trapped for keyboard/AT either way.
+    const field = cardRef.value?.querySelector<HTMLElement>('input, select, textarea')
+    ;(field ?? cardRef.value)?.focus()
   } else {
     document.removeEventListener('keydown', onKeydown)
     returnFocusTo?.focus()
@@ -228,6 +229,7 @@ defineExpose({ open })
         role="dialog"
         aria-modal="true"
         :aria-label="$t('track.grandTitle')"
+        tabindex="-1"
       >
         <div class="brand-card__body">
           <div class="track-field">
