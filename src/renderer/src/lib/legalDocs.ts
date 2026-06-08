@@ -321,166 +321,140 @@ export const PRIVACY_POLICY: LegalDoc = {
   blocks: [
     {
       kind: 'p',
-      text: 'This Privacy Policy describes what data Comfy Org collects from your use of the Comfy Desktop application, how it is used, who processes it, and the choices and rights you have.'
+      text: 'This Privacy Policy describes the personal data we process when you use Comfy Desktop, the purposes and lawful bases for that processing, the recipients of the data, and the rights available to you.'
     },
 
-    { kind: 'h2', text: 'What we collect' },
-    { kind: 'h3', text: 'Usage analytics (via PostHog)' },
+    { kind: 'h2', text: 'Controller' },
     {
       kind: 'p',
-      text: 'Sent only if you have analytics enabled (toggle on the consent screen and in Settings).'
+      text: 'Comfy Organization Inc ("Comfy Org", "we", "us") is the data controller for personal data processed in connection with your use of Comfy Desktop. We are established in San Francisco, USA. For privacy enquiries: **support@comfy.org**.'
+    },
+
+    { kind: 'h2', text: 'Personal data we process' },
+    {
+      kind: 'p',
+      text: 'When telemetry is enabled (opt-in on the first-run consent screen; toggle at Settings → Telemetry), we process the following categories of data:'
     },
     {
       kind: 'ul',
       items: [
-        'App version and platform (e.g. "Comfy Desktop 1.0.0, macOS 14.4 ARM")',
-        'A local device ID generated locally. Before you sign in to Comfy Cloud, this ID is not tied to your name, email, or any hardware identifier we can reverse. Once you sign in, the device ID is linked to your Comfy account.',
-        'Feature events ("install completed", "workflow opened", "settings panel opened") with non-identifying metadata',
-        'Identifiers of custom nodes you install through Manager (the public package name only, e.g. "comfyui-impact-pack" — never your local install path)',
-        'Approximate timing of those events'
+        '**Device identifier** — a pseudonymous identifier generated locally on first run. Before you sign in to Comfy Cloud, it is not linked to your name, email, or hardware. On sign-in, it is associated with your Comfy account.',
+        '**Technical metadata** — application version, operating system, processor architecture.',
+        '**Product usage events** — feature interactions, navigation between views, installation and update milestones, approximate timing.',
+        '**Custom node identifiers** — public package names of custom nodes you install through Manager (e.g. "comfyui-impact-pack"). The local installation path is not transmitted.',
+        '**Crash and error diagnostics** — stack traces, error messages, and short stdout/stderr fragments captured at the moment of failure.'
       ]
     },
-    { kind: 'p', text: "We **don't** send:" },
+    {
+      kind: 'p',
+      text: 'Before crash or error diagnostic data is transmitted, we apply automated redaction to home-directory paths and to well-known credential patterns (Bearer tokens, OpenAI `sk-*` and Hugging Face `hf_*` keys, basic-auth URLs, and `KEY=` / `SECRET=` environment assignments).'
+    },
+    { kind: 'p', text: 'We do **not** process:' },
     {
       kind: 'ul',
       items: [
         'Workflow content (the graph, the nodes you connect, their parameters)',
         'Prompts you write',
-        'Generated images, videos, or audio',
-        'Your username or home-directory paths (automatically redacted before sending)',
-        'Model weights, or the local filenames you save them as',
-        'Network activity outside the app'
-      ]
-    },
-
-    { kind: 'h3', text: 'Crash reports (via Datadog)' },
-    { kind: 'p', text: 'Sent only if you have analytics enabled.' },
-    {
-      kind: 'ul',
-      items: [
-        'Stack traces, error messages, and short stdout/stderr fragments captured around a ComfyUI crash',
-        'App version, platform',
-        'Local device ID (or Comfy account ID if you have signed in)'
+        'Generated images, video, or audio',
+        'Model weights, or the local filenames under which you save them',
+        'Network activity outside the application'
       ]
     },
     {
       kind: 'p',
-      text: "Before sending, we automatically redact home-directory paths (so your username isn't shipped) and well-known credential patterns (Bearer tokens, OpenAI `sk-*` keys, Hugging Face `hf_*` keys, basic-auth URLs, and `KEY=` / `SECRET=` assignments). We do **not** include your prompts, workflow JSON, or generated outputs in crash reports."
+      text: 'Workflow files, models, generated outputs, the list of installations you create, and your local settings remain on your device and are not transmitted to, or accessible by, Comfy Org.'
     },
+
+    { kind: 'h2', text: 'Purposes and lawful bases' },
     {
       kind: 'p',
-      text: "**Caveat for third-party custom nodes:** a node you install may emit its own log output around a crash (progress bars, debug status messages, function names it ran) that our automatic scrubbers cannot anticipate. We never bundle your prompts or generated content, but if you see sensitive text in your own ComfyUI logs, disable telemetry from Settings → Telemetry."
+      text: 'We process personal data on the following lawful bases under GDPR and UK GDPR:'
     },
-
-    { kind: 'h3', text: 'What stays on your machine, always' },
     {
       kind: 'ul',
       items: [
-        'Your workflow files',
-        'Your installed models',
-        'Your generated outputs (images, videos, audio)',
-        "The list of installations you've created in Desktop",
-        'Your local settings'
-      ]
-    },
-    { kind: 'p', text: 'None of these are uploaded, indexed, or accessible to Comfy Org.' },
-
-    { kind: 'h2', text: 'Why we collect what we do' },
-    {
-      kind: 'ul',
-      items: [
-        '**Usage analytics**: to understand which features people use, where they get stuck, and what to improve.',
-        '**Crash reports**: to find and fix bugs faster.'
+        'Product usage analytics — Consent (Article 6(1)(a))',
+        'Crash and error diagnostics — Consent (Article 6(1)(a))',
+        'Delivery of software updates and integrity verification — Legitimate interests (Article 6(1)(f))',
+        'Authentication when signing in to Comfy Cloud — Performance of a contract (Article 6(1)(b))'
       ]
     },
     {
       kind: 'p',
-      text: "That's the entire purpose. We don't sell, share, or use this data for advertising."
-    },
-
-    { kind: 'h2', text: 'Lawful basis (GDPR / UK GDPR)' },
-    {
-      kind: 'ul',
-      items: [
-        '**Consent** (Article 6(1)(a)) for analytics + crash reports — both are opt-in on the consent screen and revocable in Settings.',
-        '**Legitimate interests** (Article 6(1)(f)) for update-server requests necessary to deliver software updates and security fixes. You can object via privacy@comfy.org.'
-      ]
-    },
-
-    { kind: 'h2', text: 'Third-party processors' },
-    { kind: 'p', text: 'Data is processed by:' },
-    {
-      kind: 'ul',
-      items: [
-        '**PostHog** — product analytics',
-        '**Datadog** — crash reports and application logs',
-        '**Comfy Org analytics warehouse** — long-term aggregate analytics storage, operated by Comfy Org',
-        '**ToDesktop** — application distribution and auto-update servers'
-      ]
+      text: 'Consent for analytics and crash diagnostics is opt-in and may be withdrawn at any time at Settings → Telemetry. Withdrawal does not affect the lawfulness of processing carried out before withdrawal. You may object to legitimate-interest processing by contacting **support@comfy.org**.'
     },
     {
       kind: 'p',
-      text: 'External vendors process data on our behalf under standard data-processing agreements. EU/UK transfers rely on Standard Contractual Clauses where required.'
+      text: 'We do not carry out automated decision-making, including profiling, that produces legal or similarly significant effects. We do not sell personal data and do not share personal data for cross-context behavioural advertising.'
+    },
+
+    { kind: 'h2', text: 'Recipients' },
+    {
+      kind: 'p',
+      text: 'We engage the following processors under Data Processing Agreements:'
+    },
+    {
+      kind: 'ul',
+      items: [
+        '**PostHog** — product usage analytics',
+        '**Datadog** — crash and error diagnostics',
+        '**ToDesktop** — application distribution and software updates',
+        '**Comfy Org analytics warehouse** — long-term aggregate analytics, operated by Comfy Org'
+      ]
+    },
+
+    { kind: 'h2', text: 'International transfers' },
+    {
+      kind: 'p',
+      text: 'Comfy Organization Inc is established in the United States. Personal data of users in the EU, UK, EEA, or other jurisdictions outside the United States may be transferred to the United States and to other locations where our processors operate. Where required, we rely on the European Commission Standard Contractual Clauses (and the UK International Data Transfer Addendum where applicable) as the transfer mechanism under Chapter V GDPR.'
     },
 
     { kind: 'h2', text: 'Retention' },
     {
       kind: 'ul',
       items: [
-        'Usage analytics: up to **24 months** rolling, then aggregated further or deleted.',
-        'Crash reports: up to **15 days** at full fidelity, then sampled or aggregated.',
-        'Long-term aggregate analytics: up to **36 months** in aggregated form.',
-        'Update-server logs: up to **90 days**.',
-        'Local device ID: stored on your machine only, removed on uninstall.'
-      ]
-    },
-
-    { kind: 'h2', text: 'Your choices' },
-    {
-      kind: 'ul',
-      items: [
-        '**Turn off analytics**: Settings → Telemetry → toggle off. Future events stop immediately; any in-flight requests already on the wire may complete.',
-        "**Delete past data**: email **privacy@comfy.org** with your approximate install date, platform, and version. We'll do a best-effort match and remove associated records within 30 days.",
-        "**Stop using the app**: uninstalling Desktop ends data collection. We don't keep tracking IDs after uninstall."
+        'Product usage analytics — up to **24 months** from event, then aggregated or deleted',
+        'Crash and error diagnostics — **15 days** at full fidelity, sampled or aggregated thereafter',
+        'Aggregate analytics — up to **36 months** in aggregated form',
+        'Update-server logs — **90 days**',
+        'Local device identifier — stored on your device; removed on uninstall'
       ]
     },
 
     { kind: 'h2', text: 'Your rights' },
     {
       kind: 'p',
-      text: "If you're in the EU, UK, or EEA, you have rights under GDPR / UK GDPR — access, rectification, erasure, restriction, objection, portability. Email **privacy@comfy.org** to exercise them."
+      text: 'If you are in the EU, UK, or EEA, you have the following rights under GDPR and UK GDPR: access, rectification, erasure, restriction of processing, objection, portability, and withdrawal of consent.'
     },
     {
       kind: 'p',
-      text: "If you're in California, you have rights under CCPA / CPRA — know, delete, correct, opt out of sale/sharing (note: we don't sell or share data for cross-context behavioral advertising), and limit use of sensitive personal information."
+      text: 'If you are a California resident, you have rights under CCPA and CPRA: to know what we collect, to delete, to correct, and to limit use of sensitive personal information. We do not sell personal information or share it for cross-context behavioural advertising.'
     },
     {
       kind: 'p',
-      text: "You also have the right to lodge a complaint with your local data protection authority (e.g. your EU country's supervisory authority, the UK ICO, or the California Privacy Protection Agency)."
+      text: "You have the right to lodge a complaint with your supervisory authority — for example, the UK Information Commissioner's Office, your EU member-state data protection authority, or the California Privacy Protection Agency."
     },
-
-    { kind: 'h2', text: 'Identity verification' },
     {
       kind: 'p',
-      text: "The Desktop App doesn't require an account, so before you sign in to Comfy Cloud you are not directly identified to us — the only identifier we hold is a local device ID. If you sign in to Comfy Cloud, your telemetry is linked to your account from that point forward. For deletion or access requests, sign in and use your account to identify yourself; or, if you have never signed in, tell us your approximate install date, platform, and version and we'll do a best-effort match against our records."
+      text: 'To exercise any of these rights, contact **support@comfy.org**. If you have signed in to Comfy Cloud, your account verifies your identity. If you have not signed in, please provide your approximate install date, platform, and application version, and we will conduct a best-effort match against our records and respond within 30 days.'
     },
 
     { kind: 'h2', text: 'Children' },
     {
       kind: 'p',
-      text: "Comfy Desktop is not intended for users under 13. If you believe a child has used the app, contact **privacy@comfy.org** and we'll remove related records."
+      text: 'Comfy Desktop is not intended for, and we do not knowingly collect personal data from, individuals under 13 years of age.'
     },
 
-    { kind: 'h2', text: 'Changes to this policy' },
+    { kind: 'h2', text: 'Changes' },
     {
       kind: 'p',
-      text: "We'll update this document as the product evolves. The **Effective** date at the top changes when we revise. During the beta, we may iterate without re-prompting you to re-accept; at GA, we'll prompt for a fresh acceptance of the final policy."
+      text: 'We will revise this Privacy Policy when our processing changes materially. The **Effective** date at the top of this policy reflects the date of the most recent revision.'
     },
 
     { kind: 'h2', text: 'Contact' },
     {
       kind: 'p',
-      text: '**privacy@comfy.org** for any privacy-related question or request.'
+      text: 'For any privacy enquiry, contact **support@comfy.org**.'
     }
   ]
 }
