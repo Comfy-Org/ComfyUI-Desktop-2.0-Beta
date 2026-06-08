@@ -64,9 +64,15 @@ deviations are in §1a. Two implementation notes:
 - **The caret split-button** (footer): the label fills the left (click = primary
   action), a chevron on the right opens the navigation alternatives. It appears
   only where the matrix lists a secondary.
-- **The 3-way modal** (row 9) is a single prompt with three buttons — *Switch*
-  (stop A, swap B in) / *Open in new window* (keep A) / *Cancel* — reusing the
-  system modal's `secondaryLabel`/`openSystemModalChoiceAsync`.
+- **The 3-way prompt** fires for exactly one cell — **row 9** (Instance A →
+  stopped Instance B), and only when the current host is a *local running*
+  instance (the one the swap would stop). It is an **in-drawer dialog** (the
+  picker stays open, matching the Restart confirm) with three choices: *Switch*
+  (stop A, swap B in) / *Open in new window* (keep A) / *Cancel*. Implemented via
+  `dialogs.confirm`'s `secondaryLabel` in `InstancePickerView` (`confirmSwitch`),
+  which then calls `pickInstall(id, { confirmed: true })` so main skips its own
+  modal. Cloud/remote/dashboard hosts have nothing to stop → straight switch, no
+  prompt.
 
 ---
 
@@ -100,7 +106,7 @@ installs (A, B) and the Cloud entry available.
 |---|---|
 | Click **Open Dashboard** chip | Dashboard opens in a **new** window; **A keeps running** |
 | Select A itself → **Restart** | A restarts in place |
-| Select stopped **B** → click **Switch** | **3-way modal**: *Switch* (stop A, swap B in) / *Open in new window* (keep A, B in new window) / *Cancel*. Try each. |
+| Select stopped **B** → click **Switch** | **In-drawer 3-way dialog** (picker stays open): *Switch* (stop A, swap B in) / *Open in new window* (keep A, B in new window) / *Cancel*. Try each — on Cancel the picker stays put. |
 | Select stopped **B** → caret ▾ → **Open in new window** | B opens in a **new** window directly (no modal); **A keeps running** |
 | Select **B running** elsewhere → **Switch** | B's existing window is **focused** |
 | Select **Cloud** (closed) → **Open Cloud** | Cloud opens in a **new** window; **A keeps running** |
@@ -131,8 +137,8 @@ installs (A, B) and the Cloud entry available.
 | Verb → bridge dispatcher | [`src/renderer/src/composables/useInstanceActions.ts`](../src/renderer/src/composables/useInstanceActions.ts) |
 | Footer CTA + caret split-button | [`src/renderer/src/components/settings/ComfyUISettingsContent.vue`](../src/renderer/src/components/settings/ComfyUISettingsContent.vue) |
 | Picker dispatch wiring | [`src/renderer/src/comfyTitlePopup/InstancePickerView.vue`](../src/renderer/src/comfyTitlePopup/InstancePickerView.vue) |
-| Main: swap / 3-way modal / new-window primitive | [`src/main/index.ts`](../src/main/index.ts) (`pickInstallFromPicker`, `openInstallInNewWindow`) |
-| 3-way modal infra | [`src/main/popups/systemModal.ts`](../src/main/popups/systemModal.ts) (`openSystemModalChoiceAsync`) |
+| Main: swap (`confirmed` skips its modal) / new-window primitive | [`src/main/index.ts`](../src/main/index.ts) (`pickInstallFromPicker`, `openInstallInNewWindow`) |
+| In-drawer 3-way switch prompt | [`InstancePickerView.vue`](../src/renderer/src/comfyTitlePopup/InstancePickerView.vue) (`confirmSwitch`) + [`useInstanceActions.ts`](../src/renderer/src/composables/useInstanceActions.ts) |
 
 ---
 
