@@ -14,57 +14,59 @@ that table and its test; nothing else.
 
 ---
 
-## 1. CTO matrix (source of truth)
+## 1. CTO matrix (source of truth) — verbatim, with implementation status
 
-### Dashboard → X
-| Target (state) | Behavior | Primary CTA | Secondary (caret) |
-|---|---|---|---|
-| Dashboard | No-op | – | – |
-| Instance (stopped) | Start, same window | **Start** | – |
-| Instance (running) | Focus existing window | **Switch** | – |
-| Cloud (closed) | Open, same window | **Open Cloud** | Open in new window |
-| Cloud (open) | Focus existing window | **Switch** | Open in new window |
-| + New Instance | Install wizard | **New Install** | – |
+The first 8 columns are the **original CTO matrix, reproduced verbatim**. The
+**Implemented?** column records what shipped — see §1a for the two divergences.
 
-### Instance A → X
-| Target (state) | Behavior | Primary CTA | Secondary (caret) |
-|---|---|---|---|
-| Dashboard | New window (A keeps running) | **Open Dashboard** | – |
-| Self (A) | Restart in place | **Restart** | – |
-| Instance B (stopped) | Switch by default, expose new-window | **Switch** | Open in new window → 3-way modal |
-| Instance B (running) | Focus B's window | **Switch** | – |
-| Cloud (closed) | Always new window (A keeps running) | **Open Cloud** | – |
-| Cloud (open) | Focus existing | **Switch** | Open in new window |
+| # | Current view | Click target | Target state | Current behavior | Proposed action | Primary CTA label | Secondary CTA (dropdown / split-button) | Implemented? |
+|---|---|---|---|---|---|---|---|---|
+| 1 | Dashboard | Dashboard | n/a | No button surfaced | No-op | – | – | ✅ |
+| 2 | Dashboard | Instance A | Not running | Launch + same window | Launch + same window (unchanged) | Start | – | ✅ |
+| 3 | Dashboard | Instance A | Already running | Switch / focus existing | Focus existing window | Switch | – | ✅ |
+| 4 | Dashboard | Cloud | Not running | Open in same window verify | Open in same window | Open Cloud | Open in new window | ✅ |
+| 5 | Dashboard | Cloud | Already open in window | Behavior inconsistent verify | Focus existing window | Switch | Open in new window | ✅ |
+| 6 | Dashboard | + New Instance | n/a | Opens install wizard (modal/route) | Opens install wizard (unchanged) | New Install | – | ✅ |
+| 7 | Instance A | Dashboard | n/a | Switch in same window verify | Always open in new window (A keeps running) | Open Dashboard | – | ✅ |
+| 8 | Instance A | Instance A | Self | Restart Python process | Restart in same window (unchanged) | Restart | (future: Stop — defer for now) | ✅ (Stop deferred) |
+| 9 | Instance A | Instance B | Not running | Switch in same window — user dislikes this | Switch in same window (default) — but expose new-window option | Switch | Open in new window → modal: "Stop A and switch, or open B in new window?" | ✅ |
+| 10 | Instance A | Instance B | Already running | Behavior inconsistent verify | Focus existing window of B | Switch | – | ✅ |
+| 11 | Instance A | Cloud | Not running | Behavior inconsistent verify | Always open in new window (cloud is lightweight; A keeps running) | Open Cloud | – | ✅ |
+| 12 | Instance A | Cloud | Already open | Behavior inconsistent verify | Focus existing cloud window | Switch | Open in new window | ✅ |
+| 13 | Cloud | Dashboard | n/a | Verify | Switch in same window | Open Dashboard | – | ⚠️ **DEVIATION — ships new-window** (§1a) |
+| 14 | Cloud | Instance A | Not running | Verify | Open in new window (cloud window keeps running) | Start (in new window) | – | ✅ |
+| 15 | Cloud | Instance A | Already open | Verify | Focus existing window of A | Switch | Restart (defer? — open call for Maanil) | ✅ (Restart **deferred** — no caret) |
+| 16 | Cloud | Cloud | Self | No-op or no button verify | Open a second Cloud window | Open in new window | – | ✅ |
+| 17 | Cloud | + New Instance | n/a | Verify | Open install wizard in new window | New Install | – | ✅ |
 
-### Cloud → X
-| Target (state) | Behavior | Primary CTA | Secondary (caret) |
-|---|---|---|---|
-| Dashboard | Same window *(see deviation)* | **Open Dashboard** | – |
-| Instance (stopped) | New window (cloud keeps running) | **Start (new window)** | – |
-| Instance (running) | Focus existing | **Switch** | – |
-| Cloud (self) | Second cloud window | **Open in new window** | – |
-| + New Instance | Install wizard, new window | **New Install** | – |
+### 1a. Divergences from the matrix (both confirmed with the team)
+
+- **Row 13 — Cloud → Dashboard.** Matrix specifies **same window**; ships
+  **new window**. The "Open Dashboard" chip is not table-driven — it routes
+  through the shared `activate('new-window')` path. Confirmed *keep new-window
+  for now*; revisit when the chip consults `decideNavigation`.
+- **Rows 8 & 15 — deferred secondaries.** The "Stop" (row 8) and "Restart"
+  (row 15) secondaries were marked deferred / open-call in the matrix itself and
+  are intentionally **not** shipped. Restart of a running instance stays
+  reachable from that instance's own window footer (avoids the "restart a window
+  you're not looking at" footgun).
+
+15/17 cells match exactly; row 13 is a confirmed deviation; rows 8 & 15
+secondaries are confirmed deferrals.
 
 ---
 
-## 2. Implementation status
+## 2. UI notes
 
-| Cell | Status | Notes |
-|---|---|---|
-| All Dashboard → X | ✅ shipped | unchanged from prior behavior |
-| Instance → Dashboard | ✅ new window | existing `activate('new-window')` |
-| Instance → self | ✅ restart | unchanged |
-| **Instance → Instance B (stopped)** | ✅ **3-way modal** | Phase 3a — Switch / Open in new window / Cancel |
-| Instance → Instance B (running) | ✅ focus | unchanged |
-| **Instance → Cloud (closed)** | ✅ **new window** | Phase 3b — was swap-in-place |
-| **Cloud → Instance (stopped)** | ✅ **new window** | Phase 3b — was swap-in-place |
-| Cloud → Instance (running) | ✅ focus | unchanged |
-| **Cloud → Cloud (self)** | ✅ **second window** | Phase 3d — `allowDuplicate` carve-out |
-| Cloud → Dashboard | ⚠️ **new window** | **Deviation:** matrix wants same-window; chip is not table-driven (hardcoded `activate('new-window')`). Left new-window for now. |
+Per-cell status lives in the **Implemented?** column of the §1 matrix; the
+deviations are in §1a. Two implementation notes:
 
-**The caret split-button** (footer): label fills the left (click = primary
-action), a chevron on the right opens the navigation alternatives. Appears only
-where the matrix lists a secondary.
+- **The caret split-button** (footer): the label fills the left (click = primary
+  action), a chevron on the right opens the navigation alternatives. It appears
+  only where the matrix lists a secondary.
+- **The 3-way modal** (row 9) is a single prompt with three buttons — *Switch*
+  (stop A, swap B in) / *Open in new window* (keep A) / *Cancel* — reusing the
+  system modal's `secondaryLabel`/`openSystemModalChoiceAsync`.
 
 ---
 
