@@ -15,6 +15,7 @@ import StoragePane, { type StorageSnapshot } from '../../views/comfyUISettings/S
 import ConsoleTerminalPane from '../../views/comfyUISettings/ConsoleTerminalPane.vue'
 import Tooltip from '../ui/Tooltip.vue'
 import type { PickerTab, SectionTab } from '../../lib/pickerTabs'
+import { isTabAllowedForCategory } from '../../lib/pickerTabs'
 import { humanizeOpStatus, operationInflightLabel, operationSuccessLabel } from '../../lib/progressStatusLabel'
 import type { ActionDef, DetailField, Installation, ShowProgressOpts } from '../../types/ipc'
 import { TID } from '../../../../shared/testIds'
@@ -276,10 +277,13 @@ const ALL_TABS: TabDef[] = [
 ]
 
 // The console tab has no backend `sections` — it's a live PTY view — so it
-// can't be section-gated like the others. Show it for any local install
-// (cloud installs run no local process to attach a shell to).
+// can't be section-gated like the others. Visibility by instance type is
+// centralized in `isTabAllowedForCategory` (cloud + remote run no local
+// process to attach a shell to).
 const showConsoleTab = computed(
-  () => installation.value != null && installation.value.sourceCategory !== 'cloud'
+  () =>
+    installation.value != null &&
+    isTabAllowedForCategory('console', installation.value.sourceCategory)
 )
 
 const tabs = computed<TabDef[]>(() => {
@@ -325,9 +329,9 @@ const rootRef = useTemplateRef<HTMLElement>('root')
 const tabsRef = useTemplateRef<HTMLElement>('tabs')
 
 // Tooltips that echo the visible label add nothing, so only keep them
-// alive for tabs whose label is hidden. Mirror the `< 520px` collapse
+// alive for tabs whose label is hidden. Mirror the `< 640px` collapse
 // breakpoint (see `@container settings-tabs` below) via a ResizeObserver.
-const TAB_COLLAPSE_PX = 520
+const TAB_COLLAPSE_PX = 640
 const tabsCollapsed = ref(false)
 let tabsObserver: ResizeObserver | undefined
 
@@ -936,11 +940,16 @@ defineExpose({
   border-bottom: 1px solid var(--chooser-surface-border);
   container-type: inline-size;
   container-name: settings-tabs;
+  /* Clip the strip to the pane: it must never push the pane wider, even with
+     6 tabs. min-width:0 lets the flex row shrink below its content. */
+  min-width: 0;
+  flex-wrap: nowrap;
+  overflow: hidden;
 }
 
 /* Narrow right-pane: inactive tabs collapse to icon-only; the active
-   tab keeps its label. */
-@container settings-tabs (max-width: 520px) {
+   tab keeps its label. Keep this max-width in sync with `TAB_COLLAPSE_PX`. */
+@container settings-tabs (max-width: 640px) {
   .settings-v2-tab:not(.is-active) {
     padding: 6px 8px;
     gap: 0;
@@ -969,10 +978,21 @@ defineExpose({
   opacity: 0.72;
   font-size: 13px;
   font-weight: 400;
+  /* Allow buttons to shrink so the strip clips cleanly instead of overflowing. */
+  min-width: 0;
   transition:
     color 120ms ease,
     background-color 120ms ease,
     opacity 120ms ease;
+}
+
+/* Final safety net: clip a label with ellipsis rather than ever cut a glyph
+   mid-stroke at the narrowest real widths (icon wrap never shrinks). */
+.settings-v2-tab > span:not(.settings-v2-tab-icon-wrap) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 
 .settings-v2-tab:hover {
