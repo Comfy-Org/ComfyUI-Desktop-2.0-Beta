@@ -80,12 +80,14 @@ describe('useInstanceNavState — run-state derivation', () => {
     expect(navState.targetRun.value).toBe('running-elsewhere')
   })
 
-  it('folds a remote target into the cloud nav-class', () => {
+  it('remote target routes like a cloud target (non-local URL backend)', () => {
     const navState = useInstanceNavState(ref(installation('R', 'remote')), {
       currentView: 'cloud' as ViewKind,
       currentCategory: 'remote' as Category,
       activeInstallationId: null,
     })
+    // A remote connection is a non-local URL backend exactly like Cloud — the
+    // remote⇒cloud fold applies to the TARGET, so it lands the cloud rows.
     expect(navState.targetClass.value).toBe('cloud')
     expect(navState.targetKind.value).toBe('cloud')
     expect(navState.currentClass.value).toBe('cloud')
@@ -133,5 +135,25 @@ describe('useInstanceNavState → decideNavigation (end to end)', () => {
     })
     const decision = decideNavigation(navState.navInput('primary'))
     expect(decision).toMatchObject({ window: 'new', verb: 'open-new' })
+  })
+
+  it('cloud host picking a stopped REMOTE connection → opens in a new window (not a dead no-op)', () => {
+    const navState = useInstanceNavState(ref(installation('R', 'remote')), {
+      currentView: 'cloud' as ViewKind,
+      currentCategory: 'cloud' as Category,
+      activeInstallationId: 'cloud',
+    })
+    const decision = decideNavigation(navState.navInput('primary'))
+    expect(decision).toMatchObject({ window: 'new', verb: 'open-new', primaryLabel: NAV_LABEL.openInNewWindow })
+  })
+
+  it('instance host → stopped REMOTE routes identically to stopped Cloud (no in-place 3-way)', () => {
+    const sources = { currentView: 'instance' as ViewKind, currentCategory: 'local' as Category, activeInstallationId: 'A' }
+    const remote = decideNavigation(useInstanceNavState(ref(installation('R', 'remote')), sources).navInput('primary'))
+    const cloud = decideNavigation(useInstanceNavState(ref(installation('C', 'cloud')), sources).navInput('primary'))
+    // Case-4 regression: a remote must NOT get the local→local in-place "Switch"
+    // 3-way — it opens in a new window (A keeps running), exactly like cloud.
+    expect(remote).toMatchObject({ window: 'new', verb: 'open-new' })
+    expect(remote).toEqual(cloud)
   })
 })

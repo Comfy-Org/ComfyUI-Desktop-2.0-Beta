@@ -57,8 +57,10 @@ export function useInstanceNavState(
   )
 
   // A picker row is always an install target; dashboard / new-instance targets
-  // are surfaced through their own affordances, not this composable. Classify by
-  // nav-class so cloud and local installs route to the right matrix row.
+  // are surfaced through their own affordances, not this composable. A REMOTE
+  // target is a non-local URL backend exactly like Cloud, so it routes through
+  // the `'cloud'` target rows (the remote⇒cloud fold applies to the target, not
+  // just kill-confirm).
   const targetKind = computed<TargetKind>(() => (targetClass.value === 'cloud' ? 'cloud' : 'instance'))
 
   const isTargetCurrentHost = computed(() => {

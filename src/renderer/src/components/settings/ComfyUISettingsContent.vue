@@ -26,7 +26,8 @@ import {
   CircleStop,
   EyeOff,
   Settings2,
-  Repeat2
+  Repeat2,
+  Server
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 import { useComfyUISettings } from '../../composables/useComfyUISettings'
@@ -533,6 +534,17 @@ const navState = useInstanceNavState(installation, {
 })
 const primaryDecision = computed<NavDecision>(() => decideNavigation(navState.navInput('primary')))
 
+/** Resolve a decision label key to display text. The decision table folds
+ *  remote into cloud, so the cloud-specific "Open Cloud" key is re-pointed to
+ *  "Open Remote" for an actual remote install (the only place the raw category
+ *  is known). */
+function resolveNavLabel(key: string): string {
+  if (key === 'instancePicker.openCloud' && installation.value?.sourceCategory === 'remote') {
+    return t('instancePicker.openRemote', 'Open Remote')
+  }
+  return t(key)
+}
+
 const primaryActionLabel = computed(() => {
   if (isCloudCapacityBlocked.value) {
     return t('cloud.capacityDisabled', 'Temporarily unavailable')
@@ -540,7 +552,7 @@ const primaryActionLabel = computed(() => {
   if (hasPendingRestart.value) {
     return t('instancePicker.restartToApply', 'Restart to apply changes')
   }
-  return t(primaryDecision.value.primaryLabel)
+  return resolveNavLabel(primaryDecision.value.primaryLabel)
 })
 
 /** Leading icon for a nav label key (shared by the primary CTA and caret items). */
@@ -564,8 +576,17 @@ function navIcon(labelKey: string): Component {
   }
 }
 
+/** Category-aware icon: the folded "Open Cloud" cell shows a server glyph for an
+ *  actual remote install (mirrors `resolveNavLabel`). */
+function navIconFor(key: string): Component {
+  if (key === 'instancePicker.openCloud' && installation.value?.sourceCategory === 'remote') {
+    return Server
+  }
+  return navIcon(key)
+}
+
 const primaryActionIcon = computed<Component>(() =>
-  hasPendingRestart.value ? RotateCcw : navIcon(primaryDecision.value.primaryLabel)
+  hasPendingRestart.value ? RotateCcw : navIconFor(primaryDecision.value.primaryLabel)
 )
 
 /**
@@ -581,8 +602,8 @@ const stopAction = computed<ActionDef | undefined>(() =>
 const caretActions = computed<MenuAction[]>(() => {
   const navItems: MenuAction[] = primaryDecision.value.secondary.map((alt) => ({
     id: alt.primaryLabel,
-    label: t(alt.primaryLabel),
-    icon: navIcon(alt.primaryLabel)
+    label: resolveNavLabel(alt.primaryLabel),
+    icon: navIconFor(alt.primaryLabel)
   }))
   if (primaryDecision.value.verb === 'restart' && stopAction.value) {
     navItems.push({ ...stopAction.value, icon: actionIcon('stop') })

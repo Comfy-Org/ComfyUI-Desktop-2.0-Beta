@@ -2,15 +2,15 @@
  * E2E: instance/window navigation matrix — cloud-target deltas (issue #926).
  *
  * Pins `openInstallInNewWindow`'s behavior for cloud targets via recorded IPC +
- * window counts: a new window for a cloud install with no window, and the
- * cloud-self SECOND window (matrix row 16) via the `allowDuplicate` carve-out,
- * with a control proving `allowDuplicate` is the only thing lifting the
- * focus-existing guard.
+ * window counts: a new window for a cloud install with no window, plus the
+ * `allowDuplicate` carve-out (currently DORMANT — no decision cell sets it; the
+ * primitive is kept wired for a future "second window" feature), with a control
+ * proving `allowDuplicate` is the only thing lifting the focus-existing guard.
  *
  * Driven from the chooser host (no real cloud attach / network needed): the
  * primitive depends on the TARGET install + `allowDuplicate`, not on the calling
  * view. The decision that *selects* this primitive per current-view is unit
- * tested in `navDecision.test.ts`.
+ * tested in `navDecision.test.ts` (cloud-self now resolves to Restart).
  */
 import { test, expect } from '@playwright/test'
 import { launchApp, type AppContext } from './launchApp'

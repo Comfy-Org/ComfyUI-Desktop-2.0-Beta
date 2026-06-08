@@ -199,6 +199,7 @@ export const en = {
     restart: 'Restart',
     switch: 'Switch',
     openCloud: 'Open Cloud',
+    openRemote: 'Open Remote',
     openInNewWindow: 'Open in new window',
     windowOptions: 'Window options',
     moreWindowOptions: 'More window options',

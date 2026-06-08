@@ -9,8 +9,14 @@ The whole behavior matrix lives in **one pure function** —
 the renderer (CTA label + caret) and main (executor). To change a behavior, edit
 that table and its test; nothing else.
 
-> **Cloud ≡ Remote.** Remote installs share all cloud navigation behavior
-> (`navClass` folds `remote → cloud`). Every "Cloud" row below also covers Remote.
+> **Cloud ≡ Remote — but only for the *current view*, not the *target*.**
+> `navClass` folds `remote → cloud` (no local process → same kill-confirm /
+> keep-alive behavior), so a **Remote host** navigates like a Cloud host (every
+> "Cloud → X" row covers a Remote host). A **Remote target**, however, is a
+> distinct backend you connect to — it routes like an **Instance target** (e.g.
+> Cloud → Remote opens in a new window, exactly like Cloud → Instance, row 14).
+> Treating a remote target as "cloud" would hit the non-existent cloud→cloud
+> stopped cell and dead-end the CTA.
 
 ---
 
@@ -36,8 +42,40 @@ The first 8 columns are the **original CTO matrix, reproduced verbatim**. The
 | 13 | Cloud | Dashboard | n/a | Verify | Switch in same window | Open Dashboard | – | ⚠️ **DEVIATION — ships new-window** (§1a) |
 | 14 | Cloud | Instance A | Not running | Verify | Open in new window (cloud window keeps running) | Start (in new window) | – | ✅ (CTA reads "Open in new window") |
 | 15 | Cloud | Instance A | Already open | Verify | Focus existing window of A | Switch | Restart (defer? — open call for Maanil) | ✅ (Restart **deferred** — no caret) |
-| 16 | Cloud | Cloud | Self | No-op or no button verify | Open a second Cloud window | Open in new window | – | ✅ |
+| 16 | Cloud | Cloud | Self | No-op or no button verify | Open a second Cloud window | Open in new window | – | ⚠️ **CHANGED — self → Restart** (§1b; second view of one session unsupported) |
 | 17 | Cloud | + New Instance | n/a | Verify | Open install wizard in new window | New Install | – | ✅ |
+
+### 1b. Remote rows (NOT in the original CTO matrix — added during implementation)
+
+The CTO matrix has no Remote rows. **A Remote target is a non-local URL backend
+exactly like Cloud**, so it routes through the **same cells as a Cloud target**
+(`navClass` folds `remote → cloud` for both the host *view* and the *target*). A
+Remote *host* follows the "Cloud → X" rows above. The CTA **wording/icon** is
+resolved per raw category in the component (`resolveNavLabel`/`navIconFor`):
+"Open Cloud" for cloud, **"Open Remote"** (server icon) for remote.
+
+| # | Current view | Click target | Target state | Behavior (= the equivalent Cloud row) | Primary CTA label | Implemented? |
+|---|---|---|---|---|---|---|
+| R1 | Dashboard | Remote | Not running | Open in same window (= Cloud row 4) | Open Remote | ✅ |
+| R2 | Dashboard | Remote | Already open | Focus existing window (= row 5) | Switch | ✅ |
+| R3 | Instance A | Remote | Not running | Open in new window, A keeps running (= row 11) | Open Remote | ✅ |
+| R4 | Cloud / Remote host | a *different* Cloud or Remote | Not running | Open in new window, host session keeps running | Open Remote / Open Cloud | ✅ |
+| R5 | Any host | Cloud or Remote | Already running elsewhere | Focus existing window | Switch | ✅ |
+| R6 | Cloud / Remote host | **self** (the current session) | — | **Restart in place** (a second view of one session isn't supported) | Restart | ✅ |
+
+> Fixes the **dead-CTA gaps**: from a Cloud/Remote host, a *different*
+> cloud/remote target (stopped or running-elsewhere) used to hit a missing
+> `cloud→cloud` cell and render an inert "Start"; and a Remote target from an
+> Instance host wrongly hit the local→local in-place "Switch" 3-way. The
+> `cloud|cloud|stopped` (open-new) and `cloud|cloud|running-elsewhere` (focus)
+> cells now exist, and a remote target routes via the cloud cells. A regression
+> test asserts **no reachable (host, target, run) combo ever yields a no-op CTA**.
+>
+> **`cloud|cloud|self` → Restart** replaces matrix row 16's aspirational "second
+> cloud window": a true second view of one cloud/remote session isn't supported
+> (single-window session; the fresh-host relaunch dead-ended on the chooser/
+> dashboard). The `allowDuplicate` plumbing is kept dormant (reserved) for a
+> future real implementation.
 
 ### 1a. Divergences from the matrix (both confirmed with the team)
 
@@ -116,13 +154,16 @@ installs (A, B) and the Cloud entry available.
 |---|---|
 | Click **Open Dashboard** | Dashboard opens (currently **new** window — known deviation) |
 | Select stopped instance → **Open in new window** | Instance launches in a **new** window; **Cloud keeps running** |
+| Select a stopped **Remote** connection → **Open in new window** | Remote connection opens in a **new** window (routes like an instance, not cloud-self); **Cloud keeps running**. The CTA must NOT be a dead "Start". |
 | Select instance **running** elsewhere → **Switch** | That window is **focused** |
-| Select the **Cloud install itself** → **Open in new window** | A **second** Cloud window opens (two views of the same session) |
+| Select the **Cloud/Remote session itself** → **Restart** | Restarts in place (a second window of the same session is not supported) |
+| (Remote host) Select a **different Cloud/Remote** target, or (Cloud host) a Remote target | Live **Open Cloud / Open Remote** CTA → opens in a new window; the current session keeps running. Never a dead "Start". |
 | Click **+ New Instance** | Install wizard opens in a new window |
 
 ### Regression spot-checks
 - Local restart still shows the in-drawer "Restart instance?" confirm.
 - Cloud/remote actions never show a local-process kill confirm.
+- **Cloud → Remote (and any host → Remote) shows a live "Open in new window" CTA, never a dead "Start" no-op.**
 - Cloud capacity gate still blocks the CTA when capacity is disabled.
 
 ---
@@ -167,9 +208,9 @@ Assert via recorded IPC (`getIpcInvocations`) + live `BrowserWindow` counts.
 | | cloud via "Open in new window" | Dashboard → Cloud caret |
 | `nav-matrix-instance` | B via "Open in new window": spawns new window | Instance → Instance B caret |
 | | B running elsewhere: focus | Instance → Instance B (running) |
-| `nav-matrix-cloud` | cloud target with no window: new window | Instance/Cloud → Cloud (new window, Phase 3b) |
-| | cloud self + allowDuplicate: second window | Cloud → Cloud self (row 16, Phase 3d) |
-| | allowDuplicate threaded to main intact | (plumbing for the focus-vs-spawn branch) |
+| `nav-matrix-cloud` | cloud/remote target with no window: new window | Instance/Cloud → Cloud/Remote |
+| | `allowDuplicate` primitive still spawns (dormant plumbing) | reserved second-window path |
+| | `allowDuplicate` threaded to main intact | plumbing kept for a future second-window feature |
 
 ### Intentionally NOT e2e'd (with reason)
 | Cell / behavior | Why not e2e | Where it's covered |

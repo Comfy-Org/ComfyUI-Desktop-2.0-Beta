@@ -64,9 +64,11 @@ export interface NavDecision {
   secondary: NavDecision[]
   /** Telemetry event to emit when this decision executes, if any. */
   telemetry: 'instance.switched' | 'instance.opened_new_window' | null
-  /** Allow a SECOND window for an install that already owns one — set only for
-   *  cloud-self (matrix row 16), where two views of one remote session are
-   *  legitimate. Bypasses `openInstallInNewWindow`'s focus-existing guard. */
+  /** Reserved (currently unset by every cell). Allows a SECOND window for an
+   *  install that already owns one, bypassing `openInstallInNewWindow`'s
+   *  focus-existing guard. Kept wired end-to-end for a future "second cloud/
+   *  remote window"; cloud-self currently resolves to Restart instead (a true
+   *  second view of one session isn't supported). */
   allowDuplicate?: true
 }
 
@@ -232,15 +234,26 @@ const TABLE: ReadonlyMap<CellKey, NavDecision> = new Map<CellKey, NavDecision>([
   ],
   [
     cellKey('cloud', 'cloud', 'self'),
-    // Matrix row 16: open a SECOND cloud window. Cloud has no local process, so
-    // two windows are just two views of the same remote session — the one
-    // install = one window rule (local-process-bound) doesn't apply.
-    // `allowDuplicate` tells main to bypass its focus-existing guard.
+    // The current cloud/remote session itself. Matrix row 16 wanted a SECOND
+    // window, but a second view of one cloud/remote session isn't supported
+    // (single-window auth/session; the fresh-host relaunch dead-ends on the
+    // chooser). Restart in place instead — a real, working action.
+    dec({ window: 'same', verb: 'restart', primaryLabel: NAV_LABEL.restart }),
+  ],
+  [
+    // A DIFFERENT cloud/remote target that's already open elsewhere → focus it.
+    cellKey('cloud', 'cloud', 'running-elsewhere'),
+    dec({ window: 'same', verb: 'focus', primaryLabel: NAV_LABEL.switch }),
+  ],
+  [
+    // A stopped cloud target from a cloud/remote host → open it in a new window;
+    // the current cloud/remote session keeps running (mirrors cloud → instance).
+    cellKey('cloud', 'cloud', 'stopped'),
     dec({
       window: 'new',
       verb: 'open-new',
       primaryLabel: NAV_LABEL.openInNewWindow,
-      allowDuplicate: true,
+      telemetry: 'instance.opened_new_window',
     }),
   ],
   [

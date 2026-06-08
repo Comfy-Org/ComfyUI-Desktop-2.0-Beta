@@ -47,6 +47,34 @@ describe('decideNavigation — totality', () => {
                 expect(Array.isArray(d.secondary)).toBe(true)
               }
   })
+
+  // Guards against the "dead Start button" class of bug: a picked install target
+  // (instance OR cloud/remote) in a REACHABLE run-state must always produce a
+  // live action, never a silent no-op. `self` is only reachable when the target
+  // is the host's own running install (cloud→cloud).
+  it('never produces a dead no-op CTA for a reachable (host, install-target, run) combo', () => {
+    const reachable: Array<[ViewKind, NavClass | null, TargetKind, TargetRun]> = [
+      ['dashboard', null, 'instance', 'stopped'],
+      ['dashboard', null, 'instance', 'running-elsewhere'],
+      ['dashboard', null, 'cloud', 'stopped'],
+      ['dashboard', null, 'cloud', 'running-elsewhere'],
+      ['instance', 'local', 'instance', 'stopped'],
+      ['instance', 'local', 'instance', 'running-elsewhere'],
+      ['instance', 'local', 'instance', 'self'],
+      ['instance', 'local', 'cloud', 'stopped'],
+      ['instance', 'local', 'cloud', 'running-elsewhere'],
+      ['cloud', 'cloud', 'instance', 'stopped'],
+      ['cloud', 'cloud', 'instance', 'running-elsewhere'],
+      ['cloud', 'cloud', 'cloud', 'stopped'],
+      ['cloud', 'cloud', 'cloud', 'running-elsewhere'],
+      ['cloud', 'cloud', 'cloud', 'self'],
+    ]
+    const dead = reachable.filter(([currentView, currentClass, target, targetRun]) => {
+      const targetClass: NavClass = target === 'cloud' ? 'cloud' : 'local'
+      return decideNavigation(input({ currentView, currentClass, target, targetClass, targetRun })).verb === 'no-op'
+    })
+    expect(dead).toEqual([])
+  })
 })
 
 describe('decideNavigation — the CURRENT-behavior matrix (baseline before #926 deltas)', () => {
@@ -118,9 +146,17 @@ describe('decideNavigation — the CURRENT-behavior matrix (baseline before #926
     const decision = decisionFor('cloud', 'instance', 'stopped', 'cloud')
     expect(decision).toMatchObject({ window: 'new', verb: 'open-new', primaryLabel: NAV_LABEL.openInNewWindow })
   })
-  it('Cloud → self: opens a second cloud window (allowDuplicate)', () => {
+  it('Cloud/Remote → self: Restart in place (second view of one session unsupported)', () => {
     const decision = decisionFor('cloud', 'cloud', 'self', 'cloud')
-    expect(decision).toMatchObject({ window: 'new', verb: 'open-new', allowDuplicate: true })
+    expect(decision).toMatchObject({ window: 'same', verb: 'restart', primaryLabel: NAV_LABEL.restart })
+  })
+  it('Cloud → a DIFFERENT cloud/remote running elsewhere: focus (not a dead Start)', () => {
+    const decision = decisionFor('cloud', 'cloud', 'running-elsewhere', 'cloud')
+    expect(decision).toMatchObject({ window: 'same', verb: 'focus', primaryLabel: NAV_LABEL.switch })
+  })
+  it('Cloud → a stopped cloud/remote target: opens in a new window (not a dead Start)', () => {
+    const decision = decisionFor('cloud', 'cloud', 'stopped', 'cloud')
+    expect(decision).toMatchObject({ window: 'new', verb: 'open-new', primaryLabel: NAV_LABEL.openInNewWindow })
   })
   it('Cloud → New Instance: install wizard in a new window', () => {
     const decision = decisionFor('cloud', 'new-instance', 'stopped', 'cloud')
