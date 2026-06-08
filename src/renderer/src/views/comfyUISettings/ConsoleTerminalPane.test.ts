@@ -42,7 +42,8 @@ const messages = {
   en: {
     console: {
       sessionEnded: 'Console session ended',
-      restartSession: 'Restart console'
+      restartSession: 'Restart console',
+      shellLabel: 'Shell'
     }
   }
 } as const
