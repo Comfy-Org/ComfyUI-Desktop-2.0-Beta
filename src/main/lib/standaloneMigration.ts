@@ -100,7 +100,11 @@ async function resolveStandaloneInstallData(
     release = target.release
     variant = target.variant
   } else {
-    const releaseOptions = await standaloneSource.getFieldOptions!('release', {}, {})
+    // `includeLatestStable: true` opens the standalone source's release list
+    // (see `standalone/index.ts:328`). Without it the source returns an
+    // empty array and the legacy-desktop migration silently bails with
+    // "No releases available." instead of progressing.
+    const releaseOptions = await standaloneSource.getFieldOptions!('release', {}, { includeLatestStable: true })
     if (releaseOptions.length === 0) {
       cleanupOnError()
       throw new Error('No releases available.')

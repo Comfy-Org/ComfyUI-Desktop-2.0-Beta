@@ -115,6 +115,29 @@ function discoverExtraFoldersFromSharedDirs(modelsDirs: string[]): string[] {
   return [...seen].sort()
 }
 
+/**
+ * Legacy directory aliases that ComfyUI's own defaults register under canonical
+ * folder types (`folder_paths.py`):
+ *   - `clip/` is a second path on `text_encoders` (ComfyUI's `map_legacy` maps
+ *     a YAML `clip:` key to `text_encoders` automatically).
+ *   - `unet/` is a second path on `diffusion_models` (same legacy mapping).
+ *   - `t2i_adapter/` is a second path on `controlnet` (no legacy mapping —
+ *     emitted as its own key, ComfyUI's controlnet defaults already list it).
+ *
+ * Without these in the YAML, shared-dir users who keep encoders in
+ * `<shared>/clip/` (the historical ComfyUI layout) or diffusion models in
+ * `<shared>/unet/` see their files invisible to `DualCLIPLoader` / `UNETLoader`,
+ * even though Storage shows the shared dir is configured. ComfyUI's defaults
+ * find them when they live under `<install>/ComfyUI/models/clip|unet/` because
+ * those are baked into `folder_names_and_paths`, but the extra-paths YAML only
+ * registers what we explicitly list. Emitting the aliases for every shared dir
+ * keeps the shared layout on equal footing with the install's own defaults. */
+const LEGACY_FOLDER_ALIASES: ReadonlyArray<{ key: string; dir: string }> = [
+  { key: 'clip', dir: 'clip' },
+  { key: 'unet', dir: 'unet' },
+  { key: 't2i_adapter', dir: 't2i_adapter' },
+]
+
 function buildYaml(modelsDirs: string[], extraFolders: string[] = []): string {
   const allFolders = [...MODEL_FOLDER_TYPES, ...extraFolders]
   const lines = [
@@ -134,6 +157,14 @@ function buildYaml(modelsDirs: string[], extraFolders: string[] = []): string {
     for (const folder of allFolders) {
       const escapedFolder = folder.replace(/'/g, "''")
       lines.push(`  '${escapedFolder}': '${escapedFolder}/'`)
+    }
+    // Emit legacy aliases AFTER the canonical entries so the canonical
+    // directories (e.g. `text_encoders/`) stay first in ComfyUI's search
+    // order — `add_model_folder_path` appends to the existing list.
+    for (const { key, dir } of LEGACY_FOLDER_ALIASES) {
+      const escapedKey = key.replace(/'/g, "''")
+      const escapedDir = dir.replace(/'/g, "''")
+      lines.push(`  '${escapedKey}': '${escapedDir}/'`)
     }
     lines.push('')
   })

@@ -323,7 +323,7 @@ const groups = computed<FactGroup[]>(() => {
   if (details.length > 0) {
     out.push({
       id: 'install-details',
-      title: t('statusFactPanel.installDetails', 'Install details'),
+      title: t('statusFactPanel.installDetails', 'Instance details'),
       rows: details,
     })
   }
@@ -366,7 +366,7 @@ const groups = computed<FactGroup[]>(() => {
             ref="nameEl"
             class="status-fact-hero-name"
             role="textbox"
-            :aria-label="t('statusFactPanel.editName', 'Edit installation name')"
+            :aria-label="t('statusFactPanel.editName', 'Edit instance name')"
             contenteditable="plaintext-only"
             spellcheck="false"
             @blur="handleNameBlur"
@@ -383,7 +383,7 @@ const groups = computed<FactGroup[]>(() => {
             v-if="nameEditable"
             type="button"
             class="status-fact-hero-edit-btn"
-            :aria-label="t('statusFactPanel.editName', 'Edit installation name')"
+            :aria-label="t('statusFactPanel.editName', 'Edit instance name')"
             aria-controls="status-fact-hero-name"
             @click="focusName"
           >
