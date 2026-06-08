@@ -316,7 +316,7 @@ export const TOS: LegalDoc = {
 }
 
 export const PRIVACY_POLICY: LegalDoc = {
-  effectiveDate: '2026-05-19',
+  effectiveDate: '2026-06-08',
   appliesTo: 'Comfy Desktop',
   blocks: [
     {
@@ -335,7 +335,8 @@ export const PRIVACY_POLICY: LegalDoc = {
       items: [
         'App version and platform (e.g. "Comfy Desktop 1.0.0, macOS 14.4 ARM")',
         'A local device ID generated locally. Before you sign in to Comfy Cloud, this ID is not tied to your name, email, or any hardware identifier we can reverse. Once you sign in, the device ID is linked to your Comfy account.',
-        'Feature events ("install completed," "workflow opened," "settings panel opened") with non-identifying metadata',
+        'Feature events ("install completed", "workflow opened", "settings panel opened") with non-identifying metadata',
+        'Identifiers of custom nodes you install through Manager (the public package name only, e.g. "comfyui-impact-pack" — never your local install path)',
         'Approximate timing of those events'
       ]
     },
@@ -343,11 +344,11 @@ export const PRIVACY_POLICY: LegalDoc = {
     {
       kind: 'ul',
       items: [
-        'Workflow content',
+        'Workflow content (the graph, the nodes you connect, their parameters)',
         'Prompts you write',
         'Generated images, videos, or audio',
-        'File paths or filenames',
-        'Model names or weights',
+        'Your username or home-directory paths (automatically redacted before sending)',
+        'Model weights, or the local filenames you save them as',
         'Network activity outside the app'
       ]
     },
@@ -357,14 +358,18 @@ export const PRIVACY_POLICY: LegalDoc = {
     {
       kind: 'ul',
       items: [
-        'Stack traces and error messages from crashes',
+        'Stack traces, error messages, and short stdout/stderr fragments captured around a ComfyUI crash',
         'App version, platform',
         'Local device ID (or Comfy account ID if you have signed in)'
       ]
     },
     {
       kind: 'p',
-      text: "We **don't** include user content, file paths, or prompts in crash reports. We strip those before sending."
+      text: "Before sending, we automatically redact home-directory paths (so your username isn't shipped) and well-known credential patterns (Bearer tokens, OpenAI `sk-*` keys, Hugging Face `hf_*` keys, basic-auth URLs, and `KEY=` / `SECRET=` assignments). We do **not** include your prompts, workflow JSON, or generated outputs in crash reports."
+    },
+    {
+      kind: 'p',
+      text: "**Caveat for third-party custom nodes:** a node you install may emit its own log output around a crash (progress bars, debug status messages, function names it ran) that our automatic scrubbers cannot anticipate. We never bundle your prompts or generated content, but if you see sensitive text in your own ComfyUI logs, disable telemetry from Settings → Telemetry."
     },
 
     { kind: 'h3', text: 'What stays on your machine, always' },
