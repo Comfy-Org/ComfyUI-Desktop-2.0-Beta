@@ -316,7 +316,7 @@ export const TOS: LegalDoc = {
 }
 
 export const PRIVACY_POLICY: LegalDoc = {
-  effectiveDate: '2026-06-08',
+  effectiveDate: '2026-06-03',
   appliesTo: 'Comfy Desktop',
   blocks: [
     {
