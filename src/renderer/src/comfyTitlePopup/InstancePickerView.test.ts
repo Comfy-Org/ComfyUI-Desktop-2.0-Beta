@@ -9,15 +9,15 @@ import { NAV_LABEL, type NavDecision } from '../../../shared/navigation/navDecis
 // NavDecision fixtures the settings footer would emit; the picker routes their
 // `verb` through the instance-action dispatcher.
 const SWITCH_DECISION: NavDecision = {
-  window: 'same', verb: 'switch', confirm: null,
+  window: 'same', verb: 'switch',
   primaryLabel: NAV_LABEL.start, secondary: [], telemetry: 'instance.switched',
 }
 const RESTART_DECISION: NavDecision = {
-  window: 'same', verb: 'restart', confirm: 'kill-local',
+  window: 'same', verb: 'restart',
   primaryLabel: NAV_LABEL.restart, secondary: [], telemetry: null,
 }
 const FOCUS_DECISION: NavDecision = {
-  window: 'same', verb: 'focus', confirm: null,
+  window: 'same', verb: 'focus',
   primaryLabel: NAV_LABEL.switch, secondary: [], telemetry: null,
 }
 import type { SnapshotListData } from '../types/ipc'

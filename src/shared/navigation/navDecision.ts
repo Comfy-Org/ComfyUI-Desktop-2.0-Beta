@@ -40,13 +40,6 @@ export type Intent = 'primary' | 'new-window'
  */
 export type Verb = 'switch' | 'restart' | 'open-new' | 'focus' | 'no-op' | 'install-wizard'
 
-/**
- * Confirmation gate the verb must pass before executing. `kill-local` prompts
- * before stopping a local process; `null` skips the prompt (cloud/remote, or a
- * non-destructive verb).
- */
-export type Confirm = 'kill-local' | null
-
 /** i18n KEYS (not resolved text) for the primary CTA label, by cell. The
  *  renderer resolves these via `t(...)`. */
 export const NAV_LABEL = {
@@ -64,7 +57,6 @@ export type NavLabelKey = (typeof NAV_LABEL)[keyof typeof NAV_LABEL]
 export interface NavDecision {
   window: 'same' | 'new'
   verb: Verb
-  confirm: Confirm
   /** i18n key for the primary CTA label (resolved by the renderer). */
   primaryLabel: NavLabelKey
   /** Caret/dropdown alternatives for this exact cell. Each is a fully-formed
@@ -101,17 +93,15 @@ const cellKey = (view: ViewKind, target: TargetKind, run: TargetRun): CellKey =>
 const NO_OP: NavDecision = {
   window: 'same',
   verb: 'no-op',
-  confirm: null,
   primaryLabel: NAV_LABEL.start,
   secondary: [],
   telemetry: null,
 }
 
-/** Build a decision with sane defaults (no confirm / secondary / telemetry). */
+/** Build a decision with sane defaults (no secondary / telemetry). */
 const dec = (
   over: Partial<NavDecision> & Pick<NavDecision, 'window' | 'verb' | 'primaryLabel'>,
 ): NavDecision => ({
-  confirm: null,
   secondary: [],
   telemetry: null,
   ...over,
@@ -128,9 +118,7 @@ const OPEN_NEW_WINDOW_SECONDARY: NavDecision = dec({
 /**
  * The transition table. Rows mirror the CTO matrix grouping; only reachable
  * cells are listed (unreachable tuples fall through to `NO_OP`). Every "cloud"
- * row also covers remote (folded upstream). `confirm` for in-place switches is
- * filled at the boundary in `decideNavigation` from the current host's class,
- * since the table is class-agnostic.
+ * row also covers remote (folded upstream).
  */
 const TABLE: ReadonlyMap<CellKey, NavDecision> = new Map<CellKey, NavDecision>([
   // Dashboard → X
@@ -180,10 +168,9 @@ const TABLE: ReadonlyMap<CellKey, NavDecision> = new Map<CellKey, NavDecision>([
   [
     cellKey('instance', 'instance', 'stopped'),
     /**
-     * Primary "Switch" swaps B into this window (kill-confirm filled at the
-     * boundary), and the caret offers "Open in new window" so the user can keep
-     * A running. Main's swap confirm is a 3-way modal that folds both choices
-     * (Switch / Open in new window / Cancel) into one prompt.
+     * Primary "Switch" swaps B into this window; the caret offers "Open in new
+     * window" so the user can keep A running. Main's `pickInstallFromPicker`
+     * owns the confirm — a 3-way modal (Switch / Open in new window / Cancel).
      */
     dec({
       window: 'same',
@@ -200,7 +187,7 @@ const TABLE: ReadonlyMap<CellKey, NavDecision> = new Map<CellKey, NavDecision>([
   [
     cellKey('instance', 'cloud', 'stopped'),
     // Matrix: cloud always opens in a NEW window — it's lightweight and the
-    // local instance A keeps running. No swap, no kill-confirm.
+    // local instance A keeps running. No swap.
     dec({
       window: 'new',
       verb: 'open-new',
@@ -272,15 +259,7 @@ const TABLE: ReadonlyMap<CellKey, NavDecision> = new Map<CellKey, NavDecision>([
  * isn't shown when `secondary` is empty, so this fallback is defensive).
  */
 export function decideNavigation(input: NavInput): NavDecision {
-  const base = TABLE.get(cellKey(input.currentView, input.target, input.targetRun)) ?? NO_OP
-
-  // In-place switches that would kill a LOCAL process need the 2-way confirm;
-  // cloud/remote current hosts have no local process, so no confirm. Filled
-  // here (not in the table) because the table is class-agnostic.
-  const primary: NavDecision =
-    base.verb === 'switch' && base.window === 'same' && input.currentClass === 'local'
-      ? { ...base, confirm: 'kill-local' }
-      : base
+  const primary = TABLE.get(cellKey(input.currentView, input.target, input.targetRun)) ?? NO_OP
 
   if (input.intent === 'new-window') {
     const alt = primary.secondary.find((s) => s.window === 'new')

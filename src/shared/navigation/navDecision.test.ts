@@ -91,7 +91,7 @@ describe('decideNavigation — the CURRENT-behavior matrix (baseline before #926
   })
   it('Instance → Instance B (stopped): switch in place + new-window caret (matrix row 9)', () => {
     const decision = decisionFor('instance', 'instance', 'stopped', 'local')
-    expect(decision).toMatchObject({ window: 'same', verb: 'switch', confirm: 'kill-local' })
+    expect(decision).toMatchObject({ window: 'same', verb: 'switch' })
     // The caret offers "Open in new window" so the user can keep A running; the
     // main-side 3-way modal also surfaces this on the primary Switch click.
     expect(decision.secondary.some((alt) => alt.window === 'new' && alt.verb === 'open-new')).toBe(true)
@@ -129,19 +129,6 @@ describe('decideNavigation — the CURRENT-behavior matrix (baseline before #926
 })
 
 describe('decideNavigation — boundary rules', () => {
-  it('fills kill-local confirm only when the current host is local', () => {
-    const local = decideNavigation(
-      input({ currentView: 'instance', currentClass: 'local', target: 'instance', targetRun: 'stopped' }),
-    )
-    expect(local.confirm).toBe('kill-local')
-
-    // A cloud current host has no local process at risk → no confirm.
-    const cloud = decideNavigation(
-      input({ currentView: 'cloud', currentClass: 'cloud', target: 'instance', targetRun: 'stopped' }),
-    )
-    expect(cloud.confirm).toBeNull()
-  })
-
   it('new-window intent selects the new-window secondary when offered', () => {
     const d = decideNavigation(
       input({ currentView: 'dashboard', currentClass: null, target: 'cloud', targetRun: 'stopped', intent: 'new-window' }),

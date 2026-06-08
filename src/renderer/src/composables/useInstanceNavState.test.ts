@@ -103,14 +103,14 @@ describe('useInstanceNavState — run-state derivation', () => {
 })
 
 describe('useInstanceNavState → decideNavigation (end to end)', () => {
-  it('instance host picking a stopped local instance → switch with kill-local confirm', () => {
+  it('instance host picking a stopped local instance → switch in place', () => {
     const navState = useInstanceNavState(ref(installation('B', 'local')), {
       currentView: 'instance' as ViewKind,
       currentCategory: 'local' as Category,
       activeInstallationId: 'A',
     })
     const decision = decideNavigation(navState.navInput('primary'))
-    expect(decision).toMatchObject({ window: 'same', verb: 'switch', confirm: 'kill-local' })
+    expect(decision).toMatchObject({ window: 'same', verb: 'switch' })
   })
 
   it('dashboard host picking a stopped cloud install → Open Cloud + new-window caret', () => {
@@ -125,13 +125,13 @@ describe('useInstanceNavState → decideNavigation (end to end)', () => {
     expect(caretDecision).toMatchObject({ window: 'new', verb: 'open-new', primaryLabel: NAV_LABEL.openInNewWindow })
   })
 
-  it('cloud host picking a stopped instance → no kill confirm (no local process)', () => {
+  it('cloud host picking a stopped instance → opens in a new window', () => {
     const navState = useInstanceNavState(ref(installation('B', 'local')), {
       currentView: 'cloud' as ViewKind,
       currentCategory: 'cloud' as Category,
       activeInstallationId: 'cloud',
     })
     const decision = decideNavigation(navState.navInput('primary'))
-    expect(decision.confirm).toBeNull()
+    expect(decision).toMatchObject({ window: 'new', verb: 'open-new' })
   })
 })

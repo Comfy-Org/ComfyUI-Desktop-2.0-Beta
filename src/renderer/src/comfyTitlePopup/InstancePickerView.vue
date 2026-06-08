@@ -497,6 +497,32 @@ const instanceActions = useInstanceActions({
     })
     return result === 'primary'
   },
+  // In-drawer 3-way prompt (popup stays open) when the CURRENT host runs a local
+  // instance that the swap would stop. Other hosts have nothing to stop → switch
+  // straight away.
+  confirmSwitch: async (inst) => {
+    const hostIsLocalRunning =
+      props.snapshot.currentView === 'instance' && props.snapshot.currentCategory === 'local'
+    if (!hostIsLocalRunning) return 'switch'
+    const result = await dialogs.confirm({
+      title: 'Switch instance?',
+      message: `Switch to ${inst.name}?`,
+      confirmLabel: 'Switch',
+      secondaryLabel: 'Open in new window',
+      cancelLabel: 'Cancel',
+      showCancel: true,
+      messageDetails: [
+        {
+          label: 'Heads up',
+          items: [
+            'Switch stops the current instance and replaces it in this window.',
+            'Open in new window keeps the current instance running.',
+          ],
+        },
+      ],
+    })
+    return result === 'primary' ? 'switch' : result === 'secondary' ? 'new-window' : 'cancel'
+  },
 })
 
 async function handleExpandedNav(decision: NavDecision): Promise<void> {

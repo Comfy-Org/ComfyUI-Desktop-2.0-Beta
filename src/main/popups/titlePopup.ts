@@ -1571,7 +1571,11 @@ export interface TitlePopupHostBindings {
    *  need to route through a panel renderer land on the picker's own
    *  parent (not just any open Comfy window). Important when multiple
    *  Comfy windows are open. */
-  pickInstallFromPicker: (installationId: string, parentEntryId: number) => Promise<void> | void
+  pickInstallFromPicker: (
+    installationId: string,
+    parentEntryId: number,
+    opts?: { confirmed?: boolean }
+  ) => Promise<void> | void
   /** Picker → "Open in new window". Opens `installationId` in its OWN window
    *  (focus-existing else spawn a fresh chooser host + launch into it), leaving
    *  the picker's host untouched so the current instance keeps running.
@@ -2589,16 +2593,20 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
   // `parentEntryId` lets main route the launch through the picker's
   // own parent host (not just any open Comfy window) so launches
   // initiated from window A don't accidentally route through window B.
-  ipcMain.on('comfy-titlepopup:pick-install', (event, payload: { installationId?: unknown }) => {
-    const entry = titlePopupsByWebContents.get(event.sender.id)
-    if (!entry) return
-    const installationId = payload?.installationId
-    if (typeof installationId !== 'string' || installationId.length === 0) return
-    hideTitlePopup(entry, { releaseFocusToParent: false })
-    Promise.resolve(bindings.pickInstallFromPicker(installationId, entry.parentEntryId)).catch(
-      (err) => console.error('pickInstallFromPicker failed:', err),
-    )
-  })
+  ipcMain.on(
+    'comfy-titlepopup:pick-install',
+    (event, payload: { installationId?: unknown; confirmed?: unknown }) => {
+      const entry = titlePopupsByWebContents.get(event.sender.id)
+      if (!entry) return
+      const installationId = payload?.installationId
+      if (typeof installationId !== 'string' || installationId.length === 0) return
+      const confirmed = payload?.confirmed === true
+      hideTitlePopup(entry, { releaseFocusToParent: false })
+      Promise.resolve(
+        bindings.pickInstallFromPicker(installationId, entry.parentEntryId, { confirmed }),
+      ).catch((err) => console.error('pickInstallFromPicker failed:', err))
+    }
+  )
 
   // Picker → "Open in new window". Opens the install in its OWN window without
   // touching the picker's host, so the current instance keeps running.

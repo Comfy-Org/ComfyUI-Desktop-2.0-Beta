@@ -18,7 +18,7 @@ function installation(over: Partial<Installation> = {}): Installation {
 
 function decision(over: Partial<NavDecision>): NavDecision {
   return {
-    window: 'same', verb: 'switch', confirm: null,
+    window: 'same', verb: 'switch',
     primaryLabel: 'instancePicker.switch', secondary: [], telemetry: null,
     ...over,
   }
@@ -32,15 +32,34 @@ function makeDeps(
     bridge,
     confirmLocalKill: vi.fn().mockResolvedValue(true),
     confirmCloudCapacity: vi.fn().mockResolvedValue(true),
+    confirmSwitch: vi.fn().mockResolvedValue('switch'),
     ...over,
   }
 }
 
 describe('useInstanceActions.dispatch', () => {
-  it('routes switch → pickInstall', async () => {
+  it('switch → confirm in-drawer then pickInstall(confirmed:true)', async () => {
     const bridge = makeBridge()
-    await useInstanceActions(makeDeps(bridge)).dispatch(decision({ verb: 'switch' }), installation())
-    expect(bridge.pickInstall).toHaveBeenCalledWith('a')
+    const deps = makeDeps(bridge)
+    await useInstanceActions(deps).dispatch(decision({ verb: 'switch' }), installation())
+    expect(deps.confirmSwitch).toHaveBeenCalled()
+    expect(bridge.pickInstall).toHaveBeenCalledWith('a', { confirmed: true })
+  })
+
+  it('switch → "new-window" choice routes to openInstallNewWindow, not pickInstall', async () => {
+    const bridge = makeBridge()
+    const deps = makeDeps(bridge, { confirmSwitch: vi.fn().mockResolvedValue('new-window') })
+    await useInstanceActions(deps).dispatch(decision({ verb: 'switch' }), installation())
+    expect(bridge.openInstallNewWindow).toHaveBeenCalledWith('a')
+    expect(bridge.pickInstall).not.toHaveBeenCalled()
+  })
+
+  it('switch → cancel fires nothing', async () => {
+    const bridge = makeBridge()
+    const deps = makeDeps(bridge, { confirmSwitch: vi.fn().mockResolvedValue('cancel') })
+    await useInstanceActions(deps).dispatch(decision({ verb: 'switch' }), installation())
+    expect(bridge.pickInstall).not.toHaveBeenCalled()
+    expect(bridge.openInstallNewWindow).not.toHaveBeenCalled()
   })
 
   it('routes restart → restartInstall(confirmed:true) after a confirm', async () => {
@@ -56,21 +75,6 @@ describe('useInstanceActions.dispatch', () => {
     const deps = makeDeps(bridge, { confirmLocalKill: vi.fn().mockResolvedValue(false) })
     await useInstanceActions(deps).dispatch(decision({ verb: 'restart' }), installation())
     expect(bridge.restartInstall).not.toHaveBeenCalled()
-  })
-
-  it('confirms a kill-local switch before pickInstall', async () => {
-    const bridge = makeBridge()
-    const deps = makeDeps(bridge, { confirmLocalKill: vi.fn().mockResolvedValue(false) })
-    await useInstanceActions(deps).dispatch(decision({ verb: 'switch', confirm: 'kill-local' }), installation())
-    expect(bridge.pickInstall).not.toHaveBeenCalled()
-  })
-
-  it('does not confirm a switch with no kill-local gate', async () => {
-    const bridge = makeBridge()
-    const deps = makeDeps(bridge)
-    await useInstanceActions(deps).dispatch(decision({ verb: 'switch', confirm: null }), installation())
-    expect(deps.confirmLocalKill).not.toHaveBeenCalled()
-    expect(bridge.pickInstall).toHaveBeenCalledWith('a')
   })
 
   it('routes open-new → openInstallNewWindow', async () => {

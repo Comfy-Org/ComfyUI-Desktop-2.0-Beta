@@ -206,8 +206,9 @@ export interface ComfyTitlePopupBridge {
   onInstancePickerSnapshot(
     cb: (snapshot: PopupInstancePickerSnapshot) => void,
   ): () => void
-  /** Picker → pick install (focus-or-launch). Dismissed before launch. */
-  pickInstall(installationId: string): void
+  /** Picker → pick install (focus-or-launch). Dismissed before launch. `confirmed`
+   *  signals the renderer already prompted in-drawer, so main skips its modal. */
+  pickInstall(installationId: string, opts?: { confirmed?: boolean }): void
   /** Picker → open install in its OWN window (focus-existing else spawn a fresh
    *  chooser host), leaving the picker's host untouched. `allowDuplicate` opens
    *  a second window for an install that already owns one (cloud-self only). */
@@ -536,8 +537,11 @@ const bridge: ComfyTitlePopupBridge = {
     ipcRenderer.on('comfy-titlepopup:installs-changed', handler)
     return () => ipcRenderer.removeListener('comfy-titlepopup:installs-changed', handler)
   },
-  pickInstall: (installationId) => {
-    ipcRenderer.send('comfy-titlepopup:pick-install', { installationId })
+  pickInstall: (installationId, opts) => {
+    ipcRenderer.send('comfy-titlepopup:pick-install', {
+      installationId,
+      confirmed: opts?.confirmed === true
+    })
   },
   openInstallNewWindow: (installationId, opts) => {
     ipcRenderer.send('comfy-titlepopup:open-install-new-window', {

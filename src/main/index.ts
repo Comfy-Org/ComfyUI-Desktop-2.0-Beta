@@ -1456,7 +1456,8 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
      */
     const pickInstallFromPicker = async (
       installationId: string,
-      parentEntryId: number
+      parentEntryId: number,
+      opts?: { confirmed?: boolean }
     ): Promise<void> => {
       const existing = getEntryByInstallationId(installationId)
       if (existing && !existing.window.isDestroyed()) {
@@ -1475,10 +1476,11 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
       // through the chooser-pick path. Confirm only when the swap will
       // kill a *local* ComfyUI process (issue #654): chooser hosts have
       // nothing to detach and cloud/remote hosts have no local process
-      // at risk, so both skip the modal. The detach itself still runs
-      // for cloud parents so the window is free to re-attach.
+      // at risk, so both skip the modal. `opts.confirmed` means the picker
+      // already prompted in-drawer (and routed any "open in new window"
+      // choice itself), so skip the system modal here.
       if (parentEntry.installationId != null) {
-        if (shouldConfirmKillForEntry(parentEntry)) {
+        if (!opts?.confirmed && shouldConfirmKillForEntry(parentEntry)) {
           let targetName = installationId
           try {
             const target = await getInstallation(installationId)

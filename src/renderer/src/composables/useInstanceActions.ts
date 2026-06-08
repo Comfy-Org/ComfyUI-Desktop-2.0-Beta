@@ -12,9 +12,13 @@ import type { Installation } from '../types/ipc'
  * `pickInstall` vs `restartInstall` vs `openInstallNewWindow` — it asks for a
  * decision and dispatches it.
  */
+/** Outcome of the in-drawer "switch a running local instance" prompt. */
+export type SwitchChoice = 'switch' | 'new-window' | 'cancel'
+
 export interface InstanceActionsBridge {
-  /** Swap the install into the current window (detach + re-attach in place). */
-  pickInstall: (installationId: string) => void
+  /** Swap the install into the current window (detach + re-attach in place).
+   *  `confirmed` tells main the renderer already prompted, so it skips its modal. */
+  pickInstall: (installationId: string, opts?: { confirmed?: boolean }) => void
   /** Restart the install running in the current window. `confirmed` tells main
    *  the renderer already prompted, so it skips its own system-modal. */
   restartInstall: (installationId: string, opts?: { confirmed?: boolean }) => void
@@ -28,11 +32,15 @@ export interface InstanceActionsBridge {
 
 export interface InstanceActionsDeps {
   bridge: InstanceActionsBridge | undefined
-  /** Confirm a local process kill (restart/switch). Returns true to proceed;
-   *  non-local installs have no process to kill and should resolve true. */
+  /** Confirm a local process kill (restart). Returns true to proceed; non-local
+   *  installs have no process to kill and should resolve true. */
   confirmLocalKill: (inst: Installation) => Promise<boolean>
   /** Cloud capacity gate; returns false to abort a cloud action. */
   confirmCloudCapacity: (inst: Installation) => Promise<boolean>
+  /** In-drawer 3-way prompt shown when switching INTO a window that runs a local
+   *  instance: stop & switch / open the target in a new window / cancel. Returns
+   *  `'switch'` straight away for non-local hosts (nothing to stop). */
+  confirmSwitch: (inst: Installation) => Promise<SwitchChoice>
 }
 
 export interface InstanceActions {
@@ -64,10 +72,17 @@ export function useInstanceActions(deps: InstanceActionsDeps): InstanceActions {
           return
         }
         case 'switch': {
-          // An in-place switch over a local current host carries `kill-local`;
-          // confirm before detaching.
-          if (decision.confirm === 'kill-local' && !(await deps.confirmLocalKill(target))) return
-          bridge.pickInstall(target.id)
+          // Confirm in-drawer (popup stays open) rather than letting main pop a
+          // system modal after the popup is already dismissed — matches Restart's
+          // feel. The 3-way result: stop & switch / open the target in a new
+          // window / cancel. `confirmed: true` then tells main to skip its modal.
+          const choice = await deps.confirmSwitch(target)
+          if (choice === 'cancel') return
+          if (choice === 'new-window') {
+            bridge.openInstallNewWindow?.(target.id)
+            return
+          }
+          bridge.pickInstall(target.id, { confirmed: true })
           return
         }
         case 'open-new': {
