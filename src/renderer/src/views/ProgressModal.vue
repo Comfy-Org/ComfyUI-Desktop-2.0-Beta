@@ -874,6 +874,34 @@ defineExpose({ startOperation, showOperation })
   align-items: center;
   justify-content: center;
 }
+/* Soft circular ink pool, dead-center, behind the wordmark/bar/text so they
+   stay legible over the glyph — without reading as a shape. Per Figma it's a
+   whisper: the ink starts already semi-transparent at the center and fades to
+   nothing well before the edge, so there's no hard rim. blur(34px) on top of
+   the gradient dissolves it fully into the background; the purple light beam
+   still reads through. Lives on the full-screen container (the stack clips
+   overflow) so it stays a true circle. */
+.brand-progress::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  --scrim-size: clamp(340px, 48vw, 760px);
+  width: var(--scrim-size);
+  height: var(--scrim-size);
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at center,
+    color-mix(in srgb, var(--neutral-950) 58%, transparent) 0%,
+    color-mix(in srgb, var(--neutral-950) 28%, transparent) 32%,
+    color-mix(in srgb, var(--neutral-950) 9%, transparent) 56%,
+    transparent 76%
+  );
+  filter: blur(40px);
+  pointer-events: none;
+  z-index: 1;
+}
 .brand-progress__glyph {
   position: absolute;
   top: 50%;
@@ -896,25 +924,6 @@ defineExpose({ startOperation, showOperation })
   align-items: center;
   gap: clamp(1rem, 3vh, 2rem);
   text-align: center;
-  overflow: hidden;
-}
-.brand-progress__stack::before {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 130%;
-  height: 160%;
-  border-radius: 50%;
-  background: radial-gradient(
-    ellipse at center,
-    color-mix(in srgb, var(--neutral-800) 60%, transparent) 0%,
-    color-mix(in srgb, var(--neutral-800) 40%, transparent) 35%,
-    transparent 60%
-  );
-  pointer-events: none;
-  z-index: -1;
 }
 .brand-progress__wordmark {
   width: clamp(140px, 9.7vw, 240px);
