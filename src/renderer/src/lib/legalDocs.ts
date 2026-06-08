@@ -333,16 +333,16 @@ export const PRIVACY_POLICY: LegalDoc = {
     { kind: 'h2', text: 'Personal data we process' },
     {
       kind: 'p',
-      text: 'When telemetry is enabled (opt-in on the first-run consent screen; toggle at Settings → Telemetry), we process the following categories of data:'
+      text: 'If you have enabled telemetry, either on the first-run consent screen or at Settings → Telemetry, we process the following categories of data:'
     },
     {
       kind: 'ul',
       items: [
-        '**Device identifier** — a pseudonymous identifier generated locally on first run. Before you sign in to Comfy Cloud, it is not linked to your name, email, or hardware. On sign-in, it is associated with your Comfy account.',
-        '**Technical metadata** — application version, operating system, processor architecture.',
-        '**Product usage events** — feature interactions, navigation between views, installation and update milestones, approximate timing.',
-        '**Custom node identifiers** — public package names of custom nodes you install through Manager (e.g. "comfyui-impact-pack"). The local installation path is not transmitted.',
-        '**Crash and error diagnostics** — stack traces, error messages, and short stdout/stderr fragments captured at the moment of failure.'
+        '**Device identifier.** A pseudonymous identifier generated locally on first run. Before you sign in to Comfy Cloud it is not linked to your name, email address, or hardware. When you sign in, it is associated with your Comfy account.',
+        '**Technical metadata.** Application version, operating system, and processor architecture.',
+        '**Product usage events.** Feature interactions, navigation between views, installation and update milestones, and approximate timing.',
+        '**Custom node identifiers.** Public package names of custom nodes you install through Manager (for example, "comfyui-impact-pack"). The local installation path is not transmitted.',
+        '**Crash and error diagnostics.** Stack traces, error messages, and short stdout/stderr fragments captured at the moment of failure.'
       ]
     },
     {
@@ -362,7 +362,7 @@ export const PRIVACY_POLICY: LegalDoc = {
     },
     {
       kind: 'p',
-      text: 'Workflow files, models, generated outputs, the list of installations you create, and your local settings remain on your device and are not transmitted to, or accessible by, Comfy Org.'
+      text: 'Your workflow files, your models, the outputs you generate, the list of installations you create, and your local settings remain on your device. They are not transmitted to Comfy Org, and they are not accessible to us.'
     },
 
     { kind: 'h2', text: 'Purposes and lawful bases' },
@@ -373,19 +373,19 @@ export const PRIVACY_POLICY: LegalDoc = {
     {
       kind: 'ul',
       items: [
-        'Product usage analytics — Consent (Article 6(1)(a))',
-        'Crash and error diagnostics — Consent (Article 6(1)(a))',
-        'Delivery of software updates and integrity verification — Legitimate interests (Article 6(1)(f))',
-        'Authentication when signing in to Comfy Cloud — Performance of a contract (Article 6(1)(b))'
+        'Product usage analytics: consent under Article 6(1)(a).',
+        'Crash and error diagnostics: consent under Article 6(1)(a).',
+        'Delivery of software updates and integrity verification: legitimate interests under Article 6(1)(f).',
+        'Authentication when you sign in to Comfy Cloud: performance of a contract under Article 6(1)(b).'
       ]
     },
     {
       kind: 'p',
-      text: 'Consent for analytics and crash diagnostics is opt-in and may be withdrawn at any time at Settings → Telemetry. Withdrawal does not affect the lawfulness of processing carried out before withdrawal. You may object to legitimate-interest processing by contacting **support@comfy.org**.'
+      text: 'Consent for analytics and crash diagnostics is opt-in, and you may withdraw it at any time at Settings → Telemetry. Withdrawal does not affect the lawfulness of processing carried out before withdrawal. To object to processing on the basis of legitimate interests, contact **support@comfy.org**.'
     },
     {
       kind: 'p',
-      text: 'We do not carry out automated decision-making, including profiling, that produces legal or similarly significant effects. We do not sell personal data and do not share personal data for cross-context behavioural advertising.'
+      text: 'We do not carry out automated decision-making, including profiling, that produces legal or similarly significant effects. We do not sell personal data, and we do not share personal data for cross-context behavioural advertising.'
     },
 
     { kind: 'h2', text: 'Recipients' },
@@ -396,10 +396,10 @@ export const PRIVACY_POLICY: LegalDoc = {
     {
       kind: 'ul',
       items: [
-        '**PostHog** — product usage analytics',
-        '**Datadog** — crash and error diagnostics',
-        '**ToDesktop** — application distribution and software updates',
-        '**Comfy Org analytics warehouse** — long-term aggregate analytics, operated by Comfy Org'
+        '**PostHog** (product usage analytics)',
+        '**Datadog** (crash and error diagnostics)',
+        '**ToDesktop** (application distribution and software updates)',
+        '**Comfy Org analytics warehouse** (long-term aggregate analytics, operated by Comfy Org)'
       ]
     },
 
@@ -413,11 +413,11 @@ export const PRIVACY_POLICY: LegalDoc = {
     {
       kind: 'ul',
       items: [
-        'Product usage analytics — up to **24 months** from event, then aggregated or deleted',
-        'Crash and error diagnostics — **15 days** at full fidelity, sampled or aggregated thereafter',
-        'Aggregate analytics — up to **36 months** in aggregated form',
-        'Update-server logs — **90 days**',
-        'Local device identifier — stored on your device; removed on uninstall'
+        'Product usage analytics: up to **24 months** from the event, then aggregated or deleted.',
+        'Crash and error diagnostics: **15 days** at full fidelity, then sampled or aggregated.',
+        'Aggregate analytics: up to **36 months** in aggregated form.',
+        'Update-server logs: **90 days**.',
+        'Local device identifier: stored on your device only, and removed when you uninstall the application.'
       ]
     },
 
@@ -428,15 +428,15 @@ export const PRIVACY_POLICY: LegalDoc = {
     },
     {
       kind: 'p',
-      text: 'If you are a California resident, you have rights under CCPA and CPRA: to know what we collect, to delete, to correct, and to limit use of sensitive personal information. We do not sell personal information or share it for cross-context behavioural advertising.'
+      text: 'If you are a California resident, you have rights under CCPA and CPRA: to know what we collect, to delete, to correct, and to limit use of sensitive personal information. We do not sell personal information, and we do not share it for cross-context behavioural advertising.'
     },
     {
       kind: 'p',
-      text: "You have the right to lodge a complaint with your supervisory authority — for example, the UK Information Commissioner's Office, your EU member-state data protection authority, or the California Privacy Protection Agency."
+      text: "You also have the right to lodge a complaint with your supervisory authority, such as the UK Information Commissioner's Office, your EU member-state data protection authority, or the California Privacy Protection Agency."
     },
     {
       kind: 'p',
-      text: 'To exercise any of these rights, contact **support@comfy.org**. If you have signed in to Comfy Cloud, your account verifies your identity. If you have not signed in, please provide your approximate install date, platform, and application version, and we will conduct a best-effort match against our records and respond within 30 days.'
+      text: 'To exercise any of these rights, contact **support@comfy.org**. If you have signed in to Comfy Cloud, your account verifies your identity. If you have not signed in, please tell us your approximate install date, platform, and application version, and we will attempt to match these against our records. We aim to respond within 30 days.'
     },
 
     { kind: 'h2', text: 'Children' },
