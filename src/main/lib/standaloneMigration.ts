@@ -14,7 +14,8 @@ import {
   restoreCustomNodes,
   restorePipPackages,
   restoreComfyUIVersion,
-  buildPostRestoreState
+  buildPostRestoreState,
+  frozenSnapshotInstallOverrides
 } from './snapshots'
 
 import * as installations from '../installations'
@@ -100,7 +101,11 @@ async function resolveStandaloneInstallData(
     release = target.release
     variant = target.variant
   } else {
-    const releaseOptions = await standaloneSource.getFieldOptions!('release', {}, {})
+    // `includeLatestStable: true` opens the standalone source's release list
+    // (see `standalone/index.ts:328`). Without it the source returns an
+    // empty array and the legacy-desktop migration silently bails with
+    // "No releases available." instead of progressing.
+    const releaseOptions = await standaloneSource.getFieldOptions!('release', {}, { includeLatestStable: true })
     if (releaseOptions.length === 0) {
       cleanupOnError()
       throw new Error('No releases available.')
@@ -123,7 +128,12 @@ async function resolveStandaloneInstallData(
   const instData = {
     sourceId: 'standalone',
     sourceLabel: standaloneSource.label,
-    ...standaloneSource.buildInstallation({ release, variant })
+    ...standaloneSource.buildInstallation({ release, variant }),
+    // Migrating from a snapshot freezes the install to the snapshot's pinned
+    // ComfyUI version: skip the post-install auto-update (the snapshot restore
+    // re-pins the core commit). updateChannel is left as built here and
+    // re-applied from the snapshot by buildPostRestoreState once restore runs.
+    ...frozenSnapshotInstallOverrides()
   }
 
   return { instData, standaloneSource }
@@ -342,7 +352,7 @@ export async function migrateToStandaloneFromSnapshot(
   await fs.promises.writeFile(path.join(destPath, MARKER_FILE), entry.id)
   const cache = createCache(
     settings.get('cacheDir') as string,
-    settings.get('maxCachedFiles') as number
+    settings.get('maxCachedDownloads') as number
   )
   const installRecord = { ...instData, installPath: destPath } as unknown as InstallationRecord
 

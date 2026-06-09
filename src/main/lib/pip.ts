@@ -57,7 +57,7 @@ export async function installFilteredRequirements(
   tempName: string,
   sendOutput: (text: string) => void,
   signal?: AbortSignal,
-  mirrors?: PipMirrorConfig
+  mirrors?: PipMirrorConfig,
 ): Promise<number> {
   const content = await fs.promises.readFile(reqPath, 'utf-8')
   const filtered = content.split('\n').filter((l) => !PYTORCH_RE.test(l.trim())).join('\n')

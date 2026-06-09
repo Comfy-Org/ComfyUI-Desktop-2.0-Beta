@@ -19,8 +19,13 @@ interface DeepLinkRouterOpts {
   showAppUpdateRestartPrompt: (version: string | null) => Promise<void>
   showAppUpdateDownloadPrompt: (version: string | null) => Promise<void>
   /** Picker picked a non-running install; runs the chooser's launch flow
-   *  without the attach-claim that would swap this host's install out. */
-  pickInstallFromPicker?: (installation: Installation) => Promise<void> | void
+   *  without the attach-claim that would swap this host's install out.
+   *  `startupRestore` marks the boot-time restore path (dashboard fallback on
+   *  missing action + reveal handshake). */
+  pickInstallFromPicker?: (
+    installation: Installation,
+    opts?: { startupRestore?: boolean },
+  ) => Promise<void> | void
   /** Picker "More" menu selected an install-level action; dispatches
    *  through the same `useInstallContextMenu` path the dashboard kebab uses. */
   runInstallActionFromPicker?: (installation: Installation, actionId: string) => Promise<void> | void
@@ -93,8 +98,17 @@ export function useDeepLinkRouter(opts: DeepLinkRouterOpts): void {
           const id = payload.installationId
           if (!id) return
           const inst = installationStore.getById(id)
-          if (!inst) return
-          await opts.pickInstallFromPicker?.(inst)
+          if (!inst) {
+            // Boot restore against a now-missing install: tell main to reveal
+            // the dashboard rather than leaving the hidden window stuck.
+            if (payload.startupRestore) {
+              window.api.resolveStartupRestoreReveal('dashboard-fallback')
+            }
+            return
+          }
+          await opts.pickInstallFromPicker?.(inst, {
+            startupRestore: payload.startupRestore === true,
+          })
           return
         }
         if (payload.kind === 'picker-install-action') {

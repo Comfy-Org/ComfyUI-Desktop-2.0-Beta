@@ -1053,6 +1053,30 @@ export function gitCheckoutCommit(
 }
 
 /**
+ * Roll ComfyUI's source back to `targetHead` (the pre-operation commit). Undoes
+ * the git move when a dependency sync or snapshot restore fails partway, so we
+ * never leave new source + stale packages (the half-applied state that crashes
+ * on import, e.g. `comfy_aimdo.vram_buffer`). Deliberately ignores any abort
+ * signal — rollback must run even when the user cancelled. Returns true if HEAD
+ * ends up at the target (or was already there).
+ */
+export async function rollbackComfySource(
+  comfyuiDir: string,
+  targetHead: string,
+  sendOutput?: (text: string) => void,
+): Promise<boolean> {
+  if (readGitHead(comfyuiDir) === targetHead) return true
+  sendOutput?.(`\nRolling back ComfyUI source to ${targetHead.slice(0, 7)}…\n`)
+  const result = await gitCheckoutCommit(comfyuiDir, targetHead, sendOutput ?? (() => {}), undefined)
+  const head = readGitHead(comfyuiDir)
+  const ok = result.exitCode === 0 && !!head && head.startsWith(targetHead.slice(0, 7))
+  sendOutput?.(ok
+    ? `Rolled back ComfyUI source to ${targetHead.slice(0, 7)}.\n`
+    : `⚠ Failed to roll back ComfyUI source to ${targetHead.slice(0, 7)}.\n`)
+  return ok
+}
+
+/**
  * Fetch the master branch from origin and check out a specific commit.
  * Designed for the ComfyUI main repo where master must exist locally
  * (mirroring update_comfyui.py behaviour).

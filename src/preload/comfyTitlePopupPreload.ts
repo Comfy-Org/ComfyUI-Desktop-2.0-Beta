@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { IpcRendererEvent } from 'electron'
 import { PICKER_SETTINGS_CHANNELS as CH } from '../types/ipc'
+import type { TerminalRestore } from '../types/ipc'
 
 /** Bridge for the title-bar dropdown popup (waffle menu, downloads tray,
  *  instance-picker, global-settings), which share one reused child
@@ -328,6 +329,17 @@ export interface ComfyTitlePopupBridge {
   pickerSettingsPreviewLocalMigration(
     installationId: string,
   ): Promise<Record<string, unknown>>
+  /** Interactive per-install console. The popup's settings UI hits the same
+   *  generic `terminal-*` IPC the panel does, with an explicit installationId. */
+  terminalSubscribe(installationId: string): Promise<TerminalRestore>
+  terminalUnsubscribe(installationId: string): Promise<void>
+  terminalWrite(installationId: string, data: string): Promise<void>
+  terminalResize(installationId: string, cols: number, rows: number): Promise<void>
+  terminalRestart(installationId: string): Promise<TerminalRestore>
+  onTerminalOutput(
+    callback: (data: { installationId: string; data: string }) => void,
+  ): () => void
+  onTerminalExited(callback: (data: { installationId: string }) => void): () => void
   /** Relaunch the app (`app.relaunch()` main-side). */
   pickerSettingsRelaunchApp(): void
   /** Pull the panel-side i18n catalog; the popup boots with a minimal static
@@ -650,6 +662,28 @@ const bridge: ComfyTitlePopupBridge = {
     ipcRenderer.invoke(CH.previewDesktopMigration, { installationId, desktopId }),
   pickerSettingsPreviewLocalMigration: (installationId) =>
     ipcRenderer.invoke(CH.previewLocalMigration, { installationId }),
+  terminalSubscribe: (installationId) =>
+    ipcRenderer.invoke('terminal-subscribe', installationId),
+  terminalUnsubscribe: (installationId) =>
+    ipcRenderer.invoke('terminal-unsubscribe', installationId),
+  terminalWrite: (installationId, data) =>
+    ipcRenderer.invoke('terminal-write', installationId, data),
+  terminalResize: (installationId, cols, rows) =>
+    ipcRenderer.invoke('terminal-resize', installationId, cols, rows),
+  terminalRestart: (installationId) =>
+    ipcRenderer.invoke('terminal-restart', installationId),
+  onTerminalOutput: (callback) => {
+    const handler = (_event: IpcRendererEvent, data: unknown): void =>
+      callback(data as { installationId: string; data: string })
+    ipcRenderer.on('terminal-output', handler)
+    return () => ipcRenderer.removeListener('terminal-output', handler)
+  },
+  onTerminalExited: (callback) => {
+    const handler = (_event: IpcRendererEvent, data: unknown): void =>
+      callback(data as { installationId: string })
+    ipcRenderer.on('terminal-exited', handler)
+    return () => ipcRenderer.removeListener('terminal-exited', handler)
+  },
   pickerSettingsRelaunchApp: () => {
     ipcRenderer.send(CH.relaunchApp)
   },

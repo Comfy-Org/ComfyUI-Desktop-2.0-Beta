@@ -18,11 +18,10 @@ import { recordIpcInvocation } from '../e2eOverrides'
 export function registerSessionHandlers(): void {
   ipcMain.handle('stop-comfyui', async (_event, installationId?: string) => {
     recordIpcInvocation('stop-comfyui', installationId)
-    if (installationId) {
-      await stopRunning(installationId)
-    } else {
-      await stopRunning()
-    }
+    // `_onStop` swaps the window body twice: up front (the "Stopping…" panel)
+    // and again after the kill settles (stopping → stopped surface).
+    const onEnterStopping = _onStop ?? undefined
+    await stopRunning(installationId, onEnterStopping)
     if (_onStop) _onStop({ installationId })
   })
 

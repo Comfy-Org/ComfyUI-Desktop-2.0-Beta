@@ -34,10 +34,15 @@ export const en = {
     storageRestartNote:
       'Restart the application (or close and reopen) for these changes to take effect.',
     useSharedModelsOffWarning:
-      'Shared models is OFF for this install. It can only see models in its own folder plus any custom directories you add below — your shared library stays hidden until you turn this back on.'
+      'Shared models is OFF for this instance. It can only see models in its own folder plus any custom directories you add below — your shared library stays hidden until you turn this back on.'
   },
   statusFactPanel: {
-    editName: 'Edit installation name'
+    editName: 'Edit instance name',
+    editUrl: 'Edit connection URL',
+    restartToApply: 'Restart to apply'
+  },
+  errors: {
+    invalidUrl: 'Enter a valid URL (e.g. http://localhost:8188).'
   },
   models: {
     addDir: 'Add directory',
@@ -54,17 +59,27 @@ export const en = {
   },
   tooltips: {
     instances:
-      'A separate ComfyUI installation with its own version, models, and settings.',
+      'A separate ComfyUI instance with its own version, models, and settings.',
     snapshots:
-      'A saved point-in-time state of an installation (versions + custom nodes) you can restore later.',
+      'A saved point-in-time state of an instance (versions + custom nodes) you can restore later.',
+    console:
+      'An interactive shell running in this instance\'s folder. Works whether ComfyUI is running or stopped.',
+    tabUpdate:
+      'Check for and install updates to this ComfyUI instance. Pick a release channel and review release notes before updating.',
+    tabConfig:
+      'Command-line arguments passed to ComfyUI on launch — port, low-VRAM mode, custom directories, and other startup overrides.',
+    tabStorage:
+      'Disk usage for this instance and the shared model, input, and output directories it reads from.',
+    tabStatus:
+      'Instance details — version, install location, last launched, source, and other metadata about this instance.',
     sharedModels:
-      "Folders shared across all installations so models aren't downloaded twice. Newly downloaded models go to the primary folder. The primary folder can't be removed while it's in use — pick a different primary first.",
+      "Folders shared across all instances so models aren't downloaded twice. Newly downloaded models go to the primary folder. The primary folder can't be removed while it's in use — pick a different primary first.",
     modelsPrimary:
       'The primary directory is where ComfyUI saves newly downloaded models by default.',
     perInstallModelDirs:
       'Extra model directories for this install only, used while shared models is off. The first directory is the primary, where newly downloaded models are saved.',
     installDir:
-      "Default parent folder suggested when creating new installations. Existing installs aren't moved."
+      "Default parent folder suggested when creating new instances. Existing instances aren't moved."
   },
   installType: {
     standalone: 'Standalone',
@@ -95,13 +110,13 @@ export const en = {
     refreshInstanceTooltip: 'Refresh',
     resetZoomTooltip: 'Reset zoom to 100%',
     pillHintTitle: 'Switch & manage instances',
-    pillHintBody: 'Click here to switch instances, start a new local install, or return to the dashboard.',
+    pillHintBody: 'Click here to switch instances, start a new local instance, or return to the dashboard.',
     pillHintDismiss: 'Got it'
   },
   fileMenu: {
     newWindow: 'New Window',
-    newInstall: 'New Install',
-    addExistingInstall: 'Add Existing Install',
+    newInstall: 'New Instance',
+    addExistingInstall: 'Add Existing Instance',
     loadSnapshot: 'Load Snapshot',
     globalSettings: 'Desktop Settings',
     sendFeedback: 'Send Feedback',
@@ -155,13 +170,13 @@ export const en = {
     filterLocal: 'Local',
     filterCloud: 'Cloud',
     filterRemote: 'Remote',
-    newInstall: 'New Install',
+    newInstall: 'New Instance',
     moreActions: 'More actions',
     menuRevealInFolder: 'Open Folder',
     menuDelete: 'Uninstall…'
   },
   actions: {
-    copyInstallation: 'Copy Install',
+    copyInstallation: 'Duplicate Instance',
     untrack: 'Forget'
   },
   cloud: {
@@ -239,7 +254,7 @@ export const en = {
     current: 'Current',
     deleteConfirm: 'Delete this snapshot?',
     restoreConfirm:
-      'Are you sure you want to restore this snapshot? Your current install state will be replaced.',
+      'Are you sure you want to restore this snapshot? Your current instance state will be replaced.',
     // Trigger labels — `triggerLabel(trigger, t)` resolves these.
     triggerBoot: 'Boot',
     triggerRestart: 'Manager',

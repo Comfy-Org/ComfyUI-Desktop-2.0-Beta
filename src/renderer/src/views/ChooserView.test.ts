@@ -35,7 +35,7 @@ const messages = {
     list: { view: 'View' },
     running: { dismiss: 'Dismiss' },
     chooser: {
-      newInstall: 'New Install',
+      newInstall: 'New Instance',
       newInstallDesc: 'Set up a fresh ComfyUI environment.',
       filterAll: 'All',
       filterLocal: 'Local',
@@ -106,11 +106,11 @@ describe('ChooserView', () => {
     mockModal.alert.mockClear()
   })
 
-  it('always renders the New Install tile and a Cloud tile', async () => {
+  it('always renders the New Instance tile and a Cloud tile', async () => {
     installMockApi([])
     const wrapper = mountChooser()
     await flushPromises()
-    expect(wrapper.text()).toContain('New Install')
+    expect(wrapper.text()).toContain('New Instance')
     // Cloud tile shows the Try-Cloud CTA when no cloud install exists.
     expect(wrapper.text()).toContain('Cloud')
     expect(wrapper.text()).toContain('Try Cloud')

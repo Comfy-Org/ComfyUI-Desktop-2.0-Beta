@@ -24,6 +24,7 @@ import {
   untrackAction,
   MARKER_FILE,
   _operationAborts,
+  _runningSessions,
   sanitizeEnvVars,
   getComfyArgsSchema,
   COMFYUI_REPO
@@ -33,8 +34,10 @@ import * as releaseCache from '../release-cache'
 import { runStartupReleaseChecks } from '../release-cache-startup'
 import { _broadcastToRenderer } from './shared'
 import { hasGitDir } from '../git'
+import { parseUrl } from '../util'
 import { restoreSnapshotIntoInstallation } from '../standaloneMigration'
 import * as mainTelemetry from '../telemetry'
+import { appendLog } from '../logsBroadcast'
 import { recordIpcInvocation } from '../e2eOverrides'
 
 /** Fire-and-forget: refresh the shared ComfyUI release cache for the
@@ -251,7 +254,7 @@ export function registerInstallationHandlers(): void {
       _operationAborts.set(installationId, abort)
       const cache = createCache(
         settings.get('cacheDir') as string,
-        settings.get('maxCachedFiles') as number
+        settings.get('maxCachedDownloads') as number
       )
       try {
         await source.install(inst, { sendProgress, download, cache, extract, signal: abort.signal })
@@ -269,6 +272,7 @@ export function registerInstallationHandlers(): void {
             try {
               if (!sender.isDestroyed()) sender.send('comfy-output', { installationId, text })
             } catch {}
+            appendLog(installationId, text)
           }
           const update = (data: Record<string, unknown>): Promise<void> =>
             installations.update(installationId, data).then(() => {})
@@ -403,11 +407,23 @@ export function registerInstallationHandlers(): void {
           }
         }
       }
+      // The Comfy Cloud entry is not user-renamable (issue #922); drop any
+      // attempted name change so the canonical name is preserved.
+      if (inst.sourceId === installations.CLOUD_SOURCE_ID) {
+        allowedIds.delete('name')
+      }
       const filtered: Record<string, unknown> = {}
       for (const key of Object.keys(data)) {
-        if (allowedIds.has(key)) {
-          filtered[key] = key === 'envVars' ? sanitizeEnvVars(data[key]) : data[key]
+        if (!allowedIds.has(key)) continue
+        if (key === 'remoteUrl') {
+          const parsed = parseUrl(data[key] as string)
+          if (!parsed) return { ok: false, message: i18n.t('errors.invalidUrl') }
+          // Store the normalized href (scheme-completed, trailing slash
+          // stripped) so it matches creation's `buildInstallation`.
+          filtered[key] = parsed.href
+          continue
         }
+        filtered[key] = key === 'envVars' ? sanitizeEnvVars(data[key]) : data[key]
       }
       if (filtered.name && filtered.name !== inst.name) {
         if (await installations.hasNameConflict(installationId, filtered.name as string)) {
@@ -469,7 +485,18 @@ export function registerInstallationHandlers(): void {
         })
       }
     }
-    return source.getDetailSections(inst)
+    const sections = source.getDetailSections(inst)
+    // Surface the live port for a running instance. Sourced here (not in the
+    // renderer session store) so it works in every window the settings panel
+    // renders in, including the title popup where the store isn't initialised.
+    const running = _runningSessions.get(installationId)
+    if (running?.port) {
+      sections.push({
+        tab: 'status',
+        fields: [{ key: 'active-port', label: i18n.t('common.port'), value: String(running.port) }],
+      })
+    }
+    return sections
   })
 
   ipcMain.handle(

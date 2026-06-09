@@ -208,8 +208,14 @@ async function handleMakePrimary(index: number): Promise<void> {
   await bridge?.globalSettingsSetModelsDirs(dirs)
 }
 
-function handleOpenModelsDir(path: string): void {
-  bridge?.globalSettingsOpenPath(path)
+async function handleChangeModelsDir(index: number): Promise<void> {
+  const current = props.snapshot.modelsDirs[index]?.path
+  const picked = await bridge?.globalSettingsBrowseFolder(current)
+  if (!picked || picked === current) return
+  globalTouched.value = true
+  const dirs = props.snapshot.modelsDirs.map((d) => d.path)
+  dirs[index] = picked
+  await bridge?.globalSettingsSetModelsDirs(dirs)
 }
 
 async function handleUpdateSharedDirField(field: DetailField, value: unknown): Promise<void> {
@@ -275,7 +281,7 @@ function handleUpdatePerInstallField(field: DetailField, value: unknown): void {
         {{
           t(
             'comfyUISettings.useSharedModelsOffWarning',
-            'Shared models is OFF for this install. It can only see models in its own folder plus any custom directories you add below — your shared library stays hidden until you turn this back on.'
+            'Shared models is OFF for this instance. It can only see models in its own folder plus any custom directories you add below — your shared library stays hidden until you turn this back on.'
           )
         }}
       </p>
@@ -305,7 +311,7 @@ function handleUpdatePerInstallField(field: DetailField, value: unknown): void {
     >
       <ModelsDirList
         :dirs="snapshot.modelsDirs"
-        @open="handleOpenModelsDir"
+        @change="handleChangeModelsDir"
         @remove="handleRemoveModelsDir"
         @make-primary="handleMakePrimary"
         @add="handleAddModelsDir"

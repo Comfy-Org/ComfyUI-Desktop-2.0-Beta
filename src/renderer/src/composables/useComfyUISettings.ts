@@ -11,6 +11,7 @@ import {
 import { useI18n } from 'vue-i18n'
 import { useModal } from './useModal'
 import { useDialogs } from './useDialogs'
+import { useStopAction } from './useStopAction'
 import { useActionGuard } from './useActionGuard'
 import { useMigrateAction } from './useMigrateAction'
 import { useSessionStore } from '../stores/sessionStore'
@@ -52,6 +53,9 @@ export interface UseComfyUISettingsOpts {
   /** Install was removed (delete/untrack); host closes the drawer + window. */
   onNavigateList?: () => void
   onClose?: () => void
+  /** Backend was stopped from the preview; host should dismiss the whole
+   *  preview/popup so the window's stopped-relaunch card shows underneath. */
+  onDismissPreview?: () => void
 }
 
 export interface UseComfyUISettingsApi {
@@ -79,6 +83,11 @@ export interface UseComfyUISettingsApi {
   /** Running-install field ids edited away from their launched value;
    *  drives the "Restart to apply" pill. Held per-install. */
   pendingRestartFieldIds: ComputedRef<Set<string>>
+
+  /** Consume the pending-restart + error state for an install. Called when the
+   *  user initiates the restart, since a remote relaunch surfaces no observable
+   *  lifecycle dip to clear it automatically. */
+  clearPendingRestart: (installId: string) => void
 
   /** Per-install field error messages from failed `updateField` IPCs. */
   fieldErrorMessages: ComputedRef<Map<string, string>>
@@ -117,6 +126,10 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
   const { t } = useI18n()
   const modal = useModal()
   const dialogs = useDialogs()
+  const { confirmAndStop } = useStopAction({
+    confirm: (o) => dialogs.confirm({ ...o, tone: 'danger' }),
+    alert: (o) => dialogs.alert(o),
+  })
   const actionGuard = useActionGuard()
   const { confirmMigration } = useMigrateAction()
   const sessionStore = useSessionStore()
@@ -426,6 +439,14 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     const inst = toValue(opts.installation)
     if (!inst) return
 
+    // Synthetic footer action handled renderer-side (no main `stop` action);
+    // dismiss the preview on success so the window shows its stopped card.
+    if (action.id === 'stop') {
+      const stopped = await confirmAndStop(inst.id)
+      if (stopped) opts.onDismissPreview?.()
+      return
+    }
+
     // Share is a renderer-side IPC (export + native dialog), not a source
     // action, so intercept it before the dispatch chain. Cancel is a no-op.
     if (action.id === 'share') {
@@ -620,6 +641,17 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     )
     const inst = toValue(opts.installation)
     if (!inst) return acts
+    // Synthetic Stop — shut down the running backend while keeping the window
+    // alive. Renderer-only (running-state lives here, not in main), mirroring
+    // how `restart` is synthesized from `launch`. Local-like + running only;
+    // cloud/remote have no local Python process to stop. Grouped at the head of
+    // the destructive cluster (Forget/Uninstall) and styled danger to match.
+    if (inst.sourceCategory !== 'cloud' && sessionStore.isRunning(inst.id)) {
+      const stopAction: ActionDef = { id: 'stop', label: t('actions.stop', 'Stop'), style: 'danger', enabled: true }
+      const firstDanger = acts.findIndex((a) => a.style === 'danger')
+      if (firstDanger === -1) acts.push(stopAction)
+      else acts.splice(firstDanger, 0, stopAction)
+    }
     return acts
   })
 
@@ -673,8 +705,21 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     if (noticeTimer) clearTimeout(noticeTimer)
   })
 
-  // Drop the per-install dirty + error entries when the install stops; it
-  // picks up new values on next launch, so nothing is left to apply.
+  // Drop the per-install dirty + error entries once a (re)launch has consumed
+  // the new values, so the "Restart to apply" state clears after the restart.
+  function clearRestartAndErrors(installId: string): void {
+    if (restartBaselines.value.has(installId)) {
+      const next = new Map(restartBaselines.value)
+      next.delete(installId)
+      restartBaselines.value = next
+    }
+    if (errorMessages.value.has(installId)) {
+      const next = new Map(errorMessages.value)
+      next.delete(installId)
+      errorMessages.value = next
+    }
+  }
+
   watch(
     () => {
       const inst = toValue(opts.installation)
@@ -683,18 +728,28 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     (running, wasRunning) => {
       const inst = toValue(opts.installation)
       if (!inst) return
-      if (wasRunning && !running) {
-        if (restartBaselines.value.has(inst.id)) {
-          const next = new Map(restartBaselines.value)
-          next.delete(inst.id)
-          restartBaselines.value = next
-        }
-        if (errorMessages.value.has(inst.id)) {
-          const next = new Map(errorMessages.value)
-          next.delete(inst.id)
-          errorMessages.value = next
-        }
-      }
+      // Refetch so the "Running details" port row (sourced from main) appears
+      // on launch and clears on stop. Race-safe via reload()'s requestSeq.
+      void reload()
+      // Stop edge: nothing is left to apply (next launch picks up new values).
+      if (wasRunning && !running) clearRestartAndErrors(inst.id)
+    }
+  )
+
+  // A restart may not surface a running→stopped dip (e.g. a remote connection
+  // has no process to kill, so the snapshot can coalesce stop+relaunch into one
+  // running broadcast). Catch the relaunch via the launching edge instead: any
+  // (re)launch re-reads the persisted values, so the pending-restart state is
+  // satisfied the moment a new launch begins.
+  watch(
+    () => {
+      const inst = toValue(opts.installation)
+      return inst ? sessionStore.isLaunching(inst.id) : false
+    },
+    (launching, wasLaunching) => {
+      const inst = toValue(opts.installation)
+      if (!inst) return
+      if (launching && !wasLaunching) clearRestartAndErrors(inst.id)
     }
   )
 
@@ -715,6 +770,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     updateField,
     renameInstallation,
     pendingRestartFieldIds,
+    clearPendingRestart: clearRestartAndErrors,
     fieldErrorMessages,
     runAction,
     runningActionIds,

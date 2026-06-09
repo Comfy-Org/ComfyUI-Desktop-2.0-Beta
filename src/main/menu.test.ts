@@ -21,18 +21,26 @@ beforeEach(() => {
 })
 
 describe('installAppMenu', () => {
-  it('clears the application menu on win32 without dev overrides', () => {
-    installAppMenu('win32')
+  const winLinuxFullscreenOnly = (platform: 'win32' | 'linux'): void => {
+    installAppMenu(platform)
     expect(setApplicationMenu).toHaveBeenCalledTimes(1)
-    expect(setApplicationMenu).toHaveBeenCalledWith(null)
-    expect(buildFromTemplate).not.toHaveBeenCalled()
+    expect(buildFromTemplate).toHaveBeenCalledTimes(1)
+
+    const template = buildFromTemplate.mock.calls[0]?.[0] as Array<{
+      label?: string
+      submenu?: Array<{ role?: string; label?: string }>
+    }>
+    expect(template).toEqual([
+      { label: 'View', submenu: [{ role: 'togglefullscreen' }] },
+    ])
+  }
+
+  it('installs a fullscreen-only View menu on win32 without dev overrides', () => {
+    winLinuxFullscreenOnly('win32')
   })
 
-  it('clears the application menu on linux without dev overrides', () => {
-    installAppMenu('linux')
-    expect(setApplicationMenu).toHaveBeenCalledTimes(1)
-    expect(setApplicationMenu).toHaveBeenCalledWith(null)
-    expect(buildFromTemplate).not.toHaveBeenCalled()
+  it('installs a fullscreen-only View menu on linux without dev overrides', () => {
+    winLinuxFullscreenOnly('linux')
   })
 
   it('installs a View submenu on win32 when dev overrides wire Toggle DevTools', () => {
@@ -50,6 +58,7 @@ describe('installAppMenu', () => {
       expect.objectContaining({
         label: 'View',
         submenu: expect.arrayContaining([
+          expect.objectContaining({ role: 'togglefullscreen' }),
           expect.objectContaining({ role: 'reload' }),
           expect.objectContaining({ label: 'Toggle Developer Tools', click: expect.any(Function) }),
         ]),
@@ -77,6 +86,7 @@ describe('installAppMenu', () => {
     const windowRoles = (windowEntry?.submenu ?? []).map((item) => item.role)
     expect(windowRoles).toContain('minimize')
     expect(windowRoles).toContain('zoom')
+    expect(windowRoles).toContain('togglefullscreen')
     expect(windowRoles).toContain('front')
     expect(windowRoles).not.toContain('close')
     expect(windowRoles).not.toContain('closeAllWindows')
@@ -142,8 +152,14 @@ describe('installAppMenu', () => {
   it('does not add the app menu item on non-darwin platforms', () => {
     const onCheckForUpdates = vi.fn()
     installAppMenu('win32', undefined, { onCheckForUpdates })
-    // win32 with no dev overrides strips the menu entirely.
-    expect(setApplicationMenu).toHaveBeenCalledWith(null)
+    // The "Check for Updates…" item is macOS-only; win32 gets just the
+    // fullscreen-carrying View menu and never wires the handler.
+    const template = buildFromTemplate.mock.calls[0]?.[0] as Array<{
+      label?: string
+      submenu?: Array<{ role?: string; label?: string }>
+    }>
+    const labels = template.flatMap((e) => (e.submenu ?? []).map((i) => i.label))
+    expect(labels).not.toContain('Check for Updates…')
     expect(onCheckForUpdates).not.toHaveBeenCalled()
   })
 

@@ -27,6 +27,7 @@ import { rotateLogFiles, getLogDir } from '../../logRotation'
 import { createExecutionTap } from '../../executionTap'
 import { clearCrash, recordCrash } from '../../crashBuffer'
 import * as telemetry from '../../telemetry'
+import { appendLog } from '../../logsBroadcast'
 import { ensureManagerMirrorConfig } from '../../managerConfig'
 import type { WriteStream } from 'fs'
 
@@ -34,6 +35,10 @@ import type { WriteStream } from 'fs'
 // install's --list-feature-flags registry so we never inject unrecognized keys.
 const DESKTOP_FEATURE_FLAGS: Record<string, string> = {
   show_signin_button: 'true',
+  // Advertises that an interactive terminal host is available, so the frontend
+  // may surface its bottom-panel terminal. The actual transport is the
+  // __comfyDesktop2.Terminal bridge; the flag only gates visibility.
+  supports_terminal: 'true',
 }
 
 // A clean exit is code 0 with no signal; anything else (non-zero code or a
@@ -70,6 +75,30 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
   }
   // Migrate legacy envs/default/ → ComfyUI/.venv/ for standalone installs.
   if (inst.sourceId === 'standalone') {
+    // Recover from an update/restore interrupted by a hard process kill (power
+    // loss, taskkill): if a marker survived, roll ComfyUI's source back to the
+    // pre-op commit so we never launch new source against stale packages. Safe
+    // here: the _operationAborts guard above rules out a concurrent operation,
+    // and recovery is a no-op when HEAD already matches the recorded commit.
+    // Capture the recovery narration so it can be surfaced to the user on the
+    // failure path, not just dropped into the main-process log.
+    const recoveryLog: string[] = []
+    try {
+      const { recoverInterruptedComfyOp } = await import('../../opMarker')
+      const recovered = await recoverInterruptedComfyOp(inst.installPath, (text) => {
+        recoveryLog.push(text)
+        console.log(text.trim())
+      })
+      if (recovered) inst = (await installations.get(installationId)) || inst
+    } catch (err) {
+      // Recovery threw because the source rollback failed: launching now would run
+      // new source against stale packages (the crash we're preventing). Fail
+      // closed; the marker is left in place so the next launch retries.
+      console.warn('Interrupted-operation recovery failed:', err)
+      const detail = recoveryLog.join('').trim()
+      const base = `ComfyUI recovery failed: ${(err as Error).message}`
+      return { ok: false, message: detail ? `${base}\n\n${detail}` : base }
+    }
     const { migrateEnvLayout } = await import('../../../sources/standalone/install')
     const { writeComfyEnvironment } = await import('../../../sources/standalone/envPaths')
     const updateFn = async (data: Record<string, unknown>): Promise<unknown> => installations.update(installationId, data)
@@ -78,6 +107,31 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
       if (migrated) inst = (await installations.get(installationId)) || inst
     } catch (err) {
       console.warn('Env layout migration failed:', err)
+    }
+    // One-time repair for installs damaged by the brief `--upgrade` window that
+    // replaced bundled GPU torch with a CPU build. Non-fatal: CPU torch still
+    // runs, so a failed repair must never block launch (it retries next time).
+    // Held under `_operationAborts` for its duration so a second launch can't
+    // run a concurrent repair against the same venv, and so it stays cancellable.
+    const repairAbort = new AbortController()
+    _operationAborts.set(installationId, repairAbort)
+    try {
+      const { maybeRepairTorch } = await import('../../../sources/standalone/torchRepair')
+      const repaired = await maybeRepairTorch(inst, {
+        sendProgress: makeSendProgress(event.sender, installationId),
+        sendOutput: makeSendOutput(event.sender, installationId),
+        update: updateFn,
+        signal: repairAbort.signal,
+      })
+      if (repaired) inst = (await installations.get(installationId)) || inst
+    } catch (err) {
+      if (repairAbort.signal.aborted) {
+        if (_operationAborts.get(installationId) === repairAbort) _operationAborts.delete(installationId)
+        return { ok: false, cancelled: true }
+      }
+      console.warn('PyTorch vendor repair failed:', err)
+    } finally {
+      if (_operationAborts.get(installationId) === repairAbort) _operationAborts.delete(installationId)
     }
     await writeComfyEnvironment(path.join(inst.installPath, 'ComfyUI'))
   }
@@ -286,7 +340,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
       if (!sender.isDestroyed()) {
         sender.send('comfy-exited', exitedPayload)
       }
-      if (_onComfyExited) _onComfyExited({ installationId })
+      if (_onComfyExited) _onComfyExited({ installationId, crashed })
     })
 
     if (_onLaunch) {
@@ -387,6 +441,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     if (!sender.isDestroyed()) {
       sender.send('comfy-output', { installationId, text })
     }
+    appendLog(installationId, text)
   }
 
   const logStream = await openLogStream(inst.installPath)
@@ -430,6 +485,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     if (!sender.isDestroyed()) {
       sender.send('comfy-output', { installationId, text: `> ${cmdLine}\n\n` })
     }
+    appendLog(installationId, `> ${cmdLine}\n\n`)
     // Explicit boot-attempt event. `installation_started` already fires
     // on successful boot with `boot_time_ms`, and `comfyui.exited` carries
     // `crashed=true` on failure — but boot success rate needed inferred
@@ -687,7 +743,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
       if (!sender.isDestroyed()) {
         sender.send('comfy-exited', exitedPayload)
       }
-      if (_onComfyExited) _onComfyExited({ installationId })
+      if (_onComfyExited) _onComfyExited({ installationId, crashed })
     })
   }
   attachExitHandler(proc)

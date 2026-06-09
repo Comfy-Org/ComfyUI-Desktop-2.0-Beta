@@ -15,7 +15,7 @@ vi.mock('../../lib/comfyui-releases', () => ({
   getLatestStableTag: vi.fn(),
 }))
 
-import { standalone } from './index'
+import { standalone, buildPinnedVariant } from './index'
 import { fetchJSON } from '../../lib/fetch'
 import { getLatestStableTag } from '../../lib/comfyui-releases'
 import { PLATFORM_PREFIX } from './envPaths'
@@ -116,6 +116,54 @@ describe('standalone.buildInstallation', () => {
     })
     expect(result.originalBuild).toBe(1)
     expect(result.originalTorchVersion).toBe('2.7.0')
+  })
+})
+
+// --- buildPinnedVariant ---
+
+describe('buildPinnedVariant', () => {
+  // Two bundles for one vendor: a newer one (releases[0]) and the older one a
+  // snapshot might have been captured on (releases[1]).
+  const releases: R2Release[] = [
+    { tag: 'v0.20.0-env1', comfyui_version: '0.20.0', comfyui_commit: 'cNew', build: 2, date: '2026-05-01T00:00:00Z', file: 'new.tar.gz', size: 2000, python_version: '3.13.0', torch_version: '2.8.0' },
+    { tag: 'v0.18.2-env1', comfyui_version: '0.18.2', comfyui_commit: 'cOld', build: 1, date: '2026-03-15T00:00:00Z', file: 'old.tar.gz', size: 1000, python_version: '3.12.0', torch_version: '2.7.0' },
+  ]
+
+  const makeReleaseOption = (vendorId: string, history: R2Release[]): FieldOption => ({
+    value: 'stable',
+    label: 'stable',
+    data: { tag: history[0]?.tag, vendorReleases: { [vendorId]: history } } as unknown as Record<string, unknown>,
+  })
+
+  it('pins to the exact historical bundle tag when it still exists in R2', () => {
+    const option = buildPinnedVariant(makeReleaseOption(VENDOR_ID, releases), VENDOR_ID, 'v0.18.2-env1')
+    expect(option).not.toBeNull()
+    const data = option!.data as { variantId: string; r2Release: R2Release; downloadUrl: string }
+    expect(data.variantId).toBe(VENDOR_ID)
+    expect(data.r2Release.tag).toBe('v0.18.2-env1')
+    expect(data.r2Release.python_version).toBe('3.12.0')
+    expect(data.downloadUrl).toContain('v0.18.2-env1')
+    expect(data.downloadUrl).toContain('old.tar.gz')
+  })
+
+  it('feeds buildInstallation so the install freezes to the exact bundle env', () => {
+    const releaseOption = makeReleaseOption(VENDOR_ID, releases)
+    const pinned = buildPinnedVariant(releaseOption, VENDOR_ID, 'v0.18.2-env1')!
+    const inst = standalone.buildInstallation({ release: releaseOption, variant: pinned })
+    expect(inst.releaseTag).toBe('v0.18.2-env1')
+    expect(inst.version).toBe('0.18.2')
+    expect(inst.pythonVersion).toBe('3.12.0')
+    expect(inst.originalTorchVersion).toBe('2.7.0')
+  })
+
+  it('returns null when the tag has been pruned, so the caller can fall back to newest', () => {
+    const option = buildPinnedVariant(makeReleaseOption(VENDOR_ID, releases), VENDOR_ID, 'v0.99.99-env1')
+    expect(option).toBeNull()
+  })
+
+  it('returns null when the vendor has no history for the variant', () => {
+    const option = buildPinnedVariant(makeReleaseOption(VENDOR_ID, releases), 'win-unknown-vendor', 'v0.18.2-env1')
+    expect(option).toBeNull()
   })
 })
 

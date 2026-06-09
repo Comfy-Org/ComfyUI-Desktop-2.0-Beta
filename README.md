@@ -11,7 +11,7 @@
 [![License](https://img.shields.io/github/license/Comfy-Org/Comfy-Desktop?style=flat&color=blue)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/Comfy-Org/Comfy-Desktop?style=flat&logo=github&color=f5c518)](https://github.com/Comfy-Org/Comfy-Desktop/stargazers)
 [![Discord](https://img.shields.io/badge/Discord-comfy.org-5865F2?style=flat&logo=discord&logoColor=white)](https://www.comfy.org/discord)
-![Platforms](https://img.shields.io/badge/platforms-Windows%20·%20macOS%20·%20Linux-555?style=flat)
+![Platforms](https://img.shields.io/badge/platforms-Windows%20·%20macOS-555?style=flat)
 
 [**Download**](#download) · [**Getting Started**](#getting-started) · [**Contributing**](#development) · [**Discord**](https://www.comfy.org/discord)
 
@@ -40,7 +40,7 @@ Comfy Desktop is the official desktop application for **ComfyUI**, the node-base
 
 <div align="center">
 
-[![Download Comfy Desktop](https://img.shields.io/badge/⬇%20Download%20Comfy%20Desktop-Windows%20·%20macOS%20·%20Linux-4f46e5?style=for-the-badge)](https://dl.todesktop.com/241130tqe9q3y)
+[![Download Comfy Desktop](https://img.shields.io/badge/⬇%20Download%20Comfy%20Desktop-Windows%20·%20macOS-4f46e5?style=for-the-badge)](https://dl.todesktop.com/241130tqe9q3y)
 
 **[dl.todesktop.com/241130tqe9q3y](https://dl.todesktop.com/241130tqe9q3y)** — one link, auto-detects your platform.
 
@@ -154,26 +154,36 @@ At runtime the main process picks a git backend in priority order ([`src/main/li
 
 ## Releasing
 
-> Production builds are **not** built locally — they go through [ToDesktop](https://www.todesktop.com/) in CI.
+> Production builds go through [ToDesktop](https://www.todesktop.com/) in CI — nothing is built locally. Any maintainer can cut a release; it's one workflow run plus a PR merge.
+
+**To ship a release:**
+
+1. Open the **[Version Bump](../../actions/workflows/version-bump.yml)** workflow → **Run workflow**, and choose:
+   - **`channel`** — `stable` for a real release (promotes to **Latest**), or `rc` for a pre-release test build.
+   - **`bump`** — `patch` / `minor` / `major`.
+2. It opens a **`chore: bump version to vX.Y.Z`** PR, authored by **`cloud-code-bot`** and labeled **`Release`**.
+3. **Review, approve, and merge** that PR.
+4. The rest is automatic — merging tags `vX.Y.Z`, which triggers the ToDesktop build and ships the new version to Desktop users. No manual tagging, no draft to publish.
 
 <details>
-<summary><b>Release pipeline &amp; required secrets</b></summary>
+<summary><b>Pipeline &amp; config</b></summary>
 
 Three workflows in [`.github/workflows/`](.github/workflows/):
 
 | Workflow | Trigger | Role |
 |---|---|---|
-| `version-bump.yml` | manual | Opens a `chore: bump version to vX.Y.Z` PR with the `Release` label. |
+| `version-bump.yml` | manual (**Run workflow**) | Opens the version-bump PR (bot-authored) and labels it `Release`. |
 | `release-from-pr-label.yml` | `pull_request_target: closed` | On merge of a `Release`-labeled PR, tags `vX.Y.Z` and dispatches the build. |
-| `build-release.yml` | push of `v*` tag | Runs `pnpm run build`, uploads Datadog sourcemaps, runs `todesktop build`, and creates a **draft** GitHub Release. |
+| `build-release.yml` | push of a `v*` tag | Runs `pnpm run build`, uploads Datadog sourcemaps, runs `todesktop build`, and publishes the GitHub Release (`stable` → Latest, `-rc` → pre-release). |
 
-**Recommended flow:**
+CLI equivalent of step 1:
 ```bash
-gh workflow run version-bump.yml -f bump=patch -f release=true
+gh workflow run version-bump.yml -f channel=stable -f bump=patch
 ```
-Review &amp; merge the resulting PR; the tag + build are then automatic. Finally, publish the draft Release from the [Releases](../../releases) page.
 
-**Required GitHub Actions secrets:** `TODESKTOP_ACCESS_TOKEN`, `TODESKTOP_EMAIL` (ToDesktop CLI), `DATADOG_API_KEY` (RUM sourcemaps), `BEN_PAT` (version-bump PR).
+**GitHub Actions config:**
+- Variable `APP_ID` + secret `CLOUD_CODE_BOT_PRIVATE_KEY` — the `cloud-code-bot` GitHub App that opens the version-bump PR, so any maintainer can release without a personal token.
+- Secrets `TODESKTOP_ACCESS_TOKEN`, `TODESKTOP_EMAIL` (ToDesktop CLI) and `DATADOG_API_KEY` (RUM sourcemaps).
 
 </details>
 

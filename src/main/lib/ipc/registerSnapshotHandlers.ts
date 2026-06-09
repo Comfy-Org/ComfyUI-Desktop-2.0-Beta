@@ -26,8 +26,10 @@ import {
   buildExportEnvelope,
   validateExportEnvelope,
   importSnapshots,
+  frozenSnapshotInstallOverrides,
   resolveSnapshotVersion,
   getVariantLabel,
+  buildPinnedVariant,
   findDuplicatePath,
   uniqueName,
   sanitizeDirName,
@@ -489,7 +491,12 @@ export function registerSnapshotHandlers(): void {
       const baseGpu = strippedVariant.replace(/-.*$/, '')
 
       const source = sourceMap['standalone']!
-      const releaseOptions = await source.getFieldOptions!('release', {}, {})
+      // `includeLatestStable: true` opens the standalone source's release list
+      // (see `standalone/index.ts:328`). Without it the source returns an
+      // empty array and create-from-snapshot bails with "No releases available."
+      // even when there *are* releases. Mirrors the InstallWizard / QuickInstall
+      // call shape on the renderer side.
+      const releaseOptions = await source.getFieldOptions!('release', {}, { includeLatestStable: true })
       if (releaseOptions.length === 0) return { ok: false, message: 'No releases available.' }
 
       let selectedRelease: FieldOption
@@ -534,10 +541,30 @@ export function registerSnapshotHandlers(): void {
         if (!matched) matched = variantOptions[0]!
       }
 
+      // Recreate the exact standalone environment the snapshot was captured on
+      // by pinning to its original R2 bundle tag when that bundle still exists.
+      // The release dropdown only exposes the 'stable'/'latest' channels (whose
+      // variants point at the newest bundle), so without this the install would
+      // download the latest env — a different Python/torch baseline than the
+      // snapshot. Falls back to the newest bundle when the tag has been pruned.
+      const installVariant =
+        buildPinnedVariant(
+          selectedRelease,
+          matched.data?.variantId as string,
+          targetSnapshot.comfyui.releaseTag,
+          gpu?.id
+        ) ?? matched
+
       const instData = {
         sourceId: source.id,
         sourceLabel: source.label,
-        ...source.buildInstallation({ release: selectedRelease, variant: matched })
+        ...source.buildInstallation({ release: selectedRelease, variant: installVariant }),
+        // Freeze to the snapshot's pinned ComfyUI version. Even with the exact
+        // bundle pinned above, buildInstallation would set autoUpdateComfyUI:
+        // true for a stable/latest channel and auto-update to latest before the
+        // snapshot restore re-pins. The restore is the sole authority for the
+        // core commit; updateChannel mirrors the snapshot as the manual pref.
+        ...frozenSnapshotInstallOverrides(targetSnapshot.updateChannel)
       }
       const baseName = customName || envelope.installationName || 'ComfyUI'
       const name = await uniqueName(baseName)

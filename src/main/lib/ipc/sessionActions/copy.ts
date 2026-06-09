@@ -135,7 +135,7 @@ export async function handleReleaseUpdate(ctx: ActionContext): Promise<ActionRes
     try {
       fs.mkdirSync(destPath, { recursive: true })
       const installRecord = { ...installData, installPath: destPath } as InstallationRecord
-      const cache = createCache(settings.get('cacheDir') as string, settings.get('maxCachedFiles') as number)
+      const cache = createCache(settings.get('cacheDir') as string, settings.get('maxCachedDownloads') as number)
       await source.install!(installRecord, { sendProgress, download, cache, extract, signal })
 
       const finalName = await uniqueName(name)

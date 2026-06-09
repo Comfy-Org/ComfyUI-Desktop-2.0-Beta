@@ -38,6 +38,9 @@ export function buildSettingsSections(): SettingsSection[] {
     {
       title: i18n.t('settings.general'),
       fields: [
+        // Locale picker first — most users only ever touch this once and
+        // then forget the panel exists. Keeping it at the top so it's
+        // discoverable.
         {
           id: 'language',
           label: i18n.t('settings.language'),
@@ -47,8 +50,44 @@ export function buildSettingsSections(): SettingsSection[] {
         },
         // Theme picker hidden (app is dark-only); the theme plumbing stays
         // wired so re-adding this field is the only change needed to restore it.
-        // autoInstallUpdates toggles silent-install vs prompt; the auto-check
-        // loop itself always runs.
+
+        // Boot behavior: reopen the last-used instance on launch. Closing the
+        // last instance window quits Desktop (after a confirm), so the next
+        // launch boots straight back into that instance.
+        {
+          id: 'reopenLastInstanceOnLaunch',
+          label: i18n.t('settings.reopenLastInstanceOnLaunch'),
+          type: 'boolean',
+          value: s.reopenLastInstanceOnLaunch !== false
+        },
+
+        // Close confirmation, off by default. When on, closing a local-install
+        // window asks the user to confirm first (guards against accidentally
+        // killing a ComfyUI that took minutes to boot).
+        {
+          id: 'confirmBeforeClosingWindow',
+          label: i18n.t('settings.confirmBeforeClosingWindow'),
+          type: 'boolean',
+          value: s.confirmBeforeClosingWindow === true,
+          tooltip: i18n.t('settings.confirmBeforeClosingWindowDescription')
+        },
+
+        // Cloud opt-out — pure visibility toggle, doesn't affect any
+        // running behavior. Kept after the window-behavior block so
+        // users who don't care about Cloud find it without scrolling
+        // past the more invasive ones.
+        {
+          id: 'hideCloudFromPicker',
+          label: i18n.t('settings.hideCloudFromPicker'),
+          type: 'boolean',
+          value: s.hideCloudFromPicker === true,
+          tooltip: i18n.t('settings.hideCloudFromPickerDescription')
+        },
+
+        // autoInstallUpdates is filtered out of generalFields by
+        // buildGlobalSettingsSnapshot — it renders inside the Updates
+        // tab. Keeping the field definition here so the schema stays
+        // single-source.
         {
           id: 'autoInstallUpdates',
           label: i18n.t('settings.autoInstallUpdates'),
@@ -79,14 +118,6 @@ export function buildSettingsSections(): SettingsSection[] {
           type: 'path',
           value: s.cacheDir,
           openable: true
-        },
-        {
-          id: 'maxCachedFiles',
-          label: i18n.t('settings.maxCachedFiles'),
-          type: 'number',
-          value: s.maxCachedFiles,
-          min: 1,
-          max: 50
         }
       ]
     },

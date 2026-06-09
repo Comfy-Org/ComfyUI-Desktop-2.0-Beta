@@ -3,7 +3,10 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RefreshCcw, Loader2, ArrowLeft } from 'lucide-vue-next'
 import { useSessionStore } from '../stores/sessionStore'
-import { useReturnToDashboardConfirm } from '../composables/useReturnToDashboardConfirm'
+import {
+  useReturnToDashboardConfirm,
+  type ReturnToDashboardReason,
+} from '../composables/useReturnToDashboardConfirm'
 import { emitTelemetryAction } from '../lib/telemetry'
 import BrandFinishedSurface from '../components/BrandFinishedSurface.vue'
 import type { Installation, ShowProgressOpts } from '../types/ipc'
@@ -216,12 +219,9 @@ function startLaunch(): void {
 const { confirmReturnToDashboard } = useReturnToDashboardConfirm()
 
 async function returnToDashboard(): Promise<void> {
-  const id = props.installationId
-  // confirmReturnToDashboard is a no-op for the crashed surface; only the
-  // brief running-but-lifecycle-mounted race window actually triggers the
-  // prompt.
-  const isRunning = id ? sessionStore.isRunning(id) : false
-  const reason = isRunning ? 'running' : 'crashed'
+  const reason: ReturnToDashboardReason =
+    state.value === 'crashed' ? 'crashed' : state.value === 'stopped' ? 'stopped' : 'running'
+  // Only the running race actually prompts; crashed/stopped pass through.
   const ok = await confirmReturnToDashboard(props.installation, reason)
   if (!ok) return
   emitTelemetryAction('comfy.desktop.instance.return_to_dashboard', { from: 'lifecycle', reason })
@@ -271,6 +271,31 @@ const placeholderTitle = computed<string>(() => {
         <button class="brand-primary brand-progress__footer-btn" type="button" @click="startLaunch">
           <RefreshCcw :size="14" />
           {{ $t('comfyLifecycle.restart') }}
+        </button>
+      </template>
+    </BrandFinishedSurface>
+
+    <!-- Stopped → user stopped the backend on purpose; without this branch a
+         clean stop paints nothing over the torn-down canvas (a black window). -->
+    <BrandFinishedSurface
+      v-else-if="state === 'stopped'"
+      tone="neutral"
+      :title="$t('comfyLifecycle.stoppedTitle')"
+      :message="$t('comfyLifecycle.stoppedDesc')"
+      :aria-label="$t('comfyLifecycle.stoppedTitle')"
+    >
+      <template #actions>
+        <button
+          class="brand-ghost brand-progress__footer-btn"
+          type="button"
+          @click="returnToDashboard"
+        >
+          <ArrowLeft :size="14" />
+          {{ $t('dashboard.confirmStopLocal.confirmLabel', 'Return to Dashboard') }}
+        </button>
+        <button class="brand-primary brand-progress__footer-btn" type="button" @click="startLaunch">
+          <RefreshCcw :size="14" />
+          {{ $t('comfyLifecycle.relaunch') }}
         </button>
       </template>
     </BrandFinishedSurface>

@@ -10,6 +10,47 @@ export const ALLOWED_EXTENSIONS = ['.safetensors', '.sft', '.ckpt', '.pth', '.pt
 /** Asset (output) downloads whose final file is itself an image we can preview. */
 export const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.gif']
 
+/**
+ * Build "Save as type" filters for the generic Save dialog from the suggested
+ * filename. Electron's `showSaveDialog`/`showSaveDialogSync` does not infer
+ * filters from the default filename — on Windows the dropdown collapses to
+ * "All Files (*.*)" if you omit `filters`, which is the symptom field-reported
+ * as "Can't save image from Preview Image node" (#989). Pick a primary filter
+ * matching the file's actual extension so the dialog opens on the right
+ * format, with "All Files" as a fallback escape hatch.
+ */
+export function buildSaveDialogFilters(suggestedName: string): Electron.FileFilter[] {
+  const ext = path.extname(suggestedName).toLowerCase().replace(/^\./, '')
+  const ALL_FILES: Electron.FileFilter = { name: 'All Files', extensions: ['*'] }
+  if (!ext) return [ALL_FILES]
+
+  // Group images / video / audio by family so the user can switch between
+  // related extensions inside the same Save dialog instead of being locked
+  // to the single one we infer. Comfy outputs png/webp/jpg images, mp4/webm
+  // video, and wav/mp3/flac/ogg audio depending on the node graph.
+  const FAMILIES: Record<string, { name: string; extensions: string[] }> = {
+    png:  { name: 'PNG Image',  extensions: ['png'] },
+    jpg:  { name: 'JPEG Image', extensions: ['jpg', 'jpeg'] },
+    jpeg: { name: 'JPEG Image', extensions: ['jpg', 'jpeg'] },
+    webp: { name: 'WebP Image', extensions: ['webp'] },
+    gif:  { name: 'GIF Image',  extensions: ['gif'] },
+    bmp:  { name: 'Bitmap Image', extensions: ['bmp'] },
+    mp4:  { name: 'MP4 Video',  extensions: ['mp4'] },
+    webm: { name: 'WebM Video', extensions: ['webm'] },
+    mov:  { name: 'QuickTime Video', extensions: ['mov'] },
+    wav:  { name: 'WAV Audio',  extensions: ['wav'] },
+    mp3:  { name: 'MP3 Audio',  extensions: ['mp3'] },
+    flac: { name: 'FLAC Audio', extensions: ['flac'] },
+    ogg:  { name: 'OGG Audio',  extensions: ['ogg'] },
+  }
+
+  const primary = FAMILIES[ext]
+  if (primary) return [primary, ALL_FILES]
+  // Unknown extension — keep it as a literal filter so the dialog still shows
+  // the user what file type they're saving instead of collapsing to *.
+  return [{ name: `${ext.toUpperCase()} File`, extensions: [ext] }, ALL_FILES]
+}
+
 export interface DownloadProgress {
   url: string
   filename: string
@@ -650,6 +691,10 @@ export function attachSessionDownloadHandler(sess: Electron.Session): void {
       // General download — browser-like save dialog
       const suggestedName = item.getFilename()
       const downloadsDir = app.getPath('downloads')
+      // Seed the dialog with the directory the user last saved to, matching
+      // browser behavior. Fall back to Downloads if unset or no longer present.
+      const remembered = settings.get('lastSaveDialogDir')
+      const startDir = remembered && fs.existsSync(remembered) ? remembered : downloadsDir
       // `webContents` is null for `session.downloadURL(...)`-initiated downloads
       // (Electron only sets it for page-initiated ones), so fall back to the
       // focused window for the Save dialog parent.
@@ -659,22 +704,24 @@ export function attachSessionDownloadHandler(sess: Electron.Session): void {
       let savePath: string | undefined
       if (win) {
         const filePath = dialog.showSaveDialogSync(win, {
-          defaultPath: path.join(downloadsDir, suggestedName),
+          defaultPath: path.join(startDir, suggestedName),
+          filters: buildSaveDialogFilters(suggestedName),
         })
         if (filePath) {
           savePath = filePath
+          settings.set('lastSaveDialogDir', path.dirname(filePath))
         } else {
           item.cancel()
           return
         }
       } else {
         // setSavePath must be synchronous within will-download
-        let candidate = path.join(downloadsDir, suggestedName)
+        let candidate = path.join(startDir, suggestedName)
         let i = 1
         while (fs.existsSync(candidate)) {
           const ext = path.extname(suggestedName)
           const base = path.basename(suggestedName, ext)
-          candidate = path.join(downloadsDir, `${base} (${i})${ext}`)
+          candidate = path.join(startDir, `${base} (${i})${ext}`)
           i++
         }
         savePath = candidate

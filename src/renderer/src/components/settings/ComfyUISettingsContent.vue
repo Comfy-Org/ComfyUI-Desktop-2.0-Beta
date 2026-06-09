@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, toRef, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { CheckCircle, XCircle, ChevronUp, HardDrive, SlidersHorizontal, Info, RefreshCw, History } from 'lucide-vue-next'
+import { CheckCircle, XCircle, ChevronUp, HardDrive, SlidersHorizontal, Info, RefreshCw, History, SquareTerminal } from 'lucide-vue-next'
 import { useComfyUISettings } from '../../composables/useComfyUISettings'
 import { useInstallCta } from '../../composables/useInstallCta'
 import { useCloudCapacity } from '../../composables/useCloudCapacity'
@@ -12,8 +12,10 @@ import SnapshotsView from '../../views/comfyUISettings/SnapshotsView.vue'
 import StatusFactPanel from '../../views/comfyUISettings/StatusFactPanel.vue'
 import SettingsSectionList from '../../views/comfyUISettings/SettingsSectionList.vue'
 import StoragePane, { type StorageSnapshot } from '../../views/comfyUISettings/StoragePane.vue'
+import ConsoleTerminalPane from '../../views/comfyUISettings/ConsoleTerminalPane.vue'
 import Tooltip from '../ui/Tooltip.vue'
 import type { PickerTab, SectionTab } from '../../lib/pickerTabs'
+import { isTabAllowedForCategory } from '../../lib/pickerTabs'
 import { humanizeOpStatus, operationInflightLabel, operationSuccessLabel } from '../../lib/progressStatusLabel'
 import type { ActionDef, DetailField, Installation, ShowProgressOpts } from '../../types/ipc'
 import { TID } from '../../../../shared/testIds'
@@ -74,6 +76,9 @@ const emit = defineEmits<{
   /** Install was removed; host should close and tear down the window. */
   'navigate-list': []
   'request-close': []
+  /** Backend stopped from the preview; host dismisses the whole popup so the
+   *  window's stopped-relaunch card shows. */
+  'request-dismiss': []
   /** Footer primary CTA. `restartInPlace` is true only when the install
    *  runs in this host window; false when it runs in a different window
    *  so the host routes to `pickInstall` and raises the existing one. */
@@ -114,6 +119,7 @@ const {
   updateField,
   renameInstallation,
   pendingRestartFieldIds,
+  clearPendingRestart,
   fieldErrorMessages,
   runAction,
   runningActionIds,
@@ -125,7 +131,8 @@ const {
   installation,
   onShowProgress: (opts) => emit('show-progress', opts),
   onNavigateList: () => emit('navigate-list'),
-  onClose: () => emit('request-close')
+  onClose: () => emit('request-close'),
+  onDismissPreview: () => emit('request-dismiss')
 })
 
 // Fires the named action once per prop transition, after sections load.
@@ -229,13 +236,15 @@ const ALL_TABS: TabDef[] = [
     key: 'update',
     sectionTab: 'update',
     label: t('comfyUISettings.tabUpdate', 'Update'),
-    icon: RefreshCw
+    icon: RefreshCw,
+    tooltip: t('tooltips.tabUpdate')
   },
   {
     key: 'config',
     sectionTab: 'settings',
     label: t('comfyUISettings.tabConfig', 'Startup Args'),
-    icon: SlidersHorizontal
+    icon: SlidersHorizontal,
+    tooltip: t('tooltips.tabConfig')
   },
   {
     key: 'snapshots',
@@ -248,20 +257,44 @@ const ALL_TABS: TabDef[] = [
     key: 'storage',
     sectionTab: 'storage',
     label: t('comfyUISettings.tabStorage', 'Storage'),
-    icon: HardDrive
+    icon: HardDrive,
+    tooltip: t('tooltips.tabStorage')
+  },
+  {
+    key: 'console',
+    sectionTab: 'console',
+    label: t('comfyUISettings.tabTerminal', 'Terminal'),
+    icon: SquareTerminal,
+    tooltip: t('tooltips.console')
   },
   {
     key: 'status',
     sectionTab: 'status',
     label: t('comfyUISettings.tabStatus', 'About'),
-    icon: Info
+    icon: Info,
+    tooltip: t('tooltips.tabStatus')
   }
 ]
+
+// The console tab has no backend `sections` — it's a live PTY view — so it
+// can't be section-gated like the others. Visibility by instance type is
+// centralized in `isTabAllowedForCategory` (cloud + remote run no local
+// process to attach a shell to).
+const showConsoleTab = computed(
+  () =>
+    installation.value != null &&
+    isTabAllowedForCategory('console', installation.value.sourceCategory)
+)
+
 const tabs = computed<TabDef[]>(() => {
   // Cloud runs no local process, so the `config` tab carries no real
   // startup args — relabel it "Storage" to match its contents.
   const isCloud = installation.value?.sourceCategory === 'cloud'
-  return ALL_TABS.filter((tab) => sectionsForTab(tab.sectionTab).value.length > 0).map((tab) =>
+  return ALL_TABS.filter((tab) =>
+    tab.key === 'console'
+      ? showConsoleTab.value
+      : sectionsForTab(tab.sectionTab).value.length > 0
+  ).map((tab) =>
     isCloud && tab.key === 'config'
       ? { ...tab, label: t('comfyUISettings.tabStorage', 'Storage'), icon: HardDrive }
       : tab
@@ -296,9 +329,9 @@ const rootRef = useTemplateRef<HTMLElement>('root')
 const tabsRef = useTemplateRef<HTMLElement>('tabs')
 
 // Tooltips that echo the visible label add nothing, so only keep them
-// alive for tabs whose label is hidden. Mirror the `< 520px` collapse
+// alive for tabs whose label is hidden. Mirror the `< 640px` collapse
 // breakpoint (see `@container settings-tabs` below) via a ResizeObserver.
-const TAB_COLLAPSE_PX = 520
+const TAB_COLLAPSE_PX = 640
 const tabsCollapsed = ref(false)
 let tabsObserver: ResizeObserver | undefined
 
@@ -414,6 +447,26 @@ function handleArgsUpdate(value: string): void {
   if (f) void updateField(f, value)
 }
 
+/** Live `remoteUrl` field from the status sections (remote connections only). */
+const remoteUrlField = computed<DetailField | null>(() => {
+  for (const s of sectionsForTab('status').value) {
+    for (const f of s.fields ?? []) {
+      if (f.id === 'remoteUrl') return f
+    }
+  }
+  return null
+})
+
+/** Commit a remote-URL edit through `updateField` (optimistic write, rollback,
+ *  error pill, restart-dirty + telemetry). Resolves `false` on rejection so
+ *  StatusFactPanel reverts; success is read back from the field-error map. */
+async function handleUrlUpdate(value: string): Promise<boolean> {
+  const field = remoteUrlField.value
+  if (!field) return false
+  await updateField(field, value)
+  return !fieldErrorMessages.value.has(field.id)
+}
+
 function handleSnapshotAction(action: ActionDef): void {
   void runAction(action)
 }
@@ -449,7 +502,14 @@ const primaryActionLabel = computed(() => {
 })
 
 function handlePrimaryAction(): void {
-  if (!installation.value) return
+  const selectedInstall = installation.value
+  if (!selectedInstall) return
+  // The restart-in-place click IS the restart: main stops + relaunches with the
+  // freshly-saved values, so consume the pending-restart state now. A remote
+  // relaunch surfaces no observable lifecycle dip, so the watchers can't clear it.
+  if (installCta.restartInPlace.value && pendingRestartFieldIds.value.size > 0) {
+    clearPendingRestart(selectedInstall.id)
+  }
   emit('primary-action', installCta.restartInPlace.value)
 }
 
@@ -627,16 +687,16 @@ defineExpose({
 
     <section class="settings-v2-body">
       <p v-if="!installation" class="empty">
-        {{ t('comfyUISettings.emptyInstallLess', 'Open a ComfyUI install to view its settings.') }}
+        {{ t('comfyUISettings.emptyInstallLess', 'Open a ComfyUI instance to view its settings.') }}
       </p>
       <p
-        v-else-if="loading && !visibleSections.length"
+        v-else-if="loading && !visibleSections.length && activeTab !== 'console'"
         class="empty"
         :data-testid="TID.pickerSettingsLoading"
       >
         {{ t('common.loading', 'Loading…') }}
       </p>
-      <p v-else-if="error" class="empty error">{{ error }}</p>
+      <p v-else-if="error && activeTab !== 'console'" class="empty error">{{ error }}</p>
 
       <Transition v-else :name="subPageTransition" mode="out-in">
         <ArgsBuilderPage
@@ -695,6 +755,8 @@ defineExpose({
                 :sections="statusSections"
                 :disk-usage="diskUsageItem"
                 :on-rename="renameInstallation"
+                :on-update-url="handleUrlUpdate"
+                :url-restart-pending="pendingRestartFieldIds.has('remoteUrl')"
               />
             </div>
             <div
@@ -713,6 +775,13 @@ defineExpose({
                 :running-action-ids="runningActionIds"
                 @update-field="updateField"
               />
+            </div>
+            <div
+              v-else-if="activeTab === 'console' && installation"
+              :key="`tab-console-${paneInstallKey}`"
+              class="settings-v2-tab-pane settings-v2-tab-pane--console"
+            >
+              <ConsoleTerminalPane :installation-id="installation.id" />
             </div>
             <div v-else :key="`tab-${activeTab}-${paneInstallKey}`" class="settings-v2-tab-pane">
               <Transition name="op-overlay" mode="out-in">
@@ -871,11 +940,16 @@ defineExpose({
   border-bottom: 1px solid var(--chooser-surface-border);
   container-type: inline-size;
   container-name: settings-tabs;
+  /* Clip the strip to the pane: it must never push the pane wider, even with
+     6 tabs. min-width:0 lets the flex row shrink below its content. */
+  min-width: 0;
+  flex-wrap: nowrap;
+  overflow: hidden;
 }
 
 /* Narrow right-pane: inactive tabs collapse to icon-only; the active
-   tab keeps its label. */
-@container settings-tabs (max-width: 520px) {
+   tab keeps its label. Keep this max-width in sync with `TAB_COLLAPSE_PX`. */
+@container settings-tabs (max-width: 640px) {
   .settings-v2-tab:not(.is-active) {
     padding: 6px 8px;
     gap: 0;
@@ -904,10 +978,21 @@ defineExpose({
   opacity: 0.72;
   font-size: 13px;
   font-weight: 400;
+  /* Allow buttons to shrink so the strip clips cleanly instead of overflowing. */
+  min-width: 0;
   transition:
     color 120ms ease,
     background-color 120ms ease,
     opacity 120ms ease;
+}
+
+/* Final safety net: clip a label with ellipsis rather than ever cut a glyph
+   mid-stroke at the narrowest real widths (icon wrap never shrinks). */
+.settings-v2-tab > span:not(.settings-v2-tab-icon-wrap) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 
 .settings-v2-tab:hover {

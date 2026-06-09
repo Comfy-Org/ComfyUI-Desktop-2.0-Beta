@@ -29,6 +29,7 @@ interface ModelsDir {
 }
 
 interface Snapshot {
+  languageFields: Record<string, unknown>[]
   generalFields: Record<string, unknown>[]
   telemetryFields: Record<string, unknown>[]
   desktopUpdateFields: Record<string, unknown>[]
@@ -98,6 +99,9 @@ const storageSnapshot = computed(() => ({
   modelsSystemDefault: props.snapshot.modelsSystemDefault,
 }))
 
+const languageSections = computed<DetailSection[]>(() => [
+  { fields: props.snapshot.languageFields as unknown as DetailField[] }
+])
 const generalSections = computed<DetailSection[]>(() => [
   { fields: props.snapshot.generalFields as unknown as DetailField[] }
 ])
@@ -232,7 +236,11 @@ onMounted(() => {
         :aria-labelledby="`gs-tab-${activeTab}`"
       >
         <template v-if="activeTab === 'general'">
-          <GlobalSettingsMicroSection :title="t('settings.preferences', 'Preferences')">
+          <!-- Locale picker first, no microsection header — it's a single
+               control and the lone "Language" label on it is enough. -->
+          <SettingsSectionList :sections="languageSections" @update-field="handleUpdateField" />
+
+          <GlobalSettingsMicroSection :title="t('settings.appBehavior', 'App Behavior')">
             <SettingsSectionList :sections="generalSections" @update-field="handleUpdateField" />
           </GlobalSettingsMicroSection>
 
@@ -308,7 +316,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 16px;
+  padding: 6px 12px;
   border-bottom: 1px solid color-mix(in oklab, var(--neutral-100) 8%, transparent);
   flex: 0 0 auto;
 }
@@ -358,9 +366,9 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  flex: 0 0 196px;
-  width: 196px;
-  padding: 12px 8px;
+  flex: 0 0 160px;
+  width: 160px;
+  padding: 6px 4px;
   background: var(--neutral-800);
   border-right: 1px solid var(--chooser-surface-border);
   overflow-y: auto;
@@ -405,10 +413,29 @@ onMounted(() => {
   flex: 1 1 auto;
   min-width: 0;
   overflow-y: auto;
-  padding: 16px 20px;
+  padding: 8px 12px;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 10px;
+}
+
+/* Compress the SettingsSectionList stack inside the Global Settings
+ * panel. The component's scoped defaults (gap: 32px between sections,
+ * 16px within, 44px min-height per boolean row) are tuned for the
+ * full-width install Settings surface; the dense popup needs less air.
+ * Targeting via :deep so we don't have to fork the component. */
+.gs-pane :deep(.settings-v2-sections) {
+  gap: 8px;
+}
+.gs-pane :deep(.settings-v2-section) {
+  gap: 4px;
+}
+.gs-pane :deep(.settings-v2-boolean-row) {
+  min-height: 28px;
+  padding: 0;
+}
+.gs-pane :deep(.settings-v2-field) {
+  gap: 4px;
 }
 
 .global-settings :deep(.ui-input),

@@ -1,6 +1,6 @@
 import { EventEmitter } from 'events'
 import type { BrowserWindow, WebContents, WebContentsView } from 'electron'
-import { _runningSessions } from '../lib/ipc/shared'
+import { _runningSessions, _isStopping } from '../lib/ipc/shared'
 import type { FirstUseMode } from '../../shared/firstUseMode'
 
 /**
@@ -244,6 +244,17 @@ export function shouldConfirmKillForEntry(
 }
 
 /**
+ * Predicate: this entry has a live ComfyUI session (i.e. its body shows the
+ * running ComfyUI view, not the lifecycle/crash panel). Used to decide whether
+ * the install is a healthy "last active surface" worth restoring on next boot.
+ */
+export function hasRunningSessionForEntry(
+  entry: ComfyWindowEntry | null | undefined,
+): entry is ComfyWindowEntry & { installationId: string } {
+  return !!entry && isInstallHost(entry) && _runningSessions.has(entry.installationId)
+}
+
+/**
  * Decide what fills a comfy window's body. Install-backed: the Comfy pill →
  * live ComfyUI view (running) or lifecycle panel (stopped). Install-less: the
  * Comfy pill → chooser. Centralised so layout and body swaps can't disagree.
@@ -254,6 +265,9 @@ export function computeBodyMode(entry: ComfyWindowEntry): BodyMode {
     return entry.activePanel === 'comfy' ? 'chooser' : entry.activePanel
   }
   if (entry.activePanel !== 'comfy') return entry.activePanel
+  // Stopping shows the lifecycle ("Stopping…") panel even though the session is
+  // still present — otherwise the dead canvas reads as black during the kill.
+  if (_isStopping(entry.installationId)) return 'comfy-lifecycle'
   return _runningSessions.has(entry.installationId) ? 'comfy' : 'comfy-lifecycle'
 }
 
@@ -267,6 +281,16 @@ export function computeBodyMode(entry: ComfyWindowEntry): BodyMode {
 export function findEntryByTitleBarSender(wc: WebContents): { id: number; entry: ComfyWindowEntry } | null {
   for (const [id, entry] of comfyWindows) {
     if (entry.titleBarView.webContents === wc) return { id, entry }
+  }
+  return null
+}
+
+/** Resolve the installationId backing the comfyView whose webContents sent an
+ *  IPC message. Used by the terminal bridge so the served ComfyUI frontend
+ *  (which has no idea which install it belongs to) reaches the right shell. */
+export function findInstallationIdByComfySender(wc: WebContents): string | null {
+  for (const entry of comfyWindows.values()) {
+    if (entry.comfyView.webContents === wc) return entry.installationId
   }
   return null
 }
@@ -337,6 +361,18 @@ export function bringToFront(win: BrowserWindow): void {
 export function revealColdStartHostIfPending(windowKey: number): void {
   const entry = comfyWindows.get(windowKey)
   if (!entry?.coldStartPendingReveal || entry.window.isDestroyed()) return
+  entry.coldStartPendingReveal = false
+  entry.layoutViews()
+  bringToFront(entry.window)
+}
+
+/** Reveal a host whose cold-start reveal was deferred by the caller (the
+ *  startup-restore flow holds the window hidden until its launch takeover is
+ *  up, so the dashboard never flashes). Reveals regardless of the
+ *  `coldStartPendingReveal` flag — the caller owns the timing. */
+export function forceRevealHostWindow(windowKey: number): void {
+  const entry = comfyWindows.get(windowKey)
+  if (!entry || entry.window.isDestroyed()) return
   entry.coldStartPendingReveal = false
   entry.layoutViews()
   bringToFront(entry.window)

@@ -19,6 +19,22 @@ import {
 } from './registry'
 import type { BodyMode, ComfyPanelKey, ComfyWindowEntry } from './registry'
 
+/** Opaque panel background matching the title-bar chrome, used while the panel
+ *  bundle loads for full-screen bodies so the user never sees a black flash. */
+function opaquePanelBg(): string {
+  const overlay = titleBarOverlayForTheme(resolveTheme() === 'dark')
+  return overlay.color ?? TITLEBAR_BG
+}
+
+/** Full-screen bodies that hide the comfy view, so the panel must paint opaque
+ *  during load rather than compositing the (hidden) canvas through. `comfy-
+ *  lifecycle` is included so the 1-2s `stopping` window shows the spinner over
+ *  an opaque surface instead of black. Overlay modes (downloads / feedback)
+ *  deliberately stay transparent. */
+function isOpaqueBodyMode(mode: BodyMode): boolean {
+  return mode === 'chooser' || mode === 'new-install' || mode === 'comfy-lifecycle'
+}
+
 /**
  * Lazily create the panel WebContentsView for a comfy window. The URL params are only an
  * initial hint; `did-finish-load` always re-pushes the current `activePanel` to guard
@@ -42,16 +58,7 @@ export function ensurePanelView(
       // Default session (no partition) keeps the panel isolated from ComfyUI's storage.
     },
   })
-  const chooserPanelBg = (): string => {
-    const overlay = titleBarOverlayForTheme(resolveTheme() === 'dark')
-    return overlay.color ?? TITLEBAR_BG
-  }
-  // `chooser` and `new-install` are full-screen flows, so paint them opaque during load to
-  // avoid a black flash; overlay modes stay transparent so the live comfy view composites
-  // through.
-  panelView.setBackgroundColor(
-    initialPanel === 'chooser' || initialPanel === 'new-install' ? chooserPanelBg() : '#00000000',
-  )
+  panelView.setBackgroundColor(isOpaqueBodyMode(initialPanel) ? opaquePanelBg() : '#00000000')
   entry.window.contentView.addChildView(panelView)
   // Insert at zero size, behind the comfy view; layoutViews handles positioning.
   panelView.setBounds({ x: 0, y: TITLEBAR_HEIGHT + 1, width: 0, height: 0 })
@@ -177,7 +184,12 @@ export function refreshComfyTabBody(installationId: string): void {
 
   const mode = computeBodyMode(entry)
   if (mode === 'comfy-lifecycle') {
-    ensurePanelView(entry.windowKey, entry, 'comfy-lifecycle')
+    const lifecyclePanel = ensurePanelView(entry.windowKey, entry, 'comfy-lifecycle')
+    // Re-force opaque in case the panel was first created transparent (overlay/
+    // comfy mode); otherwise the hidden canvas shows black until Vue paints.
+    if (!lifecyclePanel.webContents.isDestroyed()) {
+      lifecyclePanel.setBackgroundColor(opaquePanelBg())
+    }
   }
   forwardToPanelRenderer(entry, 'panel-switch', { panel: mode, installationId })
   entry.layoutViews()

@@ -190,6 +190,25 @@ export async function restoreComfyUIVersion(
 }
 
 /**
+ * Installation-record overrides that freeze a snapshot-created install to the
+ * snapshot's pinned ComfyUI version. `autoUpdateComfyUI: false` stops the
+ * post-install auto-update (the snapshot restore is the sole authority for the
+ * core commit). Pass the snapshot's updateChannel to mirror it as the manual
+ * update preference; omit it to leave whatever channel the install was built
+ * with (the restore re-applies the channel via buildPostRestoreState).
+ */
+export function frozenSnapshotInstallOverrides(
+  snapshotUpdateChannel?: string
+): { autoUpdateComfyUI: false; updateChannel?: 'stable' | 'latest' } {
+  return {
+    autoUpdateComfyUI: false,
+    ...(snapshotUpdateChannel !== undefined
+      ? { updateChannel: snapshotUpdateChannel === 'latest' ? 'latest' : 'stable' }
+      : {})
+  }
+}
+
+/**
  * Build the installation-state update to apply after a restore. Always updates updateChannel
  * + lastRollback; updates version + updateInfoByChannel to the snapshot when the version
  * restore succeeded, else keeps current state so the next update check detects the mismatch.

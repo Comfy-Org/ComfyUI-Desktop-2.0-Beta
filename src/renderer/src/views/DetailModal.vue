@@ -495,7 +495,7 @@ function navigateToInstallation(installationId: string): void {
     <template #title>
       <div
         role="textbox"
-        :aria-label="$t('detail.editName', 'Edit installation name')"
+        :aria-label="$t('detail.editName', 'Edit instance name')"
         contenteditable
         spellcheck="false"
         @blur="handleTitleBlur"
@@ -587,7 +587,7 @@ function navigateToInstallation(installationId: string): void {
     <div class="detail-embedded-title">
       <div
         role="textbox"
-        :aria-label="$t('detail.editName', 'Edit installation name')"
+        :aria-label="$t('detail.editName', 'Edit instance name')"
         contenteditable
         spellcheck="false"
         @blur="handleTitleBlur"

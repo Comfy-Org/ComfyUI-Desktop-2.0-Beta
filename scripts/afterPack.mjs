@@ -79,9 +79,40 @@ async function ensureVcRedist(context) {
 }
 
 /**
+ * Compute the platform-correct path to `app.asar.unpacked/` inside the
+ * built bundle. The previous version of this hook hardcoded
+ * `${appOutDir}/resources/...`, which is only correct on Linux/Windows —
+ * on macOS the resources sit under `${productFilename}.app/Contents/
+ * Resources/...`. As a result, every chmod this hook tried to apply on
+ * macOS was pointed at a path that didn't exist, the calls silently
+ * no-op'd against a missing tree, and the unpacked binaries shipped with
+ * the npm tarball's `0644` mode. `extract.ts` masks the 7za side via a
+ * runtime chmod, and `terminal.ts` does the same for spawn-helper, but
+ * fixing the pack-time hook means future native helpers don't each need
+ * their own runtime workaround.
+ *
+ * `context.packager.getResourcesDir(appOutDir)` is the electron-builder
+ * API that already encodes the per-platform layout — use it instead of
+ * re-deriving the path.
+ */
+function unpackedNodeModulesDir(context) {
+  const resourcesDir = context.packager.getResourcesDir(context.appOutDir)
+  return path.join(resourcesDir, 'app.asar.unpacked', 'node_modules')
+}
+
+/**
  * electron-builder afterPack hook.
- * Ensures the 7zip-bin binary has the execute permission in the packaged output.
- * This is necessary because AppImage mounts are read-only, so runtime chmod fails.
+ * Ensures bundled native helpers have the execute permission in the packaged
+ * output. Without this, the unpacked binaries inherit `0644` from the npm
+ * tarball and fail with EACCES at exec time:
+ *   - `7za` is invoked when extracting the bundled standalone-python tarball.
+ *   - `node-pty/prebuilds/<plat>/spawn-helper` is exec'd by `pty.fork()` to
+ *     launch the user's shell. Without +x the Terminal tab and the Settings
+ *     Console come up as a black canvas with no prompt — node-pty's native
+ *     code fails silently because the exec returns EACCES inside C++ and
+ *     the JS layer never sees it.
+ * AppImage mounts are read-only, so runtime chmod fails — has to happen at
+ * pack time.
  *
  * Switches on `context.electronPlatformName` (the *target* platform) rather
  * than `process.platform` (the *host*), so cross-builds — e.g. ToDesktop's
@@ -93,22 +124,35 @@ export default async function afterPack(context) {
     return
   }
 
-  const unpackedDir = path.join(
-    context.appOutDir,
-    'resources',
-    'app.asar.unpacked',
-    'node_modules',
-    '7zip-bin',
-  )
+  const unpackedRoot = unpackedNodeModulesDir(context)
+  if (!fs.existsSync(unpackedRoot)) {
+    console.log(`afterPack: unpacked node_modules not found at ${unpackedRoot}; skipping chmods`)
+    return
+  }
 
-  if (!fs.existsSync(unpackedDir)) return
+  // 7zip-bin / 7za (used during install for the standalone-python tarball).
+  const sevenZipRoot = path.join(unpackedRoot, '7zip-bin')
+  if (fs.existsSync(sevenZipRoot)) {
+    for (const entry of fs.readdirSync(sevenZipRoot, { recursive: true })) {
+      if (path.basename(String(entry)) === '7za') {
+        const binPath = path.join(sevenZipRoot, String(entry))
+        fs.chmodSync(binPath, 0o755)
+        console.log(`afterPack: set +x on ${binPath}`)
+      }
+    }
+  }
 
-  // Find all 7za binaries under the unpacked 7zip-bin directory
-  for (const entry of fs.readdirSync(unpackedDir, { recursive: true })) {
-    if (path.basename(String(entry)) === '7za') {
-      const binPath = path.join(unpackedDir, String(entry))
-      fs.chmodSync(binPath, 0o755)
-      console.log(`afterPack: set +x on ${binPath}`)
+  // node-pty's prebuilt `spawn-helper` per platform. The native pty.fork
+  // exec()s this on every PTY spawn; without +x the helper returns EACCES
+  // and the terminal stays black.
+  const nodePtyPrebuilds = path.join(unpackedRoot, 'node-pty', 'prebuilds')
+  if (fs.existsSync(nodePtyPrebuilds)) {
+    for (const entry of fs.readdirSync(nodePtyPrebuilds, { recursive: true })) {
+      if (path.basename(String(entry)) === 'spawn-helper') {
+        const binPath = path.join(nodePtyPrebuilds, String(entry))
+        fs.chmodSync(binPath, 0o755)
+        console.log(`afterPack: set +x on ${binPath}`)
+      }
     }
   }
 }

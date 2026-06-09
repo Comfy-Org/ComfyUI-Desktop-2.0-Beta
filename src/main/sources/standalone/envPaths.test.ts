@@ -7,10 +7,21 @@ vi.mock('electron', () => ({
   app: { getPath: () => '' },
 }))
 
-import { writeComfyEnvironment } from './envPaths'
+import { writeComfyEnvironment, getTorchVersion } from './envPaths'
+import type { InstallationRecord } from '../../installations'
 
 const ENV_FILENAME = '.comfy_environment'
 const EXPECTED_CONTENT = 'local-desktop2-standalone\n'
+
+/** Build the platform-appropriate site-packages dir under a managed venv and return it. */
+function makeSitePackages(installPath: string): string {
+  const venv = path.join(installPath, 'ComfyUI', '.venv')
+  const sitePackages = process.platform === 'win32'
+    ? path.join(venv, 'Lib', 'site-packages')
+    : path.join(venv, 'lib', 'python3.12', 'site-packages')
+  fs.mkdirSync(sitePackages, { recursive: true })
+  return sitePackages
+}
 
 describe('writeComfyEnvironment', () => {
   let tmpDir: string
@@ -60,5 +71,37 @@ describe('writeComfyEnvironment', () => {
     await expect(writeComfyEnvironment(tmpDir)).resolves.toBeUndefined()
     expect(warn).toHaveBeenCalled()
     warn.mockRestore()
+  })
+})
+
+describe('getTorchVersion', () => {
+  let tmpDir: string
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'comfy-torch-test-'))
+  })
+
+  afterEach(() => {
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }) } catch {}
+  })
+
+  function install(): InstallationRecord {
+    return { id: 'i', name: 'i', installPath: tmpDir } as unknown as InstallationRecord
+  }
+
+  it('reads the version from the torch dist-info directory', () => {
+    const sitePackages = makeSitePackages(tmpDir)
+    fs.mkdirSync(path.join(sitePackages, 'torch-2.5.1+cu121.dist-info'))
+    expect(getTorchVersion(install())).toBe('2.5.1+cu121')
+  })
+
+  it('returns null when torch is not installed', () => {
+    const sitePackages = makeSitePackages(tmpDir)
+    fs.mkdirSync(path.join(sitePackages, 'numpy-1.26.4.dist-info'))
+    expect(getTorchVersion(install())).toBeNull()
+  })
+
+  it('returns null when the venv does not exist', () => {
+    expect(getTorchVersion(install())).toBeNull()
   })
 })

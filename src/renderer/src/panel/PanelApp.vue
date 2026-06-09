@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ProgressModal from '../views/ProgressModal.vue'
 import ModalDialog from '../components/ModalDialog.vue'
@@ -184,6 +184,23 @@ chooserHandoff = useChooserHandoff({
 })
 const { handleChooserPick, handleChooserShowNewInstall } = chooserHandoff
 
+// Boot-time restore: the host window is hidden until we tell main the outcome.
+// Use `performChooserLaunch` (NOT `handleChooserPick`) so a missing launch
+// action falls back to the dashboard instead of opening the new-install wizard.
+// Reveal the launching takeover when it comes up; otherwise (already running,
+// missing action, console/external mode, error) fall back to the dashboard.
+async function handleStartupRestorePick(inst: Installation): Promise<void> {
+  try {
+    const outcome = await chooserHandoff.performChooserLaunch(inst)
+    await nextTick()
+    const takeoverReady = outcome === 'launched' && currentOverlay.value?.kind === 'takeover'
+    window.api.resolveStartupRestoreReveal(takeoverReady ? 'takeover-ready' : 'dashboard-fallback')
+  } catch (err) {
+    console.error('startup restore launch failed', err)
+    window.api.resolveStartupRestoreReveal('dashboard-fallback')
+  }
+}
+
 // When an overlay closes on a chooser host without producing an attach
 // (cancel / error / dismiss), revert the install identity preview that
 // `claimAttachHost` pushed to the title bar — otherwise the chooser host
@@ -233,7 +250,7 @@ useDeepLinkRouter({
   openOverlay,
   showAppUpdateRestartPrompt,
   showAppUpdateDownloadPrompt,
-  pickInstallFromPicker: async (inst) => {
+  pickInstallFromPicker: async (inst, pickOpts) => {
     // Chooser-host pick (no installationId backing this host) → swap
     // in-place via the same path the dashboard chooser uses, so the
     // dashboard window becomes the picked install. Install-backed
@@ -243,7 +260,11 @@ useDeepLinkRouter({
     // window before this IPC fires, so we only ever see launches
     // here for installs that aren't running yet).
     if (!installationId) {
-      await chooserHandoff.handleChooserPick(inst)
+      if (pickOpts?.startupRestore) {
+        await handleStartupRestorePick(inst)
+      } else {
+        await chooserHandoff.handleChooserPick(inst)
+      }
     } else {
       await chooserHandoff.performPickerLaunch(inst)
     }

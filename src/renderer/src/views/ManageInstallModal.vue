@@ -58,7 +58,7 @@ function handleUpdateInstallation(inst: Installation) {
   <BaseModal
     :open="open"
     size="lg"
-    :aria-label="t('settingsModal.title', 'Manage Installation')"
+    :aria-label="t('settingsModal.title', 'Manage Instance')"
     content-class="manage-install-modal-content"
     @close="handleClose"
   >

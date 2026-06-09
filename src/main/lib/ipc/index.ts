@@ -25,6 +25,8 @@ import { registerInstallationHandlers } from './registerInstallationHandlers'
 import { registerSnapshotHandlers } from './registerSnapshotHandlers'
 import { registerSettingsHandlers } from './registerSettingsHandlers'
 import { registerSessionHandlers } from './registerSessionHandlers'
+import { registerTerminalHandlers } from './registerTerminalHandlers'
+import { registerLogsHandlers } from './registerLogsHandlers'
 import { registerCrashHandlers } from './registerCrashHandlers'
 import { registerTelemetryHandlers } from './registerTelemetryHandlers'
 
@@ -37,7 +39,7 @@ export {
   getActiveDetails,
   cancelAll
 } from './shared'
-export type { RegisterCallbacks } from './shared'
+export type { RegisterCallbacks, ExitCallbackInfo } from './shared'
 
 // Idempotent guard so a re-run (tests/hot-reload) doesn't double-subscribe.
 let _releaseCacheBridgeWired = false
@@ -55,21 +57,25 @@ export function register(callbacks: RegisterCallbacks = {}): void {
 
   installations.seedDefaults([
     {
-      name: 'Comfy Cloud',
-      sourceId: 'cloud',
+      name: installations.CLOUD_INSTALL_NAME,
+      sourceId: installations.CLOUD_SOURCE_ID,
       remoteUrl: 'https://cloud.comfy.org/',
       launchMode: 'window',
       browserPartition: 'shared'
     }
   ])
-  installations.ensureExists('cloud', {
-    name: 'Comfy Cloud',
-    sourceId: 'cloud',
+  installations.ensureExists(installations.CLOUD_SOURCE_ID, {
+    name: installations.CLOUD_INSTALL_NAME,
+    sourceId: installations.CLOUD_SOURCE_ID,
     remoteUrl: 'https://cloud.comfy.org/',
     launchMode: 'window',
     browserPartition: 'shared',
     status: 'installed'
   })
+  // The Cloud entry is not user-renamable; reset any entry a prior build
+  // let the user rename back to the canonical name (issue #922). Runs after
+  // ensureExists via the shared FIFO write queue.
+  void installations.enforceCloudName()
 
   // Auto-track a detected Legacy Desktop install.
   {
@@ -182,7 +188,7 @@ export function register(callbacks: RegisterCallbacks = {}): void {
     try {
       const cache = createCache(
         settings.get('cacheDir') as string,
-        settings.get('maxCachedFiles') as number
+        settings.get('maxCachedDownloads') as number
       )
       await cache.cleanPartials()
     } catch {}
@@ -205,6 +211,8 @@ export function register(callbacks: RegisterCallbacks = {}): void {
   registerSnapshotHandlers()
   registerSettingsHandlers()
   registerSessionHandlers()
+  registerTerminalHandlers()
+  registerLogsHandlers()
   registerCrashHandlers()
   registerTelemetryHandlers()
 }

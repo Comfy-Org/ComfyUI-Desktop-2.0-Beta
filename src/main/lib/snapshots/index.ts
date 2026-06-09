@@ -27,6 +27,12 @@ export {
 
 export { buildExportEnvelope, validateExportEnvelope, importSnapshots } from './exportImport'
 
-export { restoreComfyUIVersion, buildPostRestoreState, restorePipPackages, restoreCustomNodes } from './restore'
+export {
+  restoreComfyUIVersion,
+  buildPostRestoreState,
+  frozenSnapshotInstallOverrides,
+  restorePipPackages,
+  restoreCustomNodes
+} from './restore'
 
 export { getSnapshotListData, getSnapshotDetailData, getSnapshotDiffVsPrevious } from './tabData'

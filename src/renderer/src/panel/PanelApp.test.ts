@@ -141,10 +141,10 @@ const messages = {
   en: {
     titleBar: {
       panelComfy: 'ComfyUI',
-      panelInstallSettings: 'Install Settings',
+      panelInstallSettings: 'Instance Settings',
       panelLauncherSettings: 'Launcher Settings',
       installSettingsComingSoon: 'Coming soon',
-      installationLabel: 'Installation'
+      installationLabel: 'Instance'
     },
     common: {
       loading: 'Loading…'

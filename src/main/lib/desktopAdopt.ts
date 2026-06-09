@@ -1,6 +1,9 @@
 import fs from 'fs'
+import os from 'os'
 import path from 'path'
 import { execFile } from 'child_process'
+
+import { parse as parseYaml } from 'yaml'
 
 import {
   detectDesktopInstall,
@@ -11,7 +14,6 @@ import {
 import { defaultInstallDir, allocateUniqueDir, sanitizeDirName } from './paths'
 import {
   gitClone,
-  gitCheckoutCommit,
   readGitHead,
   fetchTags,
   isGitAvailable,
@@ -21,7 +23,6 @@ import {
 import { resolveLocalVersion } from './version-resolve'
 import type { ComfyVersion } from './version'
 import { getComfyUIRemoteUrl } from './github-mirror'
-import { getLatestStableTag } from './comfyui-releases'
 import { installFilteredRequirements, runUvPip, getPipIndexArgs } from './pip'
 import * as installations from '../installations'
 import type { InstallationRecord } from '../installations'
@@ -29,6 +30,7 @@ import * as settings from '../settings'
 import * as telemetry from './telemetry'
 import { scrubAll } from '../../shared/piiScrub'
 import * as i18n from './i18n'
+import { KNOWN_MODEL_FOLDERS } from './models'
 
 const MARKER_FILE = ADOPT_MARKER_FILE
 const STAGED_SOURCE_REL = path.join('legacy-staging', 'comfyui')
@@ -202,26 +204,84 @@ export async function cloneSourceFromGitDefault(
 }
 
 /**
- * Pull out every `base_path:` string value at the YAML's first nesting depth.
- * Tolerates single/double quotes and trailing comments. Per-folder overrides
- * (other keys under each section) are intentionally ignored.
+ * Keys under a section that are NOT per-type model-folder overrides and must
+ * never be treated as model dirs. `custom_nodes` is excluded because pointing
+ * the model scanner at a custom-nodes tree would register Python packages as
+ * "models"; the other three are metadata legacy desktop wrote per section.
+ */
+const NON_MODEL_SECTION_KEYS: ReadonlySet<string> = new Set([
+  'base_path',
+  'is_default',
+  'custom_nodes',
+  'download_model_base'
+])
+
+/** One config group from `extra_models_config.yaml`. */
+export interface ExtraModelsSection {
+  /** Section name (e.g. `comfyui_desktop`, `my_external`). */
+  name: string
+  /** `base_path:` value when present (raw, may be relative). */
+  basePath?: string
+  /** Per-type override key (`checkpoints`, `loras`, …) → path. A value may
+   *  carry multiple newline/pipe-delimited paths in the legacy format; each
+   *  becomes its own entry keyed by the same type. */
+  overrides: Array<{ type: string; path: string }>
+}
+
+/** Coerce a YAML scalar into one or more trimmed, non-empty path strings.
+ *  Legacy desktop allows `|`-block and pipe-delimited multi-path values
+ *  (e.g. ComfyUI's `text_encoders: models/text_encoders/\nmodels/clip/`). */
+function splitYamlPaths(value: unknown): string[] {
+  if (value == null) return []
+  return String(value)
+    .split(/[\r\n|]+/)
+    .map((s) => s.replace(/#.*$/, '').trim())
+    .filter((s) => s.length > 0)
+}
+
+/**
+ * Parse `extra_models_config.yaml` into structured sections, each with its
+ * optional `base_path` and every per-type model-folder override. Uses a real
+ * YAML parser so `|`-block scalars and pipe-delimited multi-path values (both
+ * valid in the legacy format) are handled correctly. Returns `[]` on any parse
+ * failure so a malformed legacy file never aborts adoption.
+ */
+export function parseExtraModelsSections(content: string): ExtraModelsSection[] {
+  let doc: unknown
+  try {
+    doc = parseYaml(content)
+  } catch {
+    return []
+  }
+  if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return []
+
+  const sections: ExtraModelsSection[] = []
+  for (const [name, raw] of Object.entries(doc as Record<string, unknown>)) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
+    const group = raw as Record<string, unknown>
+    const section: ExtraModelsSection = { name, overrides: [] }
+    const basePathVals = splitYamlPaths(group['base_path'])
+    if (basePathVals.length > 0) section.basePath = basePathVals[0]
+    for (const [key, value] of Object.entries(group)) {
+      if (NON_MODEL_SECTION_KEYS.has(key)) continue
+      for (const p of splitYamlPaths(value)) {
+        section.overrides.push({ type: key, path: p })
+      }
+    }
+    sections.push(section)
+  }
+  return sections
+}
+
+/**
+ * Back-compat: pull out every `base_path:` string value across sections.
+ * Retained for callers that only need the bare base paths. Prefer
+ * `parseExtraModelsSections` for the full structured view.
  */
 export function parseExtraModelsYaml(content: string): string[] {
-  const out: string[] = []
-  for (const rawLine of content.split(/\r?\n/)) {
-    const line = rawLine.replace(/#.*$/, '')
-    const m = line.match(/^\s+base_path\s*:\s*(.+?)\s*$/)
-    if (!m) continue
-    let value = m[1]!.trim()
-    if (
-      (value.startsWith("'") && value.endsWith("'")) ||
-      (value.startsWith('"') && value.endsWith('"'))
-    ) {
-      value = value.slice(1, -1)
-    }
-    if (value) out.push(value)
-  }
-  return out
+  return parseExtraModelsSections(content)
+    .map((s) => s.basePath)
+    .filter((b): b is string => typeof b === 'string' && b.length > 0)
 }
 
 /**
@@ -263,16 +323,49 @@ export interface DerivedLaunchArgs {
 }
 
 /**
+ * Coerce a raw legacy settings value into the flag→value convention used
+ * when emitting the launchArgs string: booleans become `''` (flag with no
+ * value) when truthy and are dropped when `false`; everything else is
+ * stringified. Returns `null` when the entry should be skipped entirely.
+ *
+ * This normalizes the two legacy stores into one shape. `LaunchArgs`
+ * already stores boolean flags as `''` and numbers as strings, while
+ * `ServerConfigValues` keeps native `true`/`false`/number values, so a
+ * raw `true` here means "emit the bare flag" and a raw `false` means
+ * "the user explicitly disabled it — emit nothing".
+ */
+function normalizeLaunchValue(value: unknown): string | null {
+  if (value === undefined || value === null) return null
+  if (typeof value === 'boolean') return value ? '' : null
+  return String(value)
+}
+
+/**
  * Build the user-facing `launchArgs` string for an adopted install from
- * the legacy `comfy.settings.json` blob (a flat dotted-key map). Reads
- * **only** `Comfy.Server.LaunchArgs` — the actual source of legacy launch
- * flags. Legacy `server_config.{listen,port}` keys are baked into
- * defaults by the legacy app itself and never appear here.
+ * the legacy `comfy.settings.json` blob (a flat dotted-key map).
+ *
+ * Merges both legacy server-config stores, keyed by config id (which is
+ * the CLI flag name):
+ *  - `Comfy.Server.ServerConfigValues` is the AUTHORITATIVE store of the
+ *    user's server-config choices and forms the BASE of the merge. The
+ *    legacy frontend already filters out values equal to their default,
+ *    so whatever is present here is a deliberate non-default choice.
+ *  - `Comfy.Server.LaunchArgs` is a lazily-synced derived copy that only
+ *    gets written while the Server-Config settings panel is open, so it
+ *    is frequently stale or empty. It OVERRIDES `ServerConfigValues` on
+ *    key conflicts (it is the more-recent edit when both are present),
+ *    but never erases a value that lives only in `ServerConfigValues`.
+ *
+ * Legacy `server_config.{listen,port}` keys are baked into defaults by
+ * the legacy app itself and never appear here.
  *
  * The synthesized output preserves legacy implicit defaults users notice:
- *  - `--port 8000` when the user hasn't overridden it (legacy default;
- *    matters because legacy users have it bookmarked).
- *  - `--enable-manager` always included (legacy always did).
+ *  - `--port 8000` when the user hasn't overridden it in EITHER store
+ *    (legacy default; matters because legacy users have it bookmarked).
+ *  - `--enable-manager` included by default, EXCEPT when the user opted
+ *    into the legacy Manager UI (`enable-manager-legacy-ui`). The two
+ *    Manager UIs are mutually exclusive, so honoring the legacy choice
+ *    must not also inject the new Manager.
  *  - `--listen` is NOT synthesized — legacy's implicit `127.0.0.1`
  *    matches ComfyUI's native default, so emitting it would only add
  *    noise to the editable string. Explicit user-set `listen` values
@@ -283,19 +376,24 @@ export interface DerivedLaunchArgs {
  * them into the per-install `inputDir` / `outputDir` fields.
  */
 export function deriveLaunchArgs(comfySettings: Record<string, unknown>): DerivedLaunchArgs {
-  const raw = comfySettings['Comfy.Server.LaunchArgs']
-  const launchArgsMap: Record<string, unknown> =
+  const asMap = (raw: unknown): Record<string, unknown> =>
     raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {}
+
+  const serverConfigValues = asMap(comfySettings['Comfy.Server.ServerConfigValues'])
+  const launchArgsMap = asMap(comfySettings['Comfy.Server.LaunchArgs'])
+
+  // ServerConfigValues is the base; LaunchArgs overrides on key conflicts.
+  const mergedMap: Record<string, unknown> = { ...serverConfigValues, ...launchArgsMap }
 
   const parts: string[] = []
   const pathOverrides: DerivedLaunchArgs['pathOverrides'] = {}
   let hasPort = false
 
-  for (const [key, value] of Object.entries(launchArgsMap)) {
+  for (const [key, value] of Object.entries(mergedMap)) {
     if (!key) continue
     if (STRIPPED_LAUNCH_KEYS.has(key)) continue
-    if (value === undefined || value === null) continue
-    const strVal = String(value)
+    const strVal = normalizeLaunchValue(value)
+    if (strVal === null) continue
     if (PROMOTED_LAUNCH_KEYS.has(key)) {
       if (strVal === '') continue
       if (key === 'input-directory') pathOverrides.inputDir = strVal
@@ -315,7 +413,10 @@ export function deriveLaunchArgs(comfySettings: Record<string, unknown>): Derive
   // because its legacy implicit `127.0.0.1` matches ComfyUI's native
   // default — writing it adds noise without effect.
   if (!hasPort) parts.unshift('--port', '8000')
-  if (!parts.includes('--enable-manager')) parts.push('--enable-manager')
+  // The new Manager and the legacy Manager UI are mutually exclusive, so
+  // don't force the new Manager on when the user opted into the legacy UI.
+  const usesLegacyManager = parts.includes('--enable-manager-legacy-ui')
+  if (!usesLegacyManager && !parts.includes('--enable-manager')) parts.push('--enable-manager')
 
   return { launchArgs: parts.join(' '), pathOverrides }
 }
@@ -379,37 +480,119 @@ function readLegacyAppVersion(executablePath: string | null): string | null {
   return null
 }
 
+/** True when `dir` exists on disk as a directory. */
+function isDir(dir: string): boolean {
+  return fs.statSync(dir, { throwIfNoEntry: false })?.isDirectory() === true
+}
+
+/**
+ * Reject roots that would scan the whole machine: a filesystem root
+ * (`/`, `C:\`) or the user's home directory itself. A pathological legacy
+ * override (e.g. `checkpoints: /`) must never become a models root, or boot
+ * would recursively walk everything. `os.homedir()` is the platform home.
+ */
+function isDangerousRoot(resolved: string): boolean {
+  if (resolved === path.parse(resolved).root) return true
+  try {
+    if (path.resolve(os.homedir()) === resolved) return true
+  } catch {}
+  return false
+}
+
 /**
  * Cross-install model dirs to register in `settings.modelsDirs` for the
- * adopted record. Always carries `<basePath>/models`; for each YAML
- * `base_path:`, carries `<base_path>/models` only when it exists as a
- * directory (handles ComfyUI-style siblings, silently skips other tools).
- * The bare base_path is never carried — it points at a tool root whose
- * models live one level deeper. Dedupes against `existing`.
+ * adopted record. The goal for migrations is to carry EVERY real model
+ * directory the legacy `extra_models_config.yaml` referenced so nothing
+ * shows as "missing" after adoption.
+ *
+ * For each section we register a models ROOT (a dir whose type subfolders
+ * `buildYaml` scans):
+ *   - Always `<basePath>/models` (the primary install), first.
+ *   - For each section `base_path` B (relative resolved against `basePath`):
+ *       `<B>/models` if it exists, else the bare `<B>` if it exists
+ *       (catches A1111-style roots whose models live directly under B).
+ *   - For each per-type override path P (relative resolved against the
+ *     section's base_path): skip if already covered by a carried root;
+ *     otherwise if `basename(P)` is a known model-type folder carry
+ *     `dirname(P)` so the type subfolder is discovered, else carry P.
+ *
+ * Filesystem roots and the user's home dir are skipped as a safety guard.
+ * Only existing directories are carried. Deduped against `existing` and
+ * each other, primary `<basePath>/models` first.
  */
 export function computeModelsDirsToCarry(
   basePath: string,
   extraYamlContent: string | null,
   existing: string[]
 ): string[] {
-  const candidates: string[] = [path.join(basePath, 'models')]
-  if (extraYamlContent) {
-    for (const yamlBase of parseExtraModelsYaml(extraYamlContent)) {
-      const probe = path.join(yamlBase, 'models')
-      if (fs.statSync(probe, { throwIfNoEntry: false })?.isDirectory()) {
-        candidates.push(probe)
-      }
-    }
-  }
   const seen = new Set(existing.map((d) => path.resolve(d)))
   const out: string[] = []
-  for (const dir of candidates) {
+
+  /** Register a single root if it exists, isn't dangerous, and is new. */
+  const carry = (dir: string): boolean => {
     const resolved = path.resolve(dir)
-    if (seen.has(resolved)) continue
+    if (seen.has(resolved)) return true // already covered (or queued)
+    if (isDangerousRoot(resolved)) {
+      console.warn(`[adopt] skipping unsafe legacy models root: ${resolved}`)
+      return false
+    }
+    if (!isDir(resolved)) return false
     seen.add(resolved)
     out.push(resolved)
+    return true
   }
+
+  // Primary install root always leads, even if absent (trusted) — matches
+  // prior behavior where `<basePath>/models` is carried unconditionally.
+  const primary = path.resolve(path.join(basePath, 'models'))
+  if (!seen.has(primary)) {
+    seen.add(primary)
+    out.push(primary)
+  }
+
+  if (!extraYamlContent) return out
+
+  for (const section of parseExtraModelsSections(extraYamlContent)) {
+    // Resolve relative paths against the section base_path when set,
+    // otherwise against the primary install base path.
+    const sectionBase = section.basePath
+      ? path.resolve(basePath, section.basePath)
+      : path.resolve(basePath)
+
+    const carriedRoots: string[] = []
+
+    if (section.basePath) {
+      if (carry(path.join(sectionBase, 'models'))) {
+        carriedRoots.push(path.resolve(path.join(sectionBase, 'models')))
+      } else if (carry(sectionBase)) {
+        carriedRoots.push(path.resolve(sectionBase))
+      }
+    }
+
+    for (const { type, path: overridePath } of section.overrides) {
+      const resolvedOverride = path.isAbsolute(overridePath)
+        ? path.resolve(overridePath)
+        : path.resolve(sectionBase, overridePath)
+      // Skip overrides already inside a root we're carrying for this section.
+      if (carriedRoots.some((root) => isUnderRoot(resolvedOverride, root))) continue
+      if (seen.has(resolvedOverride)) continue
+      if (!isDir(resolvedOverride)) continue
+      // A type-named leaf (e.g. `.../checkpoints`) means the models root is
+      // its parent; carrying the parent lets buildYaml discover the subfolder.
+      const root = KNOWN_MODEL_FOLDERS.has(type) && path.basename(resolvedOverride) === type
+        ? path.dirname(resolvedOverride)
+        : resolvedOverride
+      if (carry(root)) carriedRoots.push(path.resolve(root))
+    }
+  }
+
   return out
+}
+
+/** True when `child` is the same as, or nested under, `root`. */
+function isUnderRoot(child: string, root: string): boolean {
+  const rel = path.relative(root, child)
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))
 }
 
 /**
@@ -457,8 +640,8 @@ function readComfyVersion(sourceDir: string): string | null {
 
 /**
  * A staged source tree is usable as long as it has the expected entry
- * points. The first ComfyUI update rolls forward to current stable, so
- * the bundled snapshot's exact version doesn't need to match anything.
+ * points. Adoption preserves whatever version is staged, so the source's
+ * exact version doesn't need to match anything.
  */
 function isStagedSourceValid(stagingDir: string): boolean {
   return fs.existsSync(path.join(stagingDir, 'main.py'))
@@ -679,11 +862,13 @@ interface CarryReport {
  * so built-in defaults don't masquerade as user choices.
  *
  * Carries:
- *   - `modelsDirs`           ← `<basePath>/models` + `<yamlBase>/models`
- *                              for every `base_path` in
- *                              `extra_models_config.yaml` whose
- *                              `/models` subfolder actually exists
- *                              (ComfyUI-style siblings). Always appended.
+ *   - `modelsDirs`           ← `<basePath>/models` plus every real model
+ *                              root referenced by
+ *                              `extra_models_config.yaml`: each section's
+ *                              `base_path` (as `/models` or the bare dir)
+ *                              and each per-type override resolved to its
+ *                              models root. See `computeModelsDirsToCarry`.
+ *                              Always appended.
  *   - `telemetryEnabled`     ← `Comfy-Desktop.SendStatistics`
  *   - `autoInstallUpdates`   ← force `true`. Adoption ships as an
  *                              in-place app update of Legacy Desktop;
@@ -932,7 +1117,6 @@ async function runAdoption(
       { phase: 'snapshot', label: i18n.t('desktop.adoptStepSnapshot') },
       { phase: 'allocate', label: i18n.t('desktop.adoptStepAllocate') },
       { phase: 'source', label: i18n.t('desktop.adoptStepSource') },
-      { phase: 'comfy-update', label: i18n.t('desktop.adoptStepComfyUpdate') },
       { phase: 'requirements', label: i18n.t('desktop.adoptStepRequirements') },
       { phase: 'settings', label: i18n.t('desktop.adoptStepSettings') },
       { phase: 'register', label: i18n.t('desktop.adoptStepRegister') }
@@ -1036,24 +1220,14 @@ async function runAdoption(
     // 'retry' loops.
   }
 
-  // One-shot ComfyUI source update during adoption: the user is
-  // receiving the Desktop 2.0 update with the expectation that ComfyUI
-  // itself is also fresh. We resolve the latest stable tag and check
-  // it out *once* here. Subsequent launches do NOT re-update —
-  // `autoUpdateComfyUI` stays `false` on the record, matching Desktop
-  // 2.0's standard policy that ComfyUI updates are opt-in per install.
-  // Non-fatal: a stale source is still a working install.
-  sendProgress('comfy-update', { percent: 0 })
-  const updateInfo = await telemetry.trackedStep(
-    'comfy.desktop.adopt.comfy_update',
-    {},
-    async () => {
-      return updateComfyToStable(destSource, tools)
-    }
-  )
+  // Adoption preserves the user's existing ComfyUI checkout as-is — it is
+  // not auto-updated to latest stable. A "frozen" install must stay on
+  // whatever version the user was running; ComfyUI updates are opt-in per
+  // install (`autoUpdateComfyUI` stays `false` on the record) and can be
+  // triggered manually from the Update tab.
 
-  // Resolve a real {commit, baseTag, commitsAhead} from the freshly
-  // checked-out source so the release-cache compares the installed
+  // Resolve a real {commit, baseTag, commitsAhead} from the adopted
+  // source so the release-cache compares the installed
   // *tag* (e.g. "v0.24.0") against latestTag, not the bare
   // `__version__` string from comfyui_version.py (e.g. "0.24.0") which
   // never matches a "v"-prefixed remote tag and so wedges the
@@ -1070,7 +1244,7 @@ async function runAdoption(
         resolvedComfyVersion = await resolveLocalVersion(
           destSource,
           headCommit,
-          updateInfo.tag ?? undefined
+          readComfyVersion(destSource) ?? undefined
         )
       }
     } catch (err) {
@@ -1155,14 +1329,13 @@ async function runAdoption(
       pythonVersion: '3.12',
       ...(comfyVersion ? { version: comfyVersion } : {}),
       ...(resolvedComfyVersion ? { comfyVersion: resolvedComfyVersion } : {}),
-      ...(updateInfo.tag ? { adoptedComfyTagAtMigration: updateInfo.tag } : {}),
       launchArgs: derived.launchArgs,
       launchMode: 'window',
       browserPartition: 'unique',
       portConflict: 'auto',
-      // Adopted records get one-time-update-during-adoption above but
-      // stay on opt-in updates from here on out — matching v2's standard
-      // policy. Do not conflate the two.
+      // Adopted records keep the user's existing ComfyUI checkout and stay
+      // on opt-in updates — matching v2's standard policy that ComfyUI
+      // updates are never applied automatically.
       autoUpdateComfyUI: false,
       // Shared models = on (legacy `models/` lives in the global modelsDirs).
       // Shared input/output = off (workspace pinned to legacy basePath via
@@ -1233,7 +1406,7 @@ async function runAdoption(
     carry_skipped_keys: carry.carrySkippedKeys,
     adopted_path_override_input: !!derived.pathOverrides.inputDir,
     adopted_path_override_output: !!derived.pathOverrides.outputDir,
-    adopted_comfy_tag_at_migration: updateInfo.tag ?? null,
+    adopted_comfy_tag_at_migration: null,
     requirements_uv_available: reqReport.uvAvailable,
     requirements_core_exit: reqReport.coreExitCode,
     requirements_manager_exit: reqReport.managerExitCode,
@@ -1244,55 +1417,4 @@ async function runAdoption(
 
   sendProgress('done', { percent: 100 })
   return record
-}
-
-/**
- * One-shot "roll forward to current stable" for an adopted ComfyUI
- * source tree. Resolves the latest stable tag and `git checkout`s it.
- *
- * Non-fatal on every failure path — offline lookups, mirror flakes,
- * even checkout errors leave the adoption with whatever was cloned /
- * copied. The user keeps a working install they can update from the
- * settings UI later.
- */
-async function updateComfyToStable(
-  destSource: string,
-  tools: AdoptTools
-): Promise<{ tag: string | null }> {
-  if (!fs.existsSync(path.join(destSource, '.git'))) {
-    tools.sendOutput('Skipping post-adoption ComfyUI update: source is not a git checkout.\n')
-    return { tag: null }
-  }
-  let tag: string | null
-  try {
-    tag = await getLatestStableTag()
-  } catch {
-    tag = null
-  }
-  if (!tag) {
-    tools.sendOutput(
-      'Skipping post-adoption ComfyUI update: could not resolve latest stable tag.\n'
-    )
-    return { tag: null }
-  }
-  // `gitCheckoutCommit` may transparently `git fetch --unshallow` if the
-  // tag isn't already local — that surfaces as a wall of "Receiving
-  // objects: …" lines with no preamble. Frame it so the user can tell
-  // network activity here is the ComfyUI update, not random churn.
-  tools.sendOutput(`Updating ComfyUI source to latest stable tag (${tag})…\n`)
-  try {
-    const result = await gitCheckoutCommit(destSource, tag, tools.sendOutput, tools.signal)
-    if (result.exitCode !== 0) {
-      tools.sendOutput(
-        `Warning: ComfyUI checkout of ${tag} failed (exit ${result.exitCode}). ` +
-          `Continuing with whatever was cloned; user can update from Settings later.\n`
-      )
-      return { tag: null }
-    }
-    tools.sendOutput(`ComfyUI source now at ${tag}.\n`)
-  } catch (err) {
-    tools.sendOutput(`Warning: ComfyUI checkout threw: ${(err as Error).message}\n`)
-    return { tag: null }
-  }
-  return { tag }
 }
