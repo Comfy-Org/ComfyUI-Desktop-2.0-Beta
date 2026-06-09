@@ -7,7 +7,7 @@ import BaseInput from '../../components/ui/BaseInput.vue'
 import BaseSelect, { type BaseSelectOption } from '../../components/ui/BaseSelect.vue'
 import ArgsRawInput from './ArgsRawInput.vue'
 import type { ComfyArgDef } from '../../types/ipc'
-import { parseArgs, serialize, validateArgs } from '../../lib/argsParser'
+import { parseArgs, serialize } from '../../lib/argsParser'
 import { emitTelemetryAction } from '../../lib/telemetry'
 import { scoreName } from '../../utils/fuzzyMatch'
 
@@ -194,7 +194,7 @@ function clusterOptions(args: ComfyArgDef[]): BaseSelectOption[] {
 // One-line preview of the members so the collapsed dropdown says what you're
 // choosing between, not just a generic "Choose one".
 function clusterSummary(args: ComfyArgDef[]): string {
-  return args.map((a) => `--${a.name}`).join(' · ')
+  return args.map((a) => `--${a.name}`).join(' ')
 }
 
 function onExclusivePick(group: string, value: string): void {
@@ -332,24 +332,6 @@ function onRawChange(value: string): void {
   emit('update', value)
 }
 
-// True while the raw input is focused; used to hold off flagging the trailing
-// flag the user is still typing.
-const rawFocused = ref(false)
-
-// Inline validation of the raw string: colored tokens + per-issue warnings so
-// unsupported flags, missing values, and stray positionals are visible instead
-// of silently surviving. Empty until the schema loads.
-const validation = computed(() =>
-  schema.value.length
-    ? validateArgs(localValue.value, schema.value, {
-        suppressTrailingPartial: rawFocused.value
-      })
-    : null
-)
-const hasValidationIssues = computed(() => validation.value?.hasIssues ?? false)
-const showTokenDisplay = computed(
-  () => hasValidationIssues.value || validation.value?.awaiting != null
-)
 </script>
 
 <template>
@@ -374,98 +356,14 @@ const showTokenDisplay = computed(
       <ArgsRawInput
         :model-value="localValue"
         :schema="schema"
-        :invalid="hasValidationIssues"
         :placeholder="t('comfyUISettings.argsPlaceholder', 'No arguments set')"
         :aria-label="t('comfyUISettings.argsRawLabel', 'Raw arguments')"
         @update:model-value="onRawInput"
         @change="onRawChange"
-        @focus-change="rawFocused = $event"
       />
       <p class="args-page-raw-hint">
         {{ t('comfyUISettings.argsRawHint', 'Edit directly, or toggle individual flags below.') }}
       </p>
-
-      <!-- Colored echo of the raw string so problem tokens are easy to spot. -->
-      <div
-        v-if="validation && showTokenDisplay && validation.tokens.length"
-        class="args-page-tokens"
-        aria-hidden="true"
-      >
-        <span
-          v-for="(tok, i) in validation.tokens"
-          :key="i"
-          :class="{
-            'token-bad': tok.status === 'unsupported' || tok.status === 'orphaned',
-            'token-missing': tok.status === 'missing-value',
-            'token-awaiting': tok.status === 'awaiting-value',
-            'token-partial': tok.status === 'partial'
-          }"
-          :title="tok.tooltip || ''"
-          >{{ tok.text }}</span
-        >
-      </div>
-
-      <template v-if="validation">
-        <p
-          v-if="validation.awaiting"
-          class="args-page-validation args-page-validation-info"
-          role="status"
-        >
-          <AlertCircle :size="12" aria-hidden="true" />
-          <span>
-            {{ validation.awaiting.text }}
-            {{ t('comfyUISettings.argsAwaitingValue', 'expects a value') }}
-          </span>
-        </p>
-        <p
-          v-if="validation.unsupportedFlags.length > 0"
-          class="args-page-validation args-page-validation-error"
-          role="status"
-        >
-          <AlertCircle :size="12" aria-hidden="true" />
-          <span>
-            {{ t('comfyUISettings.argsUnsupported', 'Unsupported:') }}
-            <code
-              v-for="flag in validation.unsupportedFlags"
-              :key="flag"
-              class="args-page-bad-flag"
-              >--{{ flag }}</code
-            >
-          </span>
-        </p>
-        <p
-          v-if="validation.missingValueFlags.length > 0"
-          class="args-page-validation args-page-validation-warn"
-          role="status"
-        >
-          <AlertCircle :size="12" aria-hidden="true" />
-          <span>
-            {{ t('comfyUISettings.argsMissingValue', 'Missing value for:') }}
-            <code
-              v-for="flag in validation.missingValueFlags"
-              :key="flag"
-              class="args-page-bad-flag"
-              >{{ flag }}</code
-            >
-          </span>
-        </p>
-        <p
-          v-if="validation.orphanedTokens.length > 0"
-          class="args-page-validation args-page-validation-error"
-          role="status"
-        >
-          <AlertCircle :size="12" aria-hidden="true" />
-          <span>
-            {{ t('comfyUISettings.argsUnexpected', 'Unexpected:') }}
-            <code
-              v-for="tok in validation.orphanedTokens"
-              :key="tok"
-              class="args-page-bad-flag"
-              >{{ tok }}</code
-            >
-          </span>
-        </p>
-      </template>
     </div>
 
     <BaseInput
@@ -666,94 +564,6 @@ const showTokenDisplay = computed(
   font-size: 11px;
   line-height: 1.4;
   color: color-mix(in srgb, var(--text-muted) 80%, transparent);
-}
-
-/* Colored echo of the raw string: each problem token underlined in its color. */
-.args-page-tokens {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 6px;
-  margin: 6px 0 0;
-  padding: 6px 10px;
-  font-family:
-    ui-monospace,
-    SFMono-Regular,
-    Menlo,
-    monospace;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--text-muted);
-  background: var(--neutral-800);
-  border: 1px solid var(--chooser-surface-border);
-  border-radius: 6px;
-}
-
-.args-page-tokens .token-bad {
-  color: var(--danger);
-  text-decoration: underline wavy;
-  text-underline-offset: 3px;
-}
-
-.args-page-tokens .token-missing {
-  color: var(--warning);
-  text-decoration: underline wavy;
-  text-underline-offset: 3px;
-}
-
-.args-page-tokens .token-awaiting {
-  color: var(--accent-primary);
-  text-decoration: underline dotted;
-  text-underline-offset: 3px;
-}
-
-/* Trailing flag still being typed: dimmed, no error decoration. */
-.args-page-tokens .token-partial {
-  color: var(--text-muted);
-  opacity: 0.6;
-}
-
-.args-page-validation {
-  display: flex;
-  align-items: flex-start;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin: 6px 0 0;
-  padding: 6px 10px;
-  font-size: 11px;
-  line-height: 1.5;
-  border-radius: 6px;
-}
-
-.args-page-validation :deep(svg) {
-  flex-shrink: 0;
-  margin-top: 2px;
-}
-
-.args-page-validation-error {
-  color: var(--danger);
-  background: color-mix(in srgb, var(--danger) 12%, transparent);
-}
-
-.args-page-validation-warn {
-  color: var(--warning);
-  background: color-mix(in srgb, var(--warning) 14%, transparent);
-}
-
-.args-page-validation-info {
-  color: var(--accent-primary);
-  background: color-mix(in srgb, var(--accent-primary) 12%, transparent);
-}
-
-.args-page-bad-flag {
-  font-family:
-    ui-monospace,
-    SFMono-Regular,
-    Menlo,
-    monospace;
-  font-size: 11px;
-  padding: 0 4px;
-  border-radius: 3px;
-  background: color-mix(in srgb, currentcolor 14%, transparent);
 }
 
 .args-page-search :deep(.ui-input-leading) {

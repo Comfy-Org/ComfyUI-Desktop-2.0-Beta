@@ -204,19 +204,27 @@ describe('ArgsBuilderPage — exclusive group dropdown', () => {
     const trigger = wrapper.find('[role="combobox"]')
     expect(trigger.attributes('aria-label')).toContain('Choose one')
   })
+
+  it('previews cluster members space-separated, without bullet separators', async () => {
+    const wrapper = await mountPage()
+    const options = wrapper.find('.args-page-cluster-options')
+    expect(options.exists()).toBe(true)
+    expect(options.text()).not.toContain('·')
+    expect(options.text()).toContain('--cpu --gpu-only')
+  })
 })
 
 describe('ArgsBuilderPage — raw-args validation', () => {
   it('shows no validation warnings for a valid arg string', async () => {
     const wrapper = await mountPage('--cpu --port 8188')
-    expect(wrapper.find('.args-page-validation-error').exists()).toBe(false)
-    expect(wrapper.find('.args-page-validation-warn').exists()).toBe(false)
-    expect(wrapper.find('.args-page-tokens').exists()).toBe(false)
+    expect(wrapper.find('.args-raw-validation-error').exists()).toBe(false)
+    expect(wrapper.find('.args-raw-validation-warn').exists()).toBe(false)
+    expect(wrapper.find('.args-raw-tokens').exists()).toBe(false)
   })
 
   it('flags an unsupported flag and marks the raw input invalid', async () => {
     const wrapper = await mountPage('--bogus')
-    const err = wrapper.find('.args-page-validation-error')
+    const err = wrapper.find('.args-raw-validation-error')
     expect(err.exists()).toBe(true)
     expect(err.text()).toContain('--bogus')
     // BaseInput surfaces the invalid state via aria-invalid.
@@ -225,22 +233,22 @@ describe('ArgsBuilderPage — raw-args validation', () => {
 
   it('flags a missing value when a value flag is followed by another flag', async () => {
     const wrapper = await mountPage('--port --cpu')
-    const warn = wrapper.find('.args-page-validation-warn')
+    const warn = wrapper.find('.args-raw-validation-warn')
     expect(warn.exists()).toBe(true)
     expect(warn.text()).toContain('--port')
   })
 
   it('treats a trailing value flag as an info hint, not an error', async () => {
     const wrapper = await mountPage('--cpu --port')
-    expect(wrapper.find('.args-page-validation-error').exists()).toBe(false)
-    expect(wrapper.find('.args-page-validation-warn').exists()).toBe(false)
-    expect(wrapper.find('.args-page-validation-info').text()).toContain('--port')
+    expect(wrapper.find('.args-raw-validation-error').exists()).toBe(false)
+    expect(wrapper.find('.args-raw-validation-warn').exists()).toBe(false)
+    expect(wrapper.find('.args-raw-validation-info').text()).toContain('--port')
     expect(wrapper.find('input[aria-invalid="true"]').exists()).toBe(false)
   })
 
   it('flags an unexpected positional token', async () => {
     const wrapper = await mountPage('foo --cpu')
-    const err = wrapper.find('.args-page-validation-error')
+    const err = wrapper.find('.args-raw-validation-error')
     expect(err.exists()).toBe(true)
     expect(err.text()).toContain('foo')
   })
@@ -248,17 +256,17 @@ describe('ArgsBuilderPage — raw-args validation', () => {
   it('holds off flagging the trailing flag while the raw input is focused', async () => {
     const wrapper = await mountPage('--po')
     // Unfocused: the partial is flagged as unsupported.
-    expect(wrapper.find('.args-page-validation-error').exists()).toBe(true)
+    expect(wrapper.find('.args-raw-validation-error').exists()).toBe(true)
 
     // Focused: the trailing flag being typed is no longer flagged.
     await wrapper.find('.args-raw-input').trigger('focusin')
     await flushPromises()
-    expect(wrapper.find('.args-page-validation-error').exists()).toBe(false)
+    expect(wrapper.find('.args-raw-validation-error').exists()).toBe(false)
     expect(wrapper.find('input[aria-invalid="true"]').exists()).toBe(false)
 
     // Blur: validation applies again.
     await wrapper.find('.args-raw-input').trigger('focusout')
     await flushPromises()
-    expect(wrapper.find('.args-page-validation-error').exists()).toBe(true)
+    expect(wrapper.find('.args-raw-validation-error').exists()).toBe(true)
   })
 })
