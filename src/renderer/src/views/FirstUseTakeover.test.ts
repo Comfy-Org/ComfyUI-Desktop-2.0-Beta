@@ -139,10 +139,10 @@ describe('FirstUseTakeover start step', () => {
     expect(express().attributes('aria-hidden')).toBe('false')
   })
 
-  it('emits `chain-local` with `express: true` when Local is picked with Express on (no legacy desktop)', async () => {
+  it('emits `chain-local` with `express: false` when Local is picked and Express is left at its default-off state (no legacy desktop)', async () => {
     const wrapper = mountTakeover()
     // Accept T&C (Continue is gated on it), pick Local, leave Express
-    // checked (default), press Continue.
+    // at its default unchecked state, press Continue.
     await wrapper
       .find('[data-testid="first-use-consent-tos"] input[type="checkbox"]')
       .setValue(true)
@@ -151,10 +151,10 @@ describe('FirstUseTakeover start step', () => {
 
     const emitted = wrapper.emitted('chain-local')
     expect(emitted).toBeTruthy()
-    expect(emitted![0]).toEqual([{ express: true }])
+    expect(emitted![0]).toEqual([{ express: false }])
   })
 
-  it('emits `chain-local` with `express: false` when Express is unticked', async () => {
+  it('emits `chain-local` with `express: true` when Express is explicitly ticked', async () => {
     const wrapper = mountTakeover()
     await wrapper
       .find('[data-testid="first-use-consent-tos"] input[type="checkbox"]')
@@ -162,12 +162,12 @@ describe('FirstUseTakeover start step', () => {
     await wrapper.find('[data-testid="first-use-pick-local"]').trigger('click')
     await wrapper
       .find('[data-testid="first-use-express-install"] input[type="checkbox"]')
-      .setValue(false)
+      .setValue(true)
     await wrapper.find('[data-testid="first-use-continue"]').trigger('click')
 
     const emitted = wrapper.emitted('chain-local')
     expect(emitted).toBeTruthy()
-    expect(emitted![0]).toEqual([{ express: false }])
+    expect(emitted![0]).toEqual([{ express: true }])
   })
 
   it('hasLegacyDesktop + Express OFF + migrate OFF routes to the localBranch sub-step', async () => {
@@ -179,12 +179,9 @@ describe('FirstUseTakeover start step', () => {
       .find('[data-testid="first-use-consent-tos"] input[type="checkbox"]')
       .setValue(true)
     await wrapper.find('[data-testid="first-use-pick-local"]').trigger('click')
-    await wrapper
-      .find('[data-testid="first-use-express-install"] input[type="checkbox"]')
-      .setValue(false)
-    // Migrate is pre-ticked when legacy is detected; the localBranch
-    // fork is only reachable when the user explicitly opts out of
-    // BOTH express and migrate-existing.
+    // Express defaults to OFF; migrate is pre-ticked when legacy is
+    // detected. The localBranch fork is only reachable when the user
+    // explicitly opts out of migrate-existing too.
     await wrapper
       .find('[data-testid="first-use-migrate-existing"] input[type="checkbox"]')
       .setValue(false)
@@ -221,10 +218,13 @@ describe('FirstUseTakeover start step', () => {
       .find('[data-testid="first-use-consent-tos"] input[type="checkbox"]')
       .setValue(true)
     await wrapper.find('[data-testid="first-use-pick-local"]').trigger('click')
-    // Migrate AND Express are both pre-ticked on the legacy-desktop
-    // path — just press Continue. The host uses the `express: true`
-    // payload to skip the migrate confirm surface and run preview +
-    // auto-pick + run straight through.
+    // Migrate is pre-ticked on the legacy-desktop path; Express defaults
+    // to OFF and must be ticked explicitly. The host uses the
+    // `express: true` payload to skip the migrate confirm surface and
+    // run preview + auto-pick + run straight through.
+    await wrapper
+      .find('[data-testid="first-use-express-install"] input[type="checkbox"]')
+      .setValue(true)
     await wrapper.find('[data-testid="first-use-continue"]').trigger('click')
 
     const emitted = wrapper.emitted('chain-migrate')
@@ -265,11 +265,15 @@ describe('FirstUseTakeover start step', () => {
       .find('[data-testid="first-use-consent-tos"] input[type="checkbox"]')
       .setValue(true)
     await wrapper.find('[data-testid="first-use-pick-local"]').trigger('click')
-    // Untick the migrate checkbox: returning user explicitly opts out
-    // and wants a clean Standalone install instead.
+    // Untick migrate (returning user opts out, wants a clean Standalone)
+    // and tick Express (now default-off, opt-in to the skip-Configure
+    // path).
     await wrapper
       .find('[data-testid="first-use-migrate-existing"] input[type="checkbox"]')
       .setValue(false)
+    await wrapper
+      .find('[data-testid="first-use-express-install"] input[type="checkbox"]')
+      .setValue(true)
     await wrapper.find('[data-testid="first-use-continue"]').trigger('click')
 
     expect(wrapper.emitted('chain-migrate')).toBeFalsy()
