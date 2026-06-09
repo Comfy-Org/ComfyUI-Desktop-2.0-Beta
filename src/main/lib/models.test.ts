@@ -99,14 +99,14 @@ describe('models per-install YAML', () => {
     expect(p).toBe(path.join(holder.dataDir, 'instance-model-paths', 'inst-123.yaml'))
   })
 
-  it('writes the config to the supplied YAML path with the first dir as default', () => {
+  it('writes the config to the supplied YAML path; first dir is default when primaryDir is omitted', () => {
     const dirA = path.join(tmpRoot, 'a')
     const dirB = path.join(tmpRoot, 'b')
     fs.mkdirSync(dirA, { recursive: true })
     fs.mkdirSync(dirB, { recursive: true })
     const yamlPath = instanceModelPathsYaml('inst-xyz')
 
-    const result = ensureModelPathsConfig([dirA, dirB], yamlPath)
+    const result = ensureModelPathsConfig([dirA, dirB], { yamlPath })
 
     expect(result).not.toBeNull()
     expect(result!.yamlPath).toBe(yamlPath)
@@ -124,19 +124,53 @@ describe('models per-install YAML', () => {
     expect(defaultIdx).toBeLessThan(secondIdx)
   })
 
+  it('marks the supplied primaryDir as default, not the first dir', () => {
+    const dirA = path.join(tmpRoot, 'a')
+    const dirB = path.join(tmpRoot, 'b')
+    fs.mkdirSync(dirA, { recursive: true })
+    fs.mkdirSync(dirB, { recursive: true })
+    const yamlPath = instanceModelPathsYaml('inst-pri')
+
+    ensureModelPathsConfig([dirA, dirB], { yamlPath, primaryDir: dirB })
+
+    const yaml = fs.readFileSync(yamlPath, 'utf-8')
+    expect(yaml.match(/^ {2}is_default: true$/gm)).toHaveLength(1)
+    // The default marker sits with dirB (the second entry), not dirA.
+    const aIdx = yaml.indexOf(`base_path: '${dirA}'`)
+    const bIdx = yaml.indexOf(`base_path: '${dirB}'`)
+    const defaultIdx = yaml.search(/^ {2}is_default: true$/m)
+    expect(defaultIdx).toBeGreaterThan(bIdx)
+    expect(defaultIdx).toBeGreaterThan(aIdx)
+  })
+
+  it('emits NO is_default when primaryDir is null (install-owned primary)', () => {
+    const dirA = path.join(tmpRoot, 'a')
+    const dirB = path.join(tmpRoot, 'b')
+    fs.mkdirSync(dirA, { recursive: true })
+    fs.mkdirSync(dirB, { recursive: true })
+    const yamlPath = instanceModelPathsYaml('inst-own')
+
+    const result = ensureModelPathsConfig([dirA, dirB], { yamlPath, primaryDir: null })
+
+    expect(result).not.toBeNull()
+    const yaml = fs.readFileSync(yamlPath, 'utf-8')
+    expect(yaml).toContain(`base_path: '${dirA}'`)
+    expect(yaml.match(/^ {2}is_default: true$/gm)).toBeNull()
+  })
+
   it('does not write the global YAML when targeting a per-install path', () => {
     const dir = path.join(tmpRoot, 'models')
     fs.mkdirSync(dir, { recursive: true })
     const yamlPath = instanceModelPathsYaml('inst-1')
 
-    ensureModelPathsConfig([dir], yamlPath)
+    ensureModelPathsConfig([dir], { yamlPath })
 
     expect(fs.existsSync(path.join(holder.dataDir, 'shared_model_paths.yaml'))).toBe(false)
   })
 
   it('returns null for empty/missing model dirs', () => {
-    expect(ensureModelPathsConfig([], instanceModelPathsYaml('x'))).toBeNull()
-    expect(ensureModelPathsConfig(undefined, instanceModelPathsYaml('x'))).toBeNull()
+    expect(ensureModelPathsConfig([], { yamlPath: instanceModelPathsYaml('x') })).toBeNull()
+    expect(ensureModelPathsConfig(undefined, { yamlPath: instanceModelPathsYaml('x') })).toBeNull()
   })
 
   it('syncCustomModelFolders writes to the supplied per-install YAML', () => {
@@ -146,7 +180,7 @@ describe('models per-install YAML', () => {
     fs.mkdirSync(dir, { recursive: true })
     const yamlPath = instanceModelPathsYaml('inst-9')
 
-    const { config } = syncCustomModelFolders(installPath, [dir], [], yamlPath)
+    const { config } = syncCustomModelFolders(installPath, [dir], [], { yamlPath })
 
     expect(config).not.toBeNull()
     expect(config!.yamlPath).toBe(yamlPath)

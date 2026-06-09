@@ -175,37 +175,82 @@ describe('GlobalSettingsView', () => {
   })
 
   // Covers the Shared Directories field-write path, not just the model-dir actions.
-  it('Storage tab routes a Shared Directories field update through the bridge', async () => {
+  it('Storage tab routes a Shared Directories browse through the bridge', async () => {
     const bridge = installMockBridge()
+    bridge.browseFolderReturn = '/picked/in'
     const snapshot = makeSnapshot({
       sharedDirectoriesFields: [
-        {
-          id: 'sharedOutputDir',
-          label: 'Shared output dir',
-          value: false,
-          editable: true,
-          editType: 'boolean',
-        },
+        { id: 'inputDir', label: 'Input Directory', value: '/shared/in', type: 'path' },
+        { id: 'outputDir', label: 'Output Directory', value: '/shared/out', type: 'path' },
       ],
     })
     const wrapper = mountView(snapshot)
     await wrapper.findAll('.gs-tab').find((t) => t.text() === 'Storage')!.trigger('click')
     await nextTick()
-    const toggle = wrapper.find('.settings-v2-boolean-row button')
-    expect(toggle.exists()).toBe(true)
-    await toggle.trigger('click')
+    const rows = wrapper.findAll('.storage-dir-row')
+    expect(rows).toHaveLength(2)
+    expect(rows[0]!.find('.storage-dir-name').text()).toBe('/shared/in')
+    await rows[0]!.find('.storage-dir-action').trigger('click')
     await flushPromises()
-    expect(bridge.updateFieldCalls).toEqual([{ id: 'sharedOutputDir', value: true }])
+    expect(bridge.updateFieldCalls).toEqual([{ id: 'inputDir', value: '/picked/in' }])
   })
 
-  it('Advanced tab renders the global Default Install Location section', async () => {
-    installMockBridge()
+  it('Storage tab opens a Shared Directory in the OS file manager when clicked', async () => {
+    const bridge = installMockBridge()
+    const snapshot = makeSnapshot({
+      sharedDirectoriesFields: [
+        { id: 'inputDir', label: 'Input Directory', value: '/shared/in', type: 'path' },
+        { id: 'outputDir', label: 'Output Directory', value: '/shared/out', type: 'path' },
+      ],
+    })
+    const wrapper = mountView(snapshot)
+    await wrapper.findAll('.gs-tab').find((t) => t.text() === 'Storage')!.trigger('click')
+    await nextTick()
+    await wrapper.findAll('.storage-dir-row')[1]!.find('.storage-dir-name').trigger('click')
+    expect(bridge.openPathCalls).toEqual(['/shared/out'])
+  })
+
+  it('Advanced tab renders the global Default Install Location as a readonly path row', async () => {
+    const bridge = installMockBridge()
+    bridge.browseFolderReturn = '/picked/installs'
     const wrapper = mountView()
     await wrapper.findAll('.gs-tab').find((t) => t.text() === 'Advanced')!.trigger('click')
     await nextTick()
     expect(wrapper.text()).toContain('Default Install Location')
-    const inputValues = wrapper.findAll('input').map((i) => (i.element as HTMLInputElement).value)
-    expect(inputValues).toContain('/home/u/ComfyUI-Installs')
+    // The install dir is the first path row in the Advanced tab.
+    const row = wrapper.find('.storage-dir-row')
+    expect(row.exists()).toBe(true)
+    expect(row.find('.storage-dir-name').text()).toBe('/home/u/ComfyUI-Installs')
+    // Clicking the path opens it; browsing routes the pick through the bridge.
+    await row.find('.storage-dir-name').trigger('click')
+    expect(bridge.openPathCalls).toEqual(['/home/u/ComfyUI-Installs'])
+    await row.find('.storage-dir-action').trigger('click')
+    await flushPromises()
+    expect(bridge.updateFieldCalls).toEqual([{ id: 'installDir', value: '/picked/installs' }])
+  })
+
+  it('Advanced tab renders the cache dir as a readonly path row that browses + opens', async () => {
+    const bridge = installMockBridge()
+    bridge.browseFolderReturn = '/picked/cache'
+    const snapshot = makeSnapshot({
+      cacheFields: [
+        { id: 'cacheDir', label: 'Cache Directory', value: '/home/u/cache', type: 'path', openable: true },
+      ],
+    })
+    const wrapper = mountView(snapshot)
+    await wrapper.findAll('.gs-tab').find((t) => t.text() === 'Advanced')!.trigger('click')
+    await nextTick()
+    // Path rows in Advanced: [0] install location, [1] cache dir.
+    const row = wrapper.findAll('.storage-dir-row')[1]!
+    expect(row.exists()).toBe(true)
+    expect(row.find('.storage-dir-name').text()).toBe('/home/u/cache')
+    // Clicking the path opens it in the OS file manager.
+    await row.find('.storage-dir-name').trigger('click')
+    expect(bridge.openPathCalls).toEqual(['/home/u/cache'])
+    // Browse routes the picked dir through the bridge.
+    await row.find('.storage-dir-action').trigger('click')
+    await flushPromises()
+    expect(bridge.updateFieldCalls).toEqual([{ id: 'cacheDir', value: '/picked/cache' }])
   })
 
   it('does not render the Install Location section in the Storage tab', async () => {

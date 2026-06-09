@@ -771,8 +771,6 @@ defineExpose({
                 :snapshot="globalSettingsSnapshot"
                 :sections="storageSections"
                 :pending-restart-field-ids="pendingRestartFieldIds"
-                :field-error-messages="fieldErrorMessages"
-                :running-action-ids="runningActionIds"
                 @update-field="updateField"
               />
             </div>

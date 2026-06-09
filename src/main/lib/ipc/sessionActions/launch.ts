@@ -13,7 +13,7 @@ import {
   _markLaunching, _clearLaunchingFailed,
   isEffectivelyEmptyInstallDir,
   captureSnapshotIfChanged, getSnapshotCount,
-  syncCustomModelFolders, discoverExtraModelFolders, instanceModelPathsYaml,
+  syncCustomModelFolders, discoverExtraModelFolders, instanceModelPathsYaml, isSamePath,
   createSessionPath, buildLaunchEnv, checkRebootMarker,
   makeSendProgress, makeSendOutput,
   getComfyArgsSchema, filterUnsupportedArgs,
@@ -21,6 +21,7 @@ import {
   _broadcastToRenderer,
 } from '../shared'
 import type { ChildProcess, LaunchCmd } from '../shared'
+import type { ModelPathsOptions } from '../../models'
 import type { ActionContext, ActionResult } from './types'
 import { lastNLines, stripAnsi } from '../../stderrTail'
 import { rotateLogFiles, getLogDir } from '../../logRotation'
@@ -190,26 +191,34 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
   const useSharedModels = argsAvailable && (inst.useSharedModels as boolean | undefined) !== false
   const useSharedInputOutput = argsAvailable && (inst.useSharedInputOutput as boolean | undefined) !== false
   let preLaunchExtras: string[] = []
-  // Model dirs whose extra-folder changes drive auto-relaunch, plus the YAML
-  // they're written to (undefined = the global shared YAML). Sourced from the
-  // global settings when this install uses shared models, or from its
-  // per-install list when it opts out.
+  // Model dirs whose extra-folder changes drive auto-relaunch, plus the sync
+  // options (target YAML + which dir is `is_default`). Sourced from the global
+  // settings when this install uses shared models, or from its per-install list
+  // when it opts out.
   let modelDirsForLaunch: string[] | undefined
-  let modelYamlPath: string | undefined
+  let modelSyncOptions: ModelPathsOptions = {}
   let manageModelFolders = false
   if (useSharedModels) {
     manageModelFolders = true
     modelDirsForLaunch = settings.get('modelsDirs') as string[] | undefined
+    // Global shared: first dir is default (the omitted-primaryDir default).
   } else if (argsAvailable) {
     const instanceDirs = inst.modelDirs as string[] | undefined
     if (instanceDirs && instanceDirs.length > 0) {
       manageModelFolders = true
       modelDirsForLaunch = instanceDirs
-      modelYamlPath = instanceModelPathsYaml(installationId)
+      // The install's own models dir is the default unless the user promoted a
+      // valid external dir; `null` leaves ComfyUI's built-in default in place.
+      const primaryRaw = inst.modelDirsPrimary as string | undefined
+      const primaryDir =
+        typeof primaryRaw === 'string' && instanceDirs.some((d) => isSamePath(d, primaryRaw))
+          ? primaryRaw
+          : null
+      modelSyncOptions = { yamlPath: instanceModelPathsYaml(installationId), primaryDir }
     }
   }
   if (manageModelFolders) {
-    const { config } = syncCustomModelFolders(inst.installPath, modelDirsForLaunch, [], modelYamlPath)
+    const { config } = syncCustomModelFolders(inst.installPath, modelDirsForLaunch, [], modelSyncOptions)
     if (config) {
       launchCmd.args!.push('--extra-model-paths-config', config.yamlPath)
     }
@@ -594,7 +603,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
   // Check if custom nodes created new model folders during startup
   let site1Relaunched = false
   if (manageModelFolders) {
-    const { newFolders } = syncCustomModelFolders(inst.installPath, modelDirsForLaunch, preLaunchExtras, modelYamlPath)
+    const { newFolders } = syncCustomModelFolders(inst.installPath, modelDirsForLaunch, preLaunchExtras, modelSyncOptions)
     if (newFolders.length > 0) {
       sendOutput(`\n--- Restarting: new model folders detected (${newFolders.join(', ')}) ---\n\n`)
       if (_onModelFolderRelaunch) {
@@ -655,7 +664,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
           sendOutput('\n--- ComfyUI restarting ---\n\n')
         }
         if (manageModelFolders) {
-          const { config } = syncCustomModelFolders(inst.installPath, modelDirsForLaunch, [], modelYamlPath)
+          const { config } = syncCustomModelFolders(inst.installPath, modelDirsForLaunch, [], modelSyncOptions)
           if (config) {
             for (const f of config.extraFolders) knownExtras.add(f)
           }
@@ -687,7 +696,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
               const currentExtras = discoverExtraModelFolders(inst.installPath)
               const newFolders = currentExtras.filter((f) => !knownExtras.has(f))
               if (newFolders.length > 0) {
-                const { config } = syncCustomModelFolders(inst.installPath, modelDirsForLaunch, [], modelYamlPath)
+                const { config } = syncCustomModelFolders(inst.installPath, modelDirsForLaunch, [], modelSyncOptions)
                 if (config) {
                   for (const f of config.extraFolders) knownExtras.add(f)
                 }

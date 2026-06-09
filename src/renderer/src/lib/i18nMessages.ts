@@ -8,7 +8,12 @@ export const en = {
     cancel: 'Cancel',
     back: 'Back',
     browse: 'Browse…',
-    learnMore: 'Learn more'
+    resetDefault: 'Reset to default',
+    learnMore: 'Learn more',
+    useSharedModels: 'Use Shared Models',
+    useSharedInputOutput: 'Use Shared Input/Output Folders',
+    perInstallInputDir: 'Input Directory',
+    perInstallOutputDir: 'Output Directory'
   },
   settings: {
     open: 'Open',
@@ -24,6 +29,8 @@ export const en = {
     installLocation: 'Default Install Location',
     models: 'Shared Models',
     modelDirectories: 'Model Directories',
+    modelStorage: 'Models',
+    inputOutputStorage: 'Input & Output',
     updatesTab: 'Updates',
     checkForUpdates: 'Check for updates',
     checkingForUpdates: 'Checking…'
@@ -55,7 +62,11 @@ export const en = {
       "This won't delete any files. You can re-add the directory later from this list.",
     primary: 'Primary',
     makePrimary: 'Make primary',
-    moreActions: 'More actions'
+    moreActions: 'More actions',
+    openDir: 'Open folder',
+    instanceOnly: 'Instance',
+    lockedDir: 'This directory is always used and cannot be removed.',
+    default: 'default'
   },
   tooltips: {
     instances:
@@ -76,8 +87,14 @@ export const en = {
       "Folders shared across all instances so models aren't downloaded twice. Newly downloaded models go to the primary folder. The primary folder can't be removed while it's in use — pick a different primary first.",
     modelsPrimary:
       'The primary directory is where ComfyUI saves newly downloaded models by default.',
+    instanceOwnModelsDir:
+      "This instance's own models folder. It's always used and is never shared with other instances.",
     perInstallModelDirs:
       'Extra model directories for this install only, used while shared models is off. The first directory is the primary, where newly downloaded models are saved.',
+    useSharedModels:
+      'When enabled, this instance can see every model in your global shared model folders. Disabling hides those models — most users want this on.',
+    useSharedInputOutput:
+      'When enabled, this instance reads and writes input and output files from the global shared folders. Disable to point this instance at its own folders below.',
     installDir:
       "Default parent folder suggested when creating new instances. Existing instances aren't moved."
   },

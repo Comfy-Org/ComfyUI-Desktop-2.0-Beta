@@ -60,8 +60,6 @@ function mountPane(snapshot: StorageSnapshot = makeSnapshot()) {
       snapshot,
       sections: [],
       pendingRestartFieldIds: new Set<string>(),
-      fieldErrorMessages: new Map<string, string>(),
-      runningActionIds: new Set<string>(),
     },
     global: { plugins: [makeI18n()] },
     attachTo: document.body,
@@ -70,19 +68,41 @@ function mountPane(snapshot: StorageSnapshot = makeSnapshot()) {
 
 // Per-install storage section with shared-models toggled off and a per-instance
 // model-dirs list, exercising the StoragePane's own ModelsDirList wiring.
-function makeStorageSections(modelDirs: string[]) {
+// `installModelsDir` is the locked install-own row; `modelDirsPrimary` selects
+// which external dir (if any) is primary.
+function makeStorageSections(
+  modelDirs: string[],
+  opts: { sharedOn?: boolean; primary?: string | null; own?: string } = {}
+) {
   return [
     {
       fields: [
-        { id: 'useSharedModels', label: 'Use Shared Models', value: false, editable: true, editType: 'boolean' },
+        { id: 'useSharedModels', label: 'Use Shared Models', value: opts.sharedOn ?? false, editable: true, editType: 'boolean' },
         { id: 'modelDirs', label: 'Model Directories', value: modelDirs, editable: true, editType: 'model-dirs' },
+        { id: 'modelDirsPrimary', label: 'modelDirsPrimary', value: opts.primary ?? null, editable: true, editType: 'hidden' },
+        { id: 'installModelsDir', label: 'installModelsDir', value: opts.own ?? '/own/models', editable: false, editType: 'hidden' },
+      ],
+    },
+  ]
+}
+
+// Per-install section with shared input/output off, for the readonly path rows.
+function makeIoSections(opts: { inputDir?: string; outputDir?: string } = {}) {
+  return [
+    {
+      fields: [
+        { id: 'useSharedInputOutput', label: 'Use Shared Input/Output Folders', value: false, editable: true, editType: 'boolean' },
+        { id: 'inputDir', label: 'Input Folder', value: opts.inputDir ?? '', editable: true, editType: 'path' },
+        { id: 'outputDir', label: 'Output Folder', value: opts.outputDir ?? '', editable: true, editType: 'path' },
+        { id: 'inputDirDefault', label: 'Input Folder', value: '/own/input', editable: false, editType: 'hidden' },
+        { id: 'outputDirDefault', label: 'Output Folder', value: '/own/output', editable: false, editType: 'hidden' },
       ],
     },
   ]
 }
 
 function mountPaneWithSections(
-  sections: ReturnType<typeof makeStorageSections>,
+  sections: Array<{ fields: Array<Record<string, unknown>> }>,
   snapshot: StorageSnapshot = makeSnapshot()
 ) {
   return mount(StoragePane, {
@@ -91,8 +111,6 @@ function mountPaneWithSections(
       snapshot,
       sections: sections as never,
       pendingRestartFieldIds: new Set<string>(),
-      fieldErrorMessages: new Map<string, string>(),
-      runningActionIds: new Set<string>(),
     },
     global: { plugins: [makeI18n()] },
     attachTo: document.body,
@@ -205,16 +223,89 @@ describe('StoragePane', () => {
   })
 
   describe('per-instance model directories (shared models off)', () => {
-    it('renders the per-instance model-dir list when shared models is off', async () => {
+    it('renders the locked install-own row first (primary) plus extras', async () => {
       installMockBridge()
       const wrapper = mountPaneWithSections(makeStorageSections(['/a/models', '/b/models']))
       await nextTick()
-      // Global Shared Models section is hidden; only the instance list shows.
+      // install-own row + 2 extras = 3 rows. Row 0 is the install-own primary.
       const rows = wrapper.findAll('.models-dir-row')
-      expect(rows).toHaveLength(2)
+      expect(rows).toHaveLength(3)
+      expect(rows[0]!.find('.models-dir-name').text()).toBe('/own/models')
       expect(rows[0]!.find('.tag-primary').exists()).toBe(true)
       expect(rows[1]!.find('.tag-primary').exists()).toBe(false)
-      expect(wrapper.text()).toContain('Model Directories')
+      // The install-own row is locked: no browse button, no menu (undeletable),
+      // and carries the "Instance only" pill.
+      expect(rows[0]!.find('.models-dir-action').exists()).toBe(false)
+      expect(rows[0]!.find('.models-dir-menu-wrap').exists()).toBe(false)
+      expect(rows[0]!.find('.tag-local').exists()).toBe(true)
+    })
+
+    it('promotes an external dir by persisting modelDirsPrimary (no reordering)', async () => {
+      installMockBridge()
+      const wrapper = mountPaneWithSections(makeStorageSections(['/a/models', '/b/models']))
+      await nextTick()
+      // First menu belongs to the first extra (/a/models), since row 0 is locked.
+      await wrapper.find('.models-dir-menu-wrap > button').trigger('click')
+      await nextTick()
+      await flushPromises()
+      await wrapper.find('.models-dir-menu button[role="menuitem"]').trigger('click')
+      await flushPromises()
+      const emitted = wrapper.emitted('update-field')
+      expect(emitted).toBeTruthy()
+      const [field, value] = emitted![0] as [{ id: string }, unknown]
+      expect(field.id).toBe('modelDirsPrimary')
+      expect(value).toBe('/a/models')
+    })
+
+    it('puts the promoted external dir (primary) on top and sinks install-own to the bottom', async () => {
+      installMockBridge()
+      const wrapper = mountPaneWithSections(
+        makeStorageSections(['/a/models', '/b/models'], { primary: '/a/models' })
+      )
+      await nextTick()
+      const rows = wrapper.findAll('.models-dir-row')
+      // Primary on top: /a/models leads; the locked install-own row is last.
+      expect(rows[0]!.find('.models-dir-name').text()).toBe('/a/models')
+      expect(rows[0]!.find('.tag-primary').exists()).toBe(true)
+      expect(rows[2]!.find('.models-dir-name').text()).toBe('/own/models')
+      expect(rows[2]!.find('.tag-primary').exists()).toBe(false)
+    })
+
+    it('demotes back to install-own by clearing modelDirsPrimary', async () => {
+      installMockBridge()
+      const wrapper = mountPaneWithSections(
+        makeStorageSections(['/a/models'], { primary: '/a/models' })
+      )
+      await nextTick()
+      // Install-own row (locked, not primary) exposes only "Make primary".
+      await wrapper.find('.models-dir-menu-wrap > button').trigger('click')
+      await nextTick()
+      await flushPromises()
+      await wrapper.find('.models-dir-menu button[role="menuitem"]').trigger('click')
+      await flushPromises()
+      const emitted = wrapper.emitted('update-field')!
+      const [field, value] = emitted[0] as [{ id: string }, unknown]
+      expect(field.id).toBe('modelDirsPrimary')
+      expect(value).toBe(null)
+    })
+
+    it('locked install-own row offers no Remove action even when not primary', async () => {
+      installMockBridge()
+      const wrapper = mountPaneWithSections(
+        makeStorageSections(['/a/models'], { primary: '/a/models' })
+      )
+      await nextTick()
+      const rows = wrapper.findAll('.models-dir-row')
+      // The locked install-own row sits last (it's not primary); open its menu
+      // and assert it offers only "Make primary" (no Remove).
+      const ownRow = rows[rows.length - 1]!
+      expect(ownRow.find('.models-dir-name').text()).toBe('/own/models')
+      await ownRow.find('.models-dir-menu-wrap > button').trigger('click')
+      await nextTick()
+      await flushPromises()
+      const items = ownRow.findAll('.models-dir-menu button[role="menuitem"]')
+      expect(items).toHaveLength(1)
+      expect(items[0]!.text()).toContain('Make primary')
     })
 
     it('emits update-field with the appended dir when adding', async () => {
@@ -231,31 +322,161 @@ describe('StoragePane', () => {
       expect(value).toEqual(['/a/models', '/b/models', '/c/models'])
     })
 
-    it('emits update-field with reordered dirs when making one primary', async () => {
-      installMockBridge()
-      const wrapper = mountPaneWithSections(makeStorageSections(['/a/models', '/b/models']))
+    it('opens the folder when a model path is clicked', async () => {
+      const bridge = installMockBridge()
+      const wrapper = mountPaneWithSections(makeStorageSections(['/a/models']))
       await nextTick()
-      await wrapper.find('.models-dir-menu-wrap > button').trigger('click')
+      const rows = wrapper.findAll('.models-dir-row')
+      await rows[1]!.find('.models-dir-name').trigger('click')
+      expect(bridge.openPathCalls).toEqual(['/a/models'])
+    })
+
+    it('shows the global shared list (primary on top) with the locked install-own row last when shared models is on', async () => {
+      installMockBridge()
+      const wrapper = mountPaneWithSections(makeStorageSections(['/a/models'], { sharedOn: true }))
+      await nextTick()
+      // 2 global shared dirs from the snapshot + install-own locked row at the bottom.
+      const rows = wrapper.findAll('.models-dir-row')
+      expect(rows).toHaveLength(3)
+      // The global primary stays on the first shared dir.
+      expect(rows[0]!.find('.tag-primary').exists()).toBe(true)
+      // The install-own row is last, locked: no primary tag, no browse, no menu.
+      const ownRow = rows[2]!
+      expect(ownRow.find('.models-dir-name').text()).toBe('/own/models')
+      expect(ownRow.find('.tag-primary').exists()).toBe(false)
+      expect(ownRow.find('.models-dir-action').exists()).toBe(false)
+      expect(ownRow.find('.models-dir-menu-wrap').exists()).toBe(false)
+      expect(wrapper.text()).toContain('Shared Models')
+    })
+
+    it('make-primary on a shared dir reorders the global list past the locked row', async () => {
+      const bridge = installMockBridge()
+      const wrapper = mountPaneWithSections(makeStorageSections(['/x'], { sharedOn: true }))
+      await nextTick()
+      // Row 0 is the locked install-own row; the only menu belongs to the
+      // non-primary shared dir (row 2 = /mnt/extra/models).
+      const toggles = wrapper.findAll('.models-dir-menu-wrap > button')
+      expect(toggles).toHaveLength(1)
+      await toggles[0]!.trigger('click')
       await nextTick()
       await flushPromises()
       await wrapper.find('.models-dir-menu button[role="menuitem"]').trigger('click')
       await flushPromises()
-      const emitted = wrapper.emitted('update-field')
-      expect(emitted).toBeTruthy()
-      const [, value] = emitted![0] as [{ id: string }, string[]]
-      expect(value).toEqual(['/b/models', '/a/models'])
+      expect(bridge.setModelsDirsCalls).toEqual([
+        ['/mnt/extra/models', '/home/u/ComfyUI/models'],
+      ])
+    })
+  })
+
+  describe('per-instance input/output (shared I/O off)', () => {
+    it('shows the computed defaults with a "default" tag when unset', async () => {
+      installMockBridge()
+      const wrapper = mountPaneWithSections(makeIoSections())
+      await nextTick()
+      const rows = wrapper.findAll('.storage-dir-row')
+      expect(rows).toHaveLength(2)
+      expect(rows[0]!.find('.storage-dir-name').text()).toBe('/own/input')
+      expect(rows[1]!.find('.storage-dir-name').text()).toBe('/own/output')
+      expect(rows[0]!.find('.storage-dir-tag').exists()).toBe(true)
     })
 
-    it('hides the per-instance list when shared models is on', async () => {
+    it('shows the stored override (no default tag) when set', async () => {
       installMockBridge()
-      const sections = makeStorageSections(['/a/models'])
-      sections[0]!.fields[0]!.value = true // useSharedModels = true
-      const wrapper = mountPaneWithSections(sections)
+      const wrapper = mountPaneWithSections(makeIoSections({ inputDir: '/ext/in' }))
       await nextTick()
-      // Only the global Shared Models list (2 rows) renders, not the instance one.
-      const rows = wrapper.findAll('.models-dir-row')
+      const rows = wrapper.findAll('.storage-dir-row')
+      expect(rows[0]!.find('.storage-dir-name').text()).toBe('/ext/in')
+      expect(rows[0]!.find('.storage-dir-tag').exists()).toBe(false)
+    })
+
+    it('persists empty when the browsed dir equals the computed default (clone-safe)', async () => {
+      const bridge = installMockBridge()
+      bridge.browseFolderReturn = '/own/input'
+      const wrapper = mountPaneWithSections(makeIoSections())
+      await nextTick()
+      await wrapper.findAll('.storage-dir-row')[0]!.find('.storage-dir-action').trigger('click')
+      await flushPromises()
+      const [field, value] = wrapper.emitted('update-field')![0] as [{ id: string }, unknown]
+      expect(field.id).toBe('inputDir')
+      expect(value).toBe('')
+    })
+
+    it('persists the override when the browsed dir differs from the default', async () => {
+      const bridge = installMockBridge()
+      bridge.browseFolderReturn = '/ext/in'
+      const wrapper = mountPaneWithSections(makeIoSections())
+      await nextTick()
+      await wrapper.findAll('.storage-dir-row')[0]!.find('.storage-dir-action').trigger('click')
+      await flushPromises()
+      const [field, value] = wrapper.emitted('update-field')![0] as [{ id: string }, unknown]
+      expect(field.id).toBe('inputDir')
+      expect(value).toBe('/ext/in')
+    })
+
+    it('opens the effective input folder when its path is clicked', async () => {
+      const bridge = installMockBridge()
+      const wrapper = mountPaneWithSections(makeIoSections({ inputDir: '/ext/in' }))
+      await nextTick()
+      await wrapper.findAll('.storage-dir-row')[0]!.find('.storage-dir-name').trigger('click')
+      expect(bridge.openPathCalls).toEqual(['/ext/in'])
+    })
+  })
+
+  describe('shared input/output (shared I/O on)', () => {
+    function makeSharedIoSnapshot(): StorageSnapshot {
+      return {
+        ...makeSnapshot(),
+        sharedDirectoriesFields: [
+          { id: 'inputDir', label: 'Shared Input', value: '/shared/in', type: 'path' },
+          { id: 'outputDir', label: 'Shared Output', value: '/shared/out', type: 'path' },
+        ] as never,
+      }
+    }
+
+    function sharedOnSections() {
+      return [
+        {
+          fields: [
+            {
+              id: 'useSharedInputOutput',
+              label: 'Use Shared Input/Output Folders',
+              value: true,
+              editable: true,
+              editType: 'boolean',
+            },
+          ],
+        },
+      ]
+    }
+
+    it('renders the shared dirs as readonly path rows', async () => {
+      installMockBridge()
+      const wrapper = mountPaneWithSections(sharedOnSections(), makeSharedIoSnapshot())
+      await nextTick()
+      const rows = wrapper.findAll('.storage-dir-row')
       expect(rows).toHaveLength(2)
-      expect(wrapper.text()).toContain('Shared Models')
+      expect(rows[0]!.find('.storage-dir-name').text()).toBe('/shared/in')
+      expect(rows[1]!.find('.storage-dir-name').text()).toBe('/shared/out')
+      // Shared dirs are global, not per-instance overrides: no "default" tag.
+      expect(rows[0]!.find('.storage-dir-tag').exists()).toBe(false)
+    })
+
+    it('opens a shared dir when its path is clicked', async () => {
+      const bridge = installMockBridge()
+      const wrapper = mountPaneWithSections(sharedOnSections(), makeSharedIoSnapshot())
+      await nextTick()
+      await wrapper.findAll('.storage-dir-row')[0]!.find('.storage-dir-name').trigger('click')
+      expect(bridge.openPathCalls).toEqual(['/shared/in'])
+    })
+
+    it('updates the shared dir via the global bridge when browsed', async () => {
+      const bridge = installMockBridge()
+      bridge.browseFolderReturn = '/picked/in'
+      const wrapper = mountPaneWithSections(sharedOnSections(), makeSharedIoSnapshot())
+      await nextTick()
+      await wrapper.findAll('.storage-dir-row')[0]!.find('.storage-dir-action').trigger('click')
+      await flushPromises()
+      expect(bridge.updateFieldCalls).toEqual([{ id: 'inputDir', value: '/picked/in' }])
     })
   })
 })

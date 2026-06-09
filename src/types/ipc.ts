@@ -137,6 +137,7 @@ export interface DetailField {
     | 'args-builder'
     | 'env-vars'
     | 'model-dirs'
+    | 'hidden'
   options?: DetailFieldOption[]
   refreshSection?: boolean
   /** Action id to fire automatically when this field's value changes
