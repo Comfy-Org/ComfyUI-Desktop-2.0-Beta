@@ -754,8 +754,7 @@ async function handleImport(): Promise<void> {
         class="snapshots-rail-node"
         :class="{
           'is-snapshot': item.kind === 'snapshot',
-          'is-copy': item.kind === 'copy',
-          'is-current': item.kind === 'snapshot' && item.snapshotIndex === 0
+          'is-copy': item.kind === 'copy'
         }"
       >
         <span
@@ -834,8 +833,9 @@ async function handleImport(): Promise<void> {
                 </div>
 
                 <!-- "Restore preview": changes vs live state. Hidden for the
-                     newest (restoring it is a no-op). -->
-                <div v-if="i !== 0" class="snap-diff-accordion">
+                     newest snapshot (restoring it is a no-op); copy events
+                     interleaved in the timeline don't count. -->
+                <div v-if="item.snapshotIndex !== 0" class="snap-diff-accordion">
                   <button
                     type="button"
                     class="snap-diff-trigger"
@@ -886,7 +886,7 @@ async function handleImport(): Promise<void> {
                      row stays a clean tap target. -->
                 <div class="snapshots-view-detail-actions">
                   <button
-                    v-if="i !== 0"
+                    v-if="item.snapshotIndex !== 0"
                     type="button"
                     class="snapshots-view-detail-btn"
                     :aria-label="t('snapshots.restore', 'Restore')"

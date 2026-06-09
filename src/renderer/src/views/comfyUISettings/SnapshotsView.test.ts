@@ -395,11 +395,13 @@ describe('comfyUISettings/SnapshotsView', () => {
       // …but the "Latest" badge appears exactly once, on the newest snapshot.
       const badges = w.findAll('.snapshot-row-latest')
       expect(badges).toHaveLength(1)
+      const newestRow = w.find(`[data-testid="${TID.snapshotRow('snap-newest.json')}"]`)
+      expect(newestRow.find('.snapshot-row-latest').exists()).toBe(true)
 
-      const current = w.findAll('.snapshots-rail-node.is-current')
-      expect(current).toHaveLength(1)
-      expect(current[0]!.find(`[data-testid="${TID.snapshotRow('snap-newest.json')}"]`).exists())
-        .toBe(true)
+      // The newest snapshot is auto-expanded; restoring it is a no-op, so it
+      // must not offer a Restore action even though a copy event sorts above it.
+      expect(w.find(`[data-testid="${TID.snapshotRowRestore('snap-newest.json')}"]`).exists())
+        .toBe(false)
     })
 
     it('keeps the Latest badge on the newest snapshot for an outgoing copy event', async () => {
@@ -407,7 +409,8 @@ describe('comfyUISettings/SnapshotsView', () => {
 
       expect(w.text()).toContain('Copied as Copy of A')
       expect(w.findAll('.snapshot-row-latest')).toHaveLength(1)
-      expect(w.findAll('.snapshots-rail-node.is-current')).toHaveLength(1)
+      expect(w.find(`[data-testid="${TID.snapshotRowRestore('snap-newest.json')}"]`).exists())
+        .toBe(false)
     })
 
     it('header "Latest:" stat reflects the newest snapshot, not the copy event time', async () => {
