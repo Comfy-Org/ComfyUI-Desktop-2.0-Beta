@@ -191,6 +191,24 @@ function alreadyHasTerminalTab(app) {
   return false;
 }
 
+// The native Logs tab is registered asynchronously into the bottom-panel
+// store. We register our Terminal tab AFTER it so Logs stays first + default
+// and Terminal lands second, matching the native frontend ordering (the store
+// makes the first-registered tab the default active one).
+function hasLogsTab(app) {
+  try {
+    var bp = app && app.extensionManager && app.extensionManager.bottomPanel;
+    var terminalPanel = bp && bp.panels && bp.panels.terminal;
+    var tabs = terminalPanel && terminalPanel.tabs;
+    if (tabs) {
+      for (var i = 0; i < tabs.length; i++) {
+        if (tabs[i] && tabs[i].id === 'logs-terminal') return true;
+      }
+    }
+  } catch (e) {}
+  return false;
+}
+
 function waitForRegister(timeoutMs) {
   var startedAt = Date.now();
   (function tick() {
@@ -201,6 +219,13 @@ function waitForRegister(timeoutMs) {
       // Native frontend tab already mounted — leave it alone.
       if (alreadyHasTerminalTab(app)) {
         STATE.registered = true;
+        return;
+      }
+      // Hold until the native Logs tab exists so ours registers second. Fall
+      // back to registering anyway once the timeout elapses, so a frontend
+      // without a Logs tab never strands the user without a terminal.
+      if (!hasLogsTab(app) && Date.now() - startedAt <= timeoutMs) {
+        setTimeout(tick, 100);
         return;
       }
       try {

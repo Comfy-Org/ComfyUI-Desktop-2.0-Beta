@@ -89,8 +89,19 @@ function getDefaultShell(): string {
  *  hides the activation echo so the session opens on a clean prompt. */
 function initCommands(venvDir: string, uvPath: string): string[] {
   if (process.platform === 'win32') {
+    // We can't `& Activate.ps1`: PowerShell's ExecutionPolicy blocks running
+    // script *files*, and on locked-down machines even `Set-ExecutionPolicy`
+    // is unavailable, so relaxing it isn't an option. Inline commands typed
+    // into the shell are never gated by ExecutionPolicy, so replicate what
+    // Activate.ps1 does directly: set VIRTUAL_ENV, prepend the venv's Scripts
+    // dir to PATH, drop any PYTHONHOME, and add the `(.venv)` prompt prefix.
+    const promptName = path.basename(venvDir)
     return [
-      `& "${venvDir}\\Scripts\\Activate.ps1"`,
+      `$env:VIRTUAL_ENV = "${venvDir}"`,
+      `$env:VIRTUAL_ENV_PROMPT = "${promptName}"`,
+      `$env:PATH = "${venvDir}\\Scripts;$env:PATH"`,
+      'if (Test-Path Env:PYTHONHOME) { Remove-Item Env:PYTHONHOME }',
+      'function global:prompt { Write-Host -NoNewline -ForegroundColor Green "($env:VIRTUAL_ENV_PROMPT) "; "PS $($executionContext.SessionState.Path.CurrentLocation)$(\'>\' * ($nestedPromptLevel + 1)) " }',
       `function pip { & "${uvPath}" pip $args }`,
       'Clear-Host',
     ]
