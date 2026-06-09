@@ -199,15 +199,20 @@ describe('buildLaunchPhases — extensibility', () => {
     const phases = buildLaunchPhases({}, { needsRepair: true })
     expect(phases[0]!.phase).toBe('repair')
     expect(phases.length).toBe(DEFAULT_LAUNCH_PHASES.length + 1)
-    // The injected step flows through the tracker like any other phase.
+    // Repair is synthetic (the rollback finished before spawn): start() enters
+    // it up front, then the first real milestone skip-advances past it.
     const emits: Emit[] = []
     const tracker = createLaunchProgressTracker({
       phases,
       sendProgress: (phase, detail) => emits.push({ phase, ...detail }),
     })
-    tracker.ingest('Repairing installation after update…\n[DONE] Security scan\n')
+    tracker.start()
+    expect(emits[0]?.phase).toBe('steps')
+    expect(emits[1]?.phase).toBe('repair')
+    tracker.ingest('Adding extra search path checkpoints /x\n[DONE] Security scan\n')
     const order = phaseOrder(emits)
     expect(order[0]).toBe('repair')
+    expect(order).toContain('securityScan')
     expect(order).toContain('mountLibraries')
   })
 })

@@ -239,7 +239,16 @@
     "error": "错误：{message}",
     "completedSuccess": "操作成功完成",
     "completedError": "操作失败",
-    "completedCancelled": "操作已取消"
+    "completedCancelled": "操作已取消",
+    "phaseLabel": {
+      "launchStart": "正在启动 ComfyUI……",
+      "repair": "正在修复安装……",
+      "securityScan": "正在进行安全扫描……",
+      "mountLibraries": "正在加载库……",
+      "gpu": "正在初始化 GPU……",
+      "customNodes": "正在加载自定义节点……",
+      "startingServer": "正在启动服务器……"
+    }
   },
 
   "console": {
@@ -639,7 +648,16 @@
     "modelFolderRelaunchTitle": "正在重启 ComfyUI",
     "modelFolderRelaunchDesc": "检测到自定义节点创建了新的模型文件夹。正在重启以便 ComfyUI 立即使用这些文件夹。",
     "launchSplashTitle": "正在启动 ComfyUI",
-    "launchSplashDesc": "正在启动您的 ComfyUI 实例……"
+    "launchSplashDesc": "正在启动您的 ComfyUI 实例……",
+    "activity": {
+      "manager": "正在加载 ComfyUI-Manager……",
+      "registry": "正在更新节点注册表……",
+      "vram": "正在配置 GPU 显存……",
+      "optimizing": "正在针对您的硬件进行优化……",
+      "models": "正在准备模型加载……",
+      "database": "正在更新数据库……",
+      "nodes": "正在加载自定义节点……"
+    }
   },
 
   "errors": {

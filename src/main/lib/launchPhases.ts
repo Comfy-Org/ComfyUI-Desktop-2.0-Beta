@@ -4,10 +4,12 @@
  * (verified against `~/Library/Logs/ComfyUI/*.log`).
  *
  * Each phase declares:
- *   - `phase`   stable id, also the IPC phase key and i18n suffix
- *   - `labelKey` i18n key for the step label shown in the progress UI
+ *   - `phase`   stable id, the IPC phase key and the i18n suffix the renderer
+ *               resolves the label from (`progress.phaseLabel.<phase>`)
  *   - `match`   regex whose FIRST match in stdout marks ENTRY into this phase
- *   - `weight`  share of the 0→100 bar this phase owns (all weights sum to 1)
+ *   - `weight`  share of the 0→100 bar this phase owns (all weights sum to 1);
+ *               sent inline on the IPC steps payload so the renderer paces the
+ *               bar straight from here — this module is the single source
  *   - `streaming` true ⇒ the phase is unbounded; its sub-activity row shows a
  *                 spinner + live log line rather than a determinate percent
  *
@@ -22,7 +24,6 @@
  */
 export interface LaunchPhaseDef {
   phase: string
-  labelKey: string
   match: RegExp
   weight: number
   streaming: boolean
@@ -41,21 +42,18 @@ export const DEFAULT_LAUNCH_PHASES: readonly LaunchPhaseDef[] = [
     // bar, one continuous stepper. Auto-completes when `securityScan` (the
     // first real milestone) fires via skip-advance.
     phase: 'launchStart',
-    labelKey: 'launch.steps.launchStart',
     match: NEVER,
     weight: 0.05,
     streaming: true,
   },
   {
     phase: 'securityScan',
-    labelKey: 'launch.steps.securityScan',
     match: /Adding extra search path|ComfyUI startup time/i,
     weight: 0.05,
     streaming: false,
   },
   {
     phase: 'mountLibraries',
-    labelKey: 'launch.steps.mountLibraries',
     match: /\[DONE\] Security scan/i,
     weight: 0.05,
     streaming: true,
@@ -64,14 +62,12 @@ export const DEFAULT_LAUNCH_PHASES: readonly LaunchPhaseDef[] = [
     // Entry captures VRAM (group 1). The long torch/mps init lives inside
     // this phase, so it owns the largest slot and streams live activity.
     phase: 'gpu',
-    labelKey: 'launch.steps.gpu',
     match: /Total VRAM\s+(\d+)\s*MB/i,
     weight: 0.50,
     streaming: true,
   },
   {
     phase: 'customNodes',
-    labelKey: 'launch.steps.customNodes',
     match: /ComfyUI version:|Import times for custom nodes:/i,
     weight: 0.15,
     streaming: false,
@@ -80,7 +76,6 @@ export const DEFAULT_LAUNCH_PHASES: readonly LaunchPhaseDef[] = [
     // The tail. Indeterminate + streaming so the bar shows live log lines
     // (not a frozen 99%) until the existing transition into ComfyUI fires.
     phase: 'startingServer',
-    labelKey: 'launch.steps.startingServer',
     match: /Starting server|To see the GUI go to:|Uvicorn running on/i,
     weight: 0.20,
     streaming: true,
@@ -88,17 +83,19 @@ export const DEFAULT_LAUNCH_PHASES: readonly LaunchPhaseDef[] = [
 ]
 
 /**
- * The repair phase shown while we fix installs broken by the v1.13.0 bug
- * (Jędrzej's ask). It runs first — before security scan — because the repair
- * happens during early boot. Injected only when `opts.needsRepair` is set, so
- * unaffected users never see it.
+ * Repair phase, injected first when interrupted-op recovery rolled the source
+ * back before this launch (`opts.needsRepair`; see `handleLaunch`). The repair
+ * itself finishes before the process spawns, so this is a synthetic leading
+ * step — entered programmatically like `launchStart`, completed once the first
+ * real boot milestone fires. Unaffected users never see it.
+ *
+ * Its weight is added on top of the base 1.0; the renderer normalizes the set,
+ * so injection just shrinks every slot proportionally.
  */
 const REPAIR_PHASE: LaunchPhaseDef = {
   phase: 'repair',
-  labelKey: 'launch.steps.repair',
-  // Adjust to whatever marker the repair flow prints once it lands.
-  match: /Repairing|\[repair\]|fixing install/i,
-  weight: 0.15,
+  match: NEVER,
+  weight: 0.1,
   streaming: true,
 }
 

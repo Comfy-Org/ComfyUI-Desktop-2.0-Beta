@@ -64,6 +64,9 @@ function writeLog(stream: WriteStream, text: string): void {
 
 export async function handleLaunch({ event, installationId, inst: instArg, actionData }: ActionContext): Promise<ActionResult> {
   let inst = instArg
+  // Set when interrupted-op recovery actually rolls the source back, so the
+  // launch progress leads with a "Repairing installation…" step.
+  let needsRepair = false
   if (_runningSessions.has(installationId)) {
     return { ok: false, message: i18n.t('errors.alreadyRunning') }
   }
@@ -89,10 +92,19 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     const recoveryLog: string[] = []
     try {
       const { recoverInterruptedComfyOp } = await import('../../opMarker')
-      const recovered = await recoverInterruptedComfyOp(inst.installPath, (text) => {
-        recoveryLog.push(text)
-        console.log(text.trim())
-      })
+      const recovered = await recoverInterruptedComfyOp(
+        inst.installPath,
+        (text) => {
+          recoveryLog.push(text)
+          console.log(text.trim())
+        },
+        // A real source rollback ran — surface a "Repairing installation…"
+        // step at the head of the launch progress. Only
+        // fires for a genuine repair, never a benign marker cleanup.
+        () => {
+          needsRepair = true
+        }
+      )
       if (recovered) inst = (await installations.get(installationId)) || inst
     } catch (err) {
       // Recovery threw because the source rollback failed: launching now would run
@@ -205,6 +217,63 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
   const sender = event.sender
   const sendProgress = makeSendProgress(sender, installationId)
 
+  /** Enabled custom-node count for the "X of Y" launch detail. Best-effort
+   *  one-shot scan; 0 (scan failed/none) → the tracker shows a streaming line
+   *  instead. Awaited once before the spawn loop so the synchronous relaunch
+   *  path can re-arm the tracker without re-scanning. */
+  let launchNodeCount = 0
+  async function scanLaunchNodeCount(): Promise<void> {
+    try {
+      const scanned = await scanCustomNodes(path.join(inst.installPath, 'ComfyUI'))
+      launchNodeCount = scanned.filter((n) => n.enabled).length
+    } catch (err) {
+      console.warn('Custom-node scan for launch progress failed:', err)
+    }
+  }
+
+  /** Fresh tracker, started up front so the op is stepped from frame zero (no
+   *  flat "Starting ComfyUI" window). Re-armed per spawn; the renderer's
+   *  monotonic floor keeps a relaunch from regressing the bar. */
+  function armLaunchTracker(): LaunchProgressTracker {
+    const tracker = createLaunchProgressTracker({
+      phases: buildLaunchPhases(inst, { needsRepair }),
+      nodeCount: launchNodeCount,
+      sendProgress,
+    })
+    tracker.start()
+    return tracker
+  }
+
+  /** Pipe a spawned process's output to the log file, renderer, execution tap,
+   *  and the launch tracker (ANSI-stripped); returns a bounded stderr tail for
+   *  crash diagnostics. */
+  function attachLaunchStreams(
+    proc: ChildProcess,
+    logStream: WriteStream,
+    sendOutput: (text: string) => void,
+    execTap: ReturnType<typeof createExecutionTap>,
+    tracker: LaunchProgressTracker
+  ): { getStderr: () => string } {
+    let stderrBuf = ''
+    proc.stdout?.on('data', (chunk: Buffer) => {
+      const text = chunk.toString('utf-8')
+      writeLog(logStream, text)
+      sendOutput(text)
+      execTap.ingest(text, 'stdout')
+      tracker.ingest(stripAnsi(text))
+    })
+    proc.stderr?.on('data', (chunk: Buffer) => {
+      const text = chunk.toString('utf-8')
+      stderrBuf += text
+      if (stderrBuf.length > 8192) stderrBuf = stderrBuf.slice(-4096)
+      writeLog(logStream, text)
+      sendOutput(text)
+      execTap.ingest(text, 'stderr')
+      tracker.ingest(stripAnsi(text))
+    })
+    return { getStderr: () => stderrBuf }
+  }
+
   const abort = new AbortController()
   _operationAborts.set(installationId, abort)
 
@@ -253,36 +322,11 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
       variant: (inst.variant as string | undefined) ?? null,
       release: (inst.release as string | undefined) ?? null,
     })
-    let skipNodeCount = 0
-    try {
-      const scanned = await scanCustomNodes(path.join(inst.installPath, 'ComfyUI'))
-      skipNodeCount = scanned.filter((n) => n.enabled).length
-    } catch {}
-    const launchTracker = createLaunchProgressTracker({
-      phases: buildLaunchPhases(inst),
-      nodeCount: skipNodeCount,
-      sendProgress,
-    })
-    launchTracker.start()
+    await scanLaunchNodeCount()
+    const launchTracker = armLaunchTracker()
 
     const proc = spawnProcess(launchCmd.cmd!, launchCmd.args!, launchCmd.cwd!, launchEnv, { showWindow: launchCmd.showWindow })
-    let stderrBuf = ''
-    proc.stdout?.on('data', (chunk: Buffer) => {
-      const text = chunk.toString('utf-8')
-      writeLog(logStream, text)
-      sendOutput(text)
-      execTap.ingest(text, 'stdout')
-      launchTracker.ingest(stripAnsi(text))
-    })
-    proc.stderr?.on('data', (chunk: Buffer) => {
-      const text = chunk.toString('utf-8')
-      stderrBuf += text
-      if (stderrBuf.length > 8192) stderrBuf = stderrBuf.slice(-4096)
-      writeLog(logStream, text)
-      sendOutput(text)
-      execTap.ingest(text, 'stderr')
-      launchTracker.ingest(stripAnsi(text))
-    })
+    const { getStderr } = attachLaunchStreams(proc, logStream, sendOutput, execTap, launchTracker)
 
     _operationAborts.delete(installationId)
     const mode = (inst.launchMode as string | undefined) || 'window'
@@ -294,7 +338,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
       // Raw stderr — this payload is shown to the user in the crashed-state
       // lifecycle UI. PII scrubbing happens on the telemetry path
       // (`scrubTelemetryContext` in renderer bootstrap), not here.
-      const lastStderr = lastNLines(stderrBuf, 100)
+      const lastStderr = lastNLines(getStderr(), 100)
       execTap.flushSummary()
       _removeSession(installationId)
       const exitedPayload = {
@@ -430,50 +474,13 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
   // Real, log-driven launch progress. Phases + the custom-node denominator
   // are computed once; the tracker is re-armed on each spawn (relaunch loop)
   // so phases re-emit — the renderer's monotonic floor stops the bar visibly
-  // regressing. Node count is best-effort; the tracker degrades to streaming
-  // when it's 0 (e.g. shared/legacy custom_nodes dirs we don't scan here).
-  const launchPhases = buildLaunchPhases(inst)
-  let launchNodeCount = 0
-  try {
-    const scanned = await scanCustomNodes(path.join(inst.installPath, 'ComfyUI'))
-    launchNodeCount = scanned.filter((n) => n.enabled).length
-  } catch {}
-  let launchTracker: LaunchProgressTracker = createLaunchProgressTracker({
-    phases: launchPhases,
-    nodeCount: launchNodeCount,
-    sendProgress,
-  })
+  // regressing.
+  await scanLaunchNodeCount()
 
   function spawnComfy(): { proc: ChildProcess; getStderr: () => string } {
-    // Fresh tracker per spawn so a respawn re-emits its phase pipeline.
-    launchTracker = createLaunchProgressTracker({
-      phases: launchPhases,
-      nodeCount: launchNodeCount,
-      sendProgress,
-    })
-    // Emit steps + the synthetic first phase BEFORE any stdout, so the op is
-    // stepped from frame zero — one continuous stepper, never a flat
-    // "Starting ComfyUI" window between install and the launch phases.
-    launchTracker.start()
+    const tracker = armLaunchTracker()
     const p = spawnProcess(launchCmd.cmd!, launchCmd.args!, launchCmd.cwd!, launchEnv, { showWindow: launchCmd.showWindow })
-    let stderrBuf = ''
-    p.stdout!.on('data', (chunk: Buffer) => {
-      const text = chunk.toString('utf-8')
-      writeLog(logStream, text)
-      sendOutput(text)
-      execTap.ingest(text, 'stdout')
-      launchTracker.ingest(stripAnsi(text))
-    })
-    p.stderr!.on('data', (chunk: Buffer) => {
-      const text = chunk.toString('utf-8')
-      stderrBuf += text
-      if (stderrBuf.length > 8192) stderrBuf = stderrBuf.slice(-4096)
-      writeLog(logStream, text)
-      sendOutput(text)
-      execTap.ingest(text, 'stderr')
-      launchTracker.ingest(stripAnsi(text))
-    })
-    return { proc: p, getStderr: () => stderrBuf }
+    return { proc: p, ...attachLaunchStreams(p, logStream, sendOutput, execTap, tracker) }
   }
 
   const PORT_RETRY_MAX = 3

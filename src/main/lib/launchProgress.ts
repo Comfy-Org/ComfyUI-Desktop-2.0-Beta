@@ -84,11 +84,12 @@ export function createLaunchProgressTracker(opts: {
   function emitSteps(): void {
     if (stepsSent) return
     stepsSent = true
-    // Labels are resolved renderer-side from `progress.phaseLabel.<phase>`;
-    // we still send the i18n labelKey as a fallback label so ambient
-    // surfaces never show a raw slug.
+    // Labels are resolved renderer-side from `progress.phaseLabel.<phase>`, so
+    // the tracker stays locale-agnostic and sends the phase id as the label.
+    // Weights ride along so the renderer paces the bar from the phase defs (the
+    // single source of truth) — no mirrored table to keep in sync.
     sendProgress('steps', {
-      steps: phases.map((p) => ({ phase: p.phase, label: p.labelKey })),
+      steps: phases.map((p) => ({ phase: p.phase, label: p.phase, weight: p.weight })),
     })
   }
 

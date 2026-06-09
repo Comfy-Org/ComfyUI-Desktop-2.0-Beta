@@ -1015,16 +1015,6 @@
     "modelFolderRelaunchDesc": "New model folders were detected from custom nodes. Restarting so ComfyUI can use them right away.",
     "launchSplashTitle": "Starting ComfyUI",
     "launchSplashDesc": "Launching your ComfyUI instance…",
-    "steps": {
-      "launchStart": "Starting ComfyUI…",
-      "repair": "Repairing installation…",
-      "securityScan": "Running security scan…",
-      "mountLibraries": "Mounting model libraries…",
-      "gpu": "Spinning up the GPU ({vram} GB VRAM)…",
-      "gpuFallback": "Spinning up the GPU…",
-      "customNodes": "Loading custom nodes & ComfyUI-Manager…",
-      "startingServer": "Starting server…"
-    },
     "activity": {
       "manager": "Loading ComfyUI-Manager…",
       "registry": "Updating node registry…",
