@@ -20,7 +20,7 @@ let tmpDir: string
 function makeVenvWithTorch(
   installPath: string,
   torchVersion: string | null,
-  accel: { cuda?: string | null; hip?: string | null } = {},
+  accel: { cuda?: string | null; hip?: string | null; rocm?: string | null; xpu?: string | null } = {},
 ): string {
   const venv = path.join(installPath, 'ComfyUI', '.venv')
   const sitePackages =
@@ -31,12 +31,22 @@ function makeVenvWithTorch(
   if (torchVersion) {
     fs.mkdirSync(path.join(sitePackages, `torch-${torchVersion}.dist-info`))
     fs.mkdirSync(path.join(sitePackages, 'torch'))
-    const cuda = accel.cuda === undefined ? null : accel.cuda
-    const hip = accel.hip === undefined ? null : accel.hip
-    const lit = (v: string | null): string => (v === null ? 'None' : `'${v}'`)
+    // Mirror real torch/version.py, which writes type-annotated fields.
+    const lit = (v: string | null | undefined): string => (v ? `'${v}'` : 'None')
     fs.writeFileSync(
       path.join(sitePackages, 'torch', 'version.py'),
-      `__version__ = '${torchVersion}'\ndebug = False\ncuda = ${lit(cuda)}\nhip = ${lit(hip)}\n`,
+      [
+        `from typing import Optional`,
+        `__all__ = ['__version__', 'debug', 'cuda', 'git_version', 'hip', 'rocm', 'xpu']`,
+        `__version__ = '${torchVersion}'`,
+        `debug = False`,
+        `cuda: Optional[str] = ${lit(accel.cuda)}`,
+        `git_version = 'abc'`,
+        `hip: Optional[str] = ${lit(accel.hip)}`,
+        `rocm: Optional[str] = ${lit(accel.rocm)}`,
+        `xpu: Optional[str] = ${lit(accel.xpu)}`,
+        ``,
+      ].join('\n'),
     )
   }
   return sitePackages
@@ -96,6 +106,16 @@ describe('getTorchVendorMismatch', () => {
   it('does not flag an AMD install whose version.py reports hip', () => {
     makeVenvWithTorch(tmpDir, '2.6.0', { hip: '6.2.41134' })
     expect(getTorchVendorMismatch(install({ variant: 'linux-amd' }))).toBeNull()
+  })
+
+  it('does not flag an Intel XPU install whose version.py reports xpu (bare version)', () => {
+    makeVenvWithTorch(tmpDir, '2.10.0', { xpu: '20250001' })
+    expect(getTorchVendorMismatch(install({ variant: 'win-intel-xpu' }))).toBeNull()
+  })
+
+  it('flags an Intel XPU install whose torch has no xpu evidence at all', () => {
+    makeVenvWithTorch(tmpDir, '2.12.0')
+    expect(getTorchVendorMismatch(install({ variant: 'win-intel-xpu' }))).not.toBeNull()
   })
 
   it('flags an AMD install running CPU torch and accepts rocm', () => {

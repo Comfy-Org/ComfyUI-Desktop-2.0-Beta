@@ -54,27 +54,63 @@ function packageKey(entry: string): string {
   return name.toLowerCase().replace(/-/g, '_')
 }
 
+interface AcceleratorEvidence {
+  cuda: boolean
+  hip: boolean
+  rocm: boolean
+  xpu: boolean
+}
+
 /**
  * Read accelerator evidence from `torch/version.py` (the authoritative signal
- * baked into the wheel: `cuda`/`hip` are non-null strings for accelerated
- * builds, None for CPU). This distinguishes the bug's CPU torch — which on
- * Windows is a *bare* version like `2.12.0` with `cuda = None` — from a
+ * baked into the wheel: each backend field is a non-null string for an
+ * accelerated build, None for CPU). This distinguishes the bug's CPU torch —
+ * which on Windows is a *bare* version like `2.12.0` with `cuda = None` — from a
  * user-installed PyPI default wheel, which is also bare-versioned but CUDA-
- * capable (`cuda = '12.x'`). Without this we would wrongly "repair" a user's
- * deliberately-chosen torch.
+ * capable. Without it we would wrongly "repair" a user's deliberately-chosen
+ * torch. The fields are written with type annotations
+ * (`cuda: Optional[str] = '13.0'`), so the regex tolerates an optional `: type`.
  */
-function readTorchAcceleratorEvidence(sitePackages: string): { cuda: boolean; hip: boolean } {
+function readTorchAcceleratorEvidence(sitePackages: string): AcceleratorEvidence {
+  const empty: AcceleratorEvidence = { cuda: false, hip: false, rocm: false, xpu: false }
   try {
     const txt = fs.readFileSync(path.join(sitePackages, 'torch', 'version.py'), 'utf-8')
     const field = (name: string): boolean => {
-      const m = txt.match(new RegExp(`^${name}\\s*=\\s*(None|'([^']*)'|"([^"]*)")`, 'm'))
+      const m = txt.match(new RegExp(`^${name}\\s*(?::[^=\\n]+)?=\\s*(None|'([^']*)'|"([^"]*)")`, 'm'))
       if (!m || m[1] === 'None') return false
       return ((m[2] ?? m[3] ?? '').trim()).length > 0
     }
-    return { cuda: field('cuda'), hip: field('hip') }
+    return { cuda: field('cuda'), hip: field('hip'), rocm: field('rocm'), xpu: field('xpu') }
   } catch {
-    return { cuda: false, hip: false }
+    return empty
   }
+}
+
+/** Local-version tag of a torch version string, e.g. '2.10.0+cu128' → 'cu128'. */
+function localTag(version: string | null): string {
+  return version && version.includes('+') ? version.slice(version.indexOf('+') + 1).toLowerCase() : ''
+}
+
+/** Read the installed torch version from a torch dist-info dir in site-packages. */
+function readTorchVersionFromSite(sitePackages: string): string | null {
+  try {
+    for (const entry of fs.readdirSync(sitePackages)) {
+      const m = entry.match(/^torch-(.+?)\.dist-info$/i)
+      if (m) return m[1]!
+    }
+  } catch {
+    /* ignore */
+  }
+  return null
+}
+
+/** Whether a torch install carries the accelerator its GPU variant requires,
+ *  judged by either the wheel's local tag or the version.py backend fields. */
+function hasExpectedAccelerator(variantBase: string, tag: string, ev: AcceleratorEvidence): boolean {
+  if (variantBase === 'nvidia') return tag.includes('cu') || ev.cuda
+  if (variantBase === 'amd') return tag.includes('rocm') || ev.hip || ev.rocm
+  if (variantBase === 'intel-xpu') return tag.includes('xpu') || ev.xpu
+  return false
 }
 
 /**
@@ -99,15 +135,9 @@ export function getTorchVendorMismatch(installation: InstallationRecord): TorchM
   const installedVersion = getTorchVersion(installation)
   if (!installedVersion) return null // can't read torch — leave it alone
 
-  const plus = installedVersion.indexOf('+')
-  const installedTag = (plus >= 0 ? installedVersion.slice(plus + 1) : '').toLowerCase()
+  const installedTag = localTag(installedVersion)
   const evidence = readTorchAcceleratorEvidence(sitePackages)
-
-  let ok: boolean
-  if (variantBase === 'nvidia') ok = installedTag.includes('cu') || evidence.cuda
-  else if (variantBase === 'amd') ok = installedTag.includes('rocm') || evidence.hip
-  else ok = installedTag.includes('xpu') // intel-xpu
-  if (ok) return null
+  if (hasExpectedAccelerator(variantBase, installedTag, evidence)) return null
 
   return { variantBase, expectedFamily: EXPECTED_FAMILY[variantBase]!, installedVersion, installedTag }
 }
@@ -208,36 +238,30 @@ export async function repairTorch(
       return { ok: false, message: 'could not locate the installation venv' }
     }
 
-    // Confirm the bundle actually carries an accelerated torch before we touch
-    // the venv — never trade a working CPU torch for a broken/empty one.
-    const srcEvidence = readTorchAcceleratorEvidence(srcSite)
-    const base = stripPlatform(variant!)
-    const variantBase = Object.keys(EXPECTED_FAMILY).find((k) => base === k || base.startsWith(`${k}-`))
-    const expectedFamily = variantBase ? EXPECTED_FAMILY[variantBase]! : ''
-    const srcOk =
-      variantBase === 'nvidia' ? srcEvidence.cuda
-      : variantBase === 'amd' ? srcEvidence.hip
-      : fs.readdirSync(srcSite).some((e) => isTorchFamilyEntry(e) && packageKey(e) === 'torch')
-    if (!srcOk) {
-      return { ok: false, message: 'bundle does not contain an accelerated PyTorch build' }
+    // Trust the shipped bundle for *which* torch is correct — it's our own
+    // artifact, the same one every fresh install of this variant uses, so if it
+    // lacked GPU torch every fresh install would be broken too. Only guard the
+    // mechanics: the bundle must actually contain a torch package, and (below)
+    // the venv's torch version must match the bundle's afterward. Both rely on
+    // the dist-info dir name alone — nothing inside torch that breaks when
+    // PyTorch changes how version.py is written.
+    const srcVersion = readTorchVersionFromSite(srcSite)
+    if (!srcVersion) {
+      return { ok: false, message: 'bundle contains no PyTorch package' }
     }
 
     tools.sendProgress('setup', { percent: -1, status: 'Restoring GPU PyTorch…' })
     await copyTorchFamily(srcSite, dstSite, tools.signal)
 
-    // Verify the copy produced the expected accelerator family.
-    const after = getTorchVersion(installation)
-    const afterTag = after && after.includes('+') ? after.slice(after.indexOf('+') + 1).toLowerCase() : ''
-    const afterEvidence = readTorchAcceleratorEvidence(dstSite)
-    const afterOk =
-      variantBase === 'nvidia' ? afterTag.includes('cu') || afterEvidence.cuda
-      : variantBase === 'amd' ? afterTag.includes('rocm') || afterEvidence.hip
-      : afterTag.includes('xpu')
-    if (!after || !afterOk) {
-      return { ok: false, message: `PyTorch still reports "${after ?? 'unknown'}" after copy` }
+    // Verify only the mechanics: the venv's torch version now matches the
+    // bundle's. Uses the dist-info dir name alone, so it can't be broken by
+    // PyTorch changing how version.py is written.
+    const after = readTorchVersionFromSite(dstSite)
+    if (after !== srcVersion) {
+      return { ok: false, message: `PyTorch is "${after ?? 'absent'}" after copy, expected "${srcVersion}"` }
     }
 
-    return { ok: true, message: `restored PyTorch ${after} (${expectedFamily})` }
+    return { ok: true, message: `restored PyTorch ${after}` }
   } finally {
     await fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {})
   }
