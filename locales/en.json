@@ -742,7 +742,6 @@
     "adoptStepSnapshot": "Capture snapshot",
     "adoptStepAllocate": "Allocate install folder",
     "adoptStepSource": "Stage ComfyUI source",
-    "adoptStepComfyUpdate": "Update ComfyUI",
     "adoptStepRequirements": "Install requirements",
     "adoptStepSettings": "Carry over settings",
     "adoptStepRegister": "Register installation"

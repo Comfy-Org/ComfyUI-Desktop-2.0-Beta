@@ -1056,15 +1056,13 @@ describe('adoptDesktopInstall', () => {
     }
   })
 
-  it('runs a one-shot ComfyUI checkout to the latest stable tag', async () => {
+  it('does not auto-update ComfyUI; preserves the adopted checkout', async () => {
     getLatestStableTagMock.mockResolvedValue('v0.99.99')
     const legacy = buildFakeLegacy({ configFiles: { 'comfy.settings.json': '{}' } })
     try {
       const tools = buildSilentTools()
       const cloneFn = vi.fn(async (_url: string, dest: string) => {
         fs.mkdirSync(dest, { recursive: true })
-        // Make destSource look like a real git checkout so the update
-        // step's `.git` precondition fires.
         fs.mkdirSync(path.join(dest, '.git'), { recursive: true })
         fs.writeFileSync(path.join(dest, 'main.py'), '# clone')
         return { ok: true as const }
@@ -1073,46 +1071,13 @@ describe('adoptDesktopInstall', () => {
         tools,
         deps: buildDeps({ cloneSourceFromGit: cloneFn }, legacy.info)
       })
-      expect(getLatestStableTagMock).toHaveBeenCalledOnce()
-      expect(gitCheckoutCommitMock).toHaveBeenCalledWith(
-        expect.stringContaining('ComfyUI'),
-        'v0.99.99',
-        expect.any(Function),
-        expect.any(Object)
-      )
-      expect(record.adoptedComfyTagAtMigration).toBe('v0.99.99')
-      // autoUpdateComfyUI stays false — one-shot, not ongoing.
-      expect(record.autoUpdateComfyUI).toBe(false)
-      expect(telemetry.capture).toHaveBeenCalledWith(
-        'comfy.desktop.adopt.succeeded',
-        expect.objectContaining({
-          adopted_comfy_tag_at_migration: 'v0.99.99'
-        })
-      )
-    } finally {
-      legacy.cleanup()
-    }
-  })
-
-  it('one-shot ComfyUI update is non-fatal when checkout fails', async () => {
-    getLatestStableTagMock.mockResolvedValue('v0.99.99')
-    gitCheckoutCommitMock.mockResolvedValue({ exitCode: 128, stdout: '', stderr: 'boom' })
-    const legacy = buildFakeLegacy({ configFiles: { 'comfy.settings.json': '{}' } })
-    try {
-      const cloneFn = vi.fn(async (_url: string, dest: string) => {
-        fs.mkdirSync(dest, { recursive: true })
-        fs.mkdirSync(path.join(dest, '.git'), { recursive: true })
-        fs.writeFileSync(path.join(dest, 'main.py'), '# clone')
-        return { ok: true as const }
-      })
-      const tools = buildSilentTools()
-      const record = await adoptDesktopInstall({
-        tools,
-        deps: buildDeps({ cloneSourceFromGit: cloneFn }, legacy.info)
-      })
-      // Adoption still succeeded; tag-at-migration is omitted because
-      // the checkout didn't actually land.
+      // Frozen comfy: adoption must NOT roll the source forward to latest
+      // stable (issue #986). The user keeps their existing checkout.
+      expect(getLatestStableTagMock).not.toHaveBeenCalled()
+      expect(gitCheckoutCommitMock).not.toHaveBeenCalled()
       expect(record).not.toHaveProperty('adoptedComfyTagAtMigration')
+      // autoUpdateComfyUI is opt-in; adopted installs stay off.
+      expect(record.autoUpdateComfyUI).toBe(false)
       expect(telemetry.capture).toHaveBeenCalledWith(
         'comfy.desktop.adopt.succeeded',
         expect.objectContaining({
@@ -1150,11 +1115,12 @@ describe('adoptDesktopInstall', () => {
         deps: buildDeps({ cloneSourceFromGit: cloneFn }, legacy.info)
       })
       // resolveLocalVersion was invoked against the destination ComfyUI
-      // dir with the fallback tag threaded through from updateInfo.
+      // dir with the adopted source's own version (comfyui_version.py) as
+      // the fallback tag.
       expect(resolveLocalVersionMock).toHaveBeenCalledWith(
         expect.stringContaining('ComfyUI'),
         'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
-        'v0.24.0'
+        '0.24.0'
       )
       expect(fetchTagsMock).toHaveBeenCalledWith(expect.stringContaining('ComfyUI'))
       expect(record.comfyVersion).toEqual({
@@ -1248,7 +1214,8 @@ describe('adoptDesktopInstall', () => {
       expect(phases).toContain('snapshot')
       expect(phases).toContain('allocate')
       expect(phases).toContain('source')
-      expect(phases).toContain('comfy-update')
+      // Frozen comfy (#986): adoption no longer has an auto-update step.
+      expect(phases).not.toContain('comfy-update')
       expect(phases).toContain('requirements')
       expect(phases).toContain('settings')
       expect(phases).toContain('register')
