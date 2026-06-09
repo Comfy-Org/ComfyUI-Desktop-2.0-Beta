@@ -24,6 +24,7 @@ import type {
 import SnapshotRow from './SnapshotRow.vue'
 import SnapshotDiffView from '../../components/SnapshotDiffView.vue'
 import BaseAccordion from '../../components/ui/BaseAccordion.vue'
+import BaseCopyButton from '../../components/ui/BaseCopyButton.vue'
 import { humanizeOpStatus } from '../../lib/progressStatusLabel'
 
 interface ActiveOperation {
@@ -711,9 +712,17 @@ async function handleImport(): Promise<void> {
               role="alert"
               :data-testid="TID.snapshotsOpCard"
             >
-              <p v-if="restoreErrorMessage" class="snapshots-op-card-error-msg">
-                {{ restoreErrorMessage }}
-              </p>
+              <div v-if="restoreErrorMessage" class="snapshots-op-card-error">
+                <p class="snapshots-op-card-error-msg" :data-testid="TID.pickerOpErrorMessage">
+                  {{ restoreErrorMessage }}
+                </p>
+                <BaseCopyButton
+                  class="snapshots-op-card-error-copy"
+                  :get-value="() => restoreErrorMessage"
+                  :aria-label="t('common.copyError', 'Copy error details')"
+                  :data-testid="TID.pickerOpErrorCopy"
+                />
+              </div>
               <div class="snapshots-op-actions">
                 <button
                   type="button"
@@ -1362,6 +1371,15 @@ async function handleImport(): Promise<void> {
   }
 }
 
+.snapshots-op-card-error {
+  position: relative;
+  width: 100%;
+}
+.snapshots-op-card-error-copy {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+}
 .snapshots-op-card-error-msg {
   margin: 0;
   font-size: var(--takeover-fs-caption);
@@ -1373,8 +1391,10 @@ async function handleImport(): Promise<void> {
   max-height: 168px;
   overflow-y: auto;
   text-align: left;
+  padding-right: 28px;
   font-family: var(--font-mono, ui-monospace, monospace);
   line-height: 1.45;
+  user-select: text;
 }
 .snapshots-op-actions {
   display: flex;

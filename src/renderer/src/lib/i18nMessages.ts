@@ -8,7 +8,9 @@ export const en = {
     cancel: 'Cancel',
     back: 'Back',
     browse: 'Browse…',
-    learnMore: 'Learn more'
+    learnMore: 'Learn more',
+    copy: 'Copy',
+    copyError: 'Copy error details'
   },
   settings: {
     open: 'Open',

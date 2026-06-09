@@ -14,6 +14,7 @@ import SettingsSectionList from '../../views/comfyUISettings/SettingsSectionList
 import StoragePane, { type StorageSnapshot } from '../../views/comfyUISettings/StoragePane.vue'
 import ConsoleTerminalPane from '../../views/comfyUISettings/ConsoleTerminalPane.vue'
 import Tooltip from '../ui/Tooltip.vue'
+import BaseCopyButton from '../ui/BaseCopyButton.vue'
 import type { PickerTab, SectionTab } from '../../lib/pickerTabs'
 import { isTabAllowedForCategory } from '../../lib/pickerTabs'
 import { humanizeOpStatus, operationInflightLabel, operationSuccessLabel } from '../../lib/progressStatusLabel'
@@ -840,7 +841,15 @@ defineExpose({
                       <XCircle :size="32" />
                     </div>
                     <p class="op-title op-title--error">{{ t('instancePicker.progressError') }}</p>
-                    <p class="op-name op-name--error">{{ activeOperation?.error }}</p>
+                    <div v-if="activeOperation?.error" class="op-error-detail">
+                      <pre class="op-error-text" :data-testid="TID.pickerOpErrorMessage">{{ activeOperation.error }}</pre>
+                      <BaseCopyButton
+                        class="op-error-copy"
+                        :get-value="() => activeOperation?.error ?? ''"
+                        :aria-label="t('common.copyError', 'Copy error details')"
+                        :data-testid="TID.pickerOpErrorCopy"
+                      />
+                    </div>
                     <div class="op-actions">
                       <button type="button" class="op-primary-btn" @click="emit('op-retry')">
                         {{ t('instancePicker.progressRetry') }}
@@ -1149,7 +1158,34 @@ defineExpose({
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.op-name--error { color: var(--brand-error, #e74c3c); opacity: 0.8; }
+.op-error-detail {
+  position: relative;
+  width: 100%;
+  max-width: 520px;
+  margin-top: 2px;
+}
+.op-error-text {
+  margin: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 10px 38px 10px 12px;
+  border-radius: 8px;
+  background: var(--brand-surface-bg, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--brand-surface-border, rgba(255, 255, 255, 0.08));
+  color: var(--brand-error, #e74c3c);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  line-height: 1.45;
+  text-align: left;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+.op-error-copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+}
 
 .op-bar-wrap {
   width: 100%;
