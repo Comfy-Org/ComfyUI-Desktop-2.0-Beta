@@ -205,12 +205,13 @@ const timeline = computed<TimelineItem[]>(() => {
   return out
 })
 
-/** "Latest: 8d ago" stat from the newest timeline item; null when empty. */
+/** "Latest: 8d ago" stat from the newest snapshot; null when none. Copy
+ * events are excluded so an interleaved "Copied from/as X" entry can't hijack
+ * the stat (see issue #1007). */
 const latestRelative = computed<string | null>(() => {
-  const first = timeline.value[0]
-  if (!first) return null
-  const iso = first.kind === 'snapshot' ? first.snapshot.createdAt : first.event.copiedAt
-  return _formatRelative(iso, t)
+  const newest = snapshots.value[0]
+  if (!newest) return null
+  return _formatRelative(newest.createdAt, t)
 })
 
 function autoExpandFirst(): void {
@@ -756,7 +757,7 @@ async function handleImport(): Promise<void> {
         :class="{
           'is-snapshot': item.kind === 'snapshot',
           'is-copy': item.kind === 'copy',
-          'is-current': item.kind === 'snapshot' && i === 0
+          'is-current': item.kind === 'snapshot' && item.snapshotIndex === 0
         }"
       >
         <span
@@ -774,7 +775,7 @@ async function handleImport(): Promise<void> {
             <SnapshotRow
               :snapshot="item.snapshot"
               :expanded="isExpanded(item.snapshot.filename)"
-              :is-latest="i === 0"
+              :is-latest="item.snapshotIndex === 0"
               :previous-comfyui-version="snapshots[item.snapshotIndex + 1]?.comfyuiVersion"
               :toggle-test-id="TID.snapshotRow(item.snapshot.filename)"
               @toggle="toggleExpand(item.snapshot.filename)"
@@ -785,8 +786,12 @@ async function handleImport(): Promise<void> {
                 </p>
 
                 <!-- "Release notes": changes vs the previous snapshot.
-                     Hidden for the oldest (no predecessor). -->
-                <div v-if="i < timeline.length - 1" class="snap-diff-accordion">
+                     Hidden for the oldest snapshot (no predecessor); copy
+                     events interleaved in the timeline don't count. -->
+                <div
+                  v-if="item.snapshotIndex < snapshots.length - 1"
+                  class="snap-diff-accordion"
+                >
                   <button
                     type="button"
                     class="snap-diff-trigger"
