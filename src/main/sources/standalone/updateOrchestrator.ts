@@ -256,14 +256,15 @@ export async function runComfyUIUpdate(opts: UpdateOrchestrationOptions): Promis
         const filteredReqPath = path.join(installPath, '.comfyui-reqs-filtered.txt')
         await fs.promises.writeFile(filteredReqPath, filteredReqs, 'utf-8')
 
-        // Pin the installed torch/CUDA family so `--upgrade` keeps the CUDA build
-        // instead of re-resolving torch (pulled transitively by kornia/spandrel)
-        // to the CPU wheel PyPI/mirrors serve. Applied to both the dry-run and the
-        // real install so the conflict report matches what actually happens.
-        const constraintPath = await writeTorchConstraintsFile(uvPath, activeEnvPython, installPath, '.comfyui-reqs-filtered.constraints')
-        const constraintArg = constraintPath ? ['--constraint', constraintPath] : []
-
+        let constraintPath: string | null = null
         try {
+          // Pin the installed torch/CUDA family so `--upgrade` keeps the CUDA build
+          // instead of re-resolving torch (pulled transitively by kornia/spandrel)
+          // to the CPU wheel PyPI/mirrors serve. Applied to both the dry-run and the
+          // real install so the conflict report matches what actually happens.
+          constraintPath = await writeTorchConstraintsFile(uvPath, activeEnvPython, installPath, '.comfyui-reqs-filtered.constraints')
+          const constraintArg = constraintPath ? ['--constraint', constraintPath] : []
+
           const indexArgs = getPipIndexArgs(settings.get('pypiMirror'), settings.get('useChineseMirrors') === true)
           sendProgress('deps', { percent: -1, status: t('standalone.updateDepsDryRun') })
           if (signal?.aborted) return { ok: false, message: 'Cancelled', installation }

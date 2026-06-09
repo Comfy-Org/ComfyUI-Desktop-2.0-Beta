@@ -127,12 +127,13 @@ export async function installFilteredRequirements(
   const filteredPath = path.join(installPath, tempName)
   await fs.promises.writeFile(filteredPath, filtered, 'utf-8')
 
-  // Pin the installed torch/CUDA family so `--upgrade` (and transitive consumers
-  // like kornia/spandrel) can't re-resolve torch to the CPU wheel served by
-  // PyPI/mirrors when download.pytorch.org isn't in the index set.
-  const constraintPath = await writeTorchConstraintsFile(uvPath, pythonPath, installPath, `${tempName}.constraints`)
-
+  let constraintPath: string | null = null
   try {
+    // Pin the installed torch/CUDA family so `--upgrade` (and transitive consumers
+    // like kornia/spandrel) can't re-resolve torch to the CPU wheel served by
+    // PyPI/mirrors when download.pytorch.org isn't in the index set.
+    constraintPath = await writeTorchConstraintsFile(uvPath, pythonPath, installPath, `${tempName}.constraints`)
+
     const indexArgs = getPipIndexArgs(mirrors?.pypiMirror, mirrors?.useChineseMirrors)
     const upgradeArg = upgrade ? ['--upgrade'] : []
     const constraintArg = constraintPath ? ['--constraint', constraintPath] : []
