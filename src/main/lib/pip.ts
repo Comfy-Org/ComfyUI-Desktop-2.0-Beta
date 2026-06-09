@@ -110,7 +110,8 @@ export async function writeTorchConstraintsFile(
 /** Install a requirements file via `uv pip install -r`, filtering out PyTorch packages first.
  *  Pass `upgrade: true` to add `--upgrade` so already-installed packages whose pinned versions
  *  drifted (e.g. the bundled venv's `comfy-aimdo` lagging ComfyUI's `requirements.txt`) get
- *  reconciled instead of skipped by uv's satisfaction check. */
+ *  reconciled instead of skipped by uv's satisfaction check. `upgrade` also pins the installed
+ *  torch/CUDA family via `--constraint` (see body) since that is the only mode that can swap it. */
 export async function installFilteredRequirements(
   reqPath: string,
   uvPath: string,
@@ -129,10 +130,18 @@ export async function installFilteredRequirements(
 
   let constraintPath: string | null = null
   try {
-    // Pin the installed torch/CUDA family so `--upgrade` (and transitive consumers
-    // like kornia/spandrel) can't re-resolve torch to the CPU wheel served by
-    // PyPI/mirrors when download.pytorch.org isn't in the index set.
-    constraintPath = await writeTorchConstraintsFile(uvPath, pythonPath, installPath, `${tempName}.constraints`)
+    // Only `--upgrade` re-resolves the whole graph, letting transitive consumers
+    // (kornia/spandrel) pull a CPU torch over the installed CUDA build when
+    // download.pytorch.org isn't in the index set. Pin the installed torch/CUDA
+    // family there so that can't happen — critical for China users, whose Manager
+    // `PIPFixer` reactive repair reinstalls from download.pytorch.org and so can't
+    // recover. Plain installs (custom-node deps, snapshot restore, adoption) never
+    // re-resolve an already-satisfied torch, so a hard `--constraint` there would
+    // only risk failing otherwise-fine installs and distorting restores; the
+    // PYTORCH_RE line filter plus restore's file-level torch protection cover those.
+    if (upgrade) {
+      constraintPath = await writeTorchConstraintsFile(uvPath, pythonPath, installPath, `${tempName}.constraints`)
+    }
 
     const indexArgs = getPipIndexArgs(mirrors?.pypiMirror, mirrors?.useChineseMirrors)
     const upgradeArg = upgrade ? ['--upgrade'] : []
