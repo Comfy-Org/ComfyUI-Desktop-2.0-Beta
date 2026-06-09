@@ -124,13 +124,25 @@ describe('ChooserView', () => {
     expect(wrapper.text()).not.toContain('Try Cloud')
   })
 
-  it('drops the Try-Cloud CTA when only a cloud install exists (cloud is just a row now)', async () => {
+  it('drops the Try-Cloud CTA once the user has launched cloud (cloud becomes just a row)', async () => {
+    installMockApi([
+      makeInstall({
+        id: 'cloud', name: 'Comfy Cloud', sourceCategory: 'cloud', sourceLabel: 'Cloud',
+        lastLaunchedAt: 1234,
+      }),
+    ])
+    const wrapper = mountChooser()
+    await flushPromises()
+    expect(wrapper.find('.chooser-tile-cloud').exists()).toBe(false)
+  })
+
+  it('keeps the Try-Cloud CTA when the only install is an auto-seeded never-launched cloud entry', async () => {
     installMockApi([
       makeInstall({ id: 'cloud', name: 'Comfy Cloud', sourceCategory: 'cloud', sourceLabel: 'Cloud' }),
     ])
     const wrapper = mountChooser()
     await flushPromises()
-    expect(wrapper.find('.chooser-tile-cloud').exists()).toBe(false)
+    expect(wrapper.find('.chooser-tile-cloud').exists()).toBe(true)
   })
 
   it('emits show-new-install when the New Install tile is clicked', async () => {
@@ -151,14 +163,18 @@ describe('ChooserView', () => {
     expect(wrapper.emitted('show-new-install')).toBeDefined()
   })
 
-  it('renders a cloud install through the same tile component as local installs', async () => {
+  it('renders a launched cloud install through the same tile component as local installs', async () => {
     installMockApi([
-      makeInstall({ id: 'cloud', name: 'Comfy Cloud', sourceCategory: 'cloud', sourceLabel: 'Cloud' }),
+      makeInstall({
+        id: 'cloud', name: 'Comfy Cloud', sourceCategory: 'cloud', sourceLabel: 'Cloud',
+        lastLaunchedAt: 1234,
+      }),
     ])
     const wrapper = mountChooser()
     await flushPromises()
-    // The cloud install gets a regular row, no Try-Cloud CTA, and clicking
-    // its tile emits the standard `pick` (not the special new-install path).
+    // Once cloud has been launched the Try-Cloud CTA is gone and the cloud
+    // row renders via the same install tile component (emits the standard
+    // `pick`, not the special new-install path).
     expect(wrapper.find('.chooser-tile-cloud').exists()).toBe(false)
     const tile = wrapper.findAll('.chooser-tile').find((t) => t.text().includes('Comfy Cloud'))
     expect(tile).toBeTruthy()
