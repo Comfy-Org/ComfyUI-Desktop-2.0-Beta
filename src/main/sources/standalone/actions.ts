@@ -5,7 +5,7 @@ import * as releaseCache from '../../lib/release-cache'
 import { formatComfyVersion } from '../../lib/version'
 import type { ComfyVersion } from '../../lib/version'
 import { resolveLocalVersion } from '../../lib/version-resolve'
-import { readGitHead } from '../../lib/git'
+import { readGitHead, rollbackComfySource } from '../../lib/git'
 import { installFilteredRequirements } from '../../lib/pip'
 import { copyDirWithProgress } from '../../lib/copy'
 import { listCustomNodes, findComfyUIDir, backupDir, mergeDirFlat } from '../../lib/migrate'
@@ -47,13 +47,27 @@ export async function handleAction(
 
     const targetSnapshot = await snapshots.loadSnapshot(installation.installPath, file)
 
+    // Capture HEAD before the git checkout so a failed/cancelled restore can roll
+    // the source back, keeping source + packages consistent (all-or-nothing).
+    const comfyuiDir = path.join(installation.installPath, 'ComfyUI')
+    const preRestoreHead = readGitHead(comfyuiDir)
+
     sendOutput('\n── Restore ComfyUI Version ──\n')
     const comfyResult = await snapshots.restoreComfyUIVersion(
-      installation.installPath, targetSnapshot, sendOutput
+      installation.installPath, targetSnapshot, sendOutput, signal
     )
     sendProgress('restore-comfyui', { percent: 100, status: comfyResult.changed ? 'Restored' : 'Up to date' })
 
-    if (signal?.aborted) return { ok: false, message: 'Cancelled' }
+    // If the source checkout itself failed, don't touch nodes/pip — nothing moved
+    // to roll back, just report the failure.
+    if (comfyResult.error) {
+      return { ok: false, message: `ComfyUI restore failed: ${comfyResult.error}` }
+    }
+
+    if (signal?.aborted) {
+      if (preRestoreHead) await rollbackComfySource(comfyuiDir, preRestoreHead, sendOutput)
+      return { ok: false, message: 'Cancelled; ComfyUI source was rolled back.' }
+    }
 
     // Restore custom nodes before pip — node installs may add pip dependencies.
     sendOutput('\n── Restore Nodes ──\n')
@@ -62,22 +76,49 @@ export async function handleAction(
       settings.getMirrorConfig()
     )
 
-    if (signal?.aborted) return { ok: false, message: 'Cancelled' }
+    if (signal?.aborted) {
+      if (preRestoreHead) await rollbackComfySource(comfyuiDir, preRestoreHead, sendOutput)
+      return { ok: false, message: 'Cancelled; ComfyUI source was rolled back. Custom node changes may be partial.' }
+    }
 
     let pipResult: snapshots.RestoreResult = {
       installed: [], removed: [], changed: [],
       protectedSkipped: [], failed: [], errors: [],
     }
+    let pipError: string | null = null
     if (targetSnapshot.skipPipSync) {
       sendOutput('\n── Restore Packages (skipped: snapshot has skipPipSync) ──\n')
       sendProgress('restore-pip', { percent: 100, status: 'Skipped' })
     } else {
       sendOutput('\n── Restore Packages ──\n')
-      pipResult = await snapshots.restorePipPackages(
-        installation.installPath, installation, targetSnapshot,
-        (phase, data) => sendProgress(phase === 'restore' ? 'restore-pip' : phase, data),
-        sendOutput, signal, settings.getMirrorConfig()
-      )
+      try {
+        pipResult = await snapshots.restorePipPackages(
+          installation.installPath, installation, targetSnapshot,
+          (phase, data) => sendProgress(phase === 'restore' ? 'restore-pip' : phase, data),
+          sendOutput, signal, settings.getMirrorConfig()
+        )
+      } catch (err) {
+        pipError = (err as Error).message
+      }
+    }
+
+    // Transactional guard: restorePipPackages reverts its own package changes on
+    // failure/abort, but never the git checkout done above. If the package phase
+    // failed, was cancelled, or threw, roll the source back to the pre-restore
+    // commit so we land on the consistent pre-restore state instead of
+    // snapshot-source + original-packages.
+    if (pipError || pipResult.failed.length > 0 || signal?.aborted) {
+      let rolledBack = true
+      if (preRestoreHead && readGitHead(comfyuiDir) !== preRestoreHead) {
+        rolledBack = await rollbackComfySource(comfyuiDir, preRestoreHead, sendOutput)
+      }
+      const headline = signal?.aborted
+        ? 'Snapshot restore cancelled.'
+        : (pipError ? `Snapshot package restore failed: ${pipError}` : 'Snapshot package restore failed.')
+      const tail = rolledBack
+        ? 'ComfyUI source was rolled back to the pre-restore version; package changes were reverted where possible.'
+        : 'Package changes were reverted where possible, but ComfyUI source rollback failed.'
+      return { ok: false, message: `${headline}\n\n${tail}` }
     }
 
     const summary: string[] = []
@@ -85,8 +126,6 @@ export async function handleAction(
     if (comfyResult.changed) {
       summary.push(`ComfyUI: checked out ${(comfyResult.commit || targetSnapshot.comfyui.commit || '').slice(0, 7)}`)
     }
-    if (comfyResult.error) summary.push(`ComfyUI restore failed: ${comfyResult.error}`)
-
     const nodeActions = nodeResult.installed.length + nodeResult.switched.length +
       nodeResult.enabled.length + nodeResult.disabled.length + nodeResult.removed.length
     if (nodeActions > 0) {
@@ -111,12 +150,13 @@ export async function handleAction(
     if (pipResult.protectedSkipped.length > 0) summary.push(`${pipResult.protectedSkipped.length} protected (skipped)`)
     if (pipResult.failed.length > 0) summary.push(`${pipResult.failed.length} package(s) failed`)
 
-    const totalFailures = nodeResult.failed.length + pipResult.failed.length + (comfyResult.error ? 1 : 0)
+    // comfyResult.error and pip/abort failures already returned above; only
+    // best-effort custom-node failures can reach here.
+    const totalFailures = nodeResult.failed.length
 
     // Collect specific failures so the error surface explains WHY a restore
     // failed instead of a bare "N operation(s) failed".
     const failureDetails: string[] = []
-    if (comfyResult.error) failureDetails.push(`ComfyUI: ${comfyResult.error}`)
     for (const f of nodeResult.failed) failureDetails.push(`Node ${f.id}: ${f.error}`)
     for (const e of pipResult.errors) failureDetails.push(e)
     const failMessage = (headline: string): string =>
@@ -130,20 +170,16 @@ export async function handleAction(
 
     sendOutput(`\n${totalFailures > 0 ? '⚠' : '✓'} ${t('standalone.snapshotRestoreComplete')}: ${summary.join('; ')}\n`)
 
-    if (pipResult.failed.length > 0) {
-      return { ok: false, message: failMessage(t('standalone.snapshotRestoreReverted')) }
-    }
-
     // Restore channel + version/lastRollback state so the release cache sees
-    // accurate state for the restored channel.
-    const comfyuiDir = path.join(installation.installPath, 'ComfyUI')
+    // accurate state for the restored channel. (Package-restore failures already
+    // returned above after rolling the source back.)
     const restoredHead = comfyResult.commit || readGitHead(comfyuiDir)
     const restoreState = snapshots.buildPostRestoreState(
       targetSnapshot, comfyResult,
       installation.updateInfoByChannel as Record<string, Record<string, unknown>> | undefined,
       installation.comfyVersion as ComfyVersion | undefined
     )
-    if (!comfyResult.error && restoredHead) {
+    if (restoredHead) {
       const resolved = await resolveLocalVersion(comfyuiDir, restoredHead)
       restoreState.comfyVersion = resolved
       const tag = formatComfyVersion(resolved, 'short')

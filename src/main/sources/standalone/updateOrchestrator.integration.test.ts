@@ -347,6 +347,55 @@ describe.skipIf(!HAS_GIT)('runComfyUIUpdate integration', () => {
     })
   })
 
+  describe('dependency-sync rollback', () => {
+    const headSha = (): string =>
+      execFileSync('git', ['rev-parse', 'HEAD'], { cwd: comfyuiDir, windowsHide: true, stdio: 'pipe' }).toString().trim()
+
+    it('rolls ComfyUI source back to PRE_UPDATE_HEAD when the requirements install fails', async () => {
+      spawnState.pythonHandler = makeSuccessfulUpdateHandler(comfyuiDir, repoShas.v2Sha)
+      spawnState.uvHandler = () => fakeProc({ exitCode: 1 })
+
+      expect(headSha()).toBe(repoShas.v1Sha) // pre-update state
+
+      const opts = makeBaseOpts(installPath)
+      const result = await runComfyUIUpdate(opts)
+
+      expect(result.ok).toBe(false)
+      expect(result.message).toMatch(/rolled back/i)
+      // Source is back at the pre-update commit, not the failed-update commit.
+      expect(headSha()).toBe(repoShas.v1Sha)
+
+      // No success metadata persisted on the failure path.
+      const updateFn = opts.update as ReturnType<typeof vi.fn>
+      const calls = updateFn.mock.calls.map((c: unknown[]) => c[0] as Record<string, unknown>)
+      expect(calls.some((c) => c.comfyVersion !== undefined)).toBe(false)
+      expect(calls.some((c) => c.lastSnapshot !== undefined)).toBe(false)
+    })
+
+    it('fails fast and skips the manager requirements install when the main one fails', async () => {
+      spawnState.pythonHandler = makeSuccessfulUpdateHandler(comfyuiDir, repoShas.v2Sha)
+      spawnState.uvHandler = () => fakeProc({ exitCode: 1 })
+
+      const opts = makeBaseOpts(installPath)
+      await runComfyUIUpdate(opts)
+
+      // Only the main requirements install was attempted; manager reqs skipped.
+      const installCalls = spawnState.uvCalls.filter((a) => a.includes('install'))
+      expect(installCalls.length).toBe(1)
+    })
+
+    it('keeps the updated source and persists version when the install succeeds', async () => {
+      spawnState.pythonHandler = makeSuccessfulUpdateHandler(comfyuiDir, repoShas.v2Sha)
+      spawnState.uvHandler = () => fakeProc({ exitCode: 0 })
+
+      const opts = makeBaseOpts(installPath)
+      const result = await runComfyUIUpdate(opts)
+
+      expect(result.ok).toBe(true)
+      expect(headSha()).toBe(repoShas.v2Sha) // no rollback on success
+    })
+  })
+
   describe('cancellation', () => {
     it('returns cancelled when signal is already aborted', async () => {
       const controller = new AbortController()
