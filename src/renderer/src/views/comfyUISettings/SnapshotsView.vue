@@ -216,11 +216,9 @@ const latestRelative = computed<string | null>(() => {
 
 function autoExpandFirst(): void {
   if (expandedFilenames.value.size > 0) return
-  const firstSnapshot = timeline.value.find(
-    (item): item is Extract<TimelineItem, { kind: 'snapshot' }> => item.kind === 'snapshot'
-  )
-  if (firstSnapshot) {
-    expandedFilenames.value = new Set([firstSnapshot.snapshot.filename])
+  const newest = snapshots.value[0]
+  if (newest) {
+    expandedFilenames.value = new Set([newest.filename])
   }
 }
 
