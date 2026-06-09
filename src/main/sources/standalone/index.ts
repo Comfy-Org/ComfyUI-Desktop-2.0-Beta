@@ -4,7 +4,7 @@ import { fetchJSON } from '../../lib/fetch'
 import { parseArgs, extractPort, formatTime } from '../../lib/util'
 import { t } from '../../lib/i18n'
 import { launchAction } from '../../lib/actions'
-import { getLatestStableTag } from '../../lib/comfyui-releases'
+import { getLatestStableTag, getStableTags, STABLE_TAG_PICKER_LIMIT } from '../../lib/comfyui-releases'
 import { copyDirWithProgress } from '../../lib/copy'
 import {
   PLATFORM_PREFIX, DEFAULT_LAUNCH_ARGS,
@@ -121,6 +121,11 @@ export const standalone: SourcePlugin = {
   get fields() {
     return [
       { id: 'release', label: t('common.release'), type: 'select' as const },
+      // Last-N stable tags ordered newest first. Only shown for the 'stable'
+      // channel; the 'latest' channel always follows master HEAD by definition,
+      // and a tag picker there would contradict the channel intent. The
+      // wizard renders an empty/disabled select on 'latest' (zero options).
+      { id: 'comfyVersion', label: t('standalone.comfyVersion'), type: 'select' as const },
       { id: 'variant', label: t('standalone.variant'), type: 'select' as const, renderAs: 'cards' as const },
     ]
   },
@@ -166,6 +171,14 @@ export const standalone: SourcePlugin = {
     const isStable = selections.release?.value === 'stable'
     const isLatest = selections.release?.value === 'latest'
     const releaseTag = r2Release?.tag || (selections.release?.value || 'unknown')
+    // Only honour a comfyVersion pick on the stable channel; getFieldOptions
+    // returns [] for 'latest', so any stale value carried in selections from
+    // a prior channel toggle is dropped here as a defence-in-depth.
+    const pickedComfyTag = isStable
+      ? (typeof selections.comfyVersion?.value === 'string' && /^v\d+\.\d+\.\d+$/.test(selections.comfyVersion.value)
+          ? selections.comfyVersion.value
+          : undefined)
+      : undefined
     return {
       version: r2Release?.comfyui_version || manifest?.comfyui_ref || releaseTag,
       releaseTag,
@@ -186,6 +199,7 @@ export const standalone: SourcePlugin = {
       ...(isStable || isLatest ? { autoUpdateComfyUI: true } : {}),
       ...(isStable ? { updateChannel: 'stable' } : {}),
       ...(isLatest ? { updateChannel: 'latest' } : {}),
+      ...(pickedComfyTag ? { comfyVersionTag: pickedComfyTag } : {}),
     }
   },
 
@@ -405,6 +419,23 @@ export const standalone: SourcePlugin = {
         })
       }
       return options
+    }
+
+    if (fieldId === 'comfyVersion') {
+      // The picker is only meaningful on 'stable' — 'latest' tracks master
+      // HEAD by intent, and the post-install update already fast-forwards
+      // there. Returning [] makes the wizard render an empty/disabled select.
+      if (selections.release?.value !== 'stable') return []
+      const tags = await getStableTags({ limit: STABLE_TAG_PICKER_LIMIT })
+      if (tags.length === 0) return []
+      // Newest first; the wizard auto-selects the `recommended` option so
+      // the default lands on the most recent stable tag.
+      return tags.map((tag, i) => ({
+        value: tag,
+        label: tag,
+        recommended: i === 0,
+        description: i === 0 ? t('newInstall.latestStable') : undefined,
+      }))
     }
 
     if (fieldId === 'variant') {

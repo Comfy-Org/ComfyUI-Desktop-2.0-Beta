@@ -360,20 +360,22 @@ async function loadFieldOptions(fieldIndex: number): Promise<void> {
     if (gen !== loadGeneration) return
 
     fieldLoading.value.set(field.id, false)
-
-    if (options.length === 0) {
-      fieldOptions.value.set(field.id, [])
-      return
-    }
-
     fieldOptions.value.set(field.id, options)
 
-    let defaultIndex = options.findIndex((opt) => opt.recommended)
-    if (defaultIndex < 0) defaultIndex = 0
-    const defaultOption = options[defaultIndex]
-    if (defaultOption) selections.value[field.id] = defaultOption
+    if (options.length > 0) {
+      let defaultIndex = options.findIndex((opt) => opt.recommended)
+      if (defaultIndex < 0) defaultIndex = 0
+      const defaultOption = options[defaultIndex]
+      if (defaultOption) selections.value[field.id] = defaultOption
+    } else {
+      // Conditional fields (e.g. `comfyVersion` on the 'latest' channel) return
+      // [] when not applicable. Drop any stale selection so a value from a
+      // prior channel toggle doesn't leak into `buildInstallation`.
+      delete selections.value[field.id]
+    }
 
-    // Load next select field
+    // Load next select field. An empty-options field still hands off downstream
+    // so a conditional field can't strand the chain (would leave Continue disabled).
     const nextSelect = source.fields.findIndex((f, i) => i > fieldIndex && f.type !== 'text')
     if (nextSelect >= 0) {
       await loadFieldOptions(nextSelect)
@@ -603,6 +605,16 @@ function onSelectFieldChange(field: SourceField, fieldIndex: number, value: stri
   handleFieldSelectChange(field, fieldIndex, String(idx))
 }
 
+/** Conditional fields like `comfyVersion` (only meaningful on the stable
+ *  channel) return an empty options array when not applicable. Hide them
+ *  outright so the wizard doesn't render a "No options" dropdown. */
+function isHiddenWhenEmpty(field: SourceField): boolean {
+  if (field.type === 'text' || field.renderAs === 'cards') return false
+  const options = fieldOptions.value.get(field.id)
+  if (options === undefined) return false
+  return options.length === 0 && !fieldLoading.value.get(field.id)
+}
+
 defineExpose({ open })
 </script>
 
@@ -734,6 +746,7 @@ defineExpose({ open })
                 <div v-if="currentSource" id="source-fields">
                   <div
                     v-for="(field, fieldIndex) in currentSource.fields"
+                    v-show="!isHiddenWhenEmpty(field)"
                     :key="field.id"
                     class="field"
                   >
