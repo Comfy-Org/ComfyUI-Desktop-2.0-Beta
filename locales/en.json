@@ -375,7 +375,8 @@
     "processExited": "Process exited",
     "processCrashed": "Process crashed (exit code {code})",
     "sessionEnded": "This console session ended. Restart it to keep using the shell.",
-    "restartSession": "Restart console"
+    "restartSession": "Restart console",
+    "shellLabel": "Shell"
   },
 
   "settingsModal": {

@@ -10,6 +10,8 @@ import todesktop from '@todesktop/runtime'
 import * as ipc from './lib/ipc'
 import { getAppVersion } from './lib/ipc'
 import type { ExitCallbackInfo } from './lib/ipc'
+import { closeAllPopouts } from './lib/popoutWindows'
+import { disposeAllTerminals } from './lib/terminal'
 import * as updater from './lib/updater'
 import * as settings from './settings'
 import { installAppMenu } from './menu'
@@ -2089,6 +2091,10 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
         if (!entry.window.isDestroyed()) entry.window.destroy()
       }
       comfyWindows.clear()
+      // Pop-out terminal/logs windows live outside `comfyWindows`; close them
+      // here too and kill their shared shells so no window or PTY child lingers.
+      closeAllPopouts()
+      disposeAllTerminals()
       if (tray) {
         tray.destroy()
         tray = null

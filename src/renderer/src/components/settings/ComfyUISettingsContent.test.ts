@@ -24,7 +24,7 @@ const messages = {
       tabUpdate: 'Update',
       tabSnapshots: 'Snapshots',
       tabStorage: 'Storage',
-      tabConsole: 'Console',
+      tabTerminal: 'Terminal',
       relaunch: 'Relaunch',
       more: 'More',
     },
@@ -427,7 +427,7 @@ describe('ComfyUISettingsContent', () => {
      *  Every current tab carries a concept tooltip, so finding a Tooltip whose
      *  text is one of these would mean the tab fell back to the label-echo
      *  path — what these tests are guarding against. */
-    const TAB_LABELS = new Set(['Update', 'Startup Args', 'Snapshots', 'Storage', 'Console', 'About'])
+    const TAB_LABELS = new Set(['Update', 'Startup Args', 'Snapshots', 'Storage', 'Terminal', 'About'])
 
     function tabTooltips(w: VueWrapper) {
       return w

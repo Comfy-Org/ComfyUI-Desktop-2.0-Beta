@@ -49,6 +49,10 @@ export const DATADOG_MIRRORED_EVENT_NAMES: ReadonlySet<string> = new Set([
   'comfy.desktop.snapshot.restore_comfyui_version.error',
   'comfy.desktop.snapshot.restore_custom_nodes.error',
   'comfy.desktop.snapshot.restore_pip_packages.error',
+  // Interrupted update/restore recovery — a hard-killed op left ComfyUI's source
+  // moved and we couldn't roll it back. `gave_up=true` means we stopped retrying
+  // and let the (likely-inconsistent) install launch anyway.
+  'comfy.desktop.recovery.failed',
   // Operational signal for the identity migration rollout.
   'comfy.desktop.identity.migrated',
   // Sign-in failures — alert if a provider's auth bridge breaks (OAuth

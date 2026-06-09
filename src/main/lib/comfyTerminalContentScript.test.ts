@@ -38,6 +38,11 @@ describe('getComfyTerminalContentScript', () => {
     expect(script).toContain(`title: 'Terminal'`)
   })
 
+  it('waits for the native Logs tab so Terminal registers second', () => {
+    expect(script).toContain('logs-terminal')
+    expect(script).toContain('extensionManager')
+  })
+
   it('uses the shared desktop terminal transport', () => {
     for (const member of ['subscribe', 'write', 'resize', 'restart', 'onOutput', 'onExited']) {
       expect(script).toContain(member)
