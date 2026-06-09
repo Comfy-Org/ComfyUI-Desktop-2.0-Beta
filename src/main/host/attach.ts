@@ -3,6 +3,7 @@ import { getAppVersion } from '../lib/ipc'
 import { attachSessionDownloadHandler } from '../lib/comfyDownloadManager'
 import { getModelDownloadContentScript } from '../lib/comfyContentScript'
 import { getComfyTerminalContentScript } from '../lib/comfyTerminalContentScript'
+import { closeInstallPopouts } from '../lib/popoutWindows'
 import { _operationAborts, sourceMap } from '../lib/ipc/shared'
 import { TITLEBAR_BG } from '../lib/theme'
 import * as mainTelemetry from '../lib/telemetry'
@@ -610,6 +611,11 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
         comfyContents.off('will-navigate', relaunch.navBlocker)
       }
       ipc.stopRunning(id)
+      // Close this install's pop-out terminal/logs windows. They're standalone
+      // BrowserWindows outside the host registry, so without this they outlive
+      // the install and — being open windows — suppress `window-all-closed`,
+      // keeping the whole app alive after the user closed its host window.
+      closeInstallPopouts(id)
       fx.comfyFailRetryTimerCancels.delete(id)
       fx.comfyReloads.delete(id)
       fx.comfyZoomResets.delete(id)

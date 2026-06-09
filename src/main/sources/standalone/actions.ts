@@ -17,6 +17,7 @@ import * as snapshots from '../../lib/snapshots'
 import { getActivePythonPath, getActiveUvPath, getMasterPythonPath } from './envPaths'
 import { COMFYUI_REPO, getEffectiveChannel } from './updateSections'
 import { runComfyUIUpdate } from './updateOrchestrator'
+import { releaseInstallTerminalForFsOp } from '../../lib/popoutWindows'
 import type { InstallationRecord } from '../../installations'
 import type { ActionResult, ActionTools } from '../../types/sources'
 
@@ -37,6 +38,11 @@ export async function handleAction(
   if (actionId === 'snapshot-restore') {
     const file = actionData?.file as string | undefined
     if (!file) return { ok: false, message: t('standalone.snapshotNoFile') }
+
+    // Drop the shared shell + pop-outs first: on Windows a live shell holds a
+    // handle on the install dir and any running python locks venv DLLs, which
+    // breaks the site-packages removals/upgrades this restore performs.
+    releaseInstallTerminalForFsOp(installation.id)
 
     sendProgress('steps', { steps: [
       { phase: 'restore-comfyui', label: t('standalone.snapshotRestoreComfyUIPhase') },
@@ -345,6 +351,11 @@ async function handleUpdateComfyUI(
   if (!fs.existsSync(gitDir)) {
     return { ok: false, message: t('standalone.updateNoGit') }
   }
+
+  // Drop the shared shell + pop-outs before touching git / the venv: a live
+  // shell's cwd and any running python lock files the update would rewrite
+  // (Windows can't replace open files), so `uv pip` upgrades would fail.
+  releaseInstallTerminalForFsOp(installation.id)
 
   // Adopted installs route through `adoptedPythonPath`; only managed installs
   // need the standalone-env Python, so check existence per-case.

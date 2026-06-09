@@ -231,3 +231,25 @@ export async function openTerminalPopout(installationId: string): Promise<void> 
     void win.webContents.executeJavaScript(buildPopoutScript(installationId)).catch(() => {})
   })
 }
+
+/**
+ * Close the terminal pop-out for a single install, if one is open. Used when
+ * the install is detached / its host window closes (so an orphaned pop-out
+ * can't keep the app alive) and before update/restore (so the shared shell
+ * can be torn down without a surface still bound to it). The window's
+ * `closed` handler drops the map entry; we delete eagerly too so a
+ * concurrent re-open spawns a fresh window.
+ */
+export function closeTerminalPopout(installationId: string): void {
+  const win = popoutsByInstallation.get(installationId)
+  popoutsByInstallation.delete(installationId)
+  if (win && !win.isDestroyed()) win.destroy()
+}
+
+/** Close every open terminal pop-out (e.g. on app quit). */
+export function closeAllTerminalPopouts(): void {
+  for (const win of popoutsByInstallation.values()) {
+    if (!win.isDestroyed()) win.destroy()
+  }
+  popoutsByInstallation.clear()
+}
