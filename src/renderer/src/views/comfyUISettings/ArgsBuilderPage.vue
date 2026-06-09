@@ -160,7 +160,7 @@ function selectExclusive(group: string, name: string): void {
   if (chosen) emitArgsChanged(chosen.name, chosen.type)
 }
 
-// Backs the select's synthetic "None" option (radios can't deselect).
+// Clears every member of an exclusive group (backs the "None" radio).
 function clearExclusive(group: string): void {
   const next = new Map(parsed.value.known)
   for (const a of schema.value) {
@@ -174,6 +174,29 @@ function activeInGroup(group: string): string {
     if (a.exclusiveGroup === group && parsed.value.known.has(a.name)) return a.name
   }
   return ''
+}
+
+// Radio rows for an exclusive cluster: a synthetic "" (None) entry followed by
+// each member, so the template renders them with a single loop.
+interface ClusterOption {
+  value: string
+  flag: string
+  help: string
+}
+function clusterOptions(args: ComfyArgDef[]): ClusterOption[] {
+  return [
+    {
+      value: '',
+      flag: t('comfyUISettings.argsExclusiveNone', 'None (default)'),
+      help: t('comfyUISettings.argsExclusiveNoneHint', 'No flag from this group is set.')
+    },
+    ...args.map((a) => ({ value: a.name, flag: `--${a.name}`, help: a.help }))
+  ]
+}
+
+function onExclusivePick(group: string, value: string): void {
+  if (value === '') clearExclusive(group)
+  else selectExclusive(group, value)
 }
 
 // Score a query token against help prose. Strict (word-boundary or substring only); loose subsequence would make "cuda" hit unrelated help.
@@ -416,44 +439,21 @@ const unknownFlagsMessage = computed(() => {
                 {{ t('comfyUISettings.argsExclusiveLabel', 'Choose one') }}
               </span>
               <label
+                v-for="opt in clusterOptions(item.args)"
+                :key="opt.value"
                 class="args-page-radio-row"
-                :class="{ 'is-active': activeInGroup(item.group) === '' }"
+                :class="{ 'is-active': activeInGroup(item.group) === opt.value }"
               >
                 <input
                   type="radio"
                   class="args-page-radio-input"
                   :name="`exclusive-${item.group}`"
-                  :checked="activeInGroup(item.group) === ''"
-                  @change="clearExclusive(item.group!)"
+                  :checked="activeInGroup(item.group) === opt.value"
+                  @change="onExclusivePick(item.group!, opt.value)"
                 >
                 <span class="args-page-radio-indicator" aria-hidden="true"></span>
                 <div class="args-page-radio-body">
-                  <span class="args-page-flag">{{
-                    t('comfyUISettings.argsExclusiveNone', 'None (default)')
-                  }}</span>
-                  <p class="args-page-help">
-                    {{
-                      t('comfyUISettings.argsExclusiveNoneHint', 'No flag from this group is set.')
-                    }}
-                  </p>
-                </div>
-              </label>
-              <label
-                v-for="opt in item.args"
-                :key="opt.name"
-                class="args-page-radio-row"
-                :class="{ 'is-active': activeInGroup(item.group) === opt.name }"
-              >
-                <input
-                  type="radio"
-                  class="args-page-radio-input"
-                  :name="`exclusive-${item.group}`"
-                  :checked="activeInGroup(item.group) === opt.name"
-                  @change="selectExclusive(item.group!, opt.name)"
-                >
-                <span class="args-page-radio-indicator" aria-hidden="true"></span>
-                <div class="args-page-radio-body">
-                  <span class="args-page-flag">--{{ opt.name }}</span>
+                  <span class="args-page-flag">{{ opt.flag }}</span>
                   <p class="args-page-help">{{ opt.help }}</p>
                 </div>
               </label>
