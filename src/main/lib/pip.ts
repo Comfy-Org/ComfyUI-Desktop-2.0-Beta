@@ -6,6 +6,42 @@ import { killProcTree } from './process'
 /** Regex matching PyTorch-family packages that must never be overwritten by pip. */
 export const PYTORCH_RE = /^(torch|torchvision|torchaudio|torchsde)(\s*[<>=!~;[#]|$)/i
 
+/** Name prefixes for the CUDA runtime/accelerator distributions whose installed
+ *  builds must be preserved across pip operations. CUDA wheels are served only
+ *  from download.pytorch.org, which is never part of the update index set, so
+ *  letting `uv pip install --upgrade` re-resolve these would silently swap a CUDA
+ *  build for the CPU wheel PyPI/mirrors serve on Windows. */
+export const CUDA_RUNTIME_PREFIXES = ['nvidia', 'triton', 'cuda'] as const
+
+/** True when a package belongs to the torch/CUDA family that must never be
+ *  re-resolved during an update: `torch`/`torchvision`/`torchaudio`/`torchsde`
+ *  (shared with the requirements-line filter via `PYTORCH_RE`), other `torch-*`
+ *  distributions like `torch-tensorrt`, and the `nvidia`/`triton`/`cuda` runtime
+ *  libraries (incl. dashed/underscored variants such as `nvidia-cuda-runtime-cu12`). */
+export function isTorchFamilyPackage(name: string): boolean {
+  const trimmed = name.trim()
+  if (PYTORCH_RE.test(trimmed)) return true
+  const lower = trimmed.toLowerCase()
+  if (lower.startsWith('torch-') || lower.startsWith('torch_')) return true
+  return CUDA_RUNTIME_PREFIXES.some(
+    (prefix) => lower === prefix || lower.startsWith(prefix + '-') || lower.startsWith(prefix + '_')
+  )
+}
+
+/** Build `name==version` constraint lines pinning every installed torch-family
+ *  package to its current version. Editable installs and direct URL/VCS
+ *  references are skipped (they have no plain version to pin). Pure so it can be
+ *  unit-tested without spawning uv. */
+export function torchConstraintLinesFrom(installed: Record<string, string>): string[] {
+  const lines: string[] = []
+  for (const [name, version] of Object.entries(installed)) {
+    if (!isTorchFamilyPackage(name)) continue
+    if (version.startsWith('-e ') || version.includes('://') || version.includes('@')) continue
+    lines.push(`${name}==${version}`)
+  }
+  return lines
+}
+
 /** Run a uv pip command and stream output. Returns the exit code. */
 export function runUvPip(
   uvPath: string,
@@ -48,6 +84,29 @@ export interface PipMirrorConfig {
   useChineseMirrors?: boolean
 }
 
+/** Write a constraints file pinning the currently-installed torch-family packages
+ *  to their exact versions, so a subsequent `uv pip install --upgrade` keeps the
+ *  CUDA build instead of re-resolving to the CPU wheel. Returns the file path, or
+ *  null if nothing needs pinning (or the freeze failed). The caller owns deletion. */
+export async function writeTorchConstraintsFile(
+  uvPath: string,
+  pythonPath: string,
+  installPath: string,
+  tempName: string,
+): Promise<string | null> {
+  let installed: Record<string, string>
+  try {
+    installed = await pipFreeze(uvPath, pythonPath)
+  } catch {
+    return null
+  }
+  const lines = torchConstraintLinesFrom(installed)
+  if (lines.length === 0) return null
+  const constraintPath = path.join(installPath, tempName)
+  await fs.promises.writeFile(constraintPath, lines.join('\n') + '\n', 'utf-8')
+  return constraintPath
+}
+
 /** Install a requirements file via `uv pip install -r`, filtering out PyTorch packages first.
  *  Pass `upgrade: true` to add `--upgrade` so already-installed packages whose pinned versions
  *  drifted (e.g. the bundled venv's `comfy-aimdo` lagging ComfyUI's `requirements.txt`) get
@@ -68,12 +127,19 @@ export async function installFilteredRequirements(
   const filteredPath = path.join(installPath, tempName)
   await fs.promises.writeFile(filteredPath, filtered, 'utf-8')
 
+  // Pin the installed torch/CUDA family so `--upgrade` (and transitive consumers
+  // like kornia/spandrel) can't re-resolve torch to the CPU wheel served by
+  // PyPI/mirrors when download.pytorch.org isn't in the index set.
+  const constraintPath = await writeTorchConstraintsFile(uvPath, pythonPath, installPath, `${tempName}.constraints`)
+
   try {
     const indexArgs = getPipIndexArgs(mirrors?.pypiMirror, mirrors?.useChineseMirrors)
     const upgradeArg = upgrade ? ['--upgrade'] : []
-    return await runUvPip(uvPath, ['pip', 'install', ...upgradeArg, '-r', filteredPath, '--python', pythonPath, ...indexArgs], installPath, sendOutput, signal)
+    const constraintArg = constraintPath ? ['--constraint', constraintPath] : []
+    return await runUvPip(uvPath, ['pip', 'install', ...upgradeArg, '-r', filteredPath, ...constraintArg, '--python', pythonPath, ...indexArgs], installPath, sendOutput, signal)
   } finally {
     try { await fs.promises.unlink(filteredPath) } catch {}
+    if (constraintPath) { try { await fs.promises.unlink(constraintPath) } catch {} }
   }
 }
 

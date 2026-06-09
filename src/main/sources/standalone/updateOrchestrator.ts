@@ -4,7 +4,7 @@ import { spawn } from 'child_process'
 import { killProcTree } from '../../lib/process'
 import { resolveLocalVersion, clearVersionCache, type LatestTagOverride } from '../../lib/version-resolve'
 import { readGitHead, fetchTags, findLatestVersionTag, revParseRef } from '../../lib/git'
-import { PYTORCH_RE, installFilteredRequirements, getPipIndexArgs } from '../../lib/pip'
+import { PYTORCH_RE, installFilteredRequirements, getPipIndexArgs, writeTorchConstraintsFile } from '../../lib/pip'
 import { formatComfyVersion } from '../../lib/version'
 import type { ComfyVersion } from '../../lib/version'
 import { t } from '../../lib/i18n'
@@ -256,13 +256,20 @@ export async function runComfyUIUpdate(opts: UpdateOrchestrationOptions): Promis
         const filteredReqPath = path.join(installPath, '.comfyui-reqs-filtered.txt')
         await fs.promises.writeFile(filteredReqPath, filteredReqs, 'utf-8')
 
+        // Pin the installed torch/CUDA family so `--upgrade` keeps the CUDA build
+        // instead of re-resolving torch (pulled transitively by kornia/spandrel)
+        // to the CPU wheel PyPI/mirrors serve. Applied to both the dry-run and the
+        // real install so the conflict report matches what actually happens.
+        const constraintPath = await writeTorchConstraintsFile(uvPath, activeEnvPython, installPath, '.comfyui-reqs-filtered.constraints')
+        const constraintArg = constraintPath ? ['--constraint', constraintPath] : []
+
         try {
           const indexArgs = getPipIndexArgs(settings.get('pypiMirror'), settings.get('useChineseMirrors') === true)
           sendProgress('deps', { percent: -1, status: t('standalone.updateDepsDryRun') })
           if (signal?.aborted) return { ok: false, message: 'Cancelled', installation }
 
           const dryRunResult = await spawnCommand(
-            uvPath, ['pip', 'install', '--dry-run', '--upgrade', '-r', filteredReqPath, '--python', activeEnvPython, ...indexArgs],
+            uvPath, ['pip', 'install', '--dry-run', '--upgrade', '-r', filteredReqPath, ...constraintArg, '--python', activeEnvPython, ...indexArgs],
             installPath, undefined, undefined, signal
           )
 
@@ -277,7 +284,7 @@ export async function runComfyUIUpdate(opts: UpdateOrchestrationOptions): Promis
           sendProgress('deps', { percent: -1, status: t('standalone.updateDepsInstalling') })
 
           const pipResult = await spawnCommand(
-            uvPath, ['pip', 'install', '--upgrade', '-r', filteredReqPath, '--python', activeEnvPython, ...indexArgs],
+            uvPath, ['pip', 'install', '--upgrade', '-r', filteredReqPath, ...constraintArg, '--python', activeEnvPython, ...indexArgs],
             installPath, sendOutput, sendOutput, signal
           )
 
@@ -286,6 +293,7 @@ export async function runComfyUIUpdate(opts: UpdateOrchestrationOptions): Promis
           }
         } finally {
           try { await fs.promises.unlink(filteredReqPath) } catch {}
+          if (constraintPath) { try { await fs.promises.unlink(constraintPath) } catch {} }
         }
       } else {
         sendProgress('update', { percent: -1, status: 'Installing updated dependencies' })

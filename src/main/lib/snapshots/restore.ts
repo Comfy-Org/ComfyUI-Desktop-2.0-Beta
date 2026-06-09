@@ -4,7 +4,7 @@ import { spawn } from 'child_process'
 import { readGitHead, isGitAvailable, gitClone, gitCheckoutCommit, gitFetchAndCheckout } from '../git'
 import { rewriteCloneUrl } from '../github-mirror'
 import { scanCustomNodes, nodeKey } from '../nodes'
-import { pipFreeze, runUvPip as sharedRunUvPip, installFilteredRequirements, getPipIndexArgs, type PipMirrorConfig } from '../pip'
+import { pipFreeze, runUvPip as sharedRunUvPip, installFilteredRequirements, getPipIndexArgs, isTorchFamilyPackage, type PipMirrorConfig } from '../pip'
 import { installCnrNode, switchCnrVersion, isSafePathComponent } from '../cnr'
 import { killProcTree } from '../process'
 import { formatComfyVersion } from '../version'
@@ -18,12 +18,10 @@ import * as settings from '../../settings'
 
 /** Packages never modified during snapshot restore (Manager's skip list plus core tooling). */
 const PROTECTED_EXACT = new Set(['pip', 'setuptools', 'wheel', 'uv'])
-const PROTECTED_PREFIXES = ['torch', 'nvidia', 'triton', 'cuda']
 
 function isProtectedPackage(name: string): boolean {
-  const lower = name.toLowerCase()
-  if (PROTECTED_EXACT.has(lower)) return true
-  return PROTECTED_PREFIXES.some((prefix) => lower === prefix || lower.startsWith(prefix + '-') || lower.startsWith(prefix + '_'))
+  if (PROTECTED_EXACT.has(name.toLowerCase())) return true
+  return isTorchFamilyPackage(name)
 }
 
 /** Normalize a package name for dist-info directory matching (PEP 503). */

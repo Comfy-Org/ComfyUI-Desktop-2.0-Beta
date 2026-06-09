@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { getPipIndexArgs, PYPI_INDEX_URL, PYPI_MIRROR_URLS } from './pip'
+import { getPipIndexArgs, PYPI_INDEX_URL, PYPI_MIRROR_URLS, isTorchFamilyPackage, torchConstraintLinesFrom } from './pip'
 
 /** Extract --index-url value from args. */
 function getIndexUrl(args: string[]): string | undefined {
@@ -131,5 +131,67 @@ describe('getPipIndexArgs', () => {
 
   it('passes undefined the same as no argument', () => {
     expect(getPipIndexArgs(undefined)).toEqual(getPipIndexArgs())
+  })
+})
+
+describe('isTorchFamilyPackage', () => {
+  it('matches the core torch packages', () => {
+    for (const name of ['torch', 'torchvision', 'torchaudio', 'torchsde']) {
+      expect(isTorchFamilyPackage(name)).toBe(true)
+    }
+  })
+
+  it('matches other torch-* distributions like torch-tensorrt', () => {
+    expect(isTorchFamilyPackage('torch-tensorrt')).toBe(true)
+    expect(isTorchFamilyPackage('torch_tensorrt')).toBe(true)
+  })
+
+  it('matches nvidia/triton/cuda distributions including dashed and underscored names', () => {
+    expect(isTorchFamilyPackage('nvidia-cuda-runtime-cu12')).toBe(true)
+    expect(isTorchFamilyPackage('nvidia_cudnn_cu12')).toBe(true)
+    expect(isTorchFamilyPackage('triton')).toBe(true)
+    expect(isTorchFamilyPackage('cuda-python')).toBe(true)
+  })
+
+  it('is case-insensitive', () => {
+    expect(isTorchFamilyPackage('Torch')).toBe(true)
+    expect(isTorchFamilyPackage('NVIDIA-CUDA-NVRTC-CU12')).toBe(true)
+  })
+
+  it('does not match unrelated packages that merely share a prefix substring', () => {
+    expect(isTorchFamilyPackage('torchmetrics-lite')).toBe(false) // not a dash/underscore boundary after "torch"
+    expect(isTorchFamilyPackage('cudatoolkit')).toBe(false)
+    expect(isTorchFamilyPackage('numpy')).toBe(false)
+    expect(isTorchFamilyPackage('spandrel')).toBe(false)
+  })
+})
+
+describe('torchConstraintLinesFrom', () => {
+  it('pins installed torch-family packages to exact versions, preserving local CUDA tags', () => {
+    const lines = torchConstraintLinesFrom({
+      torch: '2.5.1+cu121',
+      torchvision: '0.20.1+cu121',
+      'nvidia-cuda-runtime-cu12': '12.1.105',
+      numpy: '1.26.4',
+      spandrel: '0.4.1',
+    })
+    expect(lines).toContain('torch==2.5.1+cu121')
+    expect(lines).toContain('torchvision==0.20.1+cu121')
+    expect(lines).toContain('nvidia-cuda-runtime-cu12==12.1.105')
+    expect(lines).not.toContain('numpy==1.26.4')
+    expect(lines.some((l) => l.startsWith('spandrel'))).toBe(false)
+  })
+
+  it('skips editable and direct URL/VCS references that have no plain version', () => {
+    const lines = torchConstraintLinesFrom({
+      torch: '-e git+https://github.com/pytorch/pytorch@abc123#egg=torch',
+      torchvision: 'git+https://example.com/torchvision.git',
+      torchaudio: 'torchaudio @ file:///wheels/torchaudio.whl',
+    })
+    expect(lines).toEqual([])
+  })
+
+  it('returns an empty array when nothing is in the torch family', () => {
+    expect(torchConstraintLinesFrom({ numpy: '1.26.4', pillow: '10.0.0' })).toEqual([])
   })
 })
