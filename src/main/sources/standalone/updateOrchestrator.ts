@@ -4,7 +4,7 @@ import { spawn } from 'child_process'
 import { killProcTree } from '../../lib/process'
 import { resolveLocalVersion, clearVersionCache, type LatestTagOverride } from '../../lib/version-resolve'
 import { readGitHead, fetchTags, findLatestVersionTag, revParseRef } from '../../lib/git'
-import { PYTORCH_RE, installFilteredRequirements, getPipIndexArgs, writeTorchConstraintsFile } from '../../lib/pip'
+import { PYTORCH_RE, installFilteredRequirements, getPipIndexArgs } from '../../lib/pip'
 import { formatComfyVersion } from '../../lib/version'
 import type { ComfyVersion } from '../../lib/version'
 import { t } from '../../lib/i18n'
@@ -34,14 +34,10 @@ export interface UpdateOrchestrationOptions {
   dryRunConflictCheck?: boolean
   saveRollback?: boolean
   preUpdateSnapshot?: boolean
-  /** Force `uv pip install --upgrade -r requirements.txt` to run after the git
-   *  update, even when the requirements.txt content is byte-identical pre/post.
-   *  Used by the post-install auto-update in `install.ts` to reconcile the
-   *  pre-extracted standalone bundle's venv (which can ship deps lagging
-   *  ComfyUI's own pinned versions — most visibly `comfy-aimdo`, which crashes
-   *  loading with `'ModelMMAP' object has no attribute 'get_file_handle'` or
-   *  `ModuleNotFoundError: No module named 'comfy_aimdo.vram_buffer'` when the
-   *  bundled aimdo lags the source's import surface). */
+  /** Force `uv pip install -r requirements.txt` to run after the git update,
+   *  even when the requirements.txt content is byte-identical pre/post. Used
+   *  by the post-install auto-update in `install.ts` to reconcile the
+   *  pre-extracted standalone bundle's venv against ComfyUI's pinned deps. */
   forceDepsSync?: boolean
 }
 
@@ -256,21 +252,13 @@ export async function runComfyUIUpdate(opts: UpdateOrchestrationOptions): Promis
         const filteredReqPath = path.join(installPath, '.comfyui-reqs-filtered.txt')
         await fs.promises.writeFile(filteredReqPath, filteredReqs, 'utf-8')
 
-        let constraintPath: string | null = null
         try {
-          // Pin the installed torch/CUDA family so `--upgrade` keeps the CUDA build
-          // instead of re-resolving torch (pulled transitively by kornia/spandrel)
-          // to the CPU wheel PyPI/mirrors serve. Applied to both the dry-run and the
-          // real install so the conflict report matches what actually happens.
-          constraintPath = await writeTorchConstraintsFile(uvPath, activeEnvPython, installPath, '.comfyui-reqs-filtered.constraints')
-          const constraintArg = constraintPath ? ['--constraint', constraintPath] : []
-
           const indexArgs = getPipIndexArgs(settings.get('pypiMirror'), settings.get('useChineseMirrors') === true)
           sendProgress('deps', { percent: -1, status: t('standalone.updateDepsDryRun') })
           if (signal?.aborted) return { ok: false, message: 'Cancelled', installation }
 
           const dryRunResult = await spawnCommand(
-            uvPath, ['pip', 'install', '--dry-run', '--upgrade', '-r', filteredReqPath, ...constraintArg, '--python', activeEnvPython, ...indexArgs],
+            uvPath, ['pip', 'install', '--dry-run', '-r', filteredReqPath, '--python', activeEnvPython, ...indexArgs],
             installPath, undefined, undefined, signal
           )
 
@@ -285,7 +273,7 @@ export async function runComfyUIUpdate(opts: UpdateOrchestrationOptions): Promis
           sendProgress('deps', { percent: -1, status: t('standalone.updateDepsInstalling') })
 
           const pipResult = await spawnCommand(
-            uvPath, ['pip', 'install', '--upgrade', '-r', filteredReqPath, ...constraintArg, '--python', activeEnvPython, ...indexArgs],
+            uvPath, ['pip', 'install', '-r', filteredReqPath, '--python', activeEnvPython, ...indexArgs],
             installPath, sendOutput, sendOutput, signal
           )
 
@@ -294,14 +282,13 @@ export async function runComfyUIUpdate(opts: UpdateOrchestrationOptions): Promis
           }
         } finally {
           try { await fs.promises.unlink(filteredReqPath) } catch {}
-          if (constraintPath) { try { await fs.promises.unlink(constraintPath) } catch {} }
         }
       } else {
         sendProgress('update', { percent: -1, status: 'Installing updated dependencies' })
         const logFn = sendOutput ?? console.log
         const installResult = await installFilteredRequirements(
           reqPath, uvPath, activeEnvPython, installPath,
-          '.post-install-reqs.txt', logFn, signal, settings.getMirrorConfig(), true
+          '.post-install-reqs.txt', logFn, signal, settings.getMirrorConfig()
         )
         if (installResult !== 0) {
           console.warn(`Post-install requirements install exited with code ${installResult}`)
