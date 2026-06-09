@@ -49,9 +49,47 @@ export function stateDir(): string {
   return app.getPath("userData");
 }
 
+/** Windows only: the root of the drive the app was installed onto, when it
+ *  differs from the user's home drive. The NSIS installer lets the user pick an
+ *  install location (e.g. `D:\...`); this lets ComfyUI's large data dirs follow
+ *  that drive instead of always landing on the system drive. Returns null on
+ *  non-Windows, or when the app lives on the home drive (home is already the
+ *  right default there). */
+function selectedInstallDrive(): string | null {
+  if (process.platform !== "win32") return null;
+  try {
+    // Explicit win32 parsing so the drive is extracted correctly regardless of
+    // the host the code is exercised on (matches the platform `path` at runtime).
+    const exeDrive = path.win32.parse(app.getPath("exe")).root;   // e.g. "D:\\"
+    const homeDrive = path.win32.parse(app.getPath("home")).root; // e.g. "C:\\"
+    if (!exeDrive) return null;
+    if (exeDrive.toLowerCase() === homeDrive.toLowerCase()) return null;
+    return exeDrive;
+  } catch {
+    return null;
+  }
+}
+
+/** Base directory under which ComfyUI's large data dirs (installs, shared
+ *  models/input/output) live by default. On Windows, when the app was installed
+ *  to a non-system drive, this is that drive's root so data follows the user's
+ *  chosen drive; otherwise the user's home dir. */
+export function defaultDataRoot(): string {
+  return selectedInstallDrive() ?? app.getPath("home");
+}
+
+/** Default location for the multi-GB download cache. Follows the user's chosen
+ *  install drive on Windows; otherwise the platform cache dir (userData on
+ *  Windows/macOS, XDG cache on Linux). */
+export function defaultDownloadCacheDir(): string {
+  const drive = selectedInstallDrive();
+  if (drive) return path.join(drive, "ComfyUI-Cache", "download-cache");
+  return path.join(cacheDir(), "download-cache");
+}
+
 /** Built-in fallback when no `installDir` setting is configured. */
 export function builtinDefaultInstallDir(): string {
-  return path.join(app.getPath("home"), "ComfyUI-Installs");
+  return path.join(defaultDataRoot(), "ComfyUI-Installs");
 }
 
 /** Resolver for the user's configured install location, injected by settings.ts.

@@ -5,6 +5,7 @@ import {
   findLockingProcesses,
   MARKER_FILE,
   makeSendProgress,
+  deleteBrowserPartition,
 } from '../shared'
 import type { ActionContext, ActionResult } from './types'
 import { withAbortableSessionAction } from './withAbortable'
@@ -46,6 +47,7 @@ export async function handleDelete(ctx: ActionContext): Promise<ActionResult> {
       await cleanupAdoptedLegacyDir(adoptedBaseDir, noopProgress)
     }
     await installations.remove(installationId)
+    await deleteBrowserPartition(inst.id, inst.browserPartition as string | undefined)
     return { ok: true, navigate: 'list' }
   }
   const markerPath = path.join(inst.installPath, MARKER_FILE)
@@ -94,6 +96,7 @@ export async function handleDelete(ctx: ActionContext): Promise<ActionResult> {
       throw err
     }
     await installations.remove(installationId)
+    await deleteBrowserPartition(inst.id, inst.browserPartition as string | undefined)
     return { ok: true, navigate: 'list' }
   })
 }

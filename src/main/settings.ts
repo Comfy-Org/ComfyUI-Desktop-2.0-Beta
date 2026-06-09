@@ -1,7 +1,7 @@
 import path from 'path'
 import fs from 'fs'
 import { app } from 'electron'
-import { configDir, cacheDir, homeDir, setInstallDirResolver } from './lib/paths'
+import { configDir, homeDir, defaultDataRoot, defaultDownloadCacheDir, setInstallDirResolver } from './lib/paths'
 import { MODEL_FOLDER_TYPES } from './lib/models'
 import { readFileSafe, writeFileSafe } from './lib/safe-file'
 
@@ -64,7 +64,7 @@ type SettingsDefaults = Pick<KnownSettings, DefaultedSettingKey>
 
 const dataPath = path.join(configDir(), "settings.json")
 
-const SHARED_ROOT = path.join(homeDir(), "ComfyUI-Shared")
+const SHARED_ROOT = path.join(defaultDataRoot(), "ComfyUI-Shared")
 
 const SETTINGS_SCHEMA = {
   cacheDir: { nullable: false },
@@ -107,14 +107,14 @@ function isNullableKnownSettingKey(key: KnownSettingKey): key is NullableKnownSe
 }
 
 export const defaults: SettingsDefaults = {
-  cacheDir: path.join(cacheDir(), "download-cache"),
+  cacheDir: defaultDownloadCacheDir(),
   maxCachedDownloads: 1,
   // Docking-to-tray is disabled (createTray() is currently a no-op).
   onAppClose: "quit",
   modelsDirs: [path.join(SHARED_ROOT, "models")],
   inputDir: path.join(SHARED_ROOT, "input"),
   outputDir: path.join(SHARED_ROOT, "output"),
-  installDir: path.join(homeDir(), "ComfyUI-Installs"),
+  installDir: path.join(defaultDataRoot(), "ComfyUI-Installs"),
 }
 
 const systemDefault = defaults.modelsDirs[0]!
