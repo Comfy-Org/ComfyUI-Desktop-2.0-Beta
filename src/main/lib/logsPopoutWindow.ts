@@ -159,3 +159,22 @@ export async function openLogsPopout(installationId: string): Promise<void> {
     void win.webContents.executeJavaScript(buildPopoutScript(installationId)).catch(() => {})
   })
 }
+
+/**
+ * Close the logs pop-out for a single install, if one is open. Mirrors
+ * {@link closeTerminalPopout}: invoked on detach / host-window close so a
+ * lingering pop-out can't keep the app alive, and before update/restore.
+ */
+export function closeLogsPopout(installationId: string): void {
+  const win = popoutsByInstallation.get(installationId)
+  popoutsByInstallation.delete(installationId)
+  if (win && !win.isDestroyed()) win.destroy()
+}
+
+/** Close every open logs pop-out (e.g. on app quit). */
+export function closeAllLogsPopouts(): void {
+  for (const win of popoutsByInstallation.values()) {
+    if (!win.isDestroyed()) win.destroy()
+  }
+  popoutsByInstallation.clear()
+}

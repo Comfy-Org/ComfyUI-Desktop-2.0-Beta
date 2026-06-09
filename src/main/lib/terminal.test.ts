@@ -70,6 +70,8 @@ import {
   writeTerminal,
   restartTerminal,
   getTerminalRestore,
+  disposeTerminal,
+  disposeAllTerminals,
   _resetTerminalsForTest,
 } from './terminal'
 
@@ -214,5 +216,39 @@ describe('terminal manager', () => {
 
     expect(wcA.sent.some((m) => m.channel === 'terminal-output')).toBe(true)
     expect(wcB.sent.some((m) => m.channel === 'terminal-output')).toBe(false)
+  })
+
+  it('spawns only one shell when subscribed concurrently', async () => {
+    // Two surfaces racing to subscribe must share one PTY, not orphan extras.
+    await Promise.all([
+      subscribeTerminal('inst-a', asWc(makeWebContents())),
+      subscribeTerminal('inst-a', asWc(makeWebContents())),
+    ])
+
+    expect(spawn).toHaveBeenCalledTimes(1)
+  })
+
+  it('disposeTerminal kills the install shell so an FS op runs unlocked', async () => {
+    await subscribeTerminal('inst-a', asWc(makeWebContents()))
+    expect(ptyAt(0).killed).toBe(false)
+
+    disposeTerminal('inst-a')
+
+    expect(ptyAt(0).killed).toBe(true)
+    // A fresh subscribe respawns a new shell rather than reusing the dead one.
+    await subscribeTerminal('inst-a', asWc(makeWebContents()))
+    expect(spawn).toHaveBeenCalledTimes(2)
+  })
+
+  it('disposeAllTerminals kills every install shell (app quit)', async () => {
+    await subscribeTerminal('inst-a', asWc(makeWebContents()))
+    await subscribeTerminal('inst-b', asWc(makeWebContents()))
+
+    disposeAllTerminals()
+
+    expect(ptyAt(0).killed).toBe(true)
+    expect(ptyAt(1).killed).toBe(true)
+    expect(getTerminalRestore('inst-a')).toBeNull()
+    expect(getTerminalRestore('inst-b')).toBeNull()
   })
 })
