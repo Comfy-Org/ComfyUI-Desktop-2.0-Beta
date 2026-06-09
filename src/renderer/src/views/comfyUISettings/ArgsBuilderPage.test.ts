@@ -4,9 +4,10 @@ import { createI18n } from 'vue-i18n'
 import ArgsBuilderPage from './ArgsBuilderPage.vue'
 import type { ComfyArgDef } from '../../types/ipc'
 
-// Pins the deselectable "Choose one" contract: the exclusive group
-// renders as a BaseSelect with a synthetic "None" option so it can clear,
-// covering pick → clear → re-pick with siblings cleaned up each time.
+// Pins the "Choose one" contract: the exclusive group renders as an inline
+// radio list (every member visible at a glance) with a leading "None" radio
+// that clears the group, covering pick → clear → re-pick with siblings
+// cleaned up each time.
 const i18n = createI18n({
   legacy: false,
   locale: 'en',
@@ -51,8 +52,6 @@ const SCHEMA: ComfyArgDef[] = [
 ]
 
 function stubElectronApi(): void {
-  // Attach to the real window so jsdom listeners survive teardown
-  // (swapping the whole window object breaks BaseSelect's resize/scroll cleanup).
   ;(window as unknown as { api: unknown }).api = {
     getComfyArgs: vi.fn().mockResolvedValue({ args: SCHEMA }),
   }
@@ -63,12 +62,7 @@ const wrappers: VueWrapper[] = []
 async function mountPage(initialValue = ''): Promise<VueWrapper> {
   const wrapper = mount(ArgsBuilderPage, {
     props: { installationId: 'inst-1', initialValue },
-    global: {
-      plugins: [i18n],
-      // BaseSelect teleports its popover to <body>; render it in-tree
-      // so we can query options through the wrapper.
-      stubs: { Teleport: { template: '<div><slot /></div>' } },
-    },
+    global: { plugins: [i18n] },
     attachTo: document.body,
   })
   wrappers.push(wrapper)
@@ -81,22 +75,21 @@ function lastUpdate(wrapper: VueWrapper): string {
   return (events.at(-1)?.[0] as string | undefined) ?? ''
 }
 
-async function openSelect(wrapper: VueWrapper): Promise<void> {
-  // BaseSelect has two root nodes (trigger button + Teleport), so the
-  // page's data-testid doesn't fall through. The test only mounts one
-  // BaseSelect per page so role=combobox is unambiguous.
-  const trigger = wrapper.get('[role="combobox"]')
-  await trigger.trigger('click')
+function radioRows(wrapper: VueWrapper) {
+  return wrapper.findAll('.args-page-radio-row')
+}
+
+async function pickRadio(wrapper: VueWrapper, labelText: string): Promise<void> {
+  const target = radioRows(wrapper).find((r) => r.text().includes(labelText))
+  if (!target) throw new Error(`Radio not found: ${labelText}`)
+  await target.get('input[type="radio"]').setValue(true)
   await flushPromises()
 }
 
-async function pickOption(wrapper: VueWrapper, labelText: string): Promise<void> {
-  await openSelect(wrapper)
-  const opts = wrapper.findAll('[role="option"]')
-  const target = opts.find((o) => o.text().includes(labelText))
-  if (!target) throw new Error(`Option not found: ${labelText}`)
-  await target.trigger('click')
-  await flushPromises()
+function isChecked(wrapper: VueWrapper, labelText: string): boolean {
+  const row = radioRows(wrapper).find((r) => r.text().includes(labelText))
+  if (!row) throw new Error(`Radio not found: ${labelText}`)
+  return (row.get('input[type="radio"]').element as HTMLInputElement).checked
 }
 
 beforeEach(() => {
@@ -109,63 +102,66 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('ArgsBuilderPage — exclusive group select', () => {
-  it('renders a BaseSelect for the cluster with a leading "None" option + every member', async () => {
+describe('ArgsBuilderPage — exclusive group radio list', () => {
+  it('renders a radiogroup with a leading "None" option + every member', async () => {
     const wrapper = await mountPage()
-    expect(wrapper.find('[role="combobox"]').exists()).toBe(true)
+    expect(wrapper.find('[role="radiogroup"]').exists()).toBe(true)
 
-    await openSelect(wrapper)
-    const optionTexts = wrapper.findAll('[role="option"]').map((o) => o.text())
-    expect(optionTexts[0]).toContain('None (default)')
-    expect(optionTexts.some((t) => t.includes('--cpu'))).toBe(true)
-    expect(optionTexts.some((t) => t.includes('--gpu-only'))).toBe(true)
-    expect(optionTexts.some((t) => t.includes('--lowvram'))).toBe(true)
+    const texts = radioRows(wrapper).map((r) => r.text())
+    expect(texts[0]).toContain('None (default)')
+    expect(texts.some((t) => t.includes('--cpu'))).toBe(true)
+    expect(texts.some((t) => t.includes('--gpu-only'))).toBe(true)
+    expect(texts.some((t) => t.includes('--lowvram'))).toBe(true)
   })
 
-  it('shows each member\'s help text as the option description', async () => {
+  it("shows each member's help text inline", async () => {
     const wrapper = await mountPage()
-    await openSelect(wrapper)
-    const cpuOption = wrapper.findAll('[role="option"]').find((o) => o.text().includes('--cpu'))
-    expect(cpuOption?.text()).toContain('Run on CPU only.')
+    const cpuRow = radioRows(wrapper).find((r) => r.text().includes('--cpu'))
+    expect(cpuRow?.text()).toContain('Run on CPU only.')
   })
 
-  it('reflects the active member in the closed trigger when value is pre-set', async () => {
+  it('checks the active member when a value is pre-set', async () => {
     const wrapper = await mountPage('--lowvram')
-    const trigger = wrapper.get('[role="combobox"]')
-    expect(trigger.text()).toContain('--lowvram')
+    expect(isChecked(wrapper, '--lowvram')).toBe(true)
+    expect(isChecked(wrapper, 'None (default)')).toBe(false)
+  })
+
+  it('checks "None" by default when nothing in the group is set', async () => {
+    const wrapper = await mountPage()
+    expect(isChecked(wrapper, 'None (default)')).toBe(true)
   })
 
   it('emits the picked flag and replaces siblings on selection', async () => {
     const wrapper = await mountPage('--lowvram')
-    await pickOption(wrapper, '--cpu')
+    await pickRadio(wrapper, '--cpu')
     // No `--lowvram` survives — the parent commits a single-flag string.
     expect(lastUpdate(wrapper)).toBe('--cpu')
   })
 
-  it('clears the whole group when "None" is picked — the affordance the radio version lost', async () => {
+  it('clears the whole group when "None" is picked', async () => {
     const wrapper = await mountPage('--lowvram')
-    await pickOption(wrapper, 'None (default)')
+    await pickRadio(wrapper, 'None (default)')
     expect(lastUpdate(wrapper)).toBe('')
   })
 
   it('round-trips: pick → clear → pick — siblings get cleaned up each time', async () => {
     const wrapper = await mountPage('')
-    await pickOption(wrapper, '--lowvram')
+    await pickRadio(wrapper, '--lowvram')
     expect(lastUpdate(wrapper)).toBe('--lowvram')
 
-    await pickOption(wrapper, '--cpu')
+    await pickRadio(wrapper, '--cpu')
     expect(lastUpdate(wrapper)).toBe('--cpu')
 
-    await pickOption(wrapper, 'None (default)')
+    await pickRadio(wrapper, 'None (default)')
     expect(lastUpdate(wrapper)).toBe('')
 
-    await pickOption(wrapper, '--gpu-only')
+    await pickRadio(wrapper, '--gpu-only')
     expect(lastUpdate(wrapper)).toBe('--gpu-only')
   })
 
-  it('keeps unrelated flags intact when toggling the exclusive group', async () => {
+  it('keeps unrelated flags intact when clearing the exclusive group', async () => {
     const wrapper = await mountPage('--port 8188 --lowvram')
-    await pickOption(wrapper, 'None (default)')
+    await pickRadio(wrapper, 'None (default)')
     // Only the cluster member is removed; `--port 8188` survives.
     const result = lastUpdate(wrapper)
     expect(result).toContain('--port')
@@ -175,7 +171,6 @@ describe('ArgsBuilderPage — exclusive group select', () => {
 
   it('exposes the cluster purpose to assistive tech via aria-label', async () => {
     const wrapper = await mountPage()
-    const trigger = wrapper.get('[role="combobox"]')
-    expect(trigger.attributes('aria-label')).toBe('Choose one')
+    expect(wrapper.find('[role="radiogroup"]').attributes('aria-label')).toBe('Choose one')
   })
 })

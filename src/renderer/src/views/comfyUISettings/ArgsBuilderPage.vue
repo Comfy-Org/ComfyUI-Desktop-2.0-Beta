@@ -4,7 +4,6 @@ import { useDebounceFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { AlertCircle, ArrowLeft, Loader2, Search, SearchX, X } from 'lucide-vue-next'
 import BaseInput from '../../components/ui/BaseInput.vue'
-import BaseSelect, { type BaseSelectOption } from '../../components/ui/BaseSelect.vue'
 import ArgsRawInput from './ArgsRawInput.vue'
 import type { ComfyArgDef } from '../../types/ipc'
 import { parseArgs, serialize, tokenize } from '../../lib/argsParser'
@@ -177,22 +176,6 @@ function activeInGroup(group: string): string {
   return ''
 }
 
-function optionsForGroup(args: ComfyArgDef[]): BaseSelectOption[] {
-  return [
-    {
-      value: '',
-      label: t('comfyUISettings.argsExclusiveNone', 'None (default)'),
-      description: t('comfyUISettings.argsExclusiveNoneHint', 'No flag from this group is set.')
-    },
-    ...args.map((a) => ({ value: a.name, label: `--${a.name}`, description: a.help }))
-  ]
-}
-
-function onExclusiveChange(group: string, value: string): void {
-  if (value === '') clearExclusive(group)
-  else selectExclusive(group, value)
-}
-
 // Score a query token against help prose. Strict (word-boundary or substring only); loose subsequence would make "cuda" hit unrelated help.
 function scoreHelp(needle: string, help: string): number {
   if (!needle) return 1
@@ -286,7 +269,20 @@ const structuredGroups = computed(() => {
       items.map((i) => i.item)
     )
   }
-  return result
+
+  // Pin currently-set flags to the top as their own section so they're
+  // editable without hunting through categories. Skipped while searching
+  // (the filtered list already narrows things down). Exclusive-group
+  // members surface as individual rows here for direct toggle-off.
+  if (q) return result
+  const activeItems: GroupItem[] = schema.value
+    .filter((a) => parsed.value.known.has(a.name))
+    .map((a) => ({ kind: 'arg', arg: a }))
+  if (activeItems.length === 0) return result
+  const ordered = new Map<string, GroupItem[]>()
+  ordered.set(t('comfyUISettings.argsActiveTitle', 'Active'), activeItems)
+  for (const [category, items] of result) ordered.set(category, items)
+  return ordered
 })
 
 const hasResults = computed(() =>
@@ -409,22 +405,58 @@ const unknownFlagsMessage = computed(() => {
         <header class="args-page-category-title">{{ category }}</header>
 
         <div v-for="(item, idx) in items" :key="idx" class="args-page-item">
-          <!-- Exclusive cluster as a select; a synthetic "None" option makes the group clearable (radios couldn't deselect). -->
+          <!-- Exclusive cluster as an inline radio list so every option is visible at a glance; the "None" radio clears the group. -->
           <template v-if="item.kind === 'exclusive' && item.args && item.group">
-            <div class="args-page-row args-page-row-cluster-label">
+            <div
+              class="args-page-cluster"
+              role="radiogroup"
+              :aria-label="t('comfyUISettings.argsExclusiveLabel', 'Choose one')"
+            >
               <span class="args-page-cluster-label">
                 {{ t('comfyUISettings.argsExclusiveLabel', 'Choose one') }}
               </span>
-            </div>
-            <!-- BaseSelect has two root nodes, so wrap in a div to carry the layout class. -->
-            <div class="args-page-exclusive-select">
-              <BaseSelect
-                :model-value="activeInGroup(item.group)"
-                :options="optionsForGroup(item.args)"
-                :aria-label="t('comfyUISettings.argsExclusiveLabel', 'Choose one')"
-                :placeholder="t('comfyUISettings.argsExclusiveNone', 'None (default)')"
-                @update:model-value="(v) => onExclusiveChange(item.group!, v)"
-              />
+              <label
+                class="args-page-radio-row"
+                :class="{ 'is-active': activeInGroup(item.group) === '' }"
+              >
+                <input
+                  type="radio"
+                  class="args-page-radio-input"
+                  :name="`exclusive-${item.group}`"
+                  :checked="activeInGroup(item.group) === ''"
+                  @change="clearExclusive(item.group!)"
+                >
+                <span class="args-page-radio-indicator" aria-hidden="true"></span>
+                <div class="args-page-radio-body">
+                  <span class="args-page-flag">{{
+                    t('comfyUISettings.argsExclusiveNone', 'None (default)')
+                  }}</span>
+                  <p class="args-page-help">
+                    {{
+                      t('comfyUISettings.argsExclusiveNoneHint', 'No flag from this group is set.')
+                    }}
+                  </p>
+                </div>
+              </label>
+              <label
+                v-for="opt in item.args"
+                :key="opt.name"
+                class="args-page-radio-row"
+                :class="{ 'is-active': activeInGroup(item.group) === opt.name }"
+              >
+                <input
+                  type="radio"
+                  class="args-page-radio-input"
+                  :name="`exclusive-${item.group}`"
+                  :checked="activeInGroup(item.group) === opt.name"
+                  @change="selectExclusive(item.group!, opt.name)"
+                >
+                <span class="args-page-radio-indicator" aria-hidden="true"></span>
+                <div class="args-page-radio-body">
+                  <span class="args-page-flag">--{{ opt.name }}</span>
+                  <p class="args-page-help">{{ opt.help }}</p>
+                </div>
+              </label>
             </div>
           </template>
 
@@ -774,10 +806,12 @@ const unknownFlagsMessage = computed(() => {
   }
 }
 
-/* "Choose one" cluster label above the BaseSelect picker. */
-.args-page-row-cluster-label {
-  padding: 0 2px;
-  margin: 2px 0 4px;
+/* "Choose one" radio cluster: label above an inline list of every option. */
+.args-page-cluster {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
 
 .args-page-cluster-label {
@@ -786,13 +820,10 @@ const unknownFlagsMessage = computed(() => {
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.06em;
+  margin: 2px 0 4px;
+  padding: 0 2px;
 }
 
-.args-page-exclusive-select {
-  min-width: 0;
-}
-
-/* TODO(brand-cleanup): radio cluster styles below are unreferenced (exclusive group is a BaseSelect now); drop after validation. */
 .args-page-radio-row {
   display: grid;
   grid-template-columns: auto 1fr;
