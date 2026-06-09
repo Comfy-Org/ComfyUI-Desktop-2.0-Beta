@@ -41,11 +41,21 @@ jobs:
     name: Bump package.json Version
 
     steps:
+      - name: Mint bot app token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.APP_ID }}
+          private-key: ${{ secrets.CLOUD_CODE_BOT_PRIVATE_KEY }}
+
       - name: Checkout target branch
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
           ref: ${{ inputs.target_branch }}
+          # Use the bot token so the branch push is the bot's and triggers
+          # downstream workflows (the default GITHUB_TOKEN does not).
+          token: ${{ steps.app-token.outputs.token }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -255,7 +265,7 @@ jobs:
       - name: Find existing version bump pull request
         id: find_pr
         env:
-          GH_TOKEN: ${{ secrets.BEN_PAT }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           TARGET_BRANCH: ${{ inputs.target_branch }}
           PR_BRANCH: ${{ steps.prepare.outputs.pr_branch }}
         run: |
@@ -280,7 +290,7 @@ jobs:
       - name: Create or update version bump pull request
         id: upsert_pr
         env:
-          GH_TOKEN: ${{ secrets.BEN_PAT }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           TARGET_BRANCH: ${{ inputs.target_branch }}
           PR_BRANCH: ${{ steps.prepare.outputs.pr_branch }}
           BODY_FILE: ${{ steps.body.outputs.body_file }}
