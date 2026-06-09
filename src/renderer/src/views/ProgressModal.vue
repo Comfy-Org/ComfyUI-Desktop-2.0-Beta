@@ -18,9 +18,8 @@ import ComfyWordmark from '../components/icons/ComfyWordmark.vue'
 import BrandProgressGlyph from '../components/icons/BrandProgressGlyph.vue'
 import BaseAccordion from '../components/ui/BaseAccordion.vue'
 import BaseCopyButton from '../components/ui/BaseCopyButton.vue'
-import ProgressViewHost from '../components/progress/ProgressViewHost.vue'
-import type { ProgressVariant } from '../components/progress/ProgressViewHost.vue'
-import type { ProgressStepVM } from '../components/progress/progressViewModel'
+import BrandProgressView from '../components/BrandProgressView.vue'
+import type { ProgressStepVM } from '../lib/progressViewModel'
 import { TID } from '../../../shared/testIds'
 
 interface Props {
@@ -197,7 +196,7 @@ const progressSteps = computed<ProgressStepVM[]>(() => {
       ...prior,
       {
         phase: 'launchStart',
-        label: stepLabel('launchStart', 'launch.steps.launchStart'),
+        label: stepLabel('launchStart'),
         status: 'active' as const,
         detail: null,
         subPercent: null
@@ -230,9 +229,6 @@ const progressSteps = computed<ProgressStepVM[]>(() => {
 
   return [...prior, ...current]
 })
-
-// Build-time default presentation; flip to 'minimal' (or wire to a dev setting) for the leadership A/B demo.
-const progressVariant: ProgressVariant = 'brand'
 
 // Separate from the modal-branch `terminalExpanded` so the brand accordion's state doesn't leak into the modal reopen path.
 const brandLogsExpanded = ref(false)
@@ -549,11 +545,10 @@ defineExpose({ startOperation, showOperation })
 
             <div v-if="!currentOp.finished || isChainHandoff" class="brand-progress__status">
               <Transition name="brand-status-fade" mode="out-in">
-                <ProgressViewHost
+                <BrandProgressView
                   v-if="progressSteps.length"
                   key="stepper"
                   :steps="progressSteps"
-                  :variant="progressVariant"
                   class="brand-progress__steps"
                 />
                 <div v-else key="caption" class="brand-progress__status-flat">
@@ -864,8 +859,8 @@ defineExpose({ startOperation, showOperation })
   height: 100%;
   background: var(--comfy-yellow);
   border-radius: inherit;
-  /* Matches the ~400ms trickle tick so each creep step eases in continuously
-     rather than snapping then pausing. Determinate jumps still feel snappy. */
+  /* Eases the discrete jumps between log milestones so the bar glides instead
+     of snapping. */
   transition: width 420ms cubic-bezier(0.33, 0, 0.2, 1);
 }
 @media (prefers-reduced-motion: reduce) {

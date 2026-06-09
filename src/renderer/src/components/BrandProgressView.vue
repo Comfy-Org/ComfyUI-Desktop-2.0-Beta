@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { Check, LoaderCircle } from 'lucide-vue-next'
-import type { ProgressStepVM } from '../progressViewModel'
+import type { ProgressStepVM } from '../lib/progressViewModel'
 
 /**
  * Focus stepper — replaces the caption for stepped ops. Fixed viewport, track

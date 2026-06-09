@@ -537,7 +537,7 @@ describe('ProgressModal — unified bar (install→launch chained 0→100)', () 
       opKind: 'launch',
       chainSpan: 'launch',
       priorSteps: [{ phase: 'download', label: 'Download' }],
-      steps: [{ phase: 'launchStart', label: 'launch.steps.launchStart' }],
+      steps: [{ phase: 'launchStart', label: 'launchStart' }],
       activePhase: 'launchStart',
       activePercent: -1,
     })
@@ -563,8 +563,8 @@ describe('ProgressModal — unified bar (install→launch chained 0→100)', () 
     await mountWithOp('inst-standalone-launch', {
       opKind: 'launch',
       steps: [
-        { phase: 'launchStart', label: 'launch.steps.launchStart' },
-        { phase: 'gpu', label: 'launch.steps.gpu' },
+        { phase: 'launchStart', label: 'launchStart', weight: 0.05 },
+        { phase: 'gpu', label: 'gpu', weight: 0.5 },
       ],
       activePhase: 'launchStart',
       activePercent: -1,
@@ -579,8 +579,8 @@ describe('ProgressModal — unified bar (install→launch chained 0→100)', () 
     const { body } = await mountWithOp('inst-launch-roll', {
       opKind: 'launch',
       steps: [
-        { phase: 'securityScan', label: 'launch.steps.securityScan' },
-        { phase: 'gpu', label: 'launch.steps.gpu' },
+        { phase: 'securityScan', label: 'securityScan', weight: 0.05 },
+        { phase: 'gpu', label: 'gpu', weight: 0.5 },
       ],
       activePhase: 'gpu',
       activePercent: -1,
@@ -596,7 +596,7 @@ describe('ProgressModal — unified bar (install→launch chained 0→100)', () 
     // 99 until the op actually finishes (then the success branch returns 100).
     await mountWithOp('inst-launch-ready', {
       opKind: 'launch',
-      steps: [{ phase: 'startingServer', label: 'launch.steps.startingServer' }],
+      steps: [{ phase: 'startingServer', label: 'startingServer' }],
       activePhase: 'startingServer',
       activePercent: 100,
       _globalFloor: 0,
