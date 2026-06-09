@@ -263,7 +263,7 @@ const ALL_TABS: TabDef[] = [
   {
     key: 'console',
     sectionTab: 'console',
-    label: t('comfyUISettings.tabConsole', 'Console'),
+    label: t('comfyUISettings.tabTerminal', 'Terminal'),
     icon: SquareTerminal,
     tooltip: t('tooltips.console')
   },
