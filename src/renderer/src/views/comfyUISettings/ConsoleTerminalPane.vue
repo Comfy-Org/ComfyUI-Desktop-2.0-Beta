@@ -274,6 +274,10 @@ onBeforeUnmount(teardown)
 .console-host {
   position: absolute;
   inset: 0;
+  /* content-box so FitAddon's getComputedStyle(host).height reports the inner
+   * area (excludes padding). Under the global border-box reset it returns the
+   * padded height, over-counting ~1 row and pushing the prompt below the fold. */
+  box-sizing: content-box;
   padding: 12px 14px 14px;
   overflow: hidden;
 }
@@ -294,10 +298,6 @@ onBeforeUnmount(teardown)
 .console-host :deep(.xterm-screen) {
   overflow: hidden;
   background-color: var(--neutral-800);
-}
-
-.console-host :deep(.xterm-rows) {
-  padding-bottom: 2px;
 }
 
 .console-ended {
