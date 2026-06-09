@@ -108,6 +108,20 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     } catch (err) {
       console.warn('Env layout migration failed:', err)
     }
+    // One-time repair for installs damaged by the brief `--upgrade` window that
+    // replaced bundled GPU torch with a CPU build. Non-fatal: CPU torch still
+    // runs, so a failed repair must never block launch (it retries next time).
+    try {
+      const { maybeRepairTorch } = await import('../../../sources/standalone/torchRepair')
+      const repaired = await maybeRepairTorch(inst, {
+        sendProgress: makeSendProgress(event.sender, installationId),
+        sendOutput: makeSendOutput(event.sender, installationId),
+        update: updateFn,
+      })
+      if (repaired) inst = (await installations.get(installationId)) || inst
+    } catch (err) {
+      console.warn('PyTorch vendor repair failed:', err)
+    }
     await writeComfyEnvironment(path.join(inst.installPath, 'ComfyUI'))
   }
 
