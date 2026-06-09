@@ -9,6 +9,18 @@ import type { ProgressStep } from '../types/ipc'
  * `progressStore.globalProgressFor` prevents regressions.
  */
 const TABLES: Record<string, Record<string, number>> = {
+  // ComfyUI launch — log-driven phases. Mirrors `DEFAULT_LAUNCH_PHASES`
+  // weights in src/main/lib/launchPhases.ts; `gpu` (torch/mps init) is the
+  // real time sink, not custom-node import. Keep the two in sync. Includes the
+  // synthetic `launchStart` step so install→launch reads as one stepper.
+  'customNodes|gpu|launchStart|mountLibraries|securityScan|startingServer': {
+    launchStart: 0.05,
+    securityScan: 0.05,
+    mountLibraries: 0.05,
+    gpu: 0.5,
+    customNodes: 0.15,
+    startingServer: 0.2,
+  },
   // Standalone install — common case (no pending snapshot)
   'cleanup|download|extract|setup|update': {
     download: 0.40,
