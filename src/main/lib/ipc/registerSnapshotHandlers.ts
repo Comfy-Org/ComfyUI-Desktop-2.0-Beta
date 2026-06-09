@@ -29,6 +29,7 @@ import {
   frozenSnapshotInstallOverrides,
   resolveSnapshotVersion,
   getVariantLabel,
+  buildPinnedVariant,
   findDuplicatePath,
   uniqueName,
   sanitizeDirName,
@@ -540,15 +541,29 @@ export function registerSnapshotHandlers(): void {
         if (!matched) matched = variantOptions[0]!
       }
 
+      // Recreate the exact standalone environment the snapshot was captured on
+      // by pinning to its original R2 bundle tag when that bundle still exists.
+      // The release dropdown only exposes the 'stable'/'latest' channels (whose
+      // variants point at the newest bundle), so without this the install would
+      // download the latest env — a different Python/torch baseline than the
+      // snapshot. Falls back to the newest bundle when the tag has been pruned.
+      const installVariant =
+        buildPinnedVariant(
+          selectedRelease,
+          matched.data?.variantId as string,
+          targetSnapshot.comfyui.releaseTag,
+          gpu?.id
+        ) ?? matched
+
       const instData = {
         sourceId: source.id,
         sourceLabel: source.label,
-        ...source.buildInstallation({ release: selectedRelease, variant: matched }),
-        // Freeze to the snapshot's pinned ComfyUI version. The release dropdown
-        // only offers the 'stable'/'latest' channels, so buildInstallation would
-        // otherwise set autoUpdateComfyUI: true and auto-update to latest before
-        // the snapshot restore re-pins. The restore is the sole authority for
-        // the core commit; updateChannel mirrors the snapshot as the manual pref.
+        ...source.buildInstallation({ release: selectedRelease, variant: installVariant }),
+        // Freeze to the snapshot's pinned ComfyUI version. Even with the exact
+        // bundle pinned above, buildInstallation would set autoUpdateComfyUI:
+        // true for a stable/latest channel and auto-update to latest before the
+        // snapshot restore re-pins. The restore is the sole authority for the
+        // core commit; updateChannel mirrors the snapshot as the manual pref.
         ...frozenSnapshotInstallOverrides(targetSnapshot.updateChannel)
       }
       const baseName = customName || envelope.installationName || 'ComfyUI'

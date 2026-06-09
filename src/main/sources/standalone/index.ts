@@ -54,6 +54,64 @@ interface VariantData {
   downloadFiles: { url: string; filename: string; size: number }[]
 }
 
+/**
+ * Build a variant card FieldOption from a single R2 bundle release. Shared by
+ * the install-wizard variant list (newest bundle per vendor) and the
+ * snapshot-load flow (a specific historical bundle). `displayStableTag`, when
+ * set, advertises the upstream stable version the post-install update lands on
+ * instead of the bundle's checked-in ComfyUI version.
+ */
+function buildVariantOption(
+  vendorId: string,
+  release: R2Variant,
+  displayStableTag: string | null,
+  gpu: string | undefined
+): FieldOption {
+  const sizeMB = (release.size / 1048576).toFixed(0)
+  const downloadFiles = [{
+    url: `${R2_BASE_URL}/${vendorId}/${release.tag}/${release.file}`,
+    filename: release.file,
+    size: release.size,
+  }]
+  const displayVersion = displayStableTag
+    ? displayStableTag.replace(/^v/, '')
+    : release.comfyui_version
+  return {
+    value: vendorId,
+    label: getVariantLabel(vendorId),
+    description: `ComfyUI ${displayVersion}  ·  Python ${release.python_version}  ·  ${sizeMB} MB`,
+    data: {
+      variantId: vendorId,
+      manifest: { id: vendorId, comfyui_ref: release.comfyui_version, python_version: release.python_version },
+      downloadFiles,
+      downloadUrl: downloadFiles[0]!.url,
+      r2Release: release,
+    } as unknown as Record<string, unknown>,
+    recommended: recommendVariant(vendorId, gpu),
+  }
+}
+
+/**
+ * Resolve a variant card pinned to a specific historical bundle `releaseTag`
+ * for `variantId`, using the vendor history carried on a 'release' FieldOption.
+ * Lets the snapshot-load flow recreate the exact standalone environment a
+ * snapshot was captured on. Returns null when that tag is no longer in R2
+ * (pruned), so the caller can fall back to the newest bundle for the channel.
+ */
+export function buildPinnedVariant(
+  release: FieldOption,
+  variantId: string,
+  releaseTag: string,
+  gpu?: string
+): FieldOption | null {
+  const releaseData = release.data as { vendorReleases?: Record<string, R2Variant[]> } | undefined
+  const history = releaseData?.vendorReleases?.[variantId]
+  if (!history) return null
+  const exact = history.find((r) => r.tag === releaseTag)
+  if (!exact) return null
+  return buildVariantOption(variantId, exact, null, gpu)
+}
+
 export const standalone: SourcePlugin = {
   id: 'standalone',
   get label() { return t('standalone.label') },
@@ -363,36 +421,13 @@ export const standalone: SourcePlugin = {
         .map(([vendorId, releases]): FieldOption | null => {
           const release = releases[0]
           if (!release) return null
-
-          const sizeMB = (release.size / 1048576).toFixed(0)
-          const downloadFiles = [{
-            url: `${R2_BASE_URL}/${vendorId}/${release.tag}/${release.file}`,
-            filename: release.file,
-            size: release.size,
-          }]
           // For Stable, the card must advertise the version the user
           // ends up with after post-install auto-update (the upstream stable
           // tag), not the older ComfyUI bundled in the R2 standalone build.
-          // Strip a leading `v` to match the bare-version card format
-          // (`ComfyUI 0.22.3`). Falls back to the bundled version when the
-          // upstream tag couldn't be resolved (offline, etc.).
-          const displayVersion =
-            isStable && releaseData.latestStableTag
-              ? releaseData.latestStableTag.replace(/^v/, '')
-              : release.comfyui_version
-          return {
-            value: vendorId,
-            label: getVariantLabel(vendorId),
-            description: `ComfyUI ${displayVersion}  ·  Python ${release.python_version}  ·  ${sizeMB} MB`,
-            data: {
-              variantId: vendorId,
-              manifest: { id: vendorId, comfyui_ref: release.comfyui_version, python_version: release.python_version },
-              downloadFiles,
-              downloadUrl: downloadFiles[0]!.url,
-              r2Release: release,
-            } as unknown as Record<string, unknown>,
-            recommended: recommendVariant(vendorId, gpu),
-          }
+          // Falls back to the bundled version when the upstream tag couldn't
+          // be resolved (offline, etc.).
+          const displayStableTag = isStable ? releaseData.latestStableTag ?? null : null
+          return buildVariantOption(vendorId, release, displayStableTag, gpu)
         })
         .filter((item): item is FieldOption => item != null)
     }
