@@ -852,7 +852,6 @@ defineExpose({ startOperation, showOperation })
   height: 5.079px;
   border-radius: 16px;
   background: var(--brand-surface-bg);
-  border: 1px solid var(--brand-surface-border);
   overflow: hidden;
 }
 .brand-progress__bar-fill {
