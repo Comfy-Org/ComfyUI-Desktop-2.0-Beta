@@ -36,6 +36,13 @@ export interface InstallationRecord {
    *  `--output-directory` from the global settings; else uses the per-install
    *  dirs below or ComfyUI's `<installPath>/{input,output}` defaults. */
   useSharedInputOutput?: boolean
+  /** Per-install extra (external) model directories, used only when
+   *  `useSharedModels === false`. Never includes the install's own models dir.
+   *  Written to a per-install `--extra-model-paths-config` YAML at launch. */
+  modelDirs?: string[]
+  /** External `modelDirs` entry promoted to primary (`is_default`). Null/absent
+   *  means the install's own models dir is primary (ComfyUI's built-in default). */
+  modelDirsPrimary?: string | null
   /** Per-install input dir, used only when `useSharedInputOutput === false`. */
   inputDir?: string
   /** Per-install output dir, used only when `useSharedInputOutput === false`. */
