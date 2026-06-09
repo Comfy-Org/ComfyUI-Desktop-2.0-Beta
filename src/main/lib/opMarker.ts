@@ -20,7 +20,15 @@ export interface OpMarker {
    * but the final unlink failed" case wrongly rolling a good update back.
    */
   postHead?: string
+  /** Number of launch-time recovery attempts that failed to roll the source back. */
+  recoveryAttempts?: number
 }
+
+// After this many failed launch-time rollbacks we stop blocking the launch and
+// drop the marker. This bounds transient failures (git index lock, AV holding a
+// file) to a few retries while preventing an unrecoverable rollback (e.g. the
+// pre-op commit is gone) from locking the user out of launching forever.
+const MAX_RECOVERY_ATTEMPTS = 3
 
 function markerPath(installPath: string): string {
   return path.join(installPath, MARKER_NAME)
@@ -69,7 +77,9 @@ export async function completeOpMarker(installPath: string): Promise<void> {
  * Idempotent — a no-op when HEAD already matches the recorded pre-operation
  * commit (the common case: the op concluded but the marker lingered). Returns
  * true when a marker was found and consumed. Throws if a rollback was needed but
- * failed, leaving the marker in place so the next launch can retry.
+ * failed, leaving the marker in place so the next launch can retry — until
+ * MAX_RECOVERY_ATTEMPTS is reached, after which it gives up and drops the marker
+ * rather than locking the user out of launching forever.
  */
 export async function recoverInterruptedComfyOp(
   installPath: string,
@@ -90,7 +100,19 @@ export async function recoverInterruptedComfyOp(
     sendOutput?.(`\nDetected an interrupted ${marker.op}; rolling ComfyUI source back to keep it consistent…\n`)
     const ok = await rollbackComfySource(comfyuiDir, marker.preHead, sendOutput)
     if (!ok || readGitHead(comfyuiDir) !== marker.preHead) {
-      // Leave the marker so the next launch retries; signal the caller to block.
+      const attempts = (marker.recoveryAttempts ?? 0) + 1
+      if (attempts >= MAX_RECOVERY_ATTEMPTS) {
+        // Rollback can't succeed (e.g. the pre-op commit is gone). Stop blocking:
+        // drop the marker and let the launch proceed. ComfyUI may crash on import,
+        // but that surfaces a real, recoverable error instead of an opaque,
+        // permanent launch lockout — and the user can re-run an update to repair.
+        console.warn(`Giving up rolling ComfyUI source back after ${attempts} attempts; dropping recovery marker.`)
+        sendOutput?.(`\n⚠ Could not roll ComfyUI source back after ${attempts} attempts; continuing launch. Re-run an update if ComfyUI fails to start.\n`)
+        await clearOpMarker(installPath)
+        return true
+      }
+      // Persist the attempt count and block this launch so the next one retries.
+      await writeOpMarker(installPath, { ...marker, recoveryAttempts: attempts })
       throw new Error(`could not roll ComfyUI source back to ${marker.preHead.slice(0, 7)} after an interrupted ${marker.op}`)
     }
   }

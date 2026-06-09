@@ -103,13 +103,27 @@ describe('recoverInterruptedComfyOp', () => {
     expect(fs.existsSync(path.join(installPath, MARKER_NAME))).toBe(false)
   })
 
-  it('throws and leaves the marker when the rollback fails (so next launch retries)', async () => {
+  it('throws and records an attempt when the rollback fails (so next launch retries)', async () => {
     await writeOpMarker(installPath, { op: 'update', preHead: 'OLD', startedAt: 1 })
     mockedReadGitHead.mockReturnValue('NEW') // never reaches OLD
     mockedRollback.mockResolvedValue(false)
 
     await expect(recoverInterruptedComfyOp(installPath)).rejects.toThrow(/roll ComfyUI source back/i)
-    expect(fs.existsSync(path.join(installPath, MARKER_NAME))).toBe(true)
+    const marker = readOpMarker(installPath)
+    expect(marker).not.toBeNull()
+    expect(marker!.recoveryAttempts).toBe(1)
+  })
+
+  it('gives up and drops the marker after MAX_RECOVERY_ATTEMPTS so launch is never bricked', async () => {
+    // Pre-seed the marker as if two prior launches already failed to roll back.
+    await writeOpMarker(installPath, { op: 'update', preHead: 'OLD', startedAt: 1, recoveryAttempts: 2 })
+    mockedReadGitHead.mockReturnValue('NEW') // rollback can never reach OLD
+    mockedRollback.mockResolvedValue(false)
+
+    // The third attempt gives up instead of throwing, and clears the marker.
+    const recovered = await recoverInterruptedComfyOp(installPath)
+    expect(recovered).toBe(true)
+    expect(fs.existsSync(path.join(installPath, MARKER_NAME))).toBe(false)
   })
 })
 
