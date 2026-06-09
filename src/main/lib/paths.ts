@@ -71,19 +71,22 @@ function selectedInstallDrive(): string | null {
 }
 
 /** Base directory under which ComfyUI's large data dirs (installs, shared
- *  models/input/output) live by default. On Windows, when the app was installed
- *  to a non-system drive, this is that drive's root so data follows the user's
- *  chosen drive; otherwise the user's home dir. */
+ *  models/input/output, download cache) live by default. On Windows, when the
+ *  app was installed to a non-system drive, this is a single `Comfy-Desktop`
+ *  folder on that drive so everything stays grouped under one parent instead of
+ *  scattering folders at the drive root; otherwise the user's home dir. */
 export function defaultDataRoot(): string {
-  return selectedInstallDrive() ?? app.getPath("home");
+  const drive = selectedInstallDrive();
+  return drive ? path.join(drive, "Comfy-Desktop") : app.getPath("home");
 }
 
-/** Default location for the multi-GB download cache. Follows the user's chosen
- *  install drive on Windows; otherwise the platform cache dir (userData on
- *  Windows/macOS, XDG cache on Linux). */
+/** Default location for the multi-GB download cache. On a redirected drive it
+ *  lives under the same `Comfy-Desktop` parent as the other data dirs; otherwise
+ *  the platform cache dir (userData on Windows/macOS, XDG cache on Linux). */
 export function defaultDownloadCacheDir(): string {
-  const drive = selectedInstallDrive();
-  if (drive) return path.join(drive, "ComfyUI-Cache", "download-cache");
+  if (selectedInstallDrive()) {
+    return path.join(defaultDataRoot(), "ComfyUI-Cache", "download-cache");
+  }
   return path.join(cacheDir(), "download-cache");
 }
 

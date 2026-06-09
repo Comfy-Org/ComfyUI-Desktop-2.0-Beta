@@ -41,9 +41,10 @@ describe('drive-aware defaults', () => {
     exePath = 'D:\\Programs\\Comfy Desktop\\Comfy Desktop.exe'
     const p = await loadPaths()
 
-    expect(p.defaultDataRoot()).toBe('D:\\')
-    expect(p.builtinDefaultInstallDir()).toBe(path.join('D:\\', 'ComfyUI-Installs'))
-    expect(p.defaultDownloadCacheDir()).toBe(path.join('D:\\', 'ComfyUI-Cache', 'download-cache'))
+    const dataRoot = path.join('D:\\', 'Comfy-Desktop')
+    expect(p.defaultDataRoot()).toBe(dataRoot)
+    expect(p.builtinDefaultInstallDir()).toBe(path.join(dataRoot, 'ComfyUI-Installs'))
+    expect(p.defaultDownloadCacheDir()).toBe(path.join(dataRoot, 'ComfyUI-Cache', 'download-cache'))
   })
 
   it('falls back to home when the app is on the same drive as home (win32)', async () => {
