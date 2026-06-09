@@ -12,15 +12,33 @@ import type { InstallationRecord } from '../../installations'
 
 let tmpDir: string
 
-/** Create a managed venv site-packages dir with a torch dist-info of the given version. */
-function makeVenvWithTorch(installPath: string, torchVersion: string | null): string {
+/**
+ * Create a managed venv site-packages dir with a torch dist-info of the given
+ * version and a `torch/version.py` carrying the given cuda/hip accelerator
+ * evidence (the authoritative signal the detector probes).
+ */
+function makeVenvWithTorch(
+  installPath: string,
+  torchVersion: string | null,
+  accel: { cuda?: string | null; hip?: string | null } = {},
+): string {
   const venv = path.join(installPath, 'ComfyUI', '.venv')
   const sitePackages =
     process.platform === 'win32'
       ? path.join(venv, 'Lib', 'site-packages')
       : path.join(venv, 'lib', 'python3.12', 'site-packages')
   fs.mkdirSync(sitePackages, { recursive: true })
-  if (torchVersion) fs.mkdirSync(path.join(sitePackages, `torch-${torchVersion}.dist-info`))
+  if (torchVersion) {
+    fs.mkdirSync(path.join(sitePackages, `torch-${torchVersion}.dist-info`))
+    fs.mkdirSync(path.join(sitePackages, 'torch'))
+    const cuda = accel.cuda === undefined ? null : accel.cuda
+    const hip = accel.hip === undefined ? null : accel.hip
+    const lit = (v: string | null): string => (v === null ? 'None' : `'${v}'`)
+    fs.writeFileSync(
+      path.join(sitePackages, 'torch', 'version.py'),
+      `__version__ = '${torchVersion}'\ndebug = False\ncuda = ${lit(cuda)}\nhip = ${lit(hip)}\n`,
+    )
+  }
   return sitePackages
 }
 
@@ -61,6 +79,23 @@ describe('getTorchVendorMismatch', () => {
   it('does not flag a different CUDA minor version (user freedom)', () => {
     makeVenvWithTorch(tmpDir, '2.6.0+cu126')
     expect(getTorchVendorMismatch(install({ variant: 'win-nvidia' }))).toBeNull()
+  })
+
+  it('does not flag a bare-versioned but CUDA-capable PyPI wheel (user freedom)', () => {
+    // `pip install torch` from PyPI yields a bare version that IS CUDA-enabled;
+    // version.py is the only signal that distinguishes it from the bug's CPU torch.
+    makeVenvWithTorch(tmpDir, '2.6.0', { cuda: '12.4' })
+    expect(getTorchVendorMismatch(install({ variant: 'win-nvidia' }))).toBeNull()
+  })
+
+  it('flags a bare-versioned CPU wheel (cuda=None) on an NVIDIA install', () => {
+    makeVenvWithTorch(tmpDir, '2.12.0', { cuda: null })
+    expect(getTorchVendorMismatch(install({ variant: 'win-nvidia' }))).not.toBeNull()
+  })
+
+  it('does not flag an AMD install whose version.py reports hip', () => {
+    makeVenvWithTorch(tmpDir, '2.6.0', { hip: '6.2.41134' })
+    expect(getTorchVendorMismatch(install({ variant: 'linux-amd' }))).toBeNull()
   })
 
   it('flags an AMD install running CPU torch and accepts rocm', () => {
@@ -120,10 +155,13 @@ describe('copyTorchFamily', () => {
     pkg(src, 'nvidia_cudnn_cu12', 'lib')
     pkg(src, 'triton', 'lib')
 
-    // Destination venv: CPU torch stack + an unrelated package.
+    // Destination venv: CPU torch stack, an unrelated package, and a
+    // torch-adjacent custom-node dep the bundle does NOT ship.
     pkg(dst, 'torch', "__version__ = '2.12.0'")
     pkg(dst, 'torch-2.12.0.dist-info', 'METADATA')
     pkg(dst, 'numpy', 'keep me')
+    pkg(dst, 'torchmetrics', 'custom node dep')
+    pkg(dst, 'torchmetrics-1.4.0.dist-info', 'METADATA')
 
     await copyTorchFamily(src, dst)
 
@@ -134,5 +172,10 @@ describe('copyTorchFamily', () => {
     expect(fs.existsSync(path.join(dst, 'nvidia_cudnn_cu12'))).toBe(true)
     expect(fs.existsSync(path.join(dst, 'triton'))).toBe(true)
     expect(fs.readFileSync(path.join(dst, 'numpy', 'FILE'), 'utf-8')).toBe('keep me')
+    // A torch-adjacent dep the bundle doesn't provide must be preserved.
+    expect(fs.readFileSync(path.join(dst, 'torchmetrics', 'FILE'), 'utf-8')).toBe('custom node dep')
+    expect(fs.existsSync(path.join(dst, 'torchmetrics-1.4.0.dist-info'))).toBe(true)
+    // No staging leftovers.
+    expect(fs.readdirSync(dst).some((e) => e.startsWith('.torchrepair-'))).toBe(false)
   })
 })

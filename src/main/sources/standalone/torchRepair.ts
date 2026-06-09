@@ -11,22 +11,21 @@ import * as settings from '../../settings'
 import * as telemetry from '../../lib/telemetry'
 import type { InstallationRecord } from '../../installations'
 
-// Vendor variant → the local-version tag fragment its torch wheel must carry.
-// nvidia → '+cuXXX', amd → '+rocmX', intel-xpu → '+xpu'. CPU and mac (MPS, no
-// suffix) are intentionally absent: CPU is a deliberate choice and the macOS
-// wheel has no suffix and always supports MPS, so neither is ever "broken".
+// Vendor variant → the accelerator tag fragment its torch wheel carries. CPU and
+// mac (MPS, no suffix) are intentionally absent: CPU is a deliberate choice, and
+// the macOS wheel has no suffix and always supports MPS, so neither is "broken".
 const EXPECTED_FAMILY: Record<string, string> = {
   nvidia: 'cu',
   amd: 'rocm',
   'intel-xpu': 'xpu',
 }
 
-// Packages that make up an accelerated torch stack — the package itself plus its
-// bundled GPU runtime deps. Mirrors install.ts BULKY_PREFIXES (the set the
-// installer copies in / strips out), extended for ROCm. Matched after
-// normalizing '-' → '_' so both import dirs (nvidia_cudnn_cu12) and dist-info
-// dirs (nvidia_cudnn_cu12-9.1.0.dist-info, torch-2.10.0+cu128.dist-info) hit.
-const TORCH_FAMILY_PREFIXES = ['torch', 'nvidia', 'triton', 'cuda', 'pytorch_triton', 'rocm']
+// Top-level entries that make up an accelerated torch stack — the torch packages
+// plus their bundled GPU runtime deps. Matched after normalizing '-' → '_' so
+// import dirs (nvidia_cudnn_cu12), dist-info dirs (torch-2.10.0+cu128.dist-info),
+// and auditwheel sidecars (torch.libs) all hit.
+const TORCH_FAMILY_PREFIXES = ['torch', 'torio', 'functorch', 'nvidia', 'triton', 'pytorch_triton', 'cuda', 'rocm']
+const STAGING_PREFIX = '.torchrepair-'
 
 export interface TorchMismatch {
   /** Vendor key, e.g. 'nvidia' | 'amd' | 'intel-xpu'. */
@@ -44,13 +43,47 @@ function isTorchFamilyEntry(name: string): boolean {
   return TORCH_FAMILY_PREFIXES.some((p) => norm.startsWith(p))
 }
 
+/** Project key of a site-packages entry, so a versioned dist-info maps to the
+ *  same key as its package dir (torch-2.12.0.dist-info → torch). */
+function packageKey(entry: string): string {
+  const base = entry.endsWith('.dist-info') ? entry.slice(0, -'.dist-info'.length) : entry
+  // dist-info names are `<name>-<version>` and `<name>` never contains '-', so
+  // the first '-' splits name from version. Non-dist-info entries have no '-'.
+  const dash = base.indexOf('-')
+  const name = dash >= 0 && entry.endsWith('.dist-info') ? base.slice(0, dash) : base
+  return name.toLowerCase().replace(/-/g, '_')
+}
+
 /**
- * Detect a GPU-variant install whose torch lacks its expected accelerator tag —
- * the signature of the brief `--upgrade` bug that replaced the bundled
- * CUDA/ROCm torch with a CPU build (on Windows a bare `2.12.0`, elsewhere a
- * `+cpu`). Keys ONLY on the accelerator tag, never the version number, so a user
- * freely choosing any `+cuXXX` version is never flagged. Returns null when the
- * install is fine, is CPU/mac/adopted, or torch can't be read.
+ * Read accelerator evidence from `torch/version.py` (the authoritative signal
+ * baked into the wheel: `cuda`/`hip` are non-null strings for accelerated
+ * builds, None for CPU). This distinguishes the bug's CPU torch — which on
+ * Windows is a *bare* version like `2.12.0` with `cuda = None` — from a
+ * user-installed PyPI default wheel, which is also bare-versioned but CUDA-
+ * capable (`cuda = '12.x'`). Without this we would wrongly "repair" a user's
+ * deliberately-chosen torch.
+ */
+function readTorchAcceleratorEvidence(sitePackages: string): { cuda: boolean; hip: boolean } {
+  try {
+    const txt = fs.readFileSync(path.join(sitePackages, 'torch', 'version.py'), 'utf-8')
+    const field = (name: string): boolean => {
+      const m = txt.match(new RegExp(`^${name}\\s*=\\s*(None|'([^']*)'|"([^"]*)")`, 'm'))
+      if (!m || m[1] === 'None') return false
+      return ((m[2] ?? m[3] ?? '').trim()).length > 0
+    }
+    return { cuda: field('cuda'), hip: field('hip') }
+  } catch {
+    return { cuda: false, hip: false }
+  }
+}
+
+/**
+ * Detect a GPU-variant install whose torch lacks its expected accelerator — the
+ * signature of the brief `--upgrade` bug that replaced the bundled CUDA/ROCm
+ * torch with a CPU build. Keys on accelerator *capability* (version.py probe or
+ * the wheel's local tag), never the version number, so a user freely choosing
+ * any version is never flagged. Returns null when the install is fine, is
+ * CPU/mac/adopted, or torch can't be read.
  */
 export function getTorchVendorMismatch(installation: InstallationRecord): TorchMismatch | null {
   if (installation.adopted === true) return null
@@ -61,17 +94,22 @@ export function getTorchVendorMismatch(installation: InstallationRecord): TorchM
   const variantBase = Object.keys(EXPECTED_FAMILY).find((k) => base === k || base.startsWith(`${k}-`))
   if (!variantBase) return null // cpu, mps, or unknown — nothing to repair
 
-  const expectedFamily = EXPECTED_FAMILY[variantBase]!
+  const sitePackages = findSitePackages(getActiveVenvDir(installation))
+  if (!sitePackages) return null
   const installedVersion = getTorchVersion(installation)
   if (!installedVersion) return null // can't read torch — leave it alone
 
   const plus = installedVersion.indexOf('+')
-  const installedTag = plus >= 0 ? installedVersion.slice(plus + 1) : ''
-  // Correct accelerator family present (any version, incl. a different CUDA
-  // version) → not broken.
-  if (installedTag.includes(expectedFamily)) return null
+  const installedTag = (plus >= 0 ? installedVersion.slice(plus + 1) : '').toLowerCase()
+  const evidence = readTorchAcceleratorEvidence(sitePackages)
 
-  return { variantBase, expectedFamily, installedVersion, installedTag }
+  let ok: boolean
+  if (variantBase === 'nvidia') ok = installedTag.includes('cu') || evidence.cuda
+  else if (variantBase === 'amd') ok = installedTag.includes('rocm') || evidence.hip
+  else ok = installedTag.includes('xpu') // intel-xpu
+  if (ok) return null
+
+  return { variantBase, expectedFamily: EXPECTED_FAMILY[variantBase]!, installedVersion, installedTag }
 }
 
 export interface TorchRepairTools {
@@ -81,23 +119,48 @@ export interface TorchRepairTools {
   signal?: AbortSignal
 }
 
-/** Replace every torch-family entry in dstSite with the copy from srcSite. */
+/**
+ * Replace the bundle-provided torch-family packages in dstSite with the copies
+ * from srcSite. Staged-then-swapped: the new packages are copied in full under
+ * temp names before any old package is removed, so an interruption can't leave
+ * the venv with no torch. Only packages the bundle actually ships are removed —
+ * unrelated torch-adjacent deps a custom node installed (e.g. torchmetrics) are
+ * left untouched.
+ */
 export async function copyTorchFamily(srcSite: string, dstSite: string, signal?: AbortSignal): Promise<void> {
+  const srcEntries = fs.readdirSync(srcSite, { withFileTypes: true }).filter((e) => isTorchFamilyEntry(e.name))
+  const providedKeys = new Set(srcEntries.map((e) => packageKey(e.name)))
+
+  // Clear any staging leftovers from a prior interrupted run.
   for (const entry of fs.readdirSync(dstSite)) {
-    if (isTorchFamilyEntry(entry)) {
+    if (entry.startsWith(STAGING_PREFIX)) {
       await fs.promises.rm(path.join(dstSite, entry), { recursive: true, force: true })
     }
   }
-  for (const entry of fs.readdirSync(srcSite, { withFileTypes: true })) {
+
+  // 1. Stage full copies under temp names (old torch stays live meanwhile).
+  const staged: Array<{ name: string; tmp: string }> = []
+  for (const e of srcEntries) {
     if (signal?.aborted) throw new Error('Cancelled')
-    if (!isTorchFamilyEntry(entry.name)) continue
-    const from = path.join(srcSite, entry.name)
-    const to = path.join(dstSite, entry.name)
-    if (entry.isDirectory()) {
-      await copyDirWithProgress(from, to, null, { signal })
-    } else {
-      await fs.promises.copyFile(from, to)
+    const from = path.join(srcSite, e.name)
+    const tmp = path.join(dstSite, `${STAGING_PREFIX}${e.name}`)
+    if (e.isDirectory()) await copyDirWithProgress(from, tmp, null, { signal })
+    else await fs.promises.copyFile(from, tmp)
+    staged.push({ name: e.name, tmp })
+  }
+
+  // 2. Remove the old copies of bundle-provided packages, then 3. swap staged
+  //    into place. Both are fast metadata ops, keeping the unsafe window tiny.
+  for (const entry of fs.readdirSync(dstSite)) {
+    if (entry.startsWith(STAGING_PREFIX)) continue
+    if (isTorchFamilyEntry(entry) && providedKeys.has(packageKey(entry))) {
+      await fs.promises.rm(path.join(dstSite, entry), { recursive: true, force: true })
     }
+  }
+  for (const s of staged) {
+    const final = path.join(dstSite, s.name)
+    await fs.promises.rm(final, { recursive: true, force: true })
+    await fs.promises.rename(s.tmp, final)
   }
 }
 
@@ -145,20 +208,36 @@ export async function repairTorch(
       return { ok: false, message: 'could not locate the installation venv' }
     }
 
-    tools.sendProgress('setup', { percent: -1, status: 'Restoring GPU PyTorch…' })
-    await copyTorchFamily(srcSite, dstSite, tools.signal)
-
-    // Verify the copy actually swapped in the expected accelerator family.
-    const after = getTorchVersion(installation)
-    const afterTag = after && after.includes('+') ? after.slice(after.indexOf('+') + 1) : ''
+    // Confirm the bundle actually carries an accelerated torch before we touch
+    // the venv — never trade a working CPU torch for a broken/empty one.
+    const srcEvidence = readTorchAcceleratorEvidence(srcSite)
     const base = stripPlatform(variant!)
     const variantBase = Object.keys(EXPECTED_FAMILY).find((k) => base === k || base.startsWith(`${k}-`))
     const expectedFamily = variantBase ? EXPECTED_FAMILY[variantBase]! : ''
-    if (!after || !afterTag.includes(expectedFamily)) {
+    const srcOk =
+      variantBase === 'nvidia' ? srcEvidence.cuda
+      : variantBase === 'amd' ? srcEvidence.hip
+      : fs.readdirSync(srcSite).some((e) => isTorchFamilyEntry(e) && packageKey(e) === 'torch')
+    if (!srcOk) {
+      return { ok: false, message: 'bundle does not contain an accelerated PyTorch build' }
+    }
+
+    tools.sendProgress('setup', { percent: -1, status: 'Restoring GPU PyTorch…' })
+    await copyTorchFamily(srcSite, dstSite, tools.signal)
+
+    // Verify the copy produced the expected accelerator family.
+    const after = getTorchVersion(installation)
+    const afterTag = after && after.includes('+') ? after.slice(after.indexOf('+') + 1).toLowerCase() : ''
+    const afterEvidence = readTorchAcceleratorEvidence(dstSite)
+    const afterOk =
+      variantBase === 'nvidia' ? afterTag.includes('cu') || afterEvidence.cuda
+      : variantBase === 'amd' ? afterTag.includes('rocm') || afterEvidence.hip
+      : afterTag.includes('xpu')
+    if (!after || !afterOk) {
       return { ok: false, message: `PyTorch still reports "${after ?? 'unknown'}" after copy` }
     }
 
-    return { ok: true, message: `restored PyTorch ${after}` }
+    return { ok: true, message: `restored PyTorch ${after} (${expectedFamily})` }
   } finally {
     await fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {})
   }
@@ -177,13 +256,18 @@ interface TorchRepairState {
  * GPU-variant damage and, if found, restores the accelerated build from the
  * bundle. Bounded to MAX_REPAIR_ATTEMPTS so a repeatedly-failing download can't
  * nag forever. A failed repair is NON-fatal: CPU torch still runs (slowly), so
- * we let the launch proceed rather than block it. Returns true when a repair
+ * we let the launch proceed rather than block it. Cancellation propagates to the
+ * caller and is not counted as a failed attempt. Returns true when a repair
  * succeeded (caller should refresh the installation record).
  */
 export async function maybeRepairTorch(
   installation: InstallationRecord,
   tools: TorchRepairTools,
 ): Promise<boolean> {
+  // Best-effort sweep of a multi-GB temp extraction orphaned by a hard kill.
+  const orphan = path.join(installation.installPath, '.torch-repair-tmp')
+  if (fs.existsSync(orphan)) await fs.promises.rm(orphan, { recursive: true, force: true }).catch(() => {})
+
   const state = installation.torchRepair as TorchRepairState | undefined
   if (state?.status === 'done') return false
   if ((state?.attempts ?? 0) >= MAX_REPAIR_ATTEMPTS) return false
@@ -202,6 +286,7 @@ export async function maybeRepairTorch(
   try {
     result = await repairTorch(installation, tools)
   } catch (err) {
+    if (tools.signal?.aborted) throw err // cancellation — let launch handle it, don't count
     result = { ok: false, message: (err as Error).message }
   }
 
