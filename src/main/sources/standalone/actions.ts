@@ -6,6 +6,7 @@ import { formatComfyVersion } from '../../lib/version'
 import type { ComfyVersion } from '../../lib/version'
 import { resolveLocalVersion } from '../../lib/version-resolve'
 import { readGitHead, rollbackComfySource } from '../../lib/git'
+import { writeOpMarker, clearOpMarker } from '../../lib/opMarker'
 import { installFilteredRequirements } from '../../lib/pip'
 import { copyDirWithProgress } from '../../lib/copy'
 import { listCustomNodes, findComfyUIDir, backupDir, mergeDirFlat } from '../../lib/migrate'
@@ -51,6 +52,13 @@ export async function handleAction(
     // the source back, keeping source + packages consistent (all-or-nothing).
     const comfyuiDir = path.join(installation.installPath, 'ComfyUI')
     const preRestoreHead = readGitHead(comfyuiDir)
+
+    // Mark the source-moving window so a hard process kill mid-restore is
+    // recovered on the next launch (see recoverInterruptedComfyOp). Cleared once
+    // source + packages are consistent below.
+    if (preRestoreHead) {
+      await writeOpMarker(installation.installPath, { op: 'restore', preHead: preRestoreHead, startedAt: Date.now() })
+    }
 
     sendOutput('\n── Restore ComfyUI Version ──\n')
     const comfyResult = await snapshots.restoreComfyUIVersion(
@@ -118,8 +126,14 @@ export async function handleAction(
       const tail = rolledBack
         ? 'ComfyUI source was rolled back to the pre-restore version; package changes were reverted where possible.'
         : 'Package changes were reverted where possible, but ComfyUI source rollback failed.'
+      // Leave the op marker so recoverInterruptedComfyOp retries on next launch
+      // if the in-process rollback failed; a successful rollback makes it a no-op.
       return { ok: false, message: `${headline}\n\n${tail}` }
     }
+
+    // Source + packages are consistent — the restore succeeded. Clear the marker
+    // so the next launch doesn't roll a good restore back.
+    await clearOpMarker(installation.installPath)
 
     const summary: string[] = []
 

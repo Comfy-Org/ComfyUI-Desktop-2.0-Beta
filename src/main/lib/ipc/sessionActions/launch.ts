@@ -75,6 +75,18 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
   }
   // Migrate legacy envs/default/ → ComfyUI/.venv/ for standalone installs.
   if (inst.sourceId === 'standalone') {
+    // Recover from an update/restore interrupted by a hard process kill (power
+    // loss, taskkill): if a marker survived, roll ComfyUI's source back to the
+    // pre-op commit so we never launch new source against stale packages. Safe
+    // here: the _operationAborts guard above rules out a concurrent operation,
+    // and recovery is a no-op when HEAD already matches the recorded commit.
+    try {
+      const { recoverInterruptedComfyOp } = await import('../../opMarker')
+      const recovered = await recoverInterruptedComfyOp(inst.installPath, (text) => console.log(text.trim()))
+      if (recovered) inst = (await installations.get(installationId)) || inst
+    } catch (err) {
+      console.warn('Interrupted-operation recovery failed:', err)
+    }
     const { migrateEnvLayout } = await import('../../../sources/standalone/install')
     const { writeComfyEnvironment } = await import('../../../sources/standalone/envPaths')
     const updateFn = async (data: Record<string, unknown>): Promise<unknown> => installations.update(installationId, data)

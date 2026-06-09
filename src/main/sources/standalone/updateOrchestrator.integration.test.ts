@@ -350,6 +350,8 @@ describe.skipIf(!HAS_GIT)('runComfyUIUpdate integration', () => {
   describe('dependency-sync rollback', () => {
     const headSha = (): string =>
       execFileSync('git', ['rev-parse', 'HEAD'], { cwd: comfyuiDir, windowsHide: true, stdio: 'pipe' }).toString().trim()
+    const markerExists = (): boolean =>
+      fs.existsSync(path.join(installPath, '.comfyui-op-in-progress.json'))
 
     it('rolls ComfyUI source back to PRE_UPDATE_HEAD when the requirements install fails', async () => {
       spawnState.pythonHandler = makeSuccessfulUpdateHandler(comfyuiDir, repoShas.v2Sha)
@@ -364,6 +366,9 @@ describe.skipIf(!HAS_GIT)('runComfyUIUpdate integration', () => {
       expect(result.message).toMatch(/rolled back/i)
       // Source is back at the pre-update commit, not the failed-update commit.
       expect(headSha()).toBe(repoShas.v1Sha)
+      // Marker is left behind on failure so a launch-time recovery would re-run
+      // (here a no-op, since the in-process rollback already restored HEAD).
+      expect(markerExists()).toBe(true)
 
       // No success metadata persisted on the failure path.
       const updateFn = opts.update as ReturnType<typeof vi.fn>
@@ -393,6 +398,8 @@ describe.skipIf(!HAS_GIT)('runComfyUIUpdate integration', () => {
 
       expect(result.ok).toBe(true)
       expect(headSha()).toBe(repoShas.v2Sha) // no rollback on success
+      // Marker cleared on success so the next launch won't roll a good update back.
+      expect(markerExists()).toBe(false)
     })
   })
 

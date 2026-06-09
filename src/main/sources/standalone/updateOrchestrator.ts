@@ -13,6 +13,7 @@ import * as settings from '../../settings'
 import * as snapshots from '../../lib/snapshots'
 import { repairMacBinaries } from './macRepair'
 import { getActivePythonPath, getActiveUvPath, getMasterPythonPath } from './envPaths'
+import { writeOpMarker, clearOpMarker } from '../../lib/opMarker'
 import type { InstallationRecord } from '../../installations'
 
 interface ScriptResult {
@@ -189,6 +190,14 @@ export async function runComfyUIUpdate(opts: UpdateOrchestrationOptions): Promis
     }
   }
 
+  // Mark the source-moving window so a hard process kill (power loss, taskkill)
+  // mid-update is recovered on the next launch — see recoverInterruptedComfyOp.
+  // The marker is cleared once source + packages are consistent below.
+  const preOpHead = readGitHead(comfyuiDir)
+  if (preOpHead) {
+    await writeOpMarker(installPath, { op: 'update', preHead: preOpHead, startedAt: Date.now() })
+  }
+
   // Run the update script (with a macOS SIGKILL repair-and-retry).
   let result = await spawnUpdateScript(updaterPython, comfyuiDir, channelArgs, sendOutput, signal)
 
@@ -363,8 +372,15 @@ export async function runComfyUIUpdate(opts: UpdateOrchestrationOptions): Promis
           : `${reason}\n\nComfyUI source rollback failed; installation may be inconsistent.`)
       : reason
     if (!sendOutput) console.warn(`ComfyUI update aborted: ${reason}`)
+    // Leave the op marker: if the in-process rollback failed (rolledBack=false),
+    // recoverInterruptedComfyOp retries on the next launch; if it succeeded,
+    // HEAD already matches preHead so recovery is a harmless no-op.
     return { ok: false, message, installation }
   }
+
+  // Source + packages are now consistent — the update succeeded. Clear the marker
+  // so the next launch doesn't roll a good update back.
+  await clearOpMarker(installPath)
 
   // Fetch tags so version resolution sees all release tags (the update script
   // may only fetch master on the latest channel).
