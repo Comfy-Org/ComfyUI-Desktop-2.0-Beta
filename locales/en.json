@@ -406,8 +406,8 @@
     "autoInstallUpdates": "Automatically install Desktop updates",
     "appBehavior": "App Behavior",
     "reopenLastInstanceOnLaunch": "Auto-restart last instance on launch",
-    "closeDirectlyOnLastWindow": "Close Comfy Desktop on last window (don't return to Dashboard)",
-    "closeDirectlyOnLastWindowDescription": "When you close the last ComfyUI instance window, quit Comfy Desktop immediately instead of returning to the Dashboard.",
+    "confirmBeforeClosingWindow": "Confirm before closing a window",
+    "confirmBeforeClosingWindowDescription": "Ask for confirmation before closing a window that's running a local install.",
     "hideCloudFromPicker": "Hide Cloud from the Instance Picker",
     "hideCloudFromPickerDescription": "For local-only users — hides the Cloud tile (and the Try Cloud CTA) from the Dashboard. Cloud remains fully functional; you can re-enable this any time.",
     "checkForUpdates": "Check for updates",
@@ -742,7 +742,6 @@
     "adoptStepSnapshot": "Capture snapshot",
     "adoptStepAllocate": "Allocate install folder",
     "adoptStepSource": "Stage ComfyUI source",
-    "adoptStepComfyUpdate": "Update ComfyUI",
     "adoptStepRequirements": "Install requirements",
     "adoptStepSettings": "Carry over settings",
     "adoptStepRegister": "Register installation"

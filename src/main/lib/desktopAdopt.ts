@@ -14,7 +14,6 @@ import {
 import { defaultInstallDir, allocateUniqueDir, sanitizeDirName } from './paths'
 import {
   gitClone,
-  gitCheckoutCommit,
   readGitHead,
   fetchTags,
   isGitAvailable,
@@ -24,7 +23,6 @@ import {
 import { resolveLocalVersion } from './version-resolve'
 import type { ComfyVersion } from './version'
 import { getComfyUIRemoteUrl } from './github-mirror'
-import { getLatestStableTag } from './comfyui-releases'
 import { installFilteredRequirements, runUvPip, getPipIndexArgs } from './pip'
 import * as installations from '../installations'
 import type { InstallationRecord } from '../installations'
@@ -642,8 +640,8 @@ function readComfyVersion(sourceDir: string): string | null {
 
 /**
  * A staged source tree is usable as long as it has the expected entry
- * points. The first ComfyUI update rolls forward to current stable, so
- * the bundled snapshot's exact version doesn't need to match anything.
+ * points. Adoption preserves whatever version is staged, so the source's
+ * exact version doesn't need to match anything.
  */
 function isStagedSourceValid(stagingDir: string): boolean {
   return fs.existsSync(path.join(stagingDir, 'main.py'))
@@ -1119,7 +1117,6 @@ async function runAdoption(
       { phase: 'snapshot', label: i18n.t('desktop.adoptStepSnapshot') },
       { phase: 'allocate', label: i18n.t('desktop.adoptStepAllocate') },
       { phase: 'source', label: i18n.t('desktop.adoptStepSource') },
-      { phase: 'comfy-update', label: i18n.t('desktop.adoptStepComfyUpdate') },
       { phase: 'requirements', label: i18n.t('desktop.adoptStepRequirements') },
       { phase: 'settings', label: i18n.t('desktop.adoptStepSettings') },
       { phase: 'register', label: i18n.t('desktop.adoptStepRegister') }
@@ -1223,24 +1220,14 @@ async function runAdoption(
     // 'retry' loops.
   }
 
-  // One-shot ComfyUI source update during adoption: the user is
-  // receiving the Desktop 2.0 update with the expectation that ComfyUI
-  // itself is also fresh. We resolve the latest stable tag and check
-  // it out *once* here. Subsequent launches do NOT re-update —
-  // `autoUpdateComfyUI` stays `false` on the record, matching Desktop
-  // 2.0's standard policy that ComfyUI updates are opt-in per install.
-  // Non-fatal: a stale source is still a working install.
-  sendProgress('comfy-update', { percent: 0 })
-  const updateInfo = await telemetry.trackedStep(
-    'comfy.desktop.adopt.comfy_update',
-    {},
-    async () => {
-      return updateComfyToStable(destSource, tools)
-    }
-  )
+  // Adoption preserves the user's existing ComfyUI checkout as-is — it is
+  // not auto-updated to latest stable. A "frozen" install must stay on
+  // whatever version the user was running; ComfyUI updates are opt-in per
+  // install (`autoUpdateComfyUI` stays `false` on the record) and can be
+  // triggered manually from the Update tab.
 
-  // Resolve a real {commit, baseTag, commitsAhead} from the freshly
-  // checked-out source so the release-cache compares the installed
+  // Resolve a real {commit, baseTag, commitsAhead} from the adopted
+  // source so the release-cache compares the installed
   // *tag* (e.g. "v0.24.0") against latestTag, not the bare
   // `__version__` string from comfyui_version.py (e.g. "0.24.0") which
   // never matches a "v"-prefixed remote tag and so wedges the
@@ -1257,7 +1244,7 @@ async function runAdoption(
         resolvedComfyVersion = await resolveLocalVersion(
           destSource,
           headCommit,
-          updateInfo.tag ?? undefined
+          readComfyVersion(destSource) ?? undefined
         )
       }
     } catch (err) {
@@ -1342,14 +1329,13 @@ async function runAdoption(
       pythonVersion: '3.12',
       ...(comfyVersion ? { version: comfyVersion } : {}),
       ...(resolvedComfyVersion ? { comfyVersion: resolvedComfyVersion } : {}),
-      ...(updateInfo.tag ? { adoptedComfyTagAtMigration: updateInfo.tag } : {}),
       launchArgs: derived.launchArgs,
       launchMode: 'window',
       browserPartition: 'unique',
       portConflict: 'auto',
-      // Adopted records get one-time-update-during-adoption above but
-      // stay on opt-in updates from here on out — matching v2's standard
-      // policy. Do not conflate the two.
+      // Adopted records keep the user's existing ComfyUI checkout and stay
+      // on opt-in updates — matching v2's standard policy that ComfyUI
+      // updates are never applied automatically.
       autoUpdateComfyUI: false,
       // Shared models = on (legacy `models/` lives in the global modelsDirs).
       // Shared input/output = off (workspace pinned to legacy basePath via
@@ -1420,7 +1406,7 @@ async function runAdoption(
     carry_skipped_keys: carry.carrySkippedKeys,
     adopted_path_override_input: !!derived.pathOverrides.inputDir,
     adopted_path_override_output: !!derived.pathOverrides.outputDir,
-    adopted_comfy_tag_at_migration: updateInfo.tag ?? null,
+    adopted_comfy_tag_at_migration: null,
     requirements_uv_available: reqReport.uvAvailable,
     requirements_core_exit: reqReport.coreExitCode,
     requirements_manager_exit: reqReport.managerExitCode,
@@ -1431,55 +1417,4 @@ async function runAdoption(
 
   sendProgress('done', { percent: 100 })
   return record
-}
-
-/**
- * One-shot "roll forward to current stable" for an adopted ComfyUI
- * source tree. Resolves the latest stable tag and `git checkout`s it.
- *
- * Non-fatal on every failure path — offline lookups, mirror flakes,
- * even checkout errors leave the adoption with whatever was cloned /
- * copied. The user keeps a working install they can update from the
- * settings UI later.
- */
-async function updateComfyToStable(
-  destSource: string,
-  tools: AdoptTools
-): Promise<{ tag: string | null }> {
-  if (!fs.existsSync(path.join(destSource, '.git'))) {
-    tools.sendOutput('Skipping post-adoption ComfyUI update: source is not a git checkout.\n')
-    return { tag: null }
-  }
-  let tag: string | null
-  try {
-    tag = await getLatestStableTag()
-  } catch {
-    tag = null
-  }
-  if (!tag) {
-    tools.sendOutput(
-      'Skipping post-adoption ComfyUI update: could not resolve latest stable tag.\n'
-    )
-    return { tag: null }
-  }
-  // `gitCheckoutCommit` may transparently `git fetch --unshallow` if the
-  // tag isn't already local — that surfaces as a wall of "Receiving
-  // objects: …" lines with no preamble. Frame it so the user can tell
-  // network activity here is the ComfyUI update, not random churn.
-  tools.sendOutput(`Updating ComfyUI source to latest stable tag (${tag})…\n`)
-  try {
-    const result = await gitCheckoutCommit(destSource, tag, tools.sendOutput, tools.signal)
-    if (result.exitCode !== 0) {
-      tools.sendOutput(
-        `Warning: ComfyUI checkout of ${tag} failed (exit ${result.exitCode}). ` +
-          `Continuing with whatever was cloned; user can update from Settings later.\n`
-      )
-      return { tag: null }
-    }
-    tools.sendOutput(`ComfyUI source now at ${tag}.\n`)
-  } catch (err) {
-    tools.sendOutput(`Warning: ComfyUI checkout threw: ${(err as Error).message}\n`)
-    return { tag: null }
-  }
-  return { tag }
 }
