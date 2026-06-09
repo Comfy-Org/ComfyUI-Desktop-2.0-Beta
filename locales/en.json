@@ -1009,12 +1009,23 @@
     "launchSplashTitle": "Starting ComfyUI",
     "launchSplashDesc": "Launching your ComfyUI instance…",
     "steps": {
+      "launchStart": "Starting ComfyUI…",
+      "repair": "Repairing installation…",
       "securityScan": "Running security scan…",
       "mountLibraries": "Mounting model libraries…",
       "gpu": "Spinning up the GPU ({vram} GB VRAM)…",
       "gpuFallback": "Spinning up the GPU…",
       "customNodes": "Loading custom nodes & ComfyUI-Manager…",
       "startingServer": "Starting server…"
+    },
+    "activity": {
+      "manager": "Loading ComfyUI-Manager…",
+      "registry": "Updating node registry…",
+      "vram": "Configuring GPU memory…",
+      "optimizing": "Optimizing for your hardware…",
+      "models": "Preparing model loading…",
+      "database": "Updating database…",
+      "nodes": "Loading custom nodes…"
     },
     "viewLogs": "View logs"
   },

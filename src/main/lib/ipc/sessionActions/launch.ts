@@ -25,6 +25,10 @@ import type { ActionContext, ActionResult } from './types'
 import { lastNLines, stripAnsi } from '../../stderrTail'
 import { rotateLogFiles, getLogDir } from '../../logRotation'
 import { createExecutionTap } from '../../executionTap'
+import { createLaunchProgressTracker } from '../../launchProgress'
+import { buildLaunchPhases } from '../../launchPhases'
+import { scanCustomNodes } from '../../nodes'
+import type { LaunchProgressTracker } from '../../launchProgress'
 import { clearCrash, recordCrash } from '../../crashBuffer'
 import * as telemetry from '../../telemetry'
 import { appendLog } from '../../logsBroadcast'
@@ -249,6 +253,17 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
       variant: (inst.variant as string | undefined) ?? null,
       release: (inst.release as string | undefined) ?? null,
     })
+    let skipNodeCount = 0
+    try {
+      const scanned = await scanCustomNodes(path.join(inst.installPath, 'ComfyUI'))
+      skipNodeCount = scanned.filter((n) => n.enabled).length
+    } catch {}
+    const launchTracker = createLaunchProgressTracker({
+      phases: buildLaunchPhases(inst),
+      nodeCount: skipNodeCount,
+      sendProgress,
+    })
+    launchTracker.start()
 
     const proc = spawnProcess(launchCmd.cmd!, launchCmd.args!, launchCmd.cwd!, launchEnv, { showWindow: launchCmd.showWindow })
     let stderrBuf = ''
@@ -257,6 +272,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
       writeLog(logStream, text)
       sendOutput(text)
       execTap.ingest(text, 'stdout')
+      launchTracker.ingest(stripAnsi(text))
     })
     proc.stderr?.on('data', (chunk: Buffer) => {
       const text = chunk.toString('utf-8')
@@ -265,6 +281,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
       writeLog(logStream, text)
       sendOutput(text)
       execTap.ingest(text, 'stderr')
+      launchTracker.ingest(stripAnsi(text))
     })
 
     _operationAborts.delete(installationId)
@@ -410,7 +427,34 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     release: (inst.release as string | undefined) ?? null,
   })
 
+  // Real, log-driven launch progress. Phases + the custom-node denominator
+  // are computed once; the tracker is re-armed on each spawn (relaunch loop)
+  // so phases re-emit — the renderer's monotonic floor stops the bar visibly
+  // regressing. Node count is best-effort; the tracker degrades to streaming
+  // when it's 0 (e.g. shared/legacy custom_nodes dirs we don't scan here).
+  const launchPhases = buildLaunchPhases(inst)
+  let launchNodeCount = 0
+  try {
+    const scanned = await scanCustomNodes(path.join(inst.installPath, 'ComfyUI'))
+    launchNodeCount = scanned.filter((n) => n.enabled).length
+  } catch {}
+  let launchTracker: LaunchProgressTracker = createLaunchProgressTracker({
+    phases: launchPhases,
+    nodeCount: launchNodeCount,
+    sendProgress,
+  })
+
   function spawnComfy(): { proc: ChildProcess; getStderr: () => string } {
+    // Fresh tracker per spawn so a respawn re-emits its phase pipeline.
+    launchTracker = createLaunchProgressTracker({
+      phases: launchPhases,
+      nodeCount: launchNodeCount,
+      sendProgress,
+    })
+    // Emit steps + the synthetic first phase BEFORE any stdout, so the op is
+    // stepped from frame zero — one continuous stepper, never a flat
+    // "Starting ComfyUI" window between install and the launch phases.
+    launchTracker.start()
     const p = spawnProcess(launchCmd.cmd!, launchCmd.args!, launchCmd.cwd!, launchEnv, { showWindow: launchCmd.showWindow })
     let stderrBuf = ''
     p.stdout!.on('data', (chunk: Buffer) => {
@@ -418,6 +462,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
       writeLog(logStream, text)
       sendOutput(text)
       execTap.ingest(text, 'stdout')
+      launchTracker.ingest(stripAnsi(text))
     })
     p.stderr!.on('data', (chunk: Buffer) => {
       const text = chunk.toString('utf-8')
@@ -426,6 +471,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
       writeLog(logStream, text)
       sendOutput(text)
       execTap.ingest(text, 'stderr')
+      launchTracker.ingest(stripAnsi(text))
     })
     return { proc: p, getStderr: () => stderrBuf }
   }
@@ -475,16 +521,14 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
       })
     })
 
-    sendProgress('launch', { percent: -1, status: i18n.t('launch.waiting') })
+    // No flat `launch.waiting` progress here: the log-driven stepped phases
+    // own this window. A flat update would race the `startingServer` phase
+    // and flash an indeterminate "(secs)" caption, reflowing the layout.
     try {
       await Promise.race([
         waitForPort(launchCmd.port!, '127.0.0.1', {
           timeoutMs: COMFY_BOOT_TIMEOUT_MS,
           signal: abort.signal,
-          onPoll: ({ elapsedMs }) => {
-            const secs = Math.round(elapsedMs / 1000)
-            sendProgress('launch', { percent: -1, status: i18n.t('launch.waitingTime', { secs }) })
-          },
         }),
         earlyExitPromise,
       ])
@@ -570,14 +614,12 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
         proc.on('exit', (code) => reject(new Error(`Process exited with code ${code}`)))
       })
       try {
+        // Re-armed tracker re-emits stepped phases during this relaunch wait;
+        // no flat poll (would race the stepped caption — see above).
         await Promise.race([
           waitForPort(launchCmd.port!, '127.0.0.1', {
             timeoutMs: COMFY_BOOT_TIMEOUT_MS,
             signal: abort.signal,
-            onPoll: ({ elapsedMs }) => {
-              const secs = Math.round(elapsedMs / 1000)
-              sendProgress('launch', { percent: -1, status: i18n.t('launch.waitingTime', { secs }) })
-            },
           }),
           relaunchEarlyExit,
         ])
