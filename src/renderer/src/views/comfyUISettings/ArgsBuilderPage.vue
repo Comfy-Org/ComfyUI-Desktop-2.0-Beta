@@ -4,9 +4,10 @@ import { useDebounceFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { AlertCircle, ArrowLeft, Loader2, Search, SearchX, X } from 'lucide-vue-next'
 import BaseInput from '../../components/ui/BaseInput.vue'
+import BaseSelect, { type BaseSelectOption } from '../../components/ui/BaseSelect.vue'
 import ArgsRawInput from './ArgsRawInput.vue'
 import type { ComfyArgDef } from '../../types/ipc'
-import { parseArgs, serialize, tokenize } from '../../lib/argsParser'
+import { parseArgs, serialize, validateArgs } from '../../lib/argsParser'
 import { emitTelemetryAction } from '../../lib/telemetry'
 import { scoreName } from '../../utils/fuzzyMatch'
 
@@ -160,7 +161,8 @@ function selectExclusive(group: string, name: string): void {
   if (chosen) emitArgsChanged(chosen.name, chosen.type)
 }
 
-// Clears every member of an exclusive group (backs the "None" radio).
+// Backs the select's synthetic "None" option, which clears the group (a plain
+// radio set can't deselect).
 function clearExclusive(group: string): void {
   const next = new Map(parsed.value.known)
   for (const a of schema.value) {
@@ -176,22 +178,23 @@ function activeInGroup(group: string): string {
   return ''
 }
 
-// Radio rows for an exclusive cluster: a synthetic "" (None) entry followed by
-// each member, so the template renders them with a single loop.
-interface ClusterOption {
-  value: string
-  flag: string
-  help: string
-}
-function clusterOptions(args: ComfyArgDef[]): ClusterOption[] {
+// Dropdown options for an exclusive cluster: a synthetic "None" entry that
+// clears the group, followed by each member flag.
+function clusterOptions(args: ComfyArgDef[]): BaseSelectOption[] {
   return [
     {
       value: '',
-      flag: t('comfyUISettings.argsExclusiveNone', 'None (default)'),
-      help: t('comfyUISettings.argsExclusiveNoneHint', 'No flag from this group is set.')
+      label: t('comfyUISettings.argsExclusiveNone', 'None (default)'),
+      description: t('comfyUISettings.argsExclusiveNoneHint', 'No flag from this group is set.')
     },
-    ...args.map((a) => ({ value: a.name, flag: `--${a.name}`, help: a.help }))
+    ...args.map((a) => ({ value: a.name, label: `--${a.name}`, description: a.help }))
   ]
+}
+
+// One-line preview of the members so the collapsed dropdown says what you're
+// choosing between, not just a generic "Choose one".
+function clusterSummary(args: ComfyArgDef[]): string {
+  return args.map((a) => `--${a.name}`).join(' · ')
 }
 
 function onExclusivePick(group: string, value: string): void {
@@ -295,12 +298,20 @@ const structuredGroups = computed(() => {
 
   // Pin currently-set flags to the top as their own section so they're
   // editable without hunting through categories. Skipped while searching
-  // (the filtered list already narrows things down). Exclusive-group
-  // members surface as individual rows here for direct toggle-off.
+  // (the filtered list already narrows things down). Reuses the same items
+  // as the categories below, so an active exclusive group shows as its
+  // dropdown here too.
   if (q) return result
-  const activeItems: GroupItem[] = schema.value
-    .filter((a) => parsed.value.known.has(a.name))
-    .map((a) => ({ kind: 'arg', arg: a }))
+  const activeItems: GroupItem[] = []
+  for (const items of result.values()) {
+    for (const item of items) {
+      if (item.kind === 'exclusive') {
+        if (item.group && activeInGroup(item.group) !== '') activeItems.push(item)
+      } else if (item.arg && parsed.value.known.has(item.arg.name)) {
+        activeItems.push(item)
+      }
+    }
+  }
   if (activeItems.length === 0) return result
   const ordered = new Map<string, GroupItem[]>()
   ordered.set(t('comfyUISettings.argsActiveTitle', 'Active'), activeItems)
@@ -321,29 +332,16 @@ function onRawChange(value: string): void {
   emit('update', value)
 }
 
-// Unknown-flag warning so users know if a typo silently survives.
-const unknownFlags = computed(() => {
-  if (!schema.value.length) return []
-  const known = new Set(schema.value.map((a) => a.name))
-  const tokens = tokenize(localValue.value)
-  const out: string[] = []
-  for (const tok of tokens) {
-    if (!tok.startsWith('--')) continue
-    const rest = tok.slice(2)
-    const eqIdx = rest.indexOf('=')
-    const name = eqIdx >= 0 ? rest.slice(0, eqIdx) : rest
-    if (name && !known.has(name)) out.push(name)
-  }
-  return out
-})
-
-// Built here (not via vue-i18n) because no catalog entry exists; a locale can override by registering the key with a `{flags}` placeholder.
-const unknownFlagsMessage = computed(() => {
-  const flags = unknownFlags.value.join(', ')
-  return t('comfyUISettings.argsUnknown', { flags }) === 'comfyUISettings.argsUnknown'
-    ? `Unknown flag(s): ${flags}`
-    : t('comfyUISettings.argsUnknown', { flags })
-})
+// Inline validation of the raw string: colored tokens + per-issue warnings so
+// unsupported flags, missing values, and stray positionals are visible instead
+// of silently surviving. Empty until the schema loads.
+const validation = computed(() =>
+  schema.value.length ? validateArgs(localValue.value, schema.value) : null
+)
+const hasValidationIssues = computed(() => validation.value?.hasIssues ?? false)
+const showTokenDisplay = computed(
+  () => hasValidationIssues.value || validation.value?.awaiting != null
+)
 </script>
 
 <template>
@@ -368,6 +366,7 @@ const unknownFlagsMessage = computed(() => {
       <ArgsRawInput
         :model-value="localValue"
         :schema="schema"
+        :invalid="hasValidationIssues"
         :placeholder="t('comfyUISettings.argsPlaceholder', 'No arguments set')"
         :aria-label="t('comfyUISettings.argsRawLabel', 'Raw arguments')"
         @update:model-value="onRawInput"
@@ -376,10 +375,87 @@ const unknownFlagsMessage = computed(() => {
       <p class="args-page-raw-hint">
         {{ t('comfyUISettings.argsRawHint', 'Edit directly, or toggle individual flags below.') }}
       </p>
-      <p v-if="unknownFlags.length > 0" class="args-page-unknown" role="status">
-        <AlertCircle :size="12" aria-hidden="true" />
-        <span>{{ unknownFlagsMessage }}</span>
-      </p>
+
+      <!-- Colored echo of the raw string so problem tokens are easy to spot. -->
+      <div
+        v-if="validation && showTokenDisplay && validation.tokens.length"
+        class="args-page-tokens"
+        aria-hidden="true"
+      >
+        <span
+          v-for="(tok, i) in validation.tokens"
+          :key="i"
+          :class="{
+            'token-bad': tok.status === 'unsupported' || tok.status === 'orphaned',
+            'token-missing': tok.status === 'missing-value',
+            'token-awaiting': tok.status === 'awaiting-value'
+          }"
+          :title="tok.tooltip || ''"
+          >{{ tok.text }}</span
+        >
+      </div>
+
+      <template v-if="validation">
+        <p
+          v-if="validation.awaiting"
+          class="args-page-validation args-page-validation-info"
+          role="status"
+        >
+          <AlertCircle :size="12" aria-hidden="true" />
+          <span>
+            {{ validation.awaiting.text }}
+            {{ t('comfyUISettings.argsAwaitingValue', 'expects a value') }}
+          </span>
+        </p>
+        <p
+          v-if="validation.unsupportedFlags.length > 0"
+          class="args-page-validation args-page-validation-error"
+          role="status"
+        >
+          <AlertCircle :size="12" aria-hidden="true" />
+          <span>
+            {{ t('comfyUISettings.argsUnsupported', 'Unsupported:') }}
+            <code
+              v-for="flag in validation.unsupportedFlags"
+              :key="flag"
+              class="args-page-bad-flag"
+              >--{{ flag }}</code
+            >
+          </span>
+        </p>
+        <p
+          v-if="validation.missingValueFlags.length > 0"
+          class="args-page-validation args-page-validation-warn"
+          role="status"
+        >
+          <AlertCircle :size="12" aria-hidden="true" />
+          <span>
+            {{ t('comfyUISettings.argsMissingValue', 'Missing value for:') }}
+            <code
+              v-for="flag in validation.missingValueFlags"
+              :key="flag"
+              class="args-page-bad-flag"
+              >{{ flag }}</code
+            >
+          </span>
+        </p>
+        <p
+          v-if="validation.orphanedTokens.length > 0"
+          class="args-page-validation args-page-validation-error"
+          role="status"
+        >
+          <AlertCircle :size="12" aria-hidden="true" />
+          <span>
+            {{ t('comfyUISettings.argsUnexpected', 'Unexpected:') }}
+            <code
+              v-for="tok in validation.orphanedTokens"
+              :key="tok"
+              class="args-page-bad-flag"
+              >{{ tok }}</code
+            >
+          </span>
+        </p>
+      </template>
     </div>
 
     <BaseInput
@@ -428,35 +504,20 @@ const unknownFlagsMessage = computed(() => {
         <header class="args-page-category-title">{{ category }}</header>
 
         <div v-for="(item, idx) in items" :key="idx" class="args-page-item">
-          <!-- Exclusive cluster as an inline radio list so every option is visible at a glance; the "None" radio clears the group. -->
+          <!-- Exclusive cluster as a compact dropdown; the label lists the members so you can see the choices before opening, and a synthetic "None" option clears the group. -->
           <template v-if="item.kind === 'exclusive' && item.args && item.group">
-            <div
-              class="args-page-cluster"
-              role="radiogroup"
-              :aria-label="t('comfyUISettings.argsExclusiveLabel', 'Choose one')"
-            >
+            <div class="args-page-cluster">
               <span class="args-page-cluster-label">
-                {{ t('comfyUISettings.argsExclusiveLabel', 'Choose one') }}
+                {{ t('comfyUISettings.argsExclusiveLabel', 'Choose one') }}:
+                <span class="args-page-cluster-options">{{ clusterSummary(item.args) }}</span>
               </span>
-              <label
-                v-for="opt in clusterOptions(item.args)"
-                :key="opt.value"
-                class="args-page-radio-row"
-                :class="{ 'is-active': activeInGroup(item.group) === opt.value }"
-              >
-                <input
-                  type="radio"
-                  class="args-page-radio-input"
-                  :name="`exclusive-${item.group}`"
-                  :checked="activeInGroup(item.group) === opt.value"
-                  @change="onExclusivePick(item.group!, opt.value)"
-                >
-                <span class="args-page-radio-indicator" aria-hidden="true"></span>
-                <div class="args-page-radio-body">
-                  <span class="args-page-flag">{{ opt.flag }}</span>
-                  <p class="args-page-help">{{ opt.help }}</p>
-                </div>
-              </label>
+              <BaseSelect
+                :model-value="activeInGroup(item.group)"
+                :options="clusterOptions(item.args)"
+                :aria-label="`${t('comfyUISettings.argsExclusiveLabel', 'Choose one')}: ${clusterSummary(item.args)}`"
+                :placeholder="t('comfyUISettings.argsExclusiveNone', 'None (default)')"
+                @update:model-value="(v) => onExclusivePick(item.group!, v)"
+              />
             </div>
           </template>
 
@@ -597,21 +658,86 @@ const unknownFlagsMessage = computed(() => {
   color: color-mix(in srgb, var(--text-muted) 80%, transparent);
 }
 
-.args-page-unknown {
-  display: inline-flex;
-  align-items: center;
+/* Colored echo of the raw string: each problem token underlined in its color. */
+.args-page-tokens {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  margin: 6px 0 0;
+  padding: 6px 10px;
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  background: var(--neutral-800);
+  border: 1px solid var(--chooser-surface-border);
+  border-radius: 6px;
+}
+
+.args-page-tokens .token-bad {
+  color: var(--danger);
+  text-decoration: underline wavy;
+  text-underline-offset: 3px;
+}
+
+.args-page-tokens .token-missing {
+  color: var(--warning);
+  text-decoration: underline wavy;
+  text-underline-offset: 3px;
+}
+
+.args-page-tokens .token-awaiting {
+  color: var(--accent-primary);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+.args-page-validation {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
   gap: 6px;
   margin: 6px 0 0;
   padding: 6px 10px;
   font-size: 11px;
-  line-height: 1.4;
-  color: var(--warning);
-  background: color-mix(in srgb, var(--warning) 14%, transparent);
+  line-height: 1.5;
   border-radius: 6px;
 }
 
-.args-page-unknown :deep(svg) {
+.args-page-validation :deep(svg) {
   flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.args-page-validation-error {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+.args-page-validation-warn {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 14%, transparent);
+}
+
+.args-page-validation-info {
+  color: var(--accent-primary);
+  background: color-mix(in srgb, var(--accent-primary) 12%, transparent);
+}
+
+.args-page-bad-flag {
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  font-size: 11px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: color-mix(in srgb, currentcolor 14%, transparent);
 }
 
 .args-page-search :deep(.ui-input-leading) {
@@ -806,11 +932,11 @@ const unknownFlagsMessage = computed(() => {
   }
 }
 
-/* "Choose one" radio cluster: label above an inline list of every option. */
+/* "Choose one" cluster: label (with member preview) above a compact dropdown. */
 .args-page-cluster {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
   min-width: 0;
 }
 
@@ -820,74 +946,19 @@ const unknownFlagsMessage = computed(() => {
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  margin: 2px 0 4px;
+  margin: 2px 0 2px;
   padding: 0 2px;
 }
 
-.args-page-radio-row {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 10px 12px;
-  align-items: start;
-  padding: 8px 10px;
-  margin: 0 -10px;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: background-color 120ms ease;
-}
-
-.args-page-radio-row:hover {
-  background: color-mix(in srgb, var(--text) 4%, transparent);
-}
-
-.args-page-radio-row.is-active {
-  background: color-mix(in srgb, var(--accent-primary) 8%, transparent);
-}
-
-.args-page-radio-input {
-  position: absolute;
-  opacity: 0;
-  width: 0;
-  height: 0;
-  pointer-events: none;
-}
-
-.args-page-radio-indicator {
-  flex-shrink: 0;
-  position: relative;
-  width: 16px;
-  height: 16px;
-  margin-top: 3px;
-  border-radius: 50%;
-  border: 1.5px solid color-mix(in srgb, var(--text-muted) 60%, transparent);
-  background: transparent;
-  transition:
-    border-color 150ms ease,
-    background-color 150ms ease;
-}
-
-.args-page-radio-row.is-active .args-page-radio-indicator {
-  border-color: var(--accent-primary);
-  background: var(--accent-primary);
-}
-
-.args-page-radio-row.is-active .args-page-radio-indicator::after {
-  content: '';
-  position: absolute;
-  inset: 3px;
-  border-radius: 50%;
-  background: #ffffff;
-}
-
-.args-page-radio-input:focus-visible + .args-page-radio-indicator {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-.args-page-radio-body {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
+/* Member preview: monospaced and slightly dimmer so it reads as the option list. */
+.args-page-cluster-options {
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  text-transform: none;
+  letter-spacing: 0;
+  color: color-mix(in srgb, var(--text-muted) 85%, transparent);
 }
 </style>

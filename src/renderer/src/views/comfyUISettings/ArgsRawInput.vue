@@ -16,10 +16,12 @@ const props = withDefaults(
     schema: ComfyArgDef[]
     placeholder?: string
     ariaLabel?: string
+    invalid?: boolean
   }>(),
   {
     placeholder: '',
     ariaLabel: undefined,
+    invalid: false,
   },
 )
 
@@ -83,6 +85,7 @@ function onKeydown(e: KeyboardEvent): void {
       :model-value="localValue"
       :placeholder="placeholder || t('comfyUISettings.argsPlaceholder', 'No arguments set')"
       :aria-label="ariaLabel"
+      :invalid="invalid"
       @update:model-value="handleInput"
       @change="handleChange"
     >
