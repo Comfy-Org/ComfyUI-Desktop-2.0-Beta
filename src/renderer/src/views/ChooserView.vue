@@ -7,7 +7,7 @@ import { useInstallContextMenu } from '../composables/useInstallContextMenu'
 import { useInstallList } from '../composables/useInstallList'
 import { useCloudCapacity } from '../composables/useCloudCapacity'
 import { useModal } from '../composables/useModal'
-import { Cloud, MoreVertical, Plus, Search } from 'lucide-vue-next'
+import { Cloud, Plus, Search } from 'lucide-vue-next'
 import ContextMenu from '../components/ContextMenu.vue'
 import BrandBackground from '../components/BrandBackground.vue'
 import BaseInput from '../components/ui/BaseInput.vue'
@@ -25,10 +25,10 @@ import type { Installation, ShowProgressOpts } from '../types/ipc'
  *
  * Layout:
  *   - Top-left: "New Install" (always present).
- *   - Next: "Cloud" — opens an existing cloud install or routes to
- *     new-install as a Try-Cloud CTA.
- *   - Following: every other install ordered by `lastLaunchedAt` desc,
- *     never-launched at the end.
+ *   - First-run only: a "Try Cloud" CTA tile when the user has zero
+ *     installs (any source). Once any install exists, it is gone.
+ *   - Following: every install (local / cloud / remote) ordered by
+ *     `lastLaunchedAt` desc, never-launched at the end.
  *   - Filter chips above the grid narrow by source category.
  *
  * Per-install tile rendering lives in `chooser/ChooserInstallTile.vue`.
@@ -67,24 +67,24 @@ onMounted(() => {
   }
 })
 
-// Filter / search / recency / cloud-split logic is shared with the
-// title-bar instance picker popover via `useInstallList` so the two
-// surfaces cannot drift. The chip UI is currently hidden in the brand
-// redesign but the underlying `activeFilter` ref + filter switch stay
-// wired; tests reach into `vm.activeFilter` to drive the filter-based
+// Filter / search / recency logic is shared with the title-bar
+// instance picker popover via `useInstallList` so the two surfaces
+// cannot drift. The chip UI is currently hidden in the brand redesign
+// but the underlying `activeFilter` ref + filter switch stay wired;
+// tests reach into `vm.activeFilter` to drive the filter-based
 // regressions guard.
 //
 // "Local" includes both standalone local installs and Legacy Desktop
 // installs (both report `sourceCategory === 'local'`) — they're
-// conceptually the same family from the user's POV.
+// conceptually the same family from the user's POV. Cloud installs
+// flow through `visibleInstalls` like every other source; the
+// dedicated Cloud surface here is now a first-run-only empty-state.
 const installationsRef = toRef(installationStore, 'installations')
 const {
   searchQuery,
   activeFilter,
-  cloudInstall,
-  nonCloudInstalls,
   visibleInstalls,
-  showCloudCard,
+  showTryCloudEmptyState,
   showEmptyHint,
   lastLaunchedLabel
 } = useInstallList({ installations: installationsRef })
@@ -97,9 +97,13 @@ defineExpose({ activeFilter })
 
 // --- Cluster top offset ---
 
-/** Unfiltered tile count: New Install + Cloud slot are always present. Reads
- *  the raw list, not `visibleInstalls`, so search never shifts the cluster. */
-const baseTileCount = computed(() => 2 + nonCloudInstalls.value.length)
+/** Unfiltered tile count: New Install + every install (cloud included).
+ *  The Try-Cloud empty-state CTA only appears when the install list is
+ *  empty, so it never collides with the install row count. Reads the raw
+ *  list, not `visibleInstalls`, so search never shifts the cluster. */
+const baseTileCount = computed(
+  () => 1 + (installationStore.installations.length || 1)
+)
 
 const TILES_PER_ROW = 4
 
@@ -229,20 +233,10 @@ const cloudCapacity = useCloudCapacity()
  *  would do on click. */
 const dashboardCapacityStatus = computed(() => cloudCapacity.effectiveStatus())
 
-async function handleCloudClick(): Promise<void> {
-  // Two paths from the dashboard cloud tile: an existing cloud install
-  // (delegate to `pickInstall`, which has its own capacity gate), or
-  // promote new-install as a Try-Cloud CTA (no install to pick, so the
-  // gate fires here). Calling `confirmEntry` in both branches would
-  // double-fire the degraded confirm modal on the existing-install
-  // path. The tile is also click-disabled when capacity is `disabled`
-  // (free / unknown), so this only really matters for the `degraded`
-  // and paid-on-disabled cases.
-  if (cloudInstall.value) {
-    if (sessionStore.isStopping(cloudInstall.value.id)) return
-    void pickInstall(cloudInstall.value)
-    return
-  }
+async function handleTryCloudClick(): Promise<void> {
+  // Try-Cloud empty-state CTA: there is no cloud install yet, so this
+  // routes to new-install. The capacity gate fires here so the user
+  // doesn't sail past a `disabled` outage into the new-install flow.
   if (!(await cloudCapacity.confirmEntry())) return
   emit('show-new-install')
 }
@@ -267,7 +261,7 @@ function handleNewInstallClick(): void {
       </div>
 
       <div
-        v-if="installationStore.loading && nonCloudInstalls.length === 0"
+        v-if="installationStore.loading && installationStore.installations.length === 0"
         class="chooser-loading"
       >
         {{ t('common.loading') }}
@@ -296,7 +290,7 @@ function handleNewInstallClick(): void {
         </button>
 
         <div
-          v-if="showCloudCard"
+          v-if="showTryCloudEmptyState"
           key="__cloud"
           role="button"
           :tabindex="dashboardCapacityStatus === 'disabled' ? -1 : 0"
@@ -304,31 +298,12 @@ function handleNewInstallClick(): void {
           class="chooser-tile chooser-tile-cloud"
           :class="{ 'chooser-tile--cloud-disabled': dashboardCapacityStatus === 'disabled' }"
           :data-cloud-capacity="dashboardCapacityStatus"
-          @click="handleCloudClick"
-          @keydown.enter="handleCloudClick"
-          @keydown.space.prevent="handleCloudClick"
-          @contextmenu.prevent="cloudInstall ? openCardMenu($event, cloudInstall) : null"
+          @click="handleTryCloudClick"
+          @keydown.enter="handleTryCloudClick"
+          @keydown.space.prevent="handleTryCloudClick"
         >
           <div class="chooser-tile-icon"><Cloud :size="32" /></div>
-          <!-- Kebab options menu — only when a real cloud install exists to
-               manage (parity with the per-install tiles; the Try-Cloud CTA
-               has nothing to manage). Keeps the cloud tile consistent with
-               the rest of the dashboard pills instead of right-click only. -->
-          <div v-if="cloudInstall" class="chooser-tile-actions">
-            <button
-              type="button"
-              class="chooser-tile-kebab"
-              :title="t('chooser.moreActions')"
-              :aria-label="t('chooser.moreActions')"
-              @click.stop="openKebabMenu($event, cloudInstall)"
-              @contextmenu.stop="openKebabMenu($event, cloudInstall)"
-            >
-              <MoreVertical :size="16" />
-            </button>
-          </div>
-          <div class="chooser-tile-name">
-            {{ cloudInstall ? cloudInstall.name : t('cloud.label') }}
-          </div>
+          <div class="chooser-tile-name">{{ t('cloud.label') }}</div>
           <div class="chooser-tile-meta">
             <span
               v-if="dashboardCapacityStatus !== 'normal'"
@@ -348,12 +323,8 @@ function handleNewInstallClick(): void {
                   : t('cloud.capacityDegraded')
               }}
             </span>
-            <span
-              v-else
-              class="chooser-tile-pill"
-              :title="cloudInstall ? cloudInstall.sourceLabel : t('cloud.desc')"
-            >
-              {{ cloudInstall ? cloudInstall.sourceLabel : t('cloud.desc') }}
+            <span v-else class="chooser-tile-pill" :title="t('cloud.desc')">
+              {{ t('cloud.desc') }}
             </span>
           </div>
         </div>

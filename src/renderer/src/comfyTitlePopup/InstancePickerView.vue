@@ -173,29 +173,10 @@ const installationsRef = toRef(() => installations.value)
 const {
   searchQuery,
   activeFilter,
-  cloudInstall,
   visibleInstalls,
-  showCloudCard,
   showEmptyHint,
   lastLaunchedShortLabel
 } = useInstallList({ installations: installationsRef })
-
-/** Folds cloud into the recency-sorted list (sorted by its own
- *  lastLaunchedAt). On a recency tie cloud is ordered first, but the
- *  auto-selected default still favours a real install (see
- *  `resolvePickerSelectedInstallId` in main). */
-const pickerRows = computed<Installation[]>(() => {
-  const rows = [...visibleInstalls.value]
-  if (showCloudCard.value && cloudInstall.value) {
-    rows.push(cloudInstall.value)
-  }
-  return rows.sort((a, b) => {
-    const ta = a.lastLaunchedAt ?? -Infinity
-    const tb = b.lastLaunchedAt ?? -Infinity
-    if (tb !== ta) return tb - ta
-    return (b.sourceCategory === 'cloud' ? 1 : 0) - (a.sourceCategory === 'cloud' ? 1 : 0)
-  })
-})
 
 const visibleChips = computed(() => {
   return FILTER_CHIPS.filter((chip) => {
@@ -210,21 +191,11 @@ const visibleChips = computed(() => {
   })
 })
 
-/** Default selection when the popup opens with no active/selected install.
- *  Tie-break mirrors main's `mostRecentlyLaunchedInstallId`: on a tie a real
- *  install wins so the always-seeded Cloud entry can't claim the default. */
+/** Default selection when the popup opens with no active/selected install. */
 function mostRecentInstallId(installs: PickerInstall[]): string | null {
   let best: PickerInstall | undefined
   for (const inst of installs) {
-    if (!best) {
-      best = inst
-      continue
-    }
-    const ts = inst.lastLaunchedAt ?? 0
-    const bestTs = best.lastLaunchedAt ?? 0
-    if (ts > bestTs) {
-      best = inst
-    } else if (ts === bestTs && best.sourceCategory === 'cloud' && inst.sourceCategory !== 'cloud') {
+    if (!best || (inst.lastLaunchedAt ?? 0) > (best.lastLaunchedAt ?? 0)) {
       best = inst
     }
   }
@@ -560,7 +531,7 @@ async function handleExpandedPrimaryAction(restartInPlace: boolean): Promise<voi
 
           <div class="picker-list" role="listbox">
             <InstanceRow
-              v-for="inst in pickerRows"
+              v-for="inst in visibleInstalls"
               :key="inst.id"
               :installation="inst"
               :active="selectedId === inst.id"
