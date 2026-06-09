@@ -218,6 +218,16 @@ describe('terminal manager', () => {
     expect(wcB.sent.some((m) => m.channel === 'terminal-output')).toBe(false)
   })
 
+  it('spawns only one shell when subscribed concurrently', async () => {
+    // Two surfaces racing to subscribe must share one PTY, not orphan extras.
+    await Promise.all([
+      subscribeTerminal('inst-a', asWc(makeWebContents())),
+      subscribeTerminal('inst-a', asWc(makeWebContents())),
+    ])
+
+    expect(spawn).toHaveBeenCalledTimes(1)
+  })
+
   it('disposeTerminal kills the install shell so an FS op runs unlocked', async () => {
     await subscribeTerminal('inst-a', asWc(makeWebContents()))
     expect(ptyAt(0).killed).toBe(false)

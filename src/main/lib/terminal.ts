@@ -133,6 +133,7 @@ function initCommands(venvDir: string, uvPath: string): string[] {
 class InstallTerminal {
   readonly installationId: string
   #pty: NodePty.IPty | undefined
+  #spawnInFlight: Promise<void> | undefined
   #exited = true
   readonly sessionBuffer: string[] = []
   readonly size = { ...DEFAULT_SIZE }
@@ -149,7 +150,14 @@ class InstallTerminal {
   /** Spawn the shell if it isn't alive. Safe to call repeatedly. */
   async ensureAlive(): Promise<void> {
     if (this.#pty && !this.#exited) return
-    await this.#spawn()
+    // Dedupe concurrent spawns: several surfaces can call subscribeTerminal at
+    // once, and #spawn awaits before assigning #pty — without this each caller
+    // would spawn its own shell and orphan all but the last (a leaked PTY that
+    // keeps holding the install dir / venv locked).
+    this.#spawnInFlight ??= this.#spawn().finally(() => {
+      this.#spawnInFlight = undefined
+    })
+    await this.#spawnInFlight
   }
 
   /** Kill any existing shell and start a fresh one. Clears scrollback. */
