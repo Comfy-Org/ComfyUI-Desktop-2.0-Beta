@@ -67,7 +67,8 @@ import {
 } from './lib/ipc/shared'
 import { enrichInstallationsForRenderer } from './lib/ipc/registerInstallationHandlers'
 import { getSnapshotListData } from './lib/snapshots'
-import { update as updateInstallation } from './installations'
+import { update as updateInstallation, resolveAutoLaunchInstall } from './installations'
+import { AUTO_LAUNCH_NONE } from './settings'
 import { lookupInstallUpdateOverride, recordIpcInvocation } from './lib/e2eOverrides'
 import * as mainTelemetry from './lib/telemetry'
 import {
@@ -233,14 +234,27 @@ function revealStartupRestoreDashboard(windowKey: number): void {
  * error, console/external mode, slow/absent renderer) falls back to revealing
  * the dashboard.
  */
-function openStartupSurface(): void {
+async function openStartupSurface(): Promise<void> {
   // Read the persisted surface BEFORE opening the chooser host: showing the
   // chooser fires its `focus` handler, which would record 'dashboard' and
   // clobber the instance we're about to restore.
-  const surface = getLastActiveSurface()
-  const restoreEnabled =
-    settings.get('reopenLastInstanceOnLaunch') !== false &&
-    settings.get('firstUseCompleted') === true
+  const persistedSurface = getLastActiveSurface()
+  const firstUseDone = settings.get('firstUseCompleted') === true
+  // Explicit auto-launch overrides the implicit reopen-last-instance restore:
+  // user picked a specific install (or "last") in Settings, so we honor that
+  // regardless of what surface they were on when they last quit.
+  const autoLaunchValue = firstUseDone
+    ? (settings.get('autoLaunchOnStartup') as string | undefined)
+    : undefined
+  const explicitInst = autoLaunchValue && autoLaunchValue !== AUTO_LAUNCH_NONE
+    ? await resolveAutoLaunchInstall(autoLaunchValue)
+    : null
+  const surface = explicitInst
+    ? { kind: 'instance' as const, installationId: explicitInst.id }
+    : persistedSurface
+  const restoreEnabled = explicitInst
+    ? true
+    : settings.get('reopenLastInstanceOnLaunch') !== false && firstUseDone
   const shouldRestore = restoreEnabled && surface?.kind === 'instance'
 
   // Restore opens hidden (revealed on takeover-ready / fallback); the plain
@@ -1980,7 +1994,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     // picking / creating installs. When the user last left an instance
     // window (and the reopen setting is on), restore that instance
     // in-place on top of the freshly-opened chooser host.
-    openStartupSurface()
+    void openStartupSurface()
 
     // Single subscription rebroadcasts every install-list mutation
     // (add/remove/update/markLaunched/reorder/...) to all renderers as
