@@ -39,7 +39,7 @@ const SNAPSHOTS_REL = '.snapshots'
 // Display name for adopted installs. `installations.add()` calls
 // `uniqueName()` so a second adoption (or a coexisting standalone
 // install named "ComfyUI") gets "ComfyUI (1)", "ComfyUI (2)", etc.
-// Keeping the name plain â€” instead of "Adopted from Legacy Desktop" â€”
+// Keeping the name plain — instead of "Adopted from Legacy Desktop" —
 // matches user expectation that the picker shows their app, not the
 // provenance story.
 const ADOPT_INSTALL_NAME = 'ComfyUI'
@@ -83,7 +83,7 @@ export interface AdoptDeps {
 
 export interface AdoptOptions {
   tools: AdoptTools
-  /** @internal â€” tests override to inject mocks. */
+  /** @internal — tests override to inject mocks. */
   deps?: Partial<AdoptDeps>
 }
 
@@ -92,7 +92,7 @@ export type AdoptSourceMode = 'pre-swap-copy' | 'git-clone-fallback'
 /** Subset of legacy `comfy.settings.json` consumed by the orchestrator.
  *  Excludes things v2 already handles via other paths:
  *   - `Comfy.ColorPalette` is a frontend canvas-color setting that
- *     lives in `<basePath>/user/default/comfy.settings.json` â€” ComfyUI
+ *     lives in `<basePath>/user/default/comfy.settings.json` — ComfyUI
  *     reads it on its own. v2's `theme` setting is the Electron
  *     launcher chrome (`'system' | 'dark' | 'light'`) and isn't
  *     equivalent.
@@ -102,19 +102,19 @@ export type AdoptSourceMode = 'pre-swap-copy' | 'git-clone-fallback'
  *     preserved in `<configDir>/legacy-backup/<timestamp>/` so a
  *     future "rebuild as managed standalone" flow can read it then. */
 interface LegacyComfySettings {
-  /** `Comfy-Desktop.SendStatistics` â€” telemetry consent. */
+  /** `Comfy-Desktop.SendStatistics` — telemetry consent. */
   sendStatistics?: boolean
-  /** `Comfy-Desktop.AutoUpdate` â€” whether the legacy app installed
+  /** `Comfy-Desktop.AutoUpdate` — whether the legacy app installed
    *  Desktop updates silently. Maps to v2 `autoInstallUpdates`. */
   autoUpdate?: boolean
-  /** `Comfy-Desktop.UV.PypiInstallMirror` â€” user-pinned PyPI index URL.
+  /** `Comfy-Desktop.UV.PypiInstallMirror` — user-pinned PyPI index URL.
    *  Carries verbatim into v2 `pypiMirror` (feeds every `uv pip install`
    *  the launcher runs: requirements during adoption, custom-node
    *  installs, manager extras, snapshot restore). */
   pypiMirror?: string
 }
 
-/** Substrings that mark a mirror URL as a known Chinese mirror â€”
+/** Substrings that mark a mirror URL as a known Chinese mirror —
  *  used to infer `useChineseMirrors` from a carried `pypiMirror` so the
  *  locale-triggered prompt doesn't replay for migrated users. */
 const CHINESE_MIRROR_HINTS = ['aliyun', 'tencent', 'tsinghua', 'mirrors.cernet.edu.cn']
@@ -186,7 +186,7 @@ export async function copyStagedSourceDefault(src: string, dest: string): Promis
  * also ends up with a full clone after `postInstall` runs `fetchTags
  * --unshallow`, so an adopted install needs the same complete history for
  * release-tag resolution and updates to work consistently. We don't try to
- * match the legacy bundled snapshot's exact commit â€” adopted installs
+ * match the legacy bundled snapshot's exact commit — adopted installs
  * roll forward to the current stable on their first ComfyUI update
  * anyway, so cloning `main` (or the mirror's default branch) is fine.
  */
@@ -222,7 +222,7 @@ export interface ExtraModelsSection {
   name: string
   /** `base_path:` value when present (raw, may be relative). */
   basePath?: string
-  /** Per-type override key (`checkpoints`, `loras`, â€¦) â†’ path. A value may
+  /** Per-type override key (`checkpoints`, `loras`, …) → path. A value may
    *  carry multiple newline/pipe-delimited paths in the legacy format; each
    *  becomes its own entry keyed by the same type. */
   overrides: Array<{ type: string; path: string }>
@@ -315,7 +315,7 @@ export interface DerivedLaunchArgs {
   launchArgs: string
   /** Input/output directory overrides extracted from the legacy
    *  `Comfy.Server.LaunchArgs` map. Empty when the user never set them
-   *  â€” caller falls back to `<basePath>/{input,output}`. */
+   *  — caller falls back to `<basePath>/{input,output}`. */
   pathOverrides: {
     inputDir?: string
     outputDir?: string
@@ -323,7 +323,7 @@ export interface DerivedLaunchArgs {
 }
 
 /**
- * Coerce a raw legacy settings value into the flagâ†’value convention used
+ * Coerce a raw legacy settings value into the flag→value convention used
  * when emitting the launchArgs string: booleans become `''` (flag with no
  * value) when truthy and are dropped when `false`; everything else is
  * stringified. Returns `null` when the entry should be skipped entirely.
@@ -332,7 +332,7 @@ export interface DerivedLaunchArgs {
  * already stores boolean flags as `''` and numbers as strings, while
  * `ServerConfigValues` keeps native `true`/`false`/number values, so a
  * raw `true` here means "emit the bare flag" and a raw `false` means
- * "the user explicitly disabled it â€” emit nothing".
+ * "the user explicitly disabled it — emit nothing".
  */
 function normalizeLaunchValue(value: unknown): string | null {
   if (value === undefined || value === null) return null
@@ -366,7 +366,7 @@ function normalizeLaunchValue(value: unknown): string | null {
  *    into the legacy Manager UI (`enable-manager-legacy-ui`). The two
  *    Manager UIs are mutually exclusive, so honoring the legacy choice
  *    must not also inject the new Manager.
- *  - `--listen` is NOT synthesized â€” legacy's implicit `127.0.0.1`
+ *  - `--listen` is NOT synthesized — legacy's implicit `127.0.0.1`
  *    matches ComfyUI's native default, so emitting it would only add
  *    noise to the editable string. Explicit user-set `listen` values
  *    are preserved.
@@ -411,7 +411,7 @@ export function deriveLaunchArgs(comfySettings: Record<string, unknown>): Derive
   // Synthesize legacy's baked-in defaults the user expects: port 8000
   // (preserves bookmarked URLs) and --enable-manager. Skip --listen
   // because its legacy implicit `127.0.0.1` matches ComfyUI's native
-  // default â€” writing it adds noise without effect.
+  // default — writing it adds noise without effect.
   if (!hasPort) parts.unshift('--port', '8000')
   // The new Manager and the legacy Manager UI are mutually exclusive, so
   // don't force the new Manager on when the user opted into the legacy UI.
@@ -542,7 +542,7 @@ export function computeModelsDirsToCarry(
     return true
   }
 
-  // Primary install root always leads, even if absent (trusted) â€” matches
+  // Primary install root always leads, even if absent (trusted) — matches
   // prior behavior where `<basePath>/models` is carried unconditionally.
   const primary = path.resolve(path.join(basePath, 'models'))
   if (!seen.has(primary)) {
@@ -670,7 +670,7 @@ interface RequirementsInstallReport {
 /**
  * Install ComfyUI's `requirements.txt` (and `manager_requirements.txt`
  * when present) into the legacy venv via its bundled uv. Best-effort:
- * surfaces warnings on failure rather than aborting adoption â€” the
+ * surfaces warnings on failure rather than aborting adoption — the
  * adopted install is still usable, just with potentially stale deps the
  * user can re-sync from the Manager UI later. PyTorch packages are
  * filtered out via `installFilteredRequirements` so we never clobber the
@@ -679,9 +679,9 @@ interface RequirementsInstallReport {
  * Also installs `pygit2` so:
  *   - ComfyUI-Manager v4 picks the pygit2 backend (gated by
  *     `CM_USE_PYGIT2=1`, which `buildLaunchEnv` already sets for every
- *     `sourceId === 'standalone'` install â€” adopted included). Without
+ *     `sourceId === 'standalone'` install — adopted included). Without
  *     pygit2 Manager falls back to GitPython, which requires `git` on
- *     PATH â€” Legacy Desktop never required system git, so adopted users
+ *     PATH — Legacy Desktop never required system git, so adopted users
  *     often don't have it.
  *   - The launcher-bundled `update_comfyui.py` can run against the
  *     adopted Python (it imports pygit2 unconditionally), which is what
@@ -699,7 +699,7 @@ async function installAdoptedRequirements(
   const uvPath = getLegacyVenvUvPath(basePath)
   if (!fs.existsSync(uvPath)) {
     tools.sendOutput(
-      `Warning: legacy venv uv not found at ${uvPath} â€” skipping ComfyUI requirements install. ` +
+      `Warning: legacy venv uv not found at ${uvPath} — skipping ComfyUI requirements install. ` +
         `You may need to manually run \`pip install -r requirements.txt\` later if launches fail.\n`
     )
     return { uvAvailable: false, coreExitCode: null, managerExitCode: null, pygit2ExitCode: null }
@@ -715,7 +715,7 @@ async function installAdoptedRequirements(
 
   const coreReqs = path.join(destSource, 'requirements.txt')
   if (fs.existsSync(coreReqs)) {
-    tools.sendOutput('Installing ComfyUI requirements into legacy venv via uvâ€¦\n')
+    tools.sendOutput('Installing ComfyUI requirements into legacy venv via uv…\n')
     const code = await installFilteredRequirements(
       coreReqs,
       uvPath,
@@ -731,12 +731,12 @@ async function installAdoptedRequirements(
       tools.sendOutput(`Warning: ComfyUI requirements install exited with code ${code}.\n`)
     }
   } else {
-    tools.sendOutput(`Warning: ${coreReqs} missing â€” ComfyUI source may be incomplete.\n`)
+    tools.sendOutput(`Warning: ${coreReqs} missing — ComfyUI source may be incomplete.\n`)
   }
 
   const mgrReqs = path.join(destSource, 'manager_requirements.txt')
   if (fs.existsSync(mgrReqs)) {
-    tools.sendOutput('Installing ComfyUI-Manager requirementsâ€¦\n')
+    tools.sendOutput('Installing ComfyUI-Manager requirements…\n')
     const code = await installFilteredRequirements(
       mgrReqs,
       uvPath,
@@ -758,7 +758,7 @@ async function installAdoptedRequirements(
   // (Manager + in-place updates both depend on it; we want to spot a
   // population of adoptions where this specific install fails). Idempotent
   // on reconcile.
-  tools.sendOutput('Installing pygit2 into legacy venv (enables Manager + in-place updates)â€¦\n')
+  tools.sendOutput('Installing pygit2 into legacy venv (enables Manager + in-place updates)…\n')
   const pygit2Code = await runUvPip(
     uvPath,
     [
@@ -832,7 +832,7 @@ async function sourceComfyUI(
   // Frame the operation so the user knows what those object counts mean
   // and roughly how long to wait.
   tools.sendOutput(
-    `Pre-swap copy not available; downloading ComfyUI source from ${url} â€¦\n` +
+    `Pre-swap copy not available; downloading ComfyUI source from ${url} …\n` +
       `This is a one-time download and can take a few minutes on a slow connection.\n`
   )
   const cloneResult = await deps.cloneSourceFromGit(url, destDir, tools.sendOutput, tools.signal)
@@ -856,35 +856,35 @@ interface CarryReport {
 
 /**
  * Persist legacy preferences into v2's global settings under the
- * "v2 user choice wins" rule â€” keys the user has already set in v2 are
+ * "v2 user choice wins" rule — keys the user has already set in v2 are
  * preserved verbatim; only absent keys are seeded from the legacy
  * install. Uses `settings.has()` (which reads the raw `settings.json`)
  * so built-in defaults don't masquerade as user choices.
  *
  * Carries:
- *   - `modelsDirs`           â† `<basePath>/models` plus every real model
+ *   - `modelsDirs`           ← `<basePath>/models` plus every real model
  *                              root referenced by
  *                              `extra_models_config.yaml`: each section's
  *                              `base_path` (as `/models` or the bare dir)
  *                              and each per-type override resolved to its
  *                              models root. See `computeModelsDirsToCarry`.
  *                              Always appended.
- *   - `telemetryEnabled`     â† `Comfy-Desktop.SendStatistics`
- *   - `autoInstallUpdates`   â† force `true`. Adoption ships as an
+ *   - `telemetryEnabled`     ← `Comfy-Desktop.SendStatistics`
+ *   - `autoInstallUpdates`   ← force `true`. Adoption ships as an
  *                              in-place app update of Legacy Desktop;
  *                              if the legacy user had `AutoUpdate: false`,
  *                              inheriting it would lock them out of
- *                              future Desktop 2.0 updates â€” including
+ *                              future Desktop 2.0 updates — including
  *                              fixes to the adoption flow itself. Forced
  *                              on once at adoption (respects any later
  *                              v2-side toggle).
- *   - `pypiMirror`           â† `Comfy-Desktop.UV.PypiInstallMirror`
+ *   - `pypiMirror`           ← `Comfy-Desktop.UV.PypiInstallMirror`
  *   - `useChineseMirrors` +
- *     `chineseMirrorsPrompted` â† inferred from `pypiMirror`
- *   - `firstUseCompleted`    â† force `true` (the adopting user has been
- *                              running ComfyUI for months â€” skip the
+ *     `chineseMirrorsPrompted` ← inferred from `pypiMirror`
+ *   - `firstUseCompleted`    ← force `true` (the adopting user has been
+ *                              running ComfyUI for months — skip the
  *                              first-launch takeover).
- *   - `inputDir` / `outputDir` â† `<basePath>/input` / `<basePath>/output`
+ *   - `inputDir` / `outputDir` ← `<basePath>/input` / `<basePath>/output`
  *                                so fresh managed installs created
  *                                later automatically see the legacy
  *                                workspace.
@@ -929,7 +929,7 @@ function carryLegacySettings(
   // Force Desktop auto-updates on at adoption time, regardless of the
   // legacy `Comfy-Desktop.AutoUpdate` value. The cutover ships as an
   // in-place app update from Legacy Desktop, so users who had auto-update
-  // off would never receive subsequent Desktop 2.0 updates â€” including
+  // off would never receive subsequent Desktop 2.0 updates — including
   // fixes to the adoption flow itself. We only seed when v2 hasn't already
   // persisted a choice, so users who explicitly toggle it off in v2
   // settings after adoption keep their choice on subsequent reconciles.
@@ -946,7 +946,7 @@ function carryLegacySettings(
     tryCarry('chineseMirrorsPrompted', true)
   }
 
-  // Force-skip the first-launch takeover for adopted users â€” they've
+  // Force-skip the first-launch takeover for adopted users — they've
   // been running ComfyUI for months. Carries unconditionally because
   // re-running adoption on a fresh v2 install (idempotent reconcile)
   // shouldn't replay the takeover either.
@@ -957,7 +957,7 @@ function carryLegacySettings(
 
   // Seed global shared dirs to legacy workspace so fresh managed installs
   // (created later by the same user) see the same input/output by default.
-  // Only when v2 hasn't already persisted a choice â€” adopted users who
+  // Only when v2 hasn't already persisted a choice — adopted users who
   // first ran v2 and configured shared dirs keep their choice.
   tryCarry('inputDir', path.join(basePath, 'input'))
   tryCarry('outputDir', path.join(basePath, 'output'))
@@ -1038,14 +1038,14 @@ export async function adoptDesktopInstall(opts: AdoptOptions): Promise<Installat
   // older adoptions (created before the requirements step shipped) and
   // installs whose deps drifted after a manual ComfyUI source update can
   // self-heal by re-running migrate-to-standalone. installFilteredRequirements
-  // is idempotent â€” repeating it on an up-to-date venv is a uv no-op.
+  // is idempotent — repeating it on an up-to-date venv is a uv no-op.
   const existing = await findExistingAdoption(info.basePath)
   if (existing) {
-    tools.sendOutput(`Already adopted as installation ${existing.id}; reconciling requirementsâ€¦\n`)
+    tools.sendOutput(`Already adopted as installation ${existing.id}; reconciling requirements…\n`)
     // Backfill: older adoptions only wrote the marker under
     // `<adoptedBaseDir>`. The install-side marker is required for
     // `sessionActions/delete.ts`' safety check to recognise an
-    // adopted install â€” without it, Delete errors out with the
+    // adopted install — without it, Delete errors out with the
     // generic "use Forget" message. Best-effort: ignore failures
     // so reconcile still wins.
     if (existing.installPath) {
@@ -1106,7 +1106,7 @@ async function runAdoption(
 
   // Register human-readable step labels for the progress UI. Without
   // this the renderer falls back to displaying the raw phase id
-  // ("source", "venv", â€¦) since the labels are otherwise undefined.
+  // ("source", "venv", …) since the labels are otherwise undefined.
   sendProgress('steps', {
     steps: [
       { phase: 'backup', label: i18n.t('desktop.adoptStepBackup') },
@@ -1220,7 +1220,7 @@ async function runAdoption(
     // 'retry' loops.
   }
 
-  // Adoption preserves the user's existing ComfyUI checkout as-is â€” it is
+  // Adoption preserves the user's existing ComfyUI checkout as-is — it is
   // not auto-updated to latest stable. A "frozen" install must stay on
   // whatever version the user was running; ComfyUI updates are opt-in per
   // install (`autoUpdateComfyUI` stays `false` on the record) and can be
@@ -1320,7 +1320,7 @@ async function runAdoption(
       adoptedSourceMode: sourceMode!,
       ...(legacyAppVersion ? { adoptedFromLegacyVersion: legacyAppVersion } : {}),
       // Hardware hints stashed for a future "rebuild as managed standalone"
-      // flow that needs to preselect the right variant â€” no v2 consumer
+      // flow that needs to preselect the right variant — no v2 consumer
       // today, but cheap to capture while we have the legacy config open.
       ...(detectedGpu ? { adoptedFromGpu: detectedGpu } : {}),
       ...(selectedDevice ? { adoptedSelectedDevice: selectedDevice } : {}),
@@ -1333,9 +1333,9 @@ async function runAdoption(
       launchMode: 'window',
       browserPartition: 'unique',
       portConflict: 'auto',
-      // Adopted records get one-time-update-during-adoption above but
-      // stay on opt-in updates from here on out â€” matching v2's standard
-      // policy. Do not conflate the two.
+      // Adopted records keep the user's existing ComfyUI checkout and stay
+      // on opt-in updates — matching v2's standard policy that ComfyUI
+      // updates are never applied automatically.
       autoUpdateComfyUI: false,
       // Shared models = on (legacy `models/` lives in the global modelsDirs).
       // Shared input/output = off (workspace pinned to legacy basePath via
@@ -1352,8 +1352,8 @@ async function runAdoption(
     const entry = await installations.add(recordData)
     // Marker is written only after the record exists so a crash in between
     // doesn't poison the next adoption attempt with a dangling marker.
-    // If the marker write itself fails (disk full, permissions, â€¦) we
-    // must roll the DB entry back â€” otherwise the next re-run sees no
+    // If the marker write itself fails (disk full, permissions, …) we
+    // must roll the DB entry back — otherwise the next re-run sees no
     // marker and creates a duplicate installation record.
     //
     // Two markers, two different jobs:
@@ -1363,7 +1363,7 @@ async function runAdoption(
     //     skip this workspace, so the startup auto-tracker can't reseed a
     //     "ComfyUI Legacy Desktop" card alongside the adopted standalone.
     //   - `<installPath>/<MARKER_FILE>` is the safety check used by the
-    //     standard delete flow (`sessionActions/delete.ts`) â€” without it
+    //     standard delete flow (`sessionActions/delete.ts`) — without it
     //     "Delete" on an adopted install errors out as "not created by
     //     Desktop 2.0". Adopted delete also relies on the install-side
     //     marker before touching anything under `adoptedBaseDir`.
@@ -1383,7 +1383,7 @@ async function runAdoption(
     // legacy app). The startup auto-tracker won't reseed it because the
     // marker we just wrote disqualifies the path from
     // `detectDesktopInstall()`. Best-effort: a failure here doesn't break
-    // adoption â€” the next app launch reconciles via the marker check.
+    // adoption — the next app launch reconciles via the marker check.
     try {
       const all = await installations.list()
       for (const i of all) {
@@ -1406,7 +1406,6 @@ async function runAdoption(
     carry_skipped_keys: carry.carrySkippedKeys,
     adopted_path_override_input: !!derived.pathOverrides.inputDir,
     adopted_path_override_output: !!derived.pathOverrides.outputDir,
-    // Adoption no longer force-checks-out a tag; kept for event-shape stability.
     adopted_comfy_tag_at_migration: null,
     requirements_uv_available: reqReport.uvAvailable,
     requirements_core_exit: reqReport.coreExitCode,
