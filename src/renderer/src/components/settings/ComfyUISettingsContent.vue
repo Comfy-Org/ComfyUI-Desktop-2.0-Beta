@@ -703,6 +703,7 @@ defineExpose({
           key="subpage-args"
           :installation-id="installation.id"
           :initial-value="argsValue"
+          :pending-restart="argsField != null && pendingRestartFieldIds.has(argsField.id)"
           @back="closeSubPage"
           @update="handleArgsUpdate"
         />

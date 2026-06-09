@@ -20,9 +20,14 @@ import { scoreName } from '../../utils/fuzzyMatch'
 interface Props {
   installationId: string
   initialValue: string
+  /** True when args were edited while the instance is running, so they won't
+   *  apply until a restart; mirrors the tag other settings fields show. */
+  pendingRestart?: boolean
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  pendingRestart: false
+})
 
 const emit = defineEmits<{
   back: []
@@ -328,7 +333,12 @@ function onRawChange(value: string): void {
         <ArrowLeft :size="16" />
         <span>{{ t('common.back', 'Back') }}</span>
       </button>
-      <h2 class="args-page-title">{{ t('comfyUISettings.argsTitle', 'Startup Arguments') }}</h2>
+      <div class="args-page-title-row">
+        <h2 class="args-page-title">{{ t('comfyUISettings.argsTitle', 'Startup Arguments') }}</h2>
+        <span v-if="pendingRestart" class="args-page-restart-tag" role="status">
+          {{ t('comfyUISettings.restartRequired', 'Restart to apply') }}
+        </span>
+      </div>
     </header>
 
     <div class="args-page-raw">
@@ -513,6 +523,13 @@ function onRawChange(value: string): void {
   outline-offset: 2px;
 }
 
+.args-page-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .args-page-title {
   margin: 0;
   font-size: 18px;
@@ -520,6 +537,22 @@ function onRawChange(value: string): void {
   color: var(--text);
   letter-spacing: -0.01em;
   line-height: 1.2;
+}
+
+/* Mirrors SettingsSectionList's restart tag so the args page reads as the same family. */
+.args-page-restart-tag {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: 9999px;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 14px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warning) 36%, transparent);
+  white-space: nowrap;
 }
 
 .args-page-raw {

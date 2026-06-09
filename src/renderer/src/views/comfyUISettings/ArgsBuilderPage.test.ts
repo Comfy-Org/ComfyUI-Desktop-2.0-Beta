@@ -61,9 +61,9 @@ function stubElectronApi(): void {
 
 const wrappers: VueWrapper[] = []
 
-async function mountPage(initialValue = ''): Promise<VueWrapper> {
+async function mountPage(initialValue = '', pendingRestart = false): Promise<VueWrapper> {
   const wrapper = mount(ArgsBuilderPage, {
-    props: { installationId: 'inst-1', initialValue },
+    props: { installationId: 'inst-1', initialValue, pendingRestart },
     global: {
       plugins: [i18n],
       // BaseSelect teleports its popover to <body>; render it in-tree
@@ -211,6 +211,20 @@ describe('ArgsBuilderPage — exclusive group dropdown', () => {
     expect(options.exists()).toBe(true)
     expect(options.text()).not.toContain('·')
     expect(options.text()).toContain('--cpu --gpu-only')
+  })
+})
+
+describe('ArgsBuilderPage — restart-to-apply tag', () => {
+  it('hides the restart tag by default', async () => {
+    const wrapper = await mountPage('--cpu')
+    expect(wrapper.find('.args-page-restart-tag').exists()).toBe(false)
+  })
+
+  it('shows the restart tag when args are pending a restart', async () => {
+    const wrapper = await mountPage('--cpu', true)
+    const tag = wrapper.find('.args-page-restart-tag')
+    expect(tag.exists()).toBe(true)
+    expect(tag.text()).toContain('Restart to apply')
   })
 })
 
