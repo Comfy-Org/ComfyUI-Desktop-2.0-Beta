@@ -4,8 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { CheckCircle, XCircle, Ban } from 'lucide-vue-next'
 import { operationInflightLabel, operationSuccessLabel } from '../lib/progressStatusLabel'
 import { MSG_CANCELLED } from '../../../shared/operationStatus'
-import { TID } from '../../../shared/testIds'
-import BaseCopyButton from '../components/ui/BaseCopyButton.vue'
+import OperationErrorDetail from '../components/ui/OperationErrorDetail.vue'
 import type { PopupInstancePickerSnapshot } from '../../../preload/comfyTitlePopupPreload'
 
 type OperationStatus = PopupInstancePickerSnapshot['installOperationStatus'][string]
@@ -91,15 +90,7 @@ const statusLabel = computed(() => {
           <XCircle :size="40" />
         </div>
         <p class="pip__heading pip__heading--error">{{ t('instancePicker.progressError') }}</p>
-        <div v-if="operation.error" class="pip__error-detail">
-          <pre class="pip__error-text" :data-testid="TID.pickerOpErrorMessage">{{ operation.error }}</pre>
-          <BaseCopyButton
-            class="pip__error-copy"
-            :get-value="() => operation.error ?? ''"
-            :aria-label="t('common.copyError', 'Copy error details')"
-            :data-testid="TID.pickerOpErrorCopy"
-          />
-        </div>
+        <OperationErrorDetail v-if="operation.error" :error="operation.error" compact />
         <div class="pip__actions">
           <button
             type="button"
@@ -231,34 +222,6 @@ const statusLabel = computed(() => {
   line-height: 1.5;
   word-break: break-word;
 }
-.pip__error-detail {
-  position: relative;
-  width: 100%;
-  margin-top: 2px;
-}
-.pip__error-text {
-  margin: 0;
-  max-height: 160px;
-  overflow-y: auto;
-  padding: 8px 32px 8px 10px;
-  border-radius: 8px;
-  background: var(--brand-surface-bg, rgba(255, 255, 255, 0.04));
-  border: 1px solid var(--chooser-surface-border);
-  color: var(--brand-error, #e74c3c);
-  font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 11px;
-  line-height: 1.45;
-  text-align: left;
-  white-space: pre-wrap;
-  word-break: break-word;
-  user-select: text;
-}
-.pip__error-copy {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-}
-
 .pip__primary-btn {
   margin-top: 4px;
   height: 34px;
