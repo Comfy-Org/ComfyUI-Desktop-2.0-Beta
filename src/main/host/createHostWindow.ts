@@ -29,6 +29,7 @@ import {
 import * as mainTelemetry from '../lib/telemetry'
 import { forwardDatadogError } from '../lib/processErrorHandlers'
 import { recordDashboardSurface, recordInstanceSurface } from '../lib/lastSession'
+import * as settings from '../settings'
 import * as updater from '../lib/updater'
 import { getSavedBounds, getWindowOptions, saveWindowBounds } from '../lib/windowState'
 import { ensureSystemModal } from '../popups/systemModal'
@@ -82,22 +83,29 @@ export function shouldBailAfterConsult(consult: CloseConsultResult, forceClose: 
   return consult === 'aborted' && !forceClose
 }
 
-/** Should the install-host close-confirm modal run? Fires when the renderer
- *  deferred (no overlay), the caller hasn't pre-cleared, AND either the host
- *  would kill a local process OR this is the last install window (closing it
- *  quits the app, so the user must get the confirm). Cloud/remote non-last
- *  windows skip the modal (issue #654) — closing them never kills a local
- *  ComfyUI and the app stays alive. The "entry still exists" check is folded
- *  into `killsLocalSession` (its `shouldConfirmKillForEntry` source rejects a
- *  missing entry); the last-install-window branch carries its own entry check
- *  at the call site. */
+/** Should the install-host close-confirm modal run? Gated by the user's
+ *  `confirmBeforeClosingWindow` preference (off by default — most users close
+ *  without a prompt). When enabled, fires when the renderer deferred (no
+ *  overlay), the caller hasn't pre-cleared, AND either the host would kill a
+ *  local process OR this is the last install window (closing it quits the
+ *  app). Cloud/remote non-last windows skip the modal (issue #654) — closing
+ *  them never kills a local ComfyUI and the app stays alive. The "entry still
+ *  exists" check is folded into `killsLocalSession` (its
+ *  `shouldConfirmKillForEntry` source rejects a missing entry); the
+ *  last-install-window branch carries its own entry check at the call site. */
 export function shouldShowInstallCloseConfirm(
+  confirmEnabled: boolean,
   consult: CloseConsultResult,
   killsLocalSession: boolean,
   forceClose: boolean,
   isLastInstallWindow: boolean,
 ): boolean {
-  return consult === 'defer' && !forceClose && (killsLocalSession || isLastInstallWindow)
+  return (
+    confirmEnabled
+    && consult === 'defer'
+    && !forceClose
+    && (killsLocalSession || isLastInstallWindow)
+  )
 }
 
 /** Should the close handler bail after the install-host close-confirm
@@ -852,6 +860,7 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
         const isLastInstallWindow = isLastWindow && isInstallHostWindow
         if (
           shouldShowInstallCloseConfirm(
+            settings.get('confirmBeforeClosingWindow') === true,
             consult,
             shouldConfirmKillForEntry(entryForClose),
             fx.preClearedClose.has(comfyWindow),

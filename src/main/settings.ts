@@ -27,6 +27,10 @@ export interface KnownSettings {
   /** When true (default), boot reopens the last-used instance window instead of
    *  the dashboard, when the last active surface was an instance. */
   reopenLastInstanceOnLaunch?: boolean
+  /** When true, closing a local-install window asks the user to confirm first
+   *  (guards against accidentally killing a ComfyUI that took minutes to boot).
+   *  Default false — windows close without a prompt. */
+  confirmBeforeClosingWindow?: boolean
   pypiMirror?: string
   useChineseMirrors?: boolean
   chineseMirrorsPrompted?: boolean
@@ -75,6 +79,7 @@ const SETTINGS_SCHEMA = {
   autoUpdate: { nullable: false },
   autoInstallUpdates: { nullable: false },
   reopenLastInstanceOnLaunch: { nullable: false },
+  confirmBeforeClosingWindow: { nullable: false },
   pypiMirror: { nullable: false },
   useChineseMirrors: { nullable: false },
   chineseMirrorsPrompted: { nullable: false },
@@ -224,7 +229,8 @@ function load(): Settings {
   // Drop legacy keys that no longer back any setting. `maxCachedFiles` was the
   // user-editable predecessor of `maxCachedDownloads`; its old value is
   // discarded so everyone adopts the new default. `closeDirectlyOnLastWindow`
-  // backed the removed last-window quit toggle (closing now always confirms).
+  // backed the removed last-window quit toggle (close confirmation is now gated
+  // by `confirmBeforeClosingWindow`, off by default).
   for (const key of [
     'primaryInstallId',
     'pinnedInstallIds',

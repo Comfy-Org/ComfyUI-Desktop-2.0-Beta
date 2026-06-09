@@ -117,27 +117,33 @@ describe('shouldBailAfterConsult', () => {
 
 describe('shouldShowInstallCloseConfirm', () => {
   it('shows the modal for a host that would kill a local session on a defer consult', () => {
-    expect(shouldShowInstallCloseConfirm('defer', true, false, false)).toBe(true)
+    expect(shouldShowInstallCloseConfirm(true, 'defer', true, false, false)).toBe(true)
   })
 
   it('shows the modal for the last install window even with no local session at risk (closing quits)', () => {
-    expect(shouldShowInstallCloseConfirm('defer', false, false, true)).toBe(true)
+    expect(shouldShowInstallCloseConfirm(true, 'defer', false, false, true)).toBe(true)
+  })
+
+  it('skips the modal when the confirm preference is off, even for a last install window killing a local session', () => {
+    // Default experience: no prompt. The toggle gates every other condition.
+    expect(shouldShowInstallCloseConfirm(false, 'defer', true, false, true)).toBe(false)
+    expect(shouldShowInstallCloseConfirm(false, 'defer', false, false, true)).toBe(false)
   })
 
   it('skips the modal when the caller pre-cleared the close', () => {
     // Force-close paths must not block on an extra user prompt.
-    expect(shouldShowInstallCloseConfirm('defer', true, true, true)).toBe(false)
+    expect(shouldShowInstallCloseConfirm(true, 'defer', true, true, true)).toBe(false)
   })
 
   it('skips the modal for a non-last cloud/remote-backed host (no local session at risk)', () => {
-    expect(shouldShowInstallCloseConfirm('defer', false, false, false)).toBe(false)
+    expect(shouldShowInstallCloseConfirm(true, 'defer', false, false, false)).toBe(false)
   })
 
   it('skips the modal on a cleared or aborted consult', () => {
     // `cleared` → renderer already handled it; `aborted` → we already
     // bailed in the prior check (this case is unreachable in practice).
-    expect(shouldShowInstallCloseConfirm('cleared', true, false, true)).toBe(false)
-    expect(shouldShowInstallCloseConfirm('aborted', true, false, true)).toBe(false)
+    expect(shouldShowInstallCloseConfirm(true, 'cleared', true, false, true)).toBe(false)
+    expect(shouldShowInstallCloseConfirm(true, 'aborted', true, false, true)).toBe(false)
   })
 })
 

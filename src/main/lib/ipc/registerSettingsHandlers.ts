@@ -61,6 +61,17 @@ export function buildSettingsSections(): SettingsSection[] {
           value: s.reopenLastInstanceOnLaunch !== false
         },
 
+        // Close confirmation, off by default. When on, closing a local-install
+        // window asks the user to confirm first (guards against accidentally
+        // killing a ComfyUI that took minutes to boot).
+        {
+          id: 'confirmBeforeClosingWindow',
+          label: i18n.t('settings.confirmBeforeClosingWindow'),
+          type: 'boolean',
+          value: s.confirmBeforeClosingWindow === true,
+          tooltip: i18n.t('settings.confirmBeforeClosingWindowDescription')
+        },
+
         // Cloud opt-out — pure visibility toggle, doesn't affect any
         // running behavior. Kept after the window-behavior block so
         // users who don't care about Cloud find it without scrolling

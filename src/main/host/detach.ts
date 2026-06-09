@@ -7,6 +7,7 @@ import { destroyPanelView, ensurePanelView } from './panelView'
 import { openSystemModalAsync } from '../popups/systemModal'
 import type { SystemModalDetailGroup } from '../popups/systemModal'
 import { recordDashboardSurface } from '../lib/lastSession'
+import * as settings from '../settings'
 import { comfyWindows, isChooserHost, isInstallHost, shouldConfirmKillForEntry } from './registry'
 import type { ComfyWindowEntry } from './registry'
 import {
@@ -291,7 +292,8 @@ export async function confirmCloseInstanceWindow(
 /**
  * Confirm + close a single install-backed host window. Model downloads are owned by the
  * desktop app, not the instance, so they keep running after a close (no active-download
- * list here). Closing the last window quits Desktop once the user confirms the prompt.
+ * list here). The confirm prompt is gated by `confirmBeforeClosingWindow` (off by
+ * default); closing the last window quits Desktop either way.
  */
 export async function confirmAndCloseHostWindow(parentWindow: BrowserWindow): Promise<void> {
   if (parentWindow.isDestroyed()) return
@@ -304,10 +306,12 @@ export async function confirmAndCloseHostWindow(parentWindow: BrowserWindow): Pr
     (e) => !e.window.isDestroyed(),
   ).length
   const isLastWindow = liveWindowCount <= 1
-  // Confirm when closing kills a local ComfyUI process OR when this is the last install
-  // window (closing it quits the app, so the user gets the prompt).
-  // Cloud/remote non-last windows and chooser hosts close immediately.
-  if (shouldConfirmKillForEntry(entry) || (isLastWindow && isInstallHost(entry))) {
+  // Gated by the user's `confirmBeforeClosingWindow` preference (off by default).
+  // When enabled, confirm when closing kills a local ComfyUI process OR when this
+  // is the last install window (closing it quits the app, so the user gets the
+  // prompt). Cloud/remote non-last windows and chooser hosts close immediately.
+  const confirmEnabled = settings.get('confirmBeforeClosingWindow') === true
+  if (confirmEnabled && (shouldConfirmKillForEntry(entry) || (isLastWindow && isInstallHost(entry)))) {
     const choice = await confirmCloseInstanceWindow(
       entry.window,
       isLastWindow,
