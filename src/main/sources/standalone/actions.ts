@@ -6,7 +6,7 @@ import { formatComfyVersion } from '../../lib/version'
 import type { ComfyVersion } from '../../lib/version'
 import { resolveLocalVersion } from '../../lib/version-resolve'
 import { readGitHead, rollbackComfySource } from '../../lib/git'
-import { writeOpMarker, clearOpMarker } from '../../lib/opMarker'
+import { writeOpMarker, completeOpMarker } from '../../lib/opMarker'
 import { installFilteredRequirements } from '../../lib/pip'
 import { copyDirWithProgress } from '../../lib/copy'
 import { listCustomNodes, findComfyUIDir, backupDir, mergeDirFlat } from '../../lib/migrate'
@@ -131,9 +131,9 @@ export async function handleAction(
       return { ok: false, message: `${headline}\n\n${tail}` }
     }
 
-    // Source + packages are consistent — the restore succeeded. Clear the marker
-    // so the next launch doesn't roll a good restore back.
-    await clearOpMarker(installation.installPath)
+    // Source + packages are consistent — the restore succeeded. Stamp the marker
+    // completed and clear it so the next launch doesn't roll a good restore back.
+    await completeOpMarker(installation.installPath)
 
     const summary: string[] = []
 

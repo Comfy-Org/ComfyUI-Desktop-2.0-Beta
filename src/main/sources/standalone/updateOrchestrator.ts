@@ -13,7 +13,7 @@ import * as settings from '../../settings'
 import * as snapshots from '../../lib/snapshots'
 import { repairMacBinaries } from './macRepair'
 import { getActivePythonPath, getActiveUvPath, getMasterPythonPath } from './envPaths'
-import { writeOpMarker, clearOpMarker } from '../../lib/opMarker'
+import { writeOpMarker, completeOpMarker } from '../../lib/opMarker'
 import type { InstallationRecord } from '../../installations'
 
 interface ScriptResult {
@@ -378,9 +378,9 @@ export async function runComfyUIUpdate(opts: UpdateOrchestrationOptions): Promis
     return { ok: false, message, installation }
   }
 
-  // Source + packages are now consistent — the update succeeded. Clear the marker
-  // so the next launch doesn't roll a good update back.
-  await clearOpMarker(installPath)
+  // Source + packages are now consistent — the update succeeded. Stamp the marker
+  // completed and clear it so the next launch doesn't roll a good update back.
+  await completeOpMarker(installPath)
 
   // Fetch tags so version resolution sees all release tags (the update script
   // may only fetch master on the latest channel).

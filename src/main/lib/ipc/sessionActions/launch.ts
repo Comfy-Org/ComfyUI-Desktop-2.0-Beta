@@ -85,7 +85,11 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
       const recovered = await recoverInterruptedComfyOp(inst.installPath, (text) => console.log(text.trim()))
       if (recovered) inst = (await installations.get(installationId)) || inst
     } catch (err) {
+      // Recovery threw because the source rollback failed: launching now would run
+      // new source against stale packages (the crash we're preventing). Fail
+      // closed; the marker is left in place so the next launch retries.
       console.warn('Interrupted-operation recovery failed:', err)
+      return { ok: false, message: `ComfyUI recovery failed: ${(err as Error).message}` }
     }
     const { migrateEnvLayout } = await import('../../../sources/standalone/install')
     const { writeComfyEnvironment } = await import('../../../sources/standalone/envPaths')

@@ -10,7 +10,7 @@ vi.mock('./git', () => ({
 }))
 
 import { readGitHead, rollbackComfySource } from './git'
-import { writeOpMarker, readOpMarker, clearOpMarker, recoverInterruptedComfyOp } from './opMarker'
+import { writeOpMarker, readOpMarker, clearOpMarker, completeOpMarker, recoverInterruptedComfyOp } from './opMarker'
 
 const mockedReadGitHead = vi.mocked(readGitHead)
 const mockedRollback = vi.mocked(rollbackComfySource)
@@ -67,7 +67,8 @@ describe('recoverInterruptedComfyOp', () => {
 
   it('rolls back and clears the marker when HEAD moved (hard-kill case)', async () => {
     await writeOpMarker(installPath, { op: 'update', preHead: 'OLDHEAD', startedAt: 1 })
-    mockedReadGitHead.mockReturnValue('NEWHEAD')
+    // HEAD reads as moved first (triggers rollback), then as restored afterward.
+    mockedReadGitHead.mockReturnValueOnce('NEWHEAD').mockReturnValue('OLDHEAD')
     mockedRollback.mockResolvedValue(true)
 
     const recovered = await recoverInterruptedComfyOp(installPath)
@@ -88,5 +89,42 @@ describe('recoverInterruptedComfyOp', () => {
     expect(recovered).toBe(true)
     expect(mockedRollback).not.toHaveBeenCalled()
     expect(fs.existsSync(path.join(installPath, MARKER_NAME))).toBe(false)
+  })
+
+  it('never rolls back a completed marker (success whose unlink failed)', async () => {
+    // postHead present => the op reached consistency; HEAD legitimately moved.
+    await writeOpMarker(installPath, { op: 'update', preHead: 'OLD', startedAt: 1, postHead: 'NEW' })
+    mockedReadGitHead.mockReturnValue('NEW')
+
+    const recovered = await recoverInterruptedComfyOp(installPath)
+
+    expect(recovered).toBe(true)
+    expect(mockedRollback).not.toHaveBeenCalled()
+    expect(fs.existsSync(path.join(installPath, MARKER_NAME))).toBe(false)
+  })
+
+  it('throws and leaves the marker when the rollback fails (so next launch retries)', async () => {
+    await writeOpMarker(installPath, { op: 'update', preHead: 'OLD', startedAt: 1 })
+    mockedReadGitHead.mockReturnValue('NEW') // never reaches OLD
+    mockedRollback.mockResolvedValue(false)
+
+    await expect(recoverInterruptedComfyOp(installPath)).rejects.toThrow(/roll ComfyUI source back/i)
+    expect(fs.existsSync(path.join(installPath, MARKER_NAME))).toBe(true)
+  })
+})
+
+describe('completeOpMarker', () => {
+  it('stamps postHead then removes the marker', async () => {
+    await writeOpMarker(installPath, { op: 'update', preHead: 'OLD', startedAt: 1 })
+    mockedReadGitHead.mockReturnValue('NEW')
+
+    await completeOpMarker(installPath)
+
+    // Marker file removed on success.
+    expect(fs.existsSync(path.join(installPath, MARKER_NAME))).toBe(false)
+  })
+
+  it('is safe when no marker exists', async () => {
+    await expect(completeOpMarker(installPath)).resolves.toBeUndefined()
   })
 })
