@@ -649,7 +649,6 @@ defineExpose({
       :class="{ 'is-subpage-active': subPage !== null }"
       role="tablist"
       :aria-label="t('comfyUISettings.title', 'Settings')"
-      :aria-hidden="subPage !== null"
     >
       <Tooltip
         v-for="(tab, i) in tabs"
@@ -704,6 +703,7 @@ defineExpose({
           key="subpage-args"
           :installation-id="installation.id"
           :initial-value="argsValue"
+          :pending-restart="argsField != null && pendingRestartFieldIds.has(argsField.id)"
           @back="closeSubPage"
           @update="handleArgsUpdate"
         />
@@ -960,9 +960,10 @@ defineExpose({
   }
 }
 
+/* Dim the strip while a sub-page is open to signal the nested context,
+   but keep tabs clickable so a tab switch can exit the sub-page. */
 .settings-v2-tabs.is-subpage-active {
-  opacity: 0.35;
-  pointer-events: none;
+  opacity: 0.6;
 }
 
 .settings-v2-tab {
