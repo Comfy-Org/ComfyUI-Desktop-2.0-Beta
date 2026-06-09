@@ -7,6 +7,7 @@ import GlobalSettingsMicroSection from './globalSettings/GlobalSettingsMicroSect
 import GlobalStorageSections from './globalSettings/GlobalStorageSections.vue'
 import GitHubLinkCard from './globalSettings/GitHubLinkCard.vue'
 import SettingsSectionList from '../views/comfyUISettings/SettingsSectionList.vue'
+import StorageDirRow from '../views/comfyUISettings/StorageDirRow.vue'
 import { withMinDuration } from '../lib/uiTiming'
 import type {
   AppUpdateDownloadProgress,
@@ -111,15 +112,52 @@ const telemetrySections = computed<DetailSection[]>(() => [
 const desktopUpdatePreferenceFields = computed<DetailField[]>(
   () => props.snapshot.desktopUpdateFields as unknown as DetailField[]
 )
-const cacheSections = computed<DetailSection[]>(() => [
-  { fields: props.snapshot.cacheFields as unknown as DetailField[] }
-])
+/** The cache directory path field, rendered as a readonly path row (same UI as
+ *  the shared input/output dirs) instead of a generic textbox. */
+const cacheDirField = computed<DetailField | undefined>(() => {
+  const fields = props.snapshot.cacheFields as unknown as DetailField[]
+  return fields.find((f) => f.id === 'cacheDir') ?? fields[0]
+})
+
+function fieldPath(field: DetailField | undefined): string {
+  return typeof field?.value === 'string' ? field.value : ''
+}
+
+async function handleBrowseCacheDir(): Promise<void> {
+  const field = cacheDirField.value
+  if (!field) return
+  const picked = await bridge?.globalSettingsBrowseFolder(fieldPath(field) || undefined)
+  if (!picked || picked === field.value) return
+  await bridge?.globalSettingsUpdateField(field.id, picked)
+}
+
+function handleOpenCacheDir(): void {
+  const p = fieldPath(cacheDirField.value)
+  if (p) bridge?.globalSettingsOpenPath(p)
+}
 const advancedSections = computed<DetailSection[]>(() => [
   { fields: props.snapshot.advancedFields as unknown as DetailField[] }
 ])
-const installLocationSections = computed<DetailSection[]>(() => [
-  { fields: props.snapshot.installLocationFields as unknown as DetailField[] }
-])
+
+/** The default install-location path field, rendered as a readonly path row
+ *  (same UI as the cache + shared input/output dirs) instead of a textbox. */
+const installDirField = computed<DetailField | undefined>(() => {
+  const fields = props.snapshot.installLocationFields as unknown as DetailField[]
+  return fields.find((f) => f.id === 'installDir') ?? fields[0]
+})
+
+async function handleBrowseInstallDir(): Promise<void> {
+  const field = installDirField.value
+  if (!field) return
+  const picked = await bridge?.globalSettingsBrowseFolder(fieldPath(field) || undefined)
+  if (!picked || picked === field.value) return
+  await bridge?.globalSettingsUpdateField(field.id, picked)
+}
+
+function handleOpenInstallDir(): void {
+  const p = fieldPath(installDirField.value)
+  if (p) bridge?.globalSettingsOpenPath(p)
+}
 const appUpdateState = computed<AppUpdateState>(
   () => props.snapshot.appUpdate.state as unknown as AppUpdateState
 )
@@ -283,9 +321,12 @@ onMounted(() => {
             :title="t('settings.installLocation', 'Default Install Location')"
             :tooltip="t('tooltips.installDir')"
           >
-            <SettingsSectionList
-              :sections="installLocationSections"
-              @update-field="handleUpdateField"
+            <StorageDirRow
+              v-if="installDirField"
+              :label="installDirField.label"
+              :path="fieldPath(installDirField)"
+              @open="handleOpenInstallDir"
+              @browse="handleBrowseInstallDir"
             />
           </GlobalSettingsMicroSection>
 
@@ -294,7 +335,13 @@ onMounted(() => {
           </GlobalSettingsMicroSection>
 
           <GlobalSettingsMicroSection :title="t('settings.cache', 'Cache')">
-            <SettingsSectionList :sections="cacheSections" @update-field="handleUpdateField" />
+            <StorageDirRow
+              v-if="cacheDirField"
+              :label="cacheDirField.label || t('settings.cacheDir', 'Cache Directory')"
+              :path="fieldPath(cacheDirField)"
+              @open="handleOpenCacheDir"
+              @browse="handleBrowseCacheDir"
+            />
           </GlobalSettingsMicroSection>
         </template>
       </section>
