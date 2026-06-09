@@ -27,6 +27,10 @@ export interface KnownSettings {
   /** When true (default), boot reopens the last-used instance window instead of
    *  the dashboard, when the last active surface was an instance. */
   reopenLastInstanceOnLaunch?: boolean
+  /** When true, closing a local-install window asks the user to confirm first
+   *  (guards against accidentally killing a ComfyUI that took minutes to boot).
+   *  Default false — windows close without a prompt. */
+  confirmBeforeClosingWindow?: boolean
   pypiMirror?: string
   useChineseMirrors?: boolean
   chineseMirrorsPrompted?: boolean
@@ -39,12 +43,6 @@ export interface KnownSettings {
    *  can opt out of seeing it without us removing the feature. Default
    *  false — Cloud stays visible. */
   hideCloudFromPicker?: boolean
-  /** When true, closing the last ComfyUI instance window quits Desktop
-   *  directly — no modal, no return-to-dashboard fallback. For power
-   *  users who treat the instance window as the whole app. Default
-   *  false — closing the last instance window returns to the dashboard.
-   *  Replaces the three-way close modal from the bundle iteration. */
-  closeDirectlyOnLastWindow?: boolean
   oemManagedModelDirs?: string[]
   oemWorkflowImportVersion?: number
   /** Directory the user last chose in the general "Save image/file" dialog.
@@ -81,13 +79,13 @@ const SETTINGS_SCHEMA = {
   autoUpdate: { nullable: false },
   autoInstallUpdates: { nullable: false },
   reopenLastInstanceOnLaunch: { nullable: false },
+  confirmBeforeClosingWindow: { nullable: false },
   pypiMirror: { nullable: false },
   useChineseMirrors: { nullable: false },
   chineseMirrorsPrompted: { nullable: false },
   telemetryEnabled: { nullable: false },
   firstUseCompleted: { nullable: false },
   hideCloudFromPicker: { nullable: false },
-  closeDirectlyOnLastWindow: { nullable: false },
   oemManagedModelDirs: { nullable: false },
   oemWorkflowImportVersion: { nullable: false },
   lastSaveDialogDir: { nullable: true },
@@ -230,8 +228,15 @@ function load(): Settings {
 
   // Drop legacy keys that no longer back any setting. `maxCachedFiles` was the
   // user-editable predecessor of `maxCachedDownloads`; its old value is
-  // discarded so everyone adopts the new default.
-  for (const key of ['primaryInstallId', 'pinnedInstallIds', 'maxCachedFiles']) {
+  // discarded so everyone adopts the new default. `closeDirectlyOnLastWindow`
+  // backed the removed last-window quit toggle (close confirmation is now gated
+  // by `confirmBeforeClosingWindow`, off by default).
+  for (const key of [
+    'primaryInstallId',
+    'pinnedInstallIds',
+    'maxCachedFiles',
+    'closeDirectlyOnLastWindow',
+  ]) {
     if (Object.prototype.hasOwnProperty.call(result, key)) {
       delete result[key]
       changed = true
