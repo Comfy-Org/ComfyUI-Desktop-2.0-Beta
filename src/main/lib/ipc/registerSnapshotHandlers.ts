@@ -26,6 +26,7 @@ import {
   buildExportEnvelope,
   validateExportEnvelope,
   importSnapshots,
+  frozenSnapshotInstallOverrides,
   resolveSnapshotVersion,
   getVariantLabel,
   findDuplicatePath,
@@ -542,7 +543,13 @@ export function registerSnapshotHandlers(): void {
       const instData = {
         sourceId: source.id,
         sourceLabel: source.label,
-        ...source.buildInstallation({ release: selectedRelease, variant: matched })
+        ...source.buildInstallation({ release: selectedRelease, variant: matched }),
+        // Freeze to the snapshot's pinned ComfyUI version. The release dropdown
+        // only offers the 'stable'/'latest' channels, so buildInstallation would
+        // otherwise set autoUpdateComfyUI: true and auto-update to latest before
+        // the snapshot restore re-pins. The restore is the sole authority for
+        // the core commit; updateChannel mirrors the snapshot as the manual pref.
+        ...frozenSnapshotInstallOverrides(targetSnapshot.updateChannel)
       }
       const baseName = customName || envelope.installationName || 'ComfyUI'
       const name = await uniqueName(baseName)

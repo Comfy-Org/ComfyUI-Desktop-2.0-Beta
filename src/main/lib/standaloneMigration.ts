@@ -14,7 +14,8 @@ import {
   restoreCustomNodes,
   restorePipPackages,
   restoreComfyUIVersion,
-  buildPostRestoreState
+  buildPostRestoreState,
+  frozenSnapshotInstallOverrides
 } from './snapshots'
 
 import * as installations from '../installations'
@@ -127,7 +128,12 @@ async function resolveStandaloneInstallData(
   const instData = {
     sourceId: 'standalone',
     sourceLabel: standaloneSource.label,
-    ...standaloneSource.buildInstallation({ release, variant })
+    ...standaloneSource.buildInstallation({ release, variant }),
+    // Migrating from a snapshot freezes the install to the snapshot's pinned
+    // ComfyUI version: skip the post-install auto-update (the snapshot restore
+    // re-pins the core commit). updateChannel is left as built here and
+    // re-applied from the snapshot by buildPostRestoreState once restore runs.
+    ...frozenSnapshotInstallOverrides()
   }
 
   return { instData, standaloneSource }

@@ -31,6 +31,7 @@ import {
   listSnapshots,
   restoreComfyUIVersion,
   buildPostRestoreState,
+  frozenSnapshotInstallOverrides,
   restorePipPackages,
   formatSnapshotVersion
 } from './snapshots'
@@ -798,6 +799,27 @@ describe('buildPostRestoreState', () => {
     const info = state.updateInfoByChannel as Record<string, Record<string, unknown>>
     expect(info.latest).toEqual({ installedTag: 'xyz' })
     expect(info.stable).toBeDefined()
+  })
+})
+
+// --- frozenSnapshotInstallOverrides ---
+
+describe('frozenSnapshotInstallOverrides', () => {
+  it('disables auto-update so a snapshot-created install stays frozen (#986)', () => {
+    expect(frozenSnapshotInstallOverrides('stable').autoUpdateComfyUI).toBe(false)
+    expect(frozenSnapshotInstallOverrides('latest').autoUpdateComfyUI).toBe(false)
+    expect(frozenSnapshotInstallOverrides().autoUpdateComfyUI).toBe(false)
+  })
+
+  it("mirrors the snapshot's update channel when provided", () => {
+    expect(frozenSnapshotInstallOverrides('latest').updateChannel).toBe('latest')
+    expect(frozenSnapshotInstallOverrides('stable').updateChannel).toBe('stable')
+    // Unknown/legacy channel strings fall back to stable.
+    expect(frozenSnapshotInstallOverrides('v0.24.0').updateChannel).toBe('stable')
+  })
+
+  it('omits updateChannel when no channel is passed (left to the restore)', () => {
+    expect(frozenSnapshotInstallOverrides()).not.toHaveProperty('updateChannel')
   })
 })
 
