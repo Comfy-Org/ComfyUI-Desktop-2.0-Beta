@@ -14,6 +14,7 @@ import {
   applyChooserHostTheme,
   CHOOSER_HOST_TITLE_TEXT,
   CHOOSER_HOST_WINDOW_TITLE,
+  installCloseNeedsConfirm,
 } from './createHostWindow'
 import type { CloseWindowChoice } from './createHostWindow'
 
@@ -306,12 +307,16 @@ export async function confirmAndCloseHostWindow(parentWindow: BrowserWindow): Pr
     (e) => !e.window.isDestroyed(),
   ).length
   const isLastWindow = liveWindowCount <= 1
-  // Gated by the user's `confirmBeforeClosingWindow` preference (off by default).
-  // When enabled, confirm when closing kills a local ComfyUI process OR when this
-  // is the last install window (closing it quits the app, so the user gets the
-  // prompt). Cloud/remote non-last windows and chooser hosts close immediately.
-  const confirmEnabled = settings.get('confirmBeforeClosingWindow') === true
-  if (confirmEnabled && (shouldConfirmKillForEntry(entry) || (isLastWindow && isInstallHost(entry)))) {
+  // Same rule as the OS ✕ path: confirm only when the user opted in and the
+  // close kills a local ComfyUI process or closes the last install window.
+  // Cloud/remote non-last windows and chooser hosts close immediately.
+  if (
+    installCloseNeedsConfirm(
+      settings.get('confirmBeforeClosingWindow') === true,
+      shouldConfirmKillForEntry(entry),
+      isLastWindow && isInstallHost(entry),
+    )
+  ) {
     const choice = await confirmCloseInstanceWindow(
       entry.window,
       isLastWindow,

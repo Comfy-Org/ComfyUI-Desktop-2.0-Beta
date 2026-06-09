@@ -21,6 +21,7 @@ import type { InstallationRecord } from '../installations'
 import {
   cascadeOffsetForCollisions,
   expectedPartitionFor,
+  installCloseNeedsConfirm,
   shouldBailAfterCloseChoice,
   shouldBailAfterConsult,
   shouldShowInstallCloseConfirm,
@@ -112,6 +113,21 @@ describe('shouldBailAfterConsult', () => {
   it('does not bail when the renderer deferred — main owns the close-confirm', () => {
     expect(shouldBailAfterConsult('defer', false)).toBe(false)
     expect(shouldBailAfterConsult('defer', true)).toBe(false)
+  })
+})
+
+describe('installCloseNeedsConfirm', () => {
+  it('confirms when enabled and the close kills a local session or is the last install window', () => {
+    expect(installCloseNeedsConfirm(true, true, false)).toBe(true)
+    expect(installCloseNeedsConfirm(true, false, true)).toBe(true)
+  })
+
+  it('skips when the confirm preference is off, regardless of kill/last-window state', () => {
+    expect(installCloseNeedsConfirm(false, true, true)).toBe(false)
+  })
+
+  it('skips when nothing is at risk (non-last, no local session)', () => {
+    expect(installCloseNeedsConfirm(true, false, false)).toBe(false)
   })
 })
 

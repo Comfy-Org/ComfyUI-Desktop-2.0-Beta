@@ -83,14 +83,24 @@ export function shouldBailAfterConsult(consult: CloseConsultResult, forceClose: 
   return consult === 'aborted' && !forceClose
 }
 
-/** Should the install-host close-confirm modal run? Gated by the user's
- *  `confirmBeforeClosingWindow` preference (off by default — most users close
- *  without a prompt). When enabled, fires when the renderer deferred (no
- *  overlay), the caller hasn't pre-cleared, AND either the host would kill a
- *  local process OR this is the last install window (closing it quits the
+/** Core close-confirm rule shared by the OS ✕ handler and the File-menu
+ *  "Close Window". Confirm only when the user opted in via
+ *  `confirmBeforeClosingWindow` (off by default) AND the close either kills a
+ *  local ComfyUI process OR closes the last install window (which quits the
  *  app). Cloud/remote non-last windows skip the modal (issue #654) — closing
- *  them never kills a local ComfyUI and the app stays alive. The "entry still
- *  exists" check is folded into `killsLocalSession` (its
+ *  them never kills a local ComfyUI and the app stays alive. */
+export function installCloseNeedsConfirm(
+  confirmEnabled: boolean,
+  killsLocalSession: boolean,
+  isLastInstallWindow: boolean,
+): boolean {
+  return confirmEnabled && (killsLocalSession || isLastInstallWindow)
+}
+
+/** Should the install-host close-confirm modal run on the OS ✕ path? Applies
+ *  `installCloseNeedsConfirm` and additionally requires the renderer to have
+ *  deferred (no overlay) and the caller not to have pre-cleared. The "entry
+ *  still exists" check is folded into `killsLocalSession` (its
  *  `shouldConfirmKillForEntry` source rejects a missing entry); the
  *  last-install-window branch carries its own entry check at the call site. */
 export function shouldShowInstallCloseConfirm(
@@ -101,10 +111,9 @@ export function shouldShowInstallCloseConfirm(
   isLastInstallWindow: boolean,
 ): boolean {
   return (
-    confirmEnabled
+    installCloseNeedsConfirm(confirmEnabled, killsLocalSession, isLastInstallWindow)
     && consult === 'defer'
     && !forceClose
-    && (killsLocalSession || isLastInstallWindow)
   )
 }
 
@@ -856,7 +865,7 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
         // window gets the same prompt — confirming it tears down and quits.
         // The dashboard closes with no prompt.
         const entryForClose = comfyWindows.get(windowKey)
-        const isInstallHostWindow = !!entryForClose && !isChooserHost(entryForClose)
+        const isInstallHostWindow = !!entryForClose && isInstallHost(entryForClose)
         const isLastInstallWindow = isLastWindow && isInstallHostWindow
         if (
           shouldShowInstallCloseConfirm(
