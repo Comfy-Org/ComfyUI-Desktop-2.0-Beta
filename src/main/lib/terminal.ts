@@ -1,10 +1,27 @@
-import pty from 'node-pty'
+import type * as NodePty from 'node-pty'
 import fs from 'fs'
 import path from 'path'
 import { createRequire } from 'module'
 import type { WebContents } from 'electron'
 import * as installations from '../installations'
 import { getActiveVenvDir, getActiveUvPath } from './pythonEnv'
+
+/**
+ * Lazily load node-pty. Its index eagerly loads a native binding at import
+ * time, which fails outside a built Electron runtime (e.g. vitest under plain
+ * node). Loading on first spawn keeps this module importable from the eagerly
+ * evaluated `sources`/IPC graph without dragging the native module into every
+ * test that transitively imports it; surfaces that actually spawn a shell run
+ * inside Electron where the binding loads fine.
+ */
+let ptyModulePromise: Promise<typeof NodePty> | undefined
+async function loadPty(): Promise<typeof NodePty> {
+  ptyModulePromise ??= import('node-pty')
+  const mod = await ptyModulePromise
+  // node-pty is CJS: under esModuleInterop the API lives on the synthesized
+  // `default`; fall back to the namespace for native-ESM / mocked shapes.
+  return (mod as { default?: typeof NodePty }).default ?? mod
+}
 
 const requireFromHere = createRequire(__filename)
 
@@ -115,7 +132,7 @@ function initCommands(venvDir: string, uvPath: string): string[] {
 
 class InstallTerminal {
   readonly installationId: string
-  #pty: pty.IPty | undefined
+  #pty: NodePty.IPty | undefined
   #exited = true
   readonly sessionBuffer: string[] = []
   readonly size = { ...DEFAULT_SIZE }
@@ -192,6 +209,7 @@ class InstallTerminal {
     this.sessionBuffer.length = 0
     const venvDir = getActiveVenvDir(inst)
     const uvPath = getActiveUvPath(inst)
+    const pty = await loadPty()
     const instance = pty.spawn(getDefaultShell(), [], {
       name: 'xterm-256color',
       cols: this.size.cols,
@@ -299,6 +317,11 @@ export function disposeTerminal(installationId: string): void {
   if (!term) return
   term.dispose()
   terminals.delete(installationId)
+}
+
+/** Tear down every install's shell (e.g. on app quit) so no PTY child lingers. */
+export function disposeAllTerminals(): void {
+  for (const id of [...terminals.keys()]) disposeTerminal(id)
 }
 
 /** Test-only: drop all sessions without spawning anything. */
