@@ -9,11 +9,17 @@ vi.mock('./git', () => ({
   rollbackComfySource: vi.fn(),
 }))
 
+vi.mock('./telemetry', () => ({
+  emit: vi.fn(),
+}))
+
 import { readGitHead, rollbackComfySource } from './git'
+import * as telemetry from './telemetry'
 import { writeOpMarker, readOpMarker, clearOpMarker, completeOpMarker, recoverInterruptedComfyOp } from './opMarker'
 
 const mockedReadGitHead = vi.mocked(readGitHead)
 const mockedRollback = vi.mocked(rollbackComfySource)
+const mockedEmit = vi.mocked(telemetry.emit)
 
 const MARKER_NAME = '.comfyui-op-in-progress.json'
 
@@ -78,6 +84,7 @@ describe('recoverInterruptedComfyOp', () => {
       path.join(installPath, 'ComfyUI'), 'OLDHEAD', undefined,
     )
     expect(fs.existsSync(path.join(installPath, MARKER_NAME))).toBe(false)
+    expect(mockedEmit).toHaveBeenCalledWith('comfy.desktop.recovery.rolled_back', { op: 'update' })
   })
 
   it('is a no-op rollback but still clears the marker when HEAD already matches', async () => {
@@ -112,6 +119,7 @@ describe('recoverInterruptedComfyOp', () => {
     const marker = readOpMarker(installPath)
     expect(marker).not.toBeNull()
     expect(marker!.recoveryAttempts).toBe(1)
+    expect(mockedEmit).toHaveBeenCalledWith('comfy.desktop.recovery.failed', { op: 'update', attempts: 1, gave_up: false })
   })
 
   it('gives up and drops the marker after MAX_RECOVERY_ATTEMPTS so launch is never bricked', async () => {
@@ -124,6 +132,7 @@ describe('recoverInterruptedComfyOp', () => {
     const recovered = await recoverInterruptedComfyOp(installPath)
     expect(recovered).toBe(true)
     expect(fs.existsSync(path.join(installPath, MARKER_NAME))).toBe(false)
+    expect(mockedEmit).toHaveBeenCalledWith('comfy.desktop.recovery.failed', { op: 'update', attempts: 3, gave_up: true })
   })
 })
 

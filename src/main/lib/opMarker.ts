@@ -1,6 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { readGitHead, rollbackComfySource } from './git'
+import * as telemetry from './telemetry'
 
 // Sentinel written to the install dir while an update/restore is moving ComfyUI's
 // git source. Cleared once the operation finishes consistently. If it survives to
@@ -97,11 +98,16 @@ export async function recoverInterruptedComfyOp(
 
   const comfyuiDir = path.join(installPath, 'ComfyUI')
   if (readGitHead(comfyuiDir) !== marker.preHead) {
+    // The source genuinely moved and we're rolling it back: a real interrupted op.
     sendOutput?.(`\nDetected an interrupted ${marker.op}; rolling ComfyUI source back to keep it consistent…\n`)
     const ok = await rollbackComfySource(comfyuiDir, marker.preHead, sendOutput)
     if (!ok || readGitHead(comfyuiDir) !== marker.preHead) {
       const attempts = (marker.recoveryAttempts ?? 0) + 1
-      if (attempts >= MAX_RECOVERY_ATTEMPTS) {
+      const gaveUp = attempts >= MAX_RECOVERY_ATTEMPTS
+      // Reliability signal (mirrored to Datadog): how often a hard-killed op
+      // leaves source we can't roll back, and how often we give up entirely.
+      telemetry.emit('comfy.desktop.recovery.failed', { op: marker.op, attempts, gave_up: gaveUp })
+      if (gaveUp) {
         // Rollback can't succeed (e.g. the pre-op commit is gone). Stop blocking:
         // drop the marker and let the launch proceed. ComfyUI may crash on import,
         // but that surfaces a real, recoverable error instead of an opaque,
@@ -115,6 +121,8 @@ export async function recoverInterruptedComfyOp(
       await writeOpMarker(installPath, { ...marker, recoveryAttempts: attempts })
       throw new Error(`could not roll ComfyUI source back to ${marker.preHead.slice(0, 7)} after an interrupted ${marker.op}`)
     }
+    // Successfully recovered a hard-killed op — informational signal (PostHog).
+    telemetry.emit('comfy.desktop.recovery.rolled_back', { op: marker.op })
   }
   await clearOpMarker(installPath)
   return true
