@@ -80,16 +80,24 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     // pre-op commit so we never launch new source against stale packages. Safe
     // here: the _operationAborts guard above rules out a concurrent operation,
     // and recovery is a no-op when HEAD already matches the recorded commit.
+    // Capture the recovery narration so it can be surfaced to the user on the
+    // failure path, not just dropped into the main-process log.
+    const recoveryLog: string[] = []
     try {
       const { recoverInterruptedComfyOp } = await import('../../opMarker')
-      const recovered = await recoverInterruptedComfyOp(inst.installPath, (text) => console.log(text.trim()))
+      const recovered = await recoverInterruptedComfyOp(inst.installPath, (text) => {
+        recoveryLog.push(text)
+        console.log(text.trim())
+      })
       if (recovered) inst = (await installations.get(installationId)) || inst
     } catch (err) {
       // Recovery threw because the source rollback failed: launching now would run
       // new source against stale packages (the crash we're preventing). Fail
       // closed; the marker is left in place so the next launch retries.
       console.warn('Interrupted-operation recovery failed:', err)
-      return { ok: false, message: `ComfyUI recovery failed: ${(err as Error).message}` }
+      const detail = recoveryLog.join('').trim()
+      const base = `ComfyUI recovery failed: ${(err as Error).message}`
+      return { ok: false, message: detail ? `${base}\n\n${detail}` : base }
     }
     const { migrateEnvLayout } = await import('../../../sources/standalone/install')
     const { writeComfyEnvironment } = await import('../../../sources/standalone/envPaths')
