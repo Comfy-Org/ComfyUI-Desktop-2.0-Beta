@@ -28,9 +28,7 @@ import {
 } from '../lib/ipc/shared'
 import * as mainTelemetry from '../lib/telemetry'
 import { forwardDatadogError } from '../lib/processErrorHandlers'
-import { isQuitInProgress } from '../lib/quit-state'
 import { recordDashboardSurface, recordInstanceSurface } from '../lib/lastSession'
-import * as settings from '../settings'
 import * as updater from '../lib/updater'
 import { getSavedBounds, getWindowOptions, saveWindowBounds } from '../lib/windowState'
 import { ensureSystemModal } from '../popups/systemModal'
@@ -66,11 +64,12 @@ const DEFAULT_HOST_HEIGHT = 900
 export type CloseConsultResult = 'cleared' | 'aborted' | 'defer'
 
 /** User's pick from the close-window confirm:
- *   - `close`               — tear the window down (last window → app quits)
- *   - `cancel`              — keep the window open
- *   - `return-to-dashboard` — flip the window in place to the dashboard (only
- *     offered on the last window, so the user isn't forced to quit) */
-export type CloseWindowChoice = 'close' | 'cancel' | 'return-to-dashboard'
+ *   - `close`  — tear the window down (last window → app quits)
+ *   - `cancel` — keep the window open
+ *
+ *  Returning to the dashboard is no longer a close-time choice: it's a
+ *  deliberate user action via the title pill's "Open Dashboard" / New Window. */
+export type CloseWindowChoice = 'close' | 'cancel'
 
 /** Should the close handler bail after the renderer consult?
  *
@@ -86,12 +85,12 @@ export function shouldBailAfterConsult(consult: CloseConsultResult, forceClose: 
 /** Should the install-host close-confirm modal run? Fires when the renderer
  *  deferred (no overlay), the caller hasn't pre-cleared, AND either the host
  *  would kill a local process OR this is the last install window (closing it
- *  quits the app, so the user must get the confirm + the dashboard escape).
- *  Cloud/remote non-last windows skip the modal (issue #654) — closing them
- *  never kills a local ComfyUI and the app stays alive. The "entry still
- *  exists" check is folded into `killsLocalSession` (its
- *  `shouldConfirmKillForEntry` source rejects a missing entry); the
- *  last-install-window branch carries its own entry check at the call site. */
+ *  quits the app, so the user must get the confirm). Cloud/remote non-last
+ *  windows skip the modal (issue #654) — closing them never kills a local
+ *  ComfyUI and the app stays alive. The "entry still exists" check is folded
+ *  into `killsLocalSession` (its `shouldConfirmKillForEntry` source rejects a
+ *  missing entry); the last-install-window branch carries its own entry check
+ *  at the call site. */
 export function shouldShowInstallCloseConfirm(
   consult: CloseConsultResult,
   killsLocalSession: boolean,
@@ -107,46 +106,6 @@ export function shouldShowInstallCloseConfirm(
  *  as {@link shouldBailAfterConsult}. */
 export function shouldBailAfterCloseChoice(choice: CloseWindowChoice, forceClose: boolean): boolean {
   return choice === 'cancel' && !forceClose
-}
-
-/** Should the close handler detach the last install-backed window to
- *  the dashboard instead of tearing it down — as the FALLBACK when no
- *  explicit close choice was made (the confirm was skipped)?
- *
- *  The normal close of the last install window now shows a three-way
- *  confirm (Quit Desktop / Return to Dashboard / Cancel); the user's
- *  pick drives the outcome directly. This guard only covers the paths
- *  that reach teardown WITHOUT that confirm (e.g. a rare overlay-cancel
- *  consult that cleared) — there, defaulting the last install window to
- *  the dashboard preserves the invariant that we never quit the last
- *  window without an explicit user choice. A force-close (launch-guard
- *  eviction, bulk Exit-All) is a different intent: the caller already
- *  wants the window gone, and leaving a stray dashboard window behind
- *  after a swap-installs flow is noise. Force-close therefore skips the
- *  detach branch and falls through to the normal teardown.
- *
- *  Same logic applies when `app.quit()` is in flight (Cmd+Q, app menu
- *  Quit, electron-updater's `restartAndInstall`): the caller wants the
- *  process to exit, not the host to flip in place. Detaching here would
- *  swallow the quit and leave a dashboard window alive after a "Restart
- *  to install" click — which was exactly bug #(see PR description): the
- *  first restart click was a no-op because the close handler intercepted
- *  the quit into a dashboard detach. The second click worked only
- *  because the window was already on the dashboard by then. */
-export function shouldDetachLastInstallWindowToDashboard(
-  isInstallHostWindow: boolean,
-  hasEntry: boolean,
-  isLastWindow: boolean,
-  forceClose: boolean,
-  quitInProgress: boolean,
-): boolean {
-  return (
-    isInstallHostWindow &&
-    hasEntry &&
-    isLastWindow &&
-    !forceClose &&
-    !quitInProgress
-  )
 }
 
 /** Constants reused by both host modes. Defined here because they only
@@ -854,13 +813,12 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
       try {
         const entry = comfyWindows.get(windowKey)
         const skipConsult = fx.preClearedClose.has(comfyWindow)
-        // The OS ✕ must never quit the app. When this is the only live
-        // host window, an install-backed host returns to the dashboard
-        // (stop the instance, flip in place) instead of being destroyed;
-        // a chooser host is destroyed and the app quits via
-        // `window-all-closed`, which is the one sanctioned exit. The
-        // renderer also uses `isLastWindow` to tailor its close-confirm
-        // copy.
+        // The OS ✕ on a local install window always shows the Close Window
+        // confirm — including the last window, where confirming tears the
+        // window down and the app quits via `window-all-closed`. Returning
+        // to the dashboard is a deliberate action via the title pill, not a
+        // close-time fallback. The renderer also uses `isLastWindow` to
+        // tailor its close-confirm copy.
         const isLastWindow =
           Array.from(comfyWindows.values()).filter((e) => !e.window.isDestroyed()).length <= 1
         // Hide any open title-bar popup before any confirm fires. The
@@ -885,17 +843,13 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
           ? 'cleared'
           : await fx.consultPanelRendererClose(entry?.panelView)
         if (shouldBailAfterConsult(consult, fx.preClearedClose.has(comfyWindow))) return
-        // Step 2 — for an install-backed host with no overlay, main shows
-        // the same Close Window confirm as the menu item. The last window
-        // gets a three-way choice (Quit Desktop / Return to Dashboard /
-        // Cancel) so closing it isn't a forced quit; non-last windows get
-        // the plain Close/Cancel confirm. The dashboard closes with no
-        // prompt.
+        // Step 2 — for a local install-backed host with no overlay, main
+        // shows the Close Window confirm (same as the menu item). The last
+        // window gets the same prompt — confirming it tears down and quits.
+        // The dashboard closes with no prompt.
         const entryForClose = comfyWindows.get(windowKey)
         const isInstallHostWindow = !!entryForClose && !isChooserHost(entryForClose)
         const isLastInstallWindow = isLastWindow && isInstallHostWindow
-        // `null` = no confirm was shown (so no explicit user choice).
-        let closeChoice: CloseWindowChoice | null = null
         if (
           shouldShowInstallCloseConfirm(
             consult,
@@ -905,68 +859,19 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
           )
           && entryForClose
         ) {
-          // Last install window: skip the three-way modal entirely and
-          // pick the outcome from the user's setting.
-          //  - `closeDirectlyOnLastWindow` true  → quit Desktop ('close')
-          //  - false (default)                   → return to dashboard
-          // Non-last windows still go through the existing 2-way confirm
-          // because running processes / pending downloads need an "are
-          // you sure" gate.
-          if (isLastInstallWindow) {
-            const closeDirectly =
-              (settings.get('closeDirectlyOnLastWindow') as boolean | undefined) === true
-            closeChoice = closeDirectly ? 'close' : 'return-to-dashboard'
-          } else {
-            closeChoice = await fx.confirmCloseInstanceWindow(
-              comfyWindow,
-              isLastWindow,
-              shouldConfirmKillForEntry(entryForClose),
-              entryForClose.lastTheme,
-            )
-            if (shouldBailAfterCloseChoice(closeChoice, fx.preClearedClose.has(comfyWindow))) return
-          }
+          const closeChoice = await fx.confirmCloseInstanceWindow(
+            comfyWindow,
+            isLastWindow,
+            shouldConfirmKillForEntry(entryForClose),
+            entryForClose.lastTheme,
+          )
+          if (shouldBailAfterCloseChoice(closeChoice, fx.preClearedClose.has(comfyWindow))) return
         }
-        // Capture the force-close intent before we drain the flag.
-        // Either the initial snapshot (`skipConsult`) or a late-arriving
-        // pre-clear (force-close that landed mid-consult/mid-modal) is
-        // enough to mark this as caller-driven.
-        const forceClose = skipConsult || fx.preClearedClose.has(comfyWindow)
+        // Drain the force-close flag (its only remaining consumer was the
+        // dashboard-detach fallback, now removed; kept here so a late
+        // pre-clear doesn't leak into a future close of a reused window).
         fx.preClearedClose.delete(comfyWindow)
         if (comfyWindow.isDestroyed()) return
-        // Explicit "Return to Dashboard" pick → flip in place rather than
-        // tearing down. `detachInstall` runs the same `_installCleanup`
-        // (stopRunning, listeners off) the teardown below would, then
-        // flips the window to chooser mode. Force-close ignores the pick —
-        // the caller wants the window gone.
-        if (closeChoice === 'return-to-dashboard' && !forceClose && isInstallHostWindow && entryForClose) {
-          entryForClose.detachInstall()
-          return
-        }
-        // No explicit choice (the confirm was skipped — consult cleared
-        // or pre-cleared close). Default: keep the last install window
-        // on the dashboard rather than quitting silently. EXCEPT when
-        // the user has opted into `closeDirectlyOnLastWindow`, in which
-        // case the consult-cleared path must still honor that intent
-        // and let the teardown run.
-        if (
-          closeChoice === null
-          && shouldDetachLastInstallWindowToDashboard(
-            isInstallHostWindow,
-            !!entryForClose,
-            isLastWindow,
-            forceClose,
-            isQuitInProgress(),
-          )
-          && entryForClose
-        ) {
-          const closeDirectly =
-            isLastInstallWindow &&
-            (settings.get('closeDirectlyOnLastWindow') as boolean | undefined) === true
-          if (!closeDirectly) {
-            entryForClose.detachInstall()
-            return
-          }
-        }
         // Each cleanup step is wrapped via `safeTeardown` so a single
         // throw can't skip the BrowserWindow.destroy() at the end.
         // Without this, an exception in (e.g.) the comfy webContents

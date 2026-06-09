@@ -51,22 +51,14 @@ export function buildSettingsSections(): SettingsSection[] {
         // Theme picker hidden (app is dark-only); the theme plumbing stays
         // wired so re-adding this field is the only change needed to restore it.
 
-        // Window-behavior block — these two travel together:
-        //   reopenLastInstanceOnLaunch + closeDirectlyOnLastWindow
-        // together implement the "feel like a single-app workspace" flow
-        // (quit closes the instance, next launch boots straight back in).
+        // Boot behavior: reopen the last-used instance on launch. Closing the
+        // last instance window quits Desktop (after a confirm), so the next
+        // launch boots straight back into that instance.
         {
           id: 'reopenLastInstanceOnLaunch',
           label: i18n.t('settings.reopenLastInstanceOnLaunch'),
           type: 'boolean',
           value: s.reopenLastInstanceOnLaunch !== false
-        },
-        {
-          id: 'closeDirectlyOnLastWindow',
-          label: i18n.t('settings.closeDirectlyOnLastWindow'),
-          type: 'boolean',
-          value: s.closeDirectlyOnLastWindow === true,
-          tooltip: i18n.t('settings.closeDirectlyOnLastWindowDescription')
         },
 
         // Cloud opt-out — pure visibility toggle, doesn't affect any

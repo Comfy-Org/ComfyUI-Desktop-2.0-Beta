@@ -4,7 +4,7 @@ import * as ipc from '../lib/ipc'
 import { _runningSessions } from '../lib/ipc/shared'
 import { COMFY_BG } from '../lib/theme'
 import { destroyPanelView, ensurePanelView } from './panelView'
-import { openSystemModalAsync, openSystemModalChoiceAsync } from '../popups/systemModal'
+import { openSystemModalAsync } from '../popups/systemModal'
 import type { SystemModalDetailGroup } from '../popups/systemModal'
 import { recordDashboardSurface } from '../lib/lastSession'
 import { comfyWindows, isChooserHost, isInstallHost, shouldConfirmKillForEntry } from './registry'
@@ -255,9 +255,11 @@ export async function confirmAndCloseAllHostWindows(
  * main, not the panel renderer, because the renderer is hidden behind ComfyUI while an
  * instance runs and can't be relied on to surface a prompt.
  *
- * The last window adds a "Return to Dashboard" middle option so closing it isn't a forced
- * quit — the primary action quits Desktop, the secondary keeps the app on the dashboard.
- * `stopsLocalComfy` tailors the copy (a stopped / cloud window has no local process to stop).
+ * The same Close / Cancel prompt is shown for every local install window, including the last
+ * one — confirming it tears the window down and the app quits via `window-all-closed`.
+ * `isLastWindow` and `stopsLocalComfy` only tailor the copy (a stopped / cloud window has no
+ * local process to stop; the last window's close quits Comfy Desktop). Returning to the
+ * dashboard is a deliberate action via the title pill, not a close-time option.
  */
 export async function confirmCloseInstanceWindow(
   window: BrowserWindow,
@@ -265,47 +267,31 @@ export async function confirmCloseInstanceWindow(
   stopsLocalComfy: boolean,
   theme: { bg: string; text: string },
 ): Promise<CloseWindowChoice> {
-  if (!isLastWindow) {
-    const confirmed = await openSystemModalAsync({
-      parent: window,
-      spec: {
-        title: 'Close Window',
-        message: stopsLocalComfy
-          ? 'Close this window? This stops the running ComfyUI instance.'
-          : 'Close this window?',
-        confirmLabel: 'Close Window',
-        cancelLabel: 'Cancel',
-        confirmStyle: 'danger',
-        theme,
-      },
-    })
-    return confirmed ? 'close' : 'cancel'
-  }
-  const action = await openSystemModalChoiceAsync({
+  const message = isLastWindow
+    ? stopsLocalComfy
+      ? 'Close this window? This stops ComfyUI and quits Comfy Desktop.'
+      : 'Close this window? This quits Comfy Desktop.'
+    : stopsLocalComfy
+      ? 'Close this window? This stops the running ComfyUI instance.'
+      : 'Close this window?'
+  const confirmed = await openSystemModalAsync({
     parent: window,
     spec: {
       title: 'Close Window',
-      message: stopsLocalComfy
-        ? 'This is the last window. Closing it stops ComfyUI and quits Desktop, or you can return to the dashboard.'
-        : 'This is the last window. Closing it quits Desktop, or you can return to the dashboard.',
-      confirmLabel: 'Quit Desktop',
-      secondaryLabel: 'Return to Dashboard',
-      secondaryStyle: 'primary',
+      message,
+      confirmLabel: 'Close Window',
       cancelLabel: 'Cancel',
       confirmStyle: 'danger',
       theme,
     },
   })
-  if (action === 'confirm') return 'close'
-  if (action === 'secondary') return 'return-to-dashboard'
-  return 'cancel'
+  return confirmed ? 'close' : 'cancel'
 }
 
 /**
  * Confirm + close a single install-backed host window. Model downloads are owned by the
  * desktop app, not the instance, so they keep running after a close (no active-download
- * list here). Closing the last window quits Desktop; the confirm offers "Return to
- * Dashboard" so the user isn't forced to quit.
+ * list here). Closing the last window quits Desktop once the user confirms the prompt.
  */
 export async function confirmAndCloseHostWindow(parentWindow: BrowserWindow): Promise<void> {
   if (parentWindow.isDestroyed()) return
@@ -319,7 +305,7 @@ export async function confirmAndCloseHostWindow(parentWindow: BrowserWindow): Pr
   ).length
   const isLastWindow = liveWindowCount <= 1
   // Confirm when closing kills a local ComfyUI process OR when this is the last install
-  // window (closing it quits the app, so the user gets the prompt + the dashboard escape).
+  // window (closing it quits the app, so the user gets the prompt).
   // Cloud/remote non-last windows and chooser hosts close immediately.
   if (shouldConfirmKillForEntry(entry) || (isLastWindow && isInstallHost(entry))) {
     const choice = await confirmCloseInstanceWindow(
@@ -329,11 +315,6 @@ export async function confirmAndCloseHostWindow(parentWindow: BrowserWindow): Pr
       entry.lastTheme,
     )
     if (choice === 'cancel') return
-    if (choice === 'return-to-dashboard') {
-      // Flip the last window to the dashboard rather than closing it (which would quit).
-      entry.detachInstall()
-      return
-    }
   }
   // Skip the close handler's consult: the user already confirmed via this prompt.
   preClearedClose.add(entry.window)

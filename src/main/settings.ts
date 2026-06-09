@@ -39,12 +39,6 @@ export interface KnownSettings {
    *  can opt out of seeing it without us removing the feature. Default
    *  false — Cloud stays visible. */
   hideCloudFromPicker?: boolean
-  /** When true, closing the last ComfyUI instance window quits Desktop
-   *  directly — no modal, no return-to-dashboard fallback. For power
-   *  users who treat the instance window as the whole app. Default
-   *  false — closing the last instance window returns to the dashboard.
-   *  Replaces the three-way close modal from the bundle iteration. */
-  closeDirectlyOnLastWindow?: boolean
   oemManagedModelDirs?: string[]
   oemWorkflowImportVersion?: number
   /** Directory the user last chose in the general "Save image/file" dialog.
@@ -87,7 +81,6 @@ const SETTINGS_SCHEMA = {
   telemetryEnabled: { nullable: false },
   firstUseCompleted: { nullable: false },
   hideCloudFromPicker: { nullable: false },
-  closeDirectlyOnLastWindow: { nullable: false },
   oemManagedModelDirs: { nullable: false },
   oemWorkflowImportVersion: { nullable: false },
   lastSaveDialogDir: { nullable: true },
@@ -230,8 +223,14 @@ function load(): Settings {
 
   // Drop legacy keys that no longer back any setting. `maxCachedFiles` was the
   // user-editable predecessor of `maxCachedDownloads`; its old value is
-  // discarded so everyone adopts the new default.
-  for (const key of ['primaryInstallId', 'pinnedInstallIds', 'maxCachedFiles']) {
+  // discarded so everyone adopts the new default. `closeDirectlyOnLastWindow`
+  // backed the removed last-window quit toggle (closing now always confirms).
+  for (const key of [
+    'primaryInstallId',
+    'pinnedInstallIds',
+    'maxCachedFiles',
+    'closeDirectlyOnLastWindow',
+  ]) {
     if (Object.prototype.hasOwnProperty.call(result, key)) {
       delete result[key]
       changed = true
