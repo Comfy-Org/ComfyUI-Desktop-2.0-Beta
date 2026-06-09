@@ -4,8 +4,8 @@ import { useI18n } from 'vue-i18n'
 import { useModal } from '../../composables/useModal'
 import GlobalSettingsMicroSection from './GlobalSettingsMicroSection.vue'
 import ModelsDirList from './ModelsDirList.vue'
-import SettingsSectionList from '../../views/comfyUISettings/SettingsSectionList.vue'
-import type { DetailField, DetailSection } from '../../types/ipc'
+import StorageDirRow from '../../views/comfyUISettings/StorageDirRow.vue'
+import type { DetailField } from '../../types/ipc'
 
 // Shared global-storage UI rendered identically by the Global Settings
 // popup and StoragePane.vue so the two can't drift. Writes persist
@@ -34,19 +34,9 @@ interface GlobalSettingsBridge {
 
 interface Props {
   snapshot: GlobalStorageSnapshot
-  /** Wired through for parity with the per-install renderer in StoragePane. */
-  installationId?: string
-  pendingRestartFieldIds?: Set<string>
-  fieldErrorMessages?: Map<string, string>
-  runningActionIds?: Set<string>
 }
 
-const props = withDefaults(defineProps<Props>(), {
-  installationId: undefined,
-  pendingRestartFieldIds: () => new Set<string>(),
-  fieldErrorMessages: () => new Map<string, string>(),
-  runningActionIds: () => new Set<string>(),
-})
+const props = defineProps<Props>()
 
 const emit = defineEmits<{
   touched: []
@@ -58,9 +48,45 @@ const modal = useModal()
 const bridge = (window as unknown as { __comfyTitlePopup?: GlobalSettingsBridge })
   .__comfyTitlePopup
 
-const sharedDirsSections = computed<DetailSection[]>(() => [
-  { fields: props.snapshot.sharedDirectoriesFields as unknown as DetailField[] },
-])
+/** Shared input/output fields from the snapshot, keyed by id so they render as
+ *  the same readonly path rows used in the per-instance Storage tab. */
+const sharedDirFields = computed<Record<string, DetailField>>(() => {
+  const map: Record<string, DetailField> = {}
+  for (const f of props.snapshot.sharedDirectoriesFields as unknown as DetailField[]) {
+    map[f.id] = f
+  }
+  return map
+})
+const sharedInputField = computed(() => sharedDirFields.value.inputDir)
+const sharedOutputField = computed(() => sharedDirFields.value.outputDir)
+
+function sharedFieldPath(field: DetailField | undefined): string {
+  return typeof field?.value === 'string' ? field.value : ''
+}
+
+function handleOpenPath(path: string): void {
+  if (path) bridge?.globalSettingsOpenPath(path)
+}
+
+async function browseSharedDir(field: DetailField | undefined): Promise<void> {
+  if (!field) return
+  const picked = await bridge?.globalSettingsBrowseFolder(sharedFieldPath(field) || undefined)
+  if (!picked || picked === field.value) return
+  emit('touched')
+  await bridge?.globalSettingsUpdateField(field.id, picked)
+}
+
+function handleBrowseSharedInput(): void {
+  void browseSharedDir(sharedInputField.value)
+}
+function handleBrowseSharedOutput(): void {
+  void browseSharedDir(sharedOutputField.value)
+}
+
+function handleOpenModelsDir(index: number): void {
+  const dir = props.snapshot.modelsDirs[index]
+  if (dir) bridge?.globalSettingsOpenPath(dir.path)
+}
 
 async function handleAddModelsDir(): Promise<void> {
   const picked = await bridge?.globalSettingsBrowseFolder()
@@ -109,10 +135,6 @@ async function handleChangeModelsDir(index: number): Promise<void> {
   await bridge?.globalSettingsSetModelsDirs(dirs)
 }
 
-async function handleUpdateSharedDirField(field: DetailField, value: unknown): Promise<void> {
-  emit('touched')
-  await bridge?.globalSettingsUpdateField(field.id, value)
-}
 </script>
 
 <template>
@@ -125,18 +147,25 @@ async function handleUpdateSharedDirField(field: DetailField, value: unknown): P
       @change="handleChangeModelsDir"
       @remove="handleRemoveModelsDir"
       @make-primary="handleMakePrimary"
+      @open="handleOpenModelsDir"
       @add="handleAddModelsDir"
     />
   </GlobalSettingsMicroSection>
 
   <GlobalSettingsMicroSection :title="t('settings.sharedDirectories', 'Shared Directories')">
-    <SettingsSectionList
-      :sections="sharedDirsSections"
-      :installation-id="installationId"
-      :running-action-ids="runningActionIds"
-      :pending-restart-field-ids="pendingRestartFieldIds"
-      :field-error-messages="fieldErrorMessages"
-      @update-field="handleUpdateSharedDirField"
+    <StorageDirRow
+      v-if="sharedInputField"
+      :label="sharedInputField.label || t('media.inputDir', 'Input Directory')"
+      :path="sharedFieldPath(sharedInputField)"
+      @open="handleOpenPath(sharedFieldPath(sharedInputField))"
+      @browse="handleBrowseSharedInput"
+    />
+    <StorageDirRow
+      v-if="sharedOutputField"
+      :label="sharedOutputField.label || t('media.outputDir', 'Output Directory')"
+      :path="sharedFieldPath(sharedOutputField)"
+      @open="handleOpenPath(sharedFieldPath(sharedOutputField))"
+      @browse="handleBrowseSharedOutput"
     />
   </GlobalSettingsMicroSection>
 </template>

@@ -1,12 +1,19 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Folder, FolderOpen, MoreHorizontal, Plus } from 'lucide-vue-next'
+import { Folder, FolderLock, FolderOpen, MoreHorizontal, Plus } from 'lucide-vue-next'
 import InfoTooltip from '../../components/InfoTooltip.vue'
 
 interface ModelsDir {
   path: string
   isPrimary: boolean
+  /** Locked rows (e.g. the install's own models dir) can't be removed or
+   *  browsed/replaced; they show a lock icon. */
+  locked?: boolean
+  /** Set false to also forbid promoting the row to primary (e.g. the
+   *  install's own models dir while shared models is on — the primary is a
+   *  global shared dir there). Defaults to true. */
+  promotable?: boolean
 }
 
 interface Props {
@@ -19,6 +26,7 @@ const emit = defineEmits<{
   change: [index: number]
   remove: [index: number]
   'make-primary': [index: number]
+  open: [index: number]
   add: []
 }>()
 
@@ -37,9 +45,16 @@ function setMenuRef(index: number, el: Element | null): void {
   else menuRefs.delete(index)
 }
 
+function canPromote(dir: ModelsDir): boolean {
+  return !dir.isPrimary && dir.promotable !== false
+}
+
+function canRemove(dir: ModelsDir): boolean {
+  return !dir.isPrimary && !dir.locked
+}
+
 function hasMenuActions(dir: ModelsDir): boolean {
-  // Both "Make primary" and "Remove" are available on any non-primary row.
-  return !dir.isPrimary
+  return canPromote(dir) || canRemove(dir)
 }
 
 async function toggleMenu(index: number): Promise<void> {
@@ -116,7 +131,10 @@ const rows = computed(() =>
   props.dirs.map((dir, index) => ({
     ...dir,
     index,
-    showMenu: hasMenuActions(dir)
+    locked: dir.locked === true,
+    showMenu: hasMenuActions(dir),
+    canPromote: canPromote(dir),
+    canRemove: canRemove(dir)
   }))
 )
 </script>
@@ -129,19 +147,31 @@ const rows = computed(() =>
       class="models-dir-row"
       :class="{ 'is-just-promoted': row.path === justPromotedPath }"
     >
-      <Folder
+      <component
+        :is="row.locked ? FolderLock : Folder"
         :size="14"
         class="models-dir-icon"
+        :title="row.locked ? t('models.lockedDir', 'This directory is always used and cannot be removed.') : undefined"
       />
       <div class="models-dir-main">
-        <span class="models-dir-name" :title="row.path">{{ row.path }}</span>
+        <button
+          type="button"
+          class="models-dir-name"
+          :title="t('models.openDir', 'Open folder')"
+          @click.stop="emit('open', row.index)"
+        >{{ row.path }}</button>
       </div>
       <span v-if="row.isPrimary" class="models-dir-tag tag-primary">
         {{ t('models.primary', 'Primary') }}
         <InfoTooltip :text="t('tooltips.modelsPrimary')" />
       </span>
+      <span v-if="row.locked" class="models-dir-tag tag-local">
+        {{ t('models.instanceOnly', 'Instance') }}
+        <InfoTooltip :text="t('tooltips.instanceOwnModelsDir')" />
+      </span>
       <div class="models-dir-actions">
         <button
+          v-if="!row.locked"
           type="button"
           class="models-dir-action"
           :aria-label="t('common.browse', 'Browse')"
@@ -174,7 +204,7 @@ const rows = computed(() =>
             @keydown.up.stop.prevent="handleMenuArrow(row.index, -1, $event)"
           >
             <button
-              v-if="!row.isPrimary"
+              v-if="row.canPromote"
               type="button"
               role="menuitem"
               @click="handleMakePrimary(row.index)"
@@ -182,7 +212,7 @@ const rows = computed(() =>
               {{ t('models.makePrimary', 'Make primary') }}
             </button>
             <button
-              v-if="!row.isPrimary"
+              v-if="row.canRemove"
               type="button"
               role="menuitem"
               class="danger"
@@ -265,6 +295,19 @@ const rows = computed(() =>
   white-space: nowrap;
   min-width: 0;
   max-width: 100%;
+  /* Reset button chrome — this is a clickable path that opens the folder. */
+  padding: 0;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.models-dir-name:hover,
+.models-dir-name:focus-visible {
+  color: var(--accent);
+  text-decoration: underline;
+  outline: none;
 }
 
 .models-dir-tag {
@@ -285,6 +328,13 @@ const rows = computed(() =>
   color: var(--accent);
   border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
   background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+/* Marks the install's own models dir: always used, never shared. */
+.models-dir-tag.tag-local {
+  color: var(--text-muted);
+  border: 1px solid var(--chooser-surface-border);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
 }
 
 .models-dir-actions {
