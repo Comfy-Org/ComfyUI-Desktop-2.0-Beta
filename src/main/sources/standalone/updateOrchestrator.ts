@@ -3,7 +3,7 @@ import path from 'path'
 import { spawn } from 'child_process'
 import { killProcTree } from '../../lib/process'
 import { resolveLocalVersion, clearVersionCache, type LatestTagOverride } from '../../lib/version-resolve'
-import { readGitHead, fetchTags, findLatestVersionTag, revParseRef } from '../../lib/git'
+import { readGitHead, rollbackComfySource, fetchTags, findLatestVersionTag, revParseRef } from '../../lib/git'
 import { PYTORCH_RE, installFilteredRequirements, getPipIndexArgs } from '../../lib/pip'
 import { formatComfyVersion } from '../../lib/version'
 import type { ComfyVersion } from '../../lib/version'
@@ -13,6 +13,7 @@ import * as settings from '../../settings'
 import * as snapshots from '../../lib/snapshots'
 import { repairMacBinaries } from './macRepair'
 import { getActivePythonPath, getActiveUvPath, getMasterPythonPath } from './envPaths'
+import { writeOpMarker, completeOpMarker } from '../../lib/opMarker'
 import type { InstallationRecord } from '../../installations'
 
 interface ScriptResult {
@@ -189,6 +190,14 @@ export async function runComfyUIUpdate(opts: UpdateOrchestrationOptions): Promis
     }
   }
 
+  // Mark the source-moving window so a hard process kill (power loss, taskkill)
+  // mid-update is recovered on the next launch — see recoverInterruptedComfyOp.
+  // The marker is cleared once source + packages are consistent below.
+  const preOpHead = readGitHead(comfyuiDir)
+  if (preOpHead) {
+    await writeOpMarker(installPath, { op: 'update', preHead: preOpHead, startedAt: Date.now() })
+  }
+
   // Run the update script (with a macOS SIGKILL repair-and-retry).
   let result = await spawnUpdateScript(updaterPython, comfyuiDir, channelArgs, sendOutput, signal)
 
@@ -242,11 +251,17 @@ export async function runComfyUIUpdate(opts: UpdateOrchestrationOptions): Promis
   const reqsChanged = preReqs !== postReqs
   const shouldSyncDeps = (reqsChanged || headMoved || !!opts.forceDepsSync) && postReqs.length > 0
 
+  // Tracks a dependency-sync failure so the transactional guard below can roll
+  // ComfyUI's source back instead of leaving new source + stale packages.
+  let depFailure: string | null = null
+
   if (shouldSyncDeps) {
     const uvPath = getActiveUvPath(installation)
     const activeEnvPython = getActivePythonPath(installation)
 
-    if (fs.existsSync(uvPath) && activeEnvPython) {
+    if (!fs.existsSync(uvPath) || !activeEnvPython) {
+      depFailure = 'Python environment or uv not found while installing updated dependencies'
+    } else if (!signal?.aborted) {
       if (dryRunConflictCheck) {
         const filteredReqs = postReqs.split('\n').filter((l) => !PYTORCH_RE.test(l.trim())).join('\n')
         const filteredReqPath = path.join(installPath, '.comfyui-reqs-filtered.txt')
@@ -255,43 +270,50 @@ export async function runComfyUIUpdate(opts: UpdateOrchestrationOptions): Promis
         try {
           const indexArgs = getPipIndexArgs(settings.get('pypiMirror'), settings.get('useChineseMirrors') === true)
           sendProgress('deps', { percent: -1, status: t('standalone.updateDepsDryRun') })
-          if (signal?.aborted) return { ok: false, message: 'Cancelled', installation }
 
-          const dryRunResult = await spawnCommand(
-            uvPath, ['pip', 'install', '--dry-run', '-r', filteredReqPath, '--python', activeEnvPython, ...indexArgs],
-            installPath, undefined, undefined, signal
-          )
+          if (!signal?.aborted) {
+            const dryRunResult = await spawnCommand(
+              uvPath, ['pip', 'install', '--dry-run', '-r', filteredReqPath, '--python', activeEnvPython, ...indexArgs],
+              installPath, undefined, undefined, signal
+            )
 
-          if (dryRunResult.code !== 0) {
-            sendOutput?.(`\n⚠ Requirements dry-run detected potential conflicts:\n${dryRunResult.stderr || dryRunResult.stdout}\n`)
-            sendOutput?.('Proceeding with install attempt — some conflicts may be benign.\nTip: Use "Copy & Update" for a risk-free update that leaves this installation untouched.\n')
-          } else if (dryRunResult.stderr) {
-            sendOutput?.(dryRunResult.stderr)
+            // Dry-run conflicts are advisory only — never a rollback trigger.
+            if (dryRunResult.code !== 0) {
+              sendOutput?.(`\n⚠ Requirements dry-run detected potential conflicts:\n${dryRunResult.stderr || dryRunResult.stdout}\n`)
+              sendOutput?.('Proceeding with install attempt — some conflicts may be benign.\nTip: Use "Copy & Update" for a risk-free update that leaves this installation untouched.\n')
+            } else if (dryRunResult.stderr) {
+              sendOutput?.(dryRunResult.stderr)
+            }
           }
 
-          if (signal?.aborted) return { ok: false, message: 'Cancelled', installation }
-          sendProgress('deps', { percent: -1, status: t('standalone.updateDepsInstalling') })
-
-          const pipResult = await spawnCommand(
-            uvPath, ['pip', 'install', '-r', filteredReqPath, '--python', activeEnvPython, ...indexArgs],
-            installPath, sendOutput, sendOutput, signal
-          )
-
-          if (pipResult.code !== 0) {
-            sendOutput?.(`\nWarning: requirements install exited with code ${pipResult.code}\n`)
+          if (!signal?.aborted) {
+            sendProgress('deps', { percent: -1, status: t('standalone.updateDepsInstalling') })
+            const pipResult = await spawnCommand(
+              uvPath, ['pip', 'install', '-r', filteredReqPath, '--python', activeEnvPython, ...indexArgs],
+              installPath, sendOutput, sendOutput, signal
+            )
+            if (pipResult.code !== 0) {
+              depFailure = `requirements install exited with code ${pipResult.code}`
+            }
           }
+        } catch (err) {
+          depFailure = `requirements install failed: ${(err as Error).message}`
         } finally {
           try { await fs.promises.unlink(filteredReqPath) } catch {}
         }
       } else {
         sendProgress('update', { percent: -1, status: 'Installing updated dependencies' })
         const logFn = sendOutput ?? console.log
-        const installResult = await installFilteredRequirements(
-          reqPath, uvPath, activeEnvPython, installPath,
-          '.post-install-reqs.txt', logFn, signal, settings.getMirrorConfig()
-        )
-        if (installResult !== 0) {
-          console.warn(`Post-install requirements install exited with code ${installResult}`)
+        try {
+          const installResult = await installFilteredRequirements(
+            reqPath, uvPath, activeEnvPython, installPath,
+            '.post-install-reqs.txt', logFn, signal, settings.getMirrorConfig()
+          )
+          if (installResult !== 0) {
+            depFailure = `requirements install exited with code ${installResult}`
+          }
+        } catch (err) {
+          depFailure = `requirements install failed: ${(err as Error).message}`
         }
       }
     }
@@ -302,31 +324,63 @@ export async function runComfyUIUpdate(opts: UpdateOrchestrationOptions): Promis
   let postMgrReqs = ''
   try { postMgrReqs = await fs.promises.readFile(mgrReqPath, 'utf-8') } catch {}
 
-  if (preMgrReqs !== postMgrReqs && postMgrReqs.length > 0) {
+  // Fail fast: skip the manager requirements sync if the main one already failed.
+  if (!depFailure && !signal?.aborted && preMgrReqs !== postMgrReqs && postMgrReqs.length > 0) {
     const uvPath = getActiveUvPath(installation)
     const activeEnvPython = getActivePythonPath(installation)
 
-    if (fs.existsSync(uvPath) && activeEnvPython) {
+    if (!fs.existsSync(uvPath) || !activeEnvPython) {
+      depFailure = 'Python environment or uv not found while installing manager dependencies'
+    } else {
       if (dryRunConflictCheck) {
         sendProgress('deps', { percent: -1, status: t('standalone.updateDepsInstalling') })
         sendOutput?.('\nInstalling manager requirements…\n')
       }
       const logFn = sendOutput ?? console.log
-      const mgrResult = await installFilteredRequirements(
-        mgrReqPath, uvPath, activeEnvPython, installPath,
-        dryRunConflictCheck ? '.manager-reqs-filtered.txt' : '.post-install-mgr-reqs.txt',
-        logFn, signal, settings.getMirrorConfig()
-      )
-      if (mgrResult !== 0) {
-        const msg = `manager requirements install exited with code ${mgrResult}`
-        if (sendOutput) {
-          sendOutput(`\nWarning: ${msg}\n`)
-        } else {
-          console.warn(`Post-install ${msg}`)
+      try {
+        const mgrResult = await installFilteredRequirements(
+          mgrReqPath, uvPath, activeEnvPython, installPath,
+          dryRunConflictCheck ? '.manager-reqs-filtered.txt' : '.post-install-mgr-reqs.txt',
+          logFn, signal, settings.getMirrorConfig()
+        )
+        if (mgrResult !== 0) {
+          depFailure = `manager requirements install exited with code ${mgrResult}`
         }
+      } catch (err) {
+        depFailure = `manager requirements install failed: ${(err as Error).message}`
       }
     }
   }
+
+  // Transactional guard: if the dependency sync failed or was cancelled after the
+  // git update moved ComfyUI's source, roll the source back to the pre-update
+  // commit. Otherwise we leave new source + stale packages — the half-applied
+  // state that crashes on import (e.g. `comfy_aimdo.vram_buffer`). uv installs are
+  // ~atomic, so on failure packages are typically untouched and restoring the
+  // source restores a consistent old-source/old-packages state.
+  if (depFailure || signal?.aborted) {
+    const preHead = markers.PRE_UPDATE_HEAD
+    const sourceMoved = !!preHead && readGitHead(comfyuiDir) !== preHead
+    let rolledBack = true
+    if (sourceMoved) {
+      rolledBack = await rollbackComfySource(comfyuiDir, preHead!, sendOutput)
+    }
+    const reason = signal?.aborted ? 'Cancelled' : depFailure!
+    const message = sourceMoved
+      ? (rolledBack
+          ? `${reason}\n\nComfyUI source was rolled back to ${preHead!.slice(0, 7)}.`
+          : `${reason}\n\nComfyUI source rollback failed; installation may be inconsistent.`)
+      : reason
+    if (!sendOutput) console.warn(`ComfyUI update aborted: ${reason}`)
+    // Leave the op marker: if the in-process rollback failed (rolledBack=false),
+    // recoverInterruptedComfyOp retries on the next launch; if it succeeded,
+    // HEAD already matches preHead so recovery is a harmless no-op.
+    return { ok: false, message, installation }
+  }
+
+  // Source + packages are now consistent — the update succeeded. Stamp the marker
+  // completed and clear it so the next launch doesn't roll a good update back.
+  await completeOpMarker(installPath)
 
   // Fetch tags so version resolution sees all release tags (the update script
   // may only fetch master on the latest channel).
