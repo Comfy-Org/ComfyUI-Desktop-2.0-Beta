@@ -104,26 +104,8 @@ function commit(known: Map<string, string>): void {
   emit('update', next)
 }
 
-function toggleBoolean(def: ComfyArgDef): void {
-  const next = new Map(parsed.value.known)
-  if (next.has(def.name)) {
-    next.delete(def.name)
-  } else {
-    // Enforce exclusive group: remove siblings
-    if (def.exclusiveGroup) {
-      for (const a of schema.value) {
-        if (a.exclusiveGroup === def.exclusiveGroup && a.name !== def.name) {
-          next.delete(a.name)
-        }
-      }
-    }
-    next.set(def.name, '')
-  }
-  commit(next)
-  emitArgsChanged(def.name, def.type)
-}
-
-function toggleValue(def: ComfyArgDef): void {
+// Toggle a flag on/off; turning one on clears its exclusive-group siblings.
+function toggleFlag(def: ComfyArgDef): void {
   const next = new Map(parsed.value.known)
   if (next.has(def.name)) {
     next.delete(def.name)
@@ -439,9 +421,7 @@ function onRawChange(value: string): void {
                 :data-state="isActive(item.arg.name) ? 'checked' : 'unchecked'"
                 :aria-checked="isActive(item.arg.name)"
                 :aria-label="`--${item.arg.name}`"
-                @click="
-                  item.arg.type === 'boolean' ? toggleBoolean(item.arg) : toggleValue(item.arg)
-                "
+                @click="toggleFlag(item.arg)"
               >
                 <span class="args-page-switch-thumb" aria-hidden="true"></span>
               </button>
