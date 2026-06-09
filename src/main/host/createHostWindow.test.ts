@@ -21,9 +21,9 @@ import type { InstallationRecord } from '../installations'
 import {
   cascadeOffsetForCollisions,
   expectedPartitionFor,
+  installCloseNeedsConfirm,
   shouldBailAfterCloseChoice,
   shouldBailAfterConsult,
-  shouldDetachLastInstallWindowToDashboard,
   shouldShowInstallCloseConfirm,
 } from './createHostWindow'
 
@@ -116,29 +116,50 @@ describe('shouldBailAfterConsult', () => {
   })
 })
 
+describe('installCloseNeedsConfirm', () => {
+  it('confirms when enabled and the close kills a local session or is the last install window', () => {
+    expect(installCloseNeedsConfirm(true, true, false)).toBe(true)
+    expect(installCloseNeedsConfirm(true, false, true)).toBe(true)
+  })
+
+  it('skips when the confirm preference is off, regardless of kill/last-window state', () => {
+    expect(installCloseNeedsConfirm(false, true, true)).toBe(false)
+  })
+
+  it('skips when nothing is at risk (non-last, no local session)', () => {
+    expect(installCloseNeedsConfirm(true, false, false)).toBe(false)
+  })
+})
+
 describe('shouldShowInstallCloseConfirm', () => {
   it('shows the modal for a host that would kill a local session on a defer consult', () => {
-    expect(shouldShowInstallCloseConfirm('defer', true, false, false)).toBe(true)
+    expect(shouldShowInstallCloseConfirm(true, 'defer', true, false, false)).toBe(true)
   })
 
   it('shows the modal for the last install window even with no local session at risk (closing quits)', () => {
-    expect(shouldShowInstallCloseConfirm('defer', false, false, true)).toBe(true)
+    expect(shouldShowInstallCloseConfirm(true, 'defer', false, false, true)).toBe(true)
+  })
+
+  it('skips the modal when the confirm preference is off, even for a last install window killing a local session', () => {
+    // Default experience: no prompt. The toggle gates every other condition.
+    expect(shouldShowInstallCloseConfirm(false, 'defer', true, false, true)).toBe(false)
+    expect(shouldShowInstallCloseConfirm(false, 'defer', false, false, true)).toBe(false)
   })
 
   it('skips the modal when the caller pre-cleared the close', () => {
     // Force-close paths must not block on an extra user prompt.
-    expect(shouldShowInstallCloseConfirm('defer', true, true, true)).toBe(false)
+    expect(shouldShowInstallCloseConfirm(true, 'defer', true, true, true)).toBe(false)
   })
 
   it('skips the modal for a non-last cloud/remote-backed host (no local session at risk)', () => {
-    expect(shouldShowInstallCloseConfirm('defer', false, false, false)).toBe(false)
+    expect(shouldShowInstallCloseConfirm(true, 'defer', false, false, false)).toBe(false)
   })
 
   it('skips the modal on a cleared or aborted consult', () => {
     // `cleared` → renderer already handled it; `aborted` → we already
     // bailed in the prior check (this case is unreachable in practice).
-    expect(shouldShowInstallCloseConfirm('cleared', true, false, true)).toBe(false)
-    expect(shouldShowInstallCloseConfirm('aborted', true, false, true)).toBe(false)
+    expect(shouldShowInstallCloseConfirm(true, 'cleared', true, false, true)).toBe(false)
+    expect(shouldShowInstallCloseConfirm(true, 'aborted', true, false, true)).toBe(false)
   })
 })
 
@@ -147,9 +168,8 @@ describe('shouldBailAfterCloseChoice', () => {
     expect(shouldBailAfterCloseChoice('cancel', false)).toBe(true)
   })
 
-  it('does not bail when the user chose to close or return to the dashboard', () => {
+  it('does not bail when the user chose to close', () => {
     expect(shouldBailAfterCloseChoice('close', false)).toBe(false)
-    expect(shouldBailAfterCloseChoice('return-to-dashboard', false)).toBe(false)
   })
 
   it('does not bail when a force-close lands mid-modal even on user cancel', () => {
@@ -159,37 +179,4 @@ describe('shouldBailAfterCloseChoice', () => {
   })
 })
 
-describe('shouldDetachLastInstallWindowToDashboard', () => {
-  it('detaches an install host with a live entry when it is the last window', () => {
-    // OS ✕ on the last install window → flip to dashboard in place.
-    expect(shouldDetachLastInstallWindowToDashboard(true, true, true, false, false)).toBe(true)
-  })
 
-  it('does not detach on a force-close even if it is the last install window', () => {
-    // Launch-guard swap / bulk Exit-All want the window gone, not a
-    // stray dashboard window left behind.
-    expect(shouldDetachLastInstallWindowToDashboard(true, true, true, true, false)).toBe(false)
-  })
-
-  it('does not detach when other host windows are still open', () => {
-    expect(shouldDetachLastInstallWindowToDashboard(true, true, false, false, false)).toBe(false)
-  })
-
-  it('does not detach a chooser/dashboard host (no install backing)', () => {
-    expect(shouldDetachLastInstallWindowToDashboard(false, true, true, false, false)).toBe(false)
-  })
-
-  it('does not detach when the entry has already been dropped from the registry', () => {
-    expect(shouldDetachLastInstallWindowToDashboard(true, false, true, false, false)).toBe(false)
-  })
-
-  it('does not detach when a quit is in progress (Cmd+Q, app-update restart, etc.)', () => {
-    // Regression for: clicking "Restart Now" in the Desktop Update modal
-    // fired app.quit() which fired close on the last install window —
-    // and that close was being intercepted into a dashboard-detach,
-    // swallowing the quit. The first restart click was a silent no-op
-    // because the window flipped to dashboard instead of destroying;
-    // only the second click (after the flip) actually restarted.
-    expect(shouldDetachLastInstallWindowToDashboard(true, true, true, false, true)).toBe(false)
-  })
-})
