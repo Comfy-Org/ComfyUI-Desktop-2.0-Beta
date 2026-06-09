@@ -244,4 +244,21 @@ describe('ArgsBuilderPage — raw-args validation', () => {
     expect(err.exists()).toBe(true)
     expect(err.text()).toContain('foo')
   })
+
+  it('holds off flagging the trailing flag while the raw input is focused', async () => {
+    const wrapper = await mountPage('--po')
+    // Unfocused: the partial is flagged as unsupported.
+    expect(wrapper.find('.args-page-validation-error').exists()).toBe(true)
+
+    // Focused: the trailing flag being typed is no longer flagged.
+    await wrapper.find('.args-raw-input').trigger('focusin')
+    await flushPromises()
+    expect(wrapper.find('.args-page-validation-error').exists()).toBe(false)
+    expect(wrapper.find('input[aria-invalid="true"]').exists()).toBe(false)
+
+    // Blur: validation applies again.
+    await wrapper.find('.args-raw-input').trigger('focusout')
+    await flushPromises()
+    expect(wrapper.find('.args-page-validation-error').exists()).toBe(true)
+  })
 })

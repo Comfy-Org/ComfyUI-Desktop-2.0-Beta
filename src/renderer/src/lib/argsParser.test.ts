@@ -69,4 +69,38 @@ describe('validateArgs', () => {
     expect(validateArgs('--preview-method', SCHEMA).hasIssues).toBe(false)
     expect(validateArgs('--preview-method latent2rgb', SCHEMA).hasIssues).toBe(false)
   })
+
+  describe('suppressTrailingPartial', () => {
+    it('does not flag a partial trailing flag while focused (no trailing space)', () => {
+      const v = validateArgs('--po', SCHEMA, { suppressTrailingPartial: true })
+      expect(v.unsupportedFlags).toEqual([])
+      expect(v.hasIssues).toBe(false)
+      expect(v.tokens[0]).toMatchObject({ text: '--po', status: 'partial' })
+    })
+
+    it('still flags the partial once a trailing space commits the token', () => {
+      const v = validateArgs('--po ', SCHEMA, { suppressTrailingPartial: true })
+      expect(v.unsupportedFlags).toEqual(['po'])
+      expect(v.hasIssues).toBe(true)
+    })
+
+    it('flags the partial when not focused (option off)', () => {
+      const v = validateArgs('--po', SCHEMA)
+      expect(v.unsupportedFlags).toEqual(['po'])
+      expect(v.hasIssues).toBe(true)
+    })
+
+    it('only suppresses the trailing token, not earlier unknown flags', () => {
+      const v = validateArgs('--bogus --po', SCHEMA, { suppressTrailingPartial: true })
+      expect(v.unsupportedFlags).toEqual(['bogus'])
+      expect(v.hasIssues).toBe(true)
+    })
+
+    it('does not suppress a trailing positional value', () => {
+      // `81` is a value for --port, already ok — suppression must not touch it.
+      const v = validateArgs('--port 81', SCHEMA, { suppressTrailingPartial: true })
+      expect(v.tokens.map((t) => t.status)).toEqual(['ok', 'ok'])
+      expect(v.hasIssues).toBe(false)
+    })
+  })
 })

@@ -88,8 +88,15 @@ export function parseArgs(raw: string, schema: ComfyArgDef[]): ParsedArgs {
   return { known, extra }
 }
 
-/** Per-token validation status for the raw-args field. */
-export type ArgTokenStatus = 'ok' | 'unsupported' | 'missing-value' | 'awaiting-value' | 'orphaned'
+/** Per-token validation status for the raw-args field. `partial` is the trailing
+ *  flag the user is still typing — neither valid nor an error yet. */
+export type ArgTokenStatus =
+  | 'ok'
+  | 'unsupported'
+  | 'missing-value'
+  | 'awaiting-value'
+  | 'orphaned'
+  | 'partial'
 
 export interface ArgToken {
   text: string
@@ -112,13 +119,25 @@ export interface ArgValidation {
   hasIssues: boolean
 }
 
+export interface ValidateArgsOptions {
+  /** When set (input focused), don't flag the trailing flag the user is still
+   *  typing — e.g. `--po` on the way to `--port` shouldn't turn red. The token
+   *  is reported as `partial` instead, and only once a space/another token
+   *  follows (or focus leaves) does normal validation apply. */
+  suppressTrailingPartial?: boolean
+}
+
 /**
  * Classify a raw launch-args string against the schema for inline validation.
  * Pure (no DOM) so it can be unit-tested. A trailing value-flag with no value
  * yet is reported as `awaiting-value` (info) rather than an error, so it doesn't
  * flash red while the user is still typing.
  */
-export function validateArgs(raw: string, schema: ComfyArgDef[]): ArgValidation {
+export function validateArgs(
+  raw: string,
+  schema: ComfyArgDef[],
+  opts: ValidateArgsOptions = {}
+): ArgValidation {
   const tokens = tokenize(raw)
   const schemaMap = new Map(schema.map((a) => [a.name, a]))
   const result: ArgToken[] = []
@@ -197,6 +216,18 @@ export function validateArgs(raw: string, schema: ComfyArgDef[]): ArgValidation 
         tooltip: 'Unexpected positional argument — use --flag syntax'
       })
       i++
+    }
+  }
+
+  // While the input is focused and the value has no trailing space, the last
+  // token is still being typed: downgrade an as-yet-unrecognized trailing flag
+  // from `unsupported` to `partial` so it doesn't flash red mid-word.
+  if (opts.suppressTrailingPartial && result.length > 0 && raw.trimEnd() === raw) {
+    const last = result[result.length - 1]!
+    const lastToken = tokens[tokens.length - 1]
+    if (last.text === lastToken && last.text.startsWith('-') && last.status === 'unsupported') {
+      last.status = 'partial'
+      delete last.tooltip
     }
   }
 

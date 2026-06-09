@@ -28,6 +28,7 @@ const props = withDefaults(
 const emit = defineEmits<{
   'update:modelValue': [value: string]
   change: [value: string]
+  'focus-change': [focused: boolean]
 }>()
 
 const { t } = useI18n()
@@ -64,9 +65,11 @@ function handleChange(value: string): void {
 
 function onFocus(): void {
   focused.value = true
+  emit('focus-change', true)
 }
 function onBlur(): void {
   focused.value = false
+  emit('focus-change', false)
 }
 function onKeydown(e: KeyboardEvent): void {
   if (autocomplete.handleKeydown(e.key) === 'consumed') e.preventDefault()

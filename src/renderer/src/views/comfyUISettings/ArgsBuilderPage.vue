@@ -332,11 +332,19 @@ function onRawChange(value: string): void {
   emit('update', value)
 }
 
+// True while the raw input is focused; used to hold off flagging the trailing
+// flag the user is still typing.
+const rawFocused = ref(false)
+
 // Inline validation of the raw string: colored tokens + per-issue warnings so
 // unsupported flags, missing values, and stray positionals are visible instead
 // of silently surviving. Empty until the schema loads.
 const validation = computed(() =>
-  schema.value.length ? validateArgs(localValue.value, schema.value) : null
+  schema.value.length
+    ? validateArgs(localValue.value, schema.value, {
+        suppressTrailingPartial: rawFocused.value
+      })
+    : null
 )
 const hasValidationIssues = computed(() => validation.value?.hasIssues ?? false)
 const showTokenDisplay = computed(
@@ -371,6 +379,7 @@ const showTokenDisplay = computed(
         :aria-label="t('comfyUISettings.argsRawLabel', 'Raw arguments')"
         @update:model-value="onRawInput"
         @change="onRawChange"
+        @focus-change="rawFocused = $event"
       />
       <p class="args-page-raw-hint">
         {{ t('comfyUISettings.argsRawHint', 'Edit directly, or toggle individual flags below.') }}
@@ -388,7 +397,8 @@ const showTokenDisplay = computed(
           :class="{
             'token-bad': tok.status === 'unsupported' || tok.status === 'orphaned',
             'token-missing': tok.status === 'missing-value',
-            'token-awaiting': tok.status === 'awaiting-value'
+            'token-awaiting': tok.status === 'awaiting-value',
+            'token-partial': tok.status === 'partial'
           }"
           :title="tok.tooltip || ''"
           >{{ tok.text }}</span
@@ -694,6 +704,12 @@ const showTokenDisplay = computed(
   color: var(--accent-primary);
   text-decoration: underline dotted;
   text-underline-offset: 3px;
+}
+
+/* Trailing flag still being typed: dimmed, no error decoration. */
+.args-page-tokens .token-partial {
+  color: var(--text-muted);
+  opacity: 0.6;
 }
 
 .args-page-validation {
