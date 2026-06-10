@@ -131,6 +131,8 @@ function installMockBridge(): BridgeState {
       },
     ),
     pickerSettingsGetLocaleMessages: vi.fn(async () => ({})),
+    pickerSettingsGetLocale: vi.fn(async () => 'en'),
+    pickerSettingsOnLocaleChanged: vi.fn(() => () => {}),
   }
     ; (window as unknown as { __comfyTitlePopup: typeof bridge }).__comfyTitlePopup = bridge
   return state
@@ -441,19 +443,8 @@ describe('comfyTitlePopup/InstancePickerView', () => {
       })
       expect(wrapper.find('.settings-v2-content').exists()).toBe(true)
     })
-
-    it('pulls main\'s locale catalog on mount', async () => {
-      await mountPicker({
-        installs: [makeInstall({ id: 'a', name: 'Alpha' })],
-        activeInstallationId: 'a',
-        runningInstallationIds: [],
-      })
-      await flushPromises()
-      const bridgeRef = (window as unknown as {
-        __comfyTitlePopup: { pickerSettingsGetLocaleMessages: ReturnType<typeof vi.fn> }
-      }).__comfyTitlePopup
-      expect(bridgeRef.pickerSettingsGetLocaleMessages).toHaveBeenCalled()
-    })
+    // Locale loading moved to the popup root (TitlePopupApp) so every kind
+    // tracks main's language live — see TitlePopupApp.test.ts.
   })
 
   describe('primary action dispatch', () => {

@@ -41,6 +41,8 @@ interface MockBridgeState {
   pickInstallCalls: string[]
   restartInstallCalls: string[]
   openNewInstallCalls: number
+  getLocaleCalls: number
+  localeChangedCallbacks: ((payload: { locale: string; messages: Record<string, unknown> }) => void)[]
 }
 
 function installMockBridge(): MockBridgeState {
@@ -59,6 +61,8 @@ function installMockBridge(): MockBridgeState {
     pickInstallCalls: [],
     restartInstallCalls: [],
     openNewInstallCalls: 0,
+    getLocaleCalls: 0,
+    localeChangedCallbacks: [],
   }
   const bridge = {
     activate: (id: string) => state.activateCalls.push(id),
@@ -110,6 +114,17 @@ function installMockBridge(): MockBridgeState {
       state.openNewInstallCalls += 1
     },
     requestSize: () => {},
+    pickerSettingsGetLocale: async () => {
+      state.getLocaleCalls += 1
+      return 'en'
+    },
+    pickerSettingsGetLocaleMessages: async () => ({}),
+    pickerSettingsOnLocaleChanged: (
+      cb: (payload: { locale: string; messages: Record<string, unknown> }) => void
+    ) => {
+      state.localeChangedCallbacks.push(cb)
+      return () => {}
+    },
   }
   ;(window as unknown as { __comfyTitlePopup: typeof bridge }).__comfyTitlePopup = bridge
   return state
@@ -128,6 +143,25 @@ describe('TitlePopupApp', () => {
     mount(TitlePopupApp)
     await flushPromises()
     expect(bridgeState.readyCalls).toBe(1)
+  })
+
+  // Locale lives at the popup root so every kind tracks main's language live —
+  // not just the instance-picker view once it's clicked open.
+  it('pulls main locale on mount and subscribes for live changes', async () => {
+    const { default: TitlePopupApp } = await import('./TitlePopupApp.vue')
+    mount(TitlePopupApp)
+    await flushPromises()
+    expect(bridgeState.getLocaleCalls).toBe(1)
+    expect(bridgeState.localeChangedCallbacks).toHaveLength(1)
+  })
+
+  it('switches vue-i18n locale when main broadcasts a locale change', async () => {
+    const { default: TitlePopupApp } = await import('./TitlePopupApp.vue')
+    const wrapper = mount(TitlePopupApp)
+    await flushPromises()
+    bridgeState.localeChangedCallbacks[0]!({ locale: 'zh', messages: { menu: { x: '测试' } } })
+    await flushPromises()
+    expect(wrapper.vm.$i18n.locale).toBe('zh')
   })
 
   it('renders the menu view by default and reflects items pushed via config', async () => {

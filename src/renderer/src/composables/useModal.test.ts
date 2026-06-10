@@ -26,9 +26,9 @@ describe('useModal', () => {
       await expect(promise).resolves.toBeUndefined()
     })
 
-    it('uses i18n key as default buttonLabel', () => {
+    it('uses the translated default buttonLabel', () => {
       modal.alert({ title: 'T', message: 'M' })
-      expect(modal.state.buttonLabel).toBe('modal.ok')
+      expect(modal.state.buttonLabel).toBe('OK')
     })
 
     it('uses custom buttonLabel when provided', () => {
