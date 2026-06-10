@@ -978,26 +978,33 @@ export function hasGitDir(nodePath: string): boolean {
   return resolveGitDir(nodePath) !== null
 }
 
-let _gitAvailableCache: boolean | null = null
+/**
+ * Single-flight probe of the real `git` binary. Caches the in-flight promise
+ * (not just the resolved boolean) so concurrent callers share one
+ * `git --version` spawn. The probe resolves `!error` and never rejects, so
+ * caching the promise can't memoize a rejection.
+ */
+let _systemGitProbe: Promise<boolean> | null = null
+
+function probeSystemGit(): Promise<boolean> {
+  if (_systemGitProbe !== null) return _systemGitProbe
+  _systemGitProbe = new Promise<boolean>((resolve) => {
+    execFile('git', ['--version'], { windowsHide: true, timeout: 5000 }, (error) => {
+      resolve(!error)
+    })
+  })
+  return _systemGitProbe
+}
 
 export function isGitAvailable(): Promise<boolean> {
   if (isPygit2Configured()) return Promise.resolve(true)
-  if (_gitAvailableCache !== null) return Promise.resolve(_gitAvailableCache)
-  return new Promise((resolve) => {
-    execFile('git', ['--version'], { windowsHide: true, timeout: 5000 }, (error) => {
-      _gitAvailableCache = !error
-      resolve(_gitAvailableCache)
-    })
-  })
+  return probeSystemGit()
 }
 
-/** Reset the cached result of {@link isGitAvailable} (for tests). */
+/** Reset the cached git probe (for tests). */
 export function resetGitAvailableCache(): void {
-  _gitAvailableCache = null
-  _systemGitAvailableCache = null
+  _systemGitProbe = null
 }
-
-let _systemGitAvailableCache: boolean | null = null
 
 /**
  * Whether a usable system `git` binary exists, regardless of pygit2 state.
@@ -1008,13 +1015,7 @@ let _systemGitAvailableCache: boolean | null = null
  * system git is even possible.
  */
 export function isSystemGitAvailable(): Promise<boolean> {
-  if (_systemGitAvailableCache !== null) return Promise.resolve(_systemGitAvailableCache)
-  return new Promise((resolve) => {
-    execFile('git', ['--version'], { windowsHide: true, timeout: 5000 }, (error) => {
-      _systemGitAvailableCache = !error
-      resolve(_systemGitAvailableCache)
-    })
-  })
+  return probeSystemGit()
 }
 
 /**

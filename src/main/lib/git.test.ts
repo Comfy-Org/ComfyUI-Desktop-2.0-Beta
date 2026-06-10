@@ -8,7 +8,7 @@ vi.mock('child_process', async (importOriginal) => {
 
 import { execFile, spawn } from 'child_process'
 import { EventEmitter } from 'events'
-import { countCommitsAhead, findNearestTag, findLatestVersionTag, lsRemoteLatestTag, lsRemoteRef, isAncestorOf, findMergeBase, revParseRef, fetchTags, configurePygit2, isGitAvailable, isPygit2Configured, getPygit2Status, resetPygit2State, probePygit2, resetGitAvailableCache, countUniqueCommits, gitClone, gitCheckoutCommit, gitFetchAndCheckout, isPygit2AuthFailure, isForcePygit2 } from './git'
+import { countCommitsAhead, findNearestTag, findLatestVersionTag, lsRemoteLatestTag, lsRemoteRef, isAncestorOf, findMergeBase, revParseRef, fetchTags, configurePygit2, isGitAvailable, isPygit2Configured, getPygit2Status, resetPygit2State, probePygit2, resetGitAvailableCache, countUniqueCommits, gitClone, gitCheckoutCommit, gitFetchAndCheckout, isPygit2AuthFailure, isForcePygit2, isSystemGitAvailable } from './git'
 
 const mockedExecFile = vi.mocked(execFile)
 const mockedSpawn = vi.mocked(spawn)
@@ -179,6 +179,14 @@ describe('isGitAvailable (system git)', () => {
   it('returns false when git is not found', async () => {
     mockExecFile((_cmd, _args, _opts, cb) => { cb(new Error('ENOENT'), '', '') })
     expect(await isGitAvailable()).toBe(false)
+  })
+
+  it('coalesces concurrent callers into a single git --version probe', async () => {
+    let spawnCount = 0
+    mockExecFile((_cmd, _args, _opts, cb) => { spawnCount++; cb(null, 'git version 2.40.0\n', '') })
+    const results = await Promise.all([isSystemGitAvailable(), isSystemGitAvailable(), isGitAvailable()])
+    expect(results).toEqual([true, true, true])
+    expect(spawnCount).toBe(1)
   })
 })
 
