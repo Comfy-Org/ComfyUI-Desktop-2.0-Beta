@@ -39,13 +39,13 @@ import { formatTime } from '../util'
 import { getActiveDownloads } from '../comfyDownloadManager'
 import * as releaseCache from '../release-cache'
 import * as i18n from '../i18n'
-import { syncCustomModelFolders, discoverExtraModelFolders } from '../models'
+import { syncCustomModelFolders, discoverExtraModelFolders, instanceModelPathsYaml, isSamePath } from '../models'
 import { copyDirWithProgress } from '../copy'
 import { fetchJSON } from '../fetch'
 import { fetchLatestRelease, getLatestStableTag } from '../comfyui-releases'
-import { captureSnapshotIfChanged, getSnapshotCount, getSnapshotListData, getSnapshotDetailData, getSnapshotDiffVsPrevious, diffAgainstCurrent, loadSnapshot, listSnapshots, deleteSnapshot, diffSnapshots, buildExportEnvelope, validateExportEnvelope, importSnapshots, saveSnapshot, statesMatch, restoreCustomNodes, restorePipPackages, restoreComfyUIVersion, buildPostRestoreState, formatSnapshotVersion, resolveSnapshotVersion } from '../snapshots'
+import { captureSnapshotIfChanged, getSnapshotCount, getSnapshotListData, getSnapshotDetailData, getSnapshotDiffVsPrevious, diffAgainstCurrent, loadSnapshot, listSnapshots, deleteSnapshot, diffSnapshots, buildExportEnvelope, validateExportEnvelope, importSnapshots, saveSnapshot, statesMatch, restoreCustomNodes, restorePipPackages, restoreComfyUIVersion, buildPostRestoreState, frozenSnapshotInstallOverrides, formatSnapshotVersion, resolveSnapshotVersion } from '../snapshots'
 import type { SnapshotExportEnvelope, Snapshot } from '../snapshots'
-import { getVariantLabel } from '../../sources/standalone'
+import { getVariantLabel, buildPinnedVariant } from '../../sources/standalone'
 import type { FieldOption, SourcePlugin } from '../../types/sources'
 import { REQUIRES_STOPPED } from '../../../types/ipc'
 import type { Theme, ResolvedTheme, QuitActiveItem } from '../../../types/ipc'
@@ -74,13 +74,13 @@ export {
   performLocalMigration, stageLocalSnapshot,
   getDiskSpace, getDirectorySize, validateInstallPath,
   syncOemSeed, formatTime, getActiveDownloads,
-  syncCustomModelFolders, discoverExtraModelFolders,
+  syncCustomModelFolders, discoverExtraModelFolders, instanceModelPathsYaml, isSamePath,
   copyDirWithProgress, fetchJSON, fetchLatestRelease, getLatestStableTag,
   captureSnapshotIfChanged, getSnapshotCount, getSnapshotListData, getSnapshotDetailData,
   getSnapshotDiffVsPrevious, diffAgainstCurrent, loadSnapshot, listSnapshots, diffSnapshots,
   buildExportEnvelope, validateExportEnvelope, importSnapshots, saveSnapshot, statesMatch, deleteSnapshot,
-  restoreCustomNodes, restorePipPackages, restoreComfyUIVersion, buildPostRestoreState, formatSnapshotVersion, resolveSnapshotVersion,
-  getVariantLabel, REQUIRES_STOPPED, findLockingProcesses,
+  restoreCustomNodes, restorePipPackages, restoreComfyUIVersion, buildPostRestoreState, frozenSnapshotInstallOverrides, formatSnapshotVersion, resolveSnapshotVersion,
+  getVariantLabel, buildPinnedVariant, REQUIRES_STOPPED, findLockingProcesses,
   getComfyArgsSchema, filterUnsupportedArgs,
   getComfyFeatureFlagRegistry,
 }
@@ -427,11 +427,11 @@ export async function performCopy(
         adoptedAt: new Date().toISOString(),
         adoptedBaseDir: newComfyUI,
         adoptedPythonPath: newAdoptedPython,
-        // Point per-install I/O at the deep-copied data so launches don't write to the
-        // legacy workspace.
+        // Use per-install I/O so launches write to the deep-copied data, not the
+        // legacy workspace. inputDir/outputDir are left unset so launch falls
+        // back to this copy's own `<comfyDir>/{input,output}` — keeping the
+        // record clone-safe (no absolute path pointing at a specific install).
         useSharedInputOutput: false,
-        inputDir: path.join(newComfyUI, 'input'),
-        outputDir: path.join(newComfyUI, 'output'),
       }
     }
 

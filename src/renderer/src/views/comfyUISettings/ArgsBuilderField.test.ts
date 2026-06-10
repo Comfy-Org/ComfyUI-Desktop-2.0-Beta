@@ -143,4 +143,17 @@ describe('ArgsBuilderField — inline autocomplete', () => {
     expect((window as unknown as { api: { getComfyArgs: ReturnType<typeof vi.fn> } }).api.getComfyArgs).not.toHaveBeenCalled()
     expect(wrapper.find('.args-raw-input-ac').exists()).toBe(false)
   })
+
+  it('disables native spellcheck so flags do not get red squiggles', async () => {
+    const wrapper = await mountField()
+    expect(wrapper.find('input').attributes('spellcheck')).toBe('false')
+  })
+
+  it('surfaces the correctness check in the compact field, not just the helper page', async () => {
+    const wrapper = await mountField({ field: { ...FIELD, value: '--bogus' } })
+    const err = wrapper.find('.args-raw-validation-error')
+    expect(err.exists()).toBe(true)
+    expect(err.text()).toContain('--bogus')
+    expect(wrapper.find('input[aria-invalid="true"]').exists()).toBe(true)
+  })
 })

@@ -233,10 +233,12 @@ const cloudDescriptionKey = computed(() => {
   if (cloudCapacity.isDegraded()) return 'cloud.capacityDegradedHint'
   return 'firstUse.cloudDesc'
 })
-/** Express-install opt-out modifier on the start screen. Pre-ticked.
- *  Functional wiring (skipping optional setup steps) lands separately;
- *  for now the value is captured for telemetry only. */
-const expressInstall = ref(true)
+/** Express-install opt-in modifier on the start screen. Defaults OFF
+ *  so users land on Configure (install path, GPU, options) before any
+ *  files are written — too many people zoomed past the default-on
+ *  modifier and ended up with an unwanted C:\ install. Ticking it
+ *  restores the express skip-Configure path. */
+const expressInstall = ref(false)
 /** Peer modifier alongside Express Install, only rendered when an
  *  auto-tracked legacy install was detected on the machine. When
  *  checked, Continue routes straight to chain-migrate so the existing
@@ -590,7 +592,7 @@ async function open(opts: OpenOpts = {}): Promise<void> {
   if (forkExperimentVariant.value) {
     applyForkExperimentDefault(forkExperimentVariant.value)
   }
-  expressInstall.value = true
+  expressInstall.value = false
   migrateExisting.value = true
   // `onContinue` keeps `isContinuing` true past `routePostStart()`
   // because the chain handlers normally unmount this takeover within

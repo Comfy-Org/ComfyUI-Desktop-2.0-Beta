@@ -1,10 +1,27 @@
-import pty from 'node-pty'
+import type * as NodePty from 'node-pty'
 import fs from 'fs'
 import path from 'path'
 import { createRequire } from 'module'
 import type { WebContents } from 'electron'
 import * as installations from '../installations'
 import { getActiveVenvDir, getActiveUvPath } from './pythonEnv'
+
+/**
+ * Lazily load node-pty. Its index eagerly loads a native binding at import
+ * time, which fails outside a built Electron runtime (e.g. vitest under plain
+ * node). Loading on first spawn keeps this module importable from the eagerly
+ * evaluated `sources`/IPC graph without dragging the native module into every
+ * test that transitively imports it; surfaces that actually spawn a shell run
+ * inside Electron where the binding loads fine.
+ */
+let ptyModulePromise: Promise<typeof NodePty> | undefined
+async function loadPty(): Promise<typeof NodePty> {
+  ptyModulePromise ??= import('node-pty')
+  const mod = await ptyModulePromise
+  // node-pty is CJS: under esModuleInterop the API lives on the synthesized
+  // `default`; fall back to the namespace for native-ESM / mocked shapes.
+  return (mod as { default?: typeof NodePty }).default ?? mod
+}
 
 const requireFromHere = createRequire(__filename)
 
@@ -89,8 +106,19 @@ function getDefaultShell(): string {
  *  hides the activation echo so the session opens on a clean prompt. */
 function initCommands(venvDir: string, uvPath: string): string[] {
   if (process.platform === 'win32') {
+    // We can't `& Activate.ps1`: PowerShell's ExecutionPolicy blocks running
+    // script *files*, and on locked-down machines even `Set-ExecutionPolicy`
+    // is unavailable, so relaxing it isn't an option. Inline commands typed
+    // into the shell are never gated by ExecutionPolicy, so replicate what
+    // Activate.ps1 does directly: set VIRTUAL_ENV, prepend the venv's Scripts
+    // dir to PATH, drop any PYTHONHOME, and add the `(.venv)` prompt prefix.
+    const promptName = path.basename(venvDir)
     return [
-      `& "${venvDir}\\Scripts\\Activate.ps1"`,
+      `$env:VIRTUAL_ENV = "${venvDir}"`,
+      `$env:VIRTUAL_ENV_PROMPT = "${promptName}"`,
+      `$env:PATH = "${venvDir}\\Scripts;$env:PATH"`,
+      'if (Test-Path Env:PYTHONHOME) { Remove-Item Env:PYTHONHOME }',
+      'function global:prompt { Write-Host -NoNewline -ForegroundColor Green "($env:VIRTUAL_ENV_PROMPT) "; "PS $($executionContext.SessionState.Path.CurrentLocation)$(\'>\' * ($nestedPromptLevel + 1)) " }',
       `function pip { & "${uvPath}" pip $args }`,
       'Clear-Host',
     ]
@@ -104,7 +132,8 @@ function initCommands(venvDir: string, uvPath: string): string[] {
 
 class InstallTerminal {
   readonly installationId: string
-  #pty: pty.IPty | undefined
+  #pty: NodePty.IPty | undefined
+  #spawnInFlight: Promise<void> | undefined
   #exited = true
   readonly sessionBuffer: string[] = []
   readonly size = { ...DEFAULT_SIZE }
@@ -121,7 +150,14 @@ class InstallTerminal {
   /** Spawn the shell if it isn't alive. Safe to call repeatedly. */
   async ensureAlive(): Promise<void> {
     if (this.#pty && !this.#exited) return
-    await this.#spawn()
+    // Dedupe concurrent spawns: several surfaces can call subscribeTerminal at
+    // once, and #spawn awaits before assigning #pty — without this each caller
+    // would spawn its own shell and orphan all but the last (a leaked PTY that
+    // keeps holding the install dir / venv locked).
+    this.#spawnInFlight ??= this.#spawn().finally(() => {
+      this.#spawnInFlight = undefined
+    })
+    await this.#spawnInFlight
   }
 
   /** Kill any existing shell and start a fresh one. Clears scrollback. */
@@ -181,6 +217,7 @@ class InstallTerminal {
     this.sessionBuffer.length = 0
     const venvDir = getActiveVenvDir(inst)
     const uvPath = getActiveUvPath(inst)
+    const pty = await loadPty()
     const instance = pty.spawn(getDefaultShell(), [], {
       name: 'xterm-256color',
       cols: this.size.cols,
@@ -288,6 +325,11 @@ export function disposeTerminal(installationId: string): void {
   if (!term) return
   term.dispose()
   terminals.delete(installationId)
+}
+
+/** Tear down every install's shell (e.g. on app quit) so no PTY child lingers. */
+export function disposeAllTerminals(): void {
+  for (const id of [...terminals.keys()]) disposeTerminal(id)
 }
 
 /** Test-only: drop all sessions without spawning anything. */

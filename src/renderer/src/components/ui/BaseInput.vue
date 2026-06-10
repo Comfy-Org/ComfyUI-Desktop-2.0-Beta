@@ -8,6 +8,9 @@ interface Props {
   mono?: boolean
   readonly?: boolean
   invalid?: boolean
+  /** Forwarded to the native input; pass false to suppress the red squiggly
+   *  spell-check underline on non-prose fields (e.g. CLI args). */
+  spellcheck?: boolean
   type?: string
   // Only meaningful when `type === 'number'`.
   min?: number
@@ -21,6 +24,7 @@ const props = withDefaults(defineProps<Props>(), {
   mono: false,
   readonly: false,
   invalid: false,
+  spellcheck: undefined,
   type: 'text',
   min: undefined,
   max: undefined,
@@ -64,6 +68,7 @@ function onChange(event: Event): void {
       :placeholder="placeholder"
       :aria-label="ariaLabel"
       :aria-invalid="invalid || undefined"
+      :spellcheck="spellcheck"
       :readonly="readonly"
       :min="min"
       :max="max"

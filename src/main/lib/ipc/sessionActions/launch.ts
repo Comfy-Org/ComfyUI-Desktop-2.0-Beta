@@ -13,7 +13,7 @@ import {
   _markLaunching, _clearLaunchingFailed,
   isEffectivelyEmptyInstallDir,
   captureSnapshotIfChanged, getSnapshotCount,
-  syncCustomModelFolders, discoverExtraModelFolders,
+  syncCustomModelFolders, discoverExtraModelFolders, instanceModelPathsYaml, isSamePath,
   createSessionPath, buildLaunchEnv, checkRebootMarker,
   makeSendProgress, makeSendOutput,
   getComfyArgsSchema, filterUnsupportedArgs,
@@ -21,6 +21,7 @@ import {
   _broadcastToRenderer,
 } from '../shared'
 import type { ChildProcess, LaunchCmd } from '../shared'
+import type { ModelPathsOptions } from '../../models'
 import type { ActionContext, ActionResult } from './types'
 import { lastNLines, stripAnsi } from '../../stderrTail'
 import { rotateLogFiles, getLogDir } from '../../logRotation'
@@ -75,6 +76,30 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
   }
   // Migrate legacy envs/default/ → ComfyUI/.venv/ for standalone installs.
   if (inst.sourceId === 'standalone') {
+    // Recover from an update/restore interrupted by a hard process kill (power
+    // loss, taskkill): if a marker survived, roll ComfyUI's source back to the
+    // pre-op commit so we never launch new source against stale packages. Safe
+    // here: the _operationAborts guard above rules out a concurrent operation,
+    // and recovery is a no-op when HEAD already matches the recorded commit.
+    // Capture the recovery narration so it can be surfaced to the user on the
+    // failure path, not just dropped into the main-process log.
+    const recoveryLog: string[] = []
+    try {
+      const { recoverInterruptedComfyOp } = await import('../../opMarker')
+      const recovered = await recoverInterruptedComfyOp(inst.installPath, (text) => {
+        recoveryLog.push(text)
+        console.log(text.trim())
+      })
+      if (recovered) inst = (await installations.get(installationId)) || inst
+    } catch (err) {
+      // Recovery threw because the source rollback failed: launching now would run
+      // new source against stale packages (the crash we're preventing). Fail
+      // closed; the marker is left in place so the next launch retries.
+      console.warn('Interrupted-operation recovery failed:', err)
+      const detail = recoveryLog.join('').trim()
+      const base = `ComfyUI recovery failed: ${(err as Error).message}`
+      return { ok: false, message: detail ? `${base}\n\n${detail}` : base }
+    }
     const { migrateEnvLayout } = await import('../../../sources/standalone/install')
     const { writeComfyEnvironment } = await import('../../../sources/standalone/envPaths')
     const updateFn = async (data: Record<string, unknown>): Promise<unknown> => installations.update(installationId, data)
@@ -83,6 +108,31 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
       if (migrated) inst = (await installations.get(installationId)) || inst
     } catch (err) {
       console.warn('Env layout migration failed:', err)
+    }
+    // One-time repair for installs damaged by the brief `--upgrade` window that
+    // replaced bundled GPU torch with a CPU build. Non-fatal: CPU torch still
+    // runs, so a failed repair must never block launch (it retries next time).
+    // Held under `_operationAborts` for its duration so a second launch can't
+    // run a concurrent repair against the same venv, and so it stays cancellable.
+    const repairAbort = new AbortController()
+    _operationAborts.set(installationId, repairAbort)
+    try {
+      const { maybeRepairTorch } = await import('../../../sources/standalone/torchRepair')
+      const repaired = await maybeRepairTorch(inst, {
+        sendProgress: makeSendProgress(event.sender, installationId),
+        sendOutput: makeSendOutput(event.sender, installationId),
+        update: updateFn,
+        signal: repairAbort.signal,
+      })
+      if (repaired) inst = (await installations.get(installationId)) || inst
+    } catch (err) {
+      if (repairAbort.signal.aborted) {
+        if (_operationAborts.get(installationId) === repairAbort) _operationAborts.delete(installationId)
+        return { ok: false, cancelled: true }
+      }
+      console.warn('PyTorch vendor repair failed:', err)
+    } finally {
+      if (_operationAborts.get(installationId) === repairAbort) _operationAborts.delete(installationId)
     }
     await writeComfyEnvironment(path.join(inst.installPath, 'ComfyUI'))
   }
@@ -141,10 +191,34 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
   const useSharedModels = argsAvailable && (inst.useSharedModels as boolean | undefined) !== false
   const useSharedInputOutput = argsAvailable && (inst.useSharedInputOutput as boolean | undefined) !== false
   let preLaunchExtras: string[] = []
-  let sharedModelsDirs: string[] | undefined
+  // Model dirs whose extra-folder changes drive auto-relaunch, plus the sync
+  // options (target YAML + which dir is `is_default`). Sourced from the global
+  // settings when this install uses shared models, or from its per-install list
+  // when it opts out.
+  let modelDirsForLaunch: string[] | undefined
+  let modelSyncOptions: ModelPathsOptions = {}
+  let manageModelFolders = false
   if (useSharedModels) {
-    sharedModelsDirs = settings.get('modelsDirs') as string[] | undefined
-    const { config } = syncCustomModelFolders(inst.installPath, sharedModelsDirs)
+    manageModelFolders = true
+    modelDirsForLaunch = settings.get('modelsDirs') as string[] | undefined
+    // Global shared: first dir is default (the omitted-primaryDir default).
+  } else if (argsAvailable) {
+    const instanceDirs = inst.modelDirs as string[] | undefined
+    if (instanceDirs && instanceDirs.length > 0) {
+      manageModelFolders = true
+      modelDirsForLaunch = instanceDirs
+      // The install's own models dir is the default unless the user promoted a
+      // valid external dir; `null` leaves ComfyUI's built-in default in place.
+      const primaryRaw = inst.modelDirsPrimary as string | undefined
+      const primaryDir =
+        typeof primaryRaw === 'string' && instanceDirs.some((d) => isSamePath(d, primaryRaw))
+          ? primaryRaw
+          : null
+      modelSyncOptions = { yamlPath: instanceModelPathsYaml(installationId), primaryDir }
+    }
+  }
+  if (manageModelFolders) {
+    const { config } = syncCustomModelFolders(inst.installPath, modelDirsForLaunch, [], modelSyncOptions)
     if (config) {
       launchCmd.args!.push('--extra-model-paths-config', config.yamlPath)
     }
@@ -528,8 +602,8 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
 
   // Check if custom nodes created new model folders during startup
   let site1Relaunched = false
-  if (useSharedModels) {
-    const { newFolders } = syncCustomModelFolders(inst.installPath, sharedModelsDirs, preLaunchExtras)
+  if (manageModelFolders) {
+    const { newFolders } = syncCustomModelFolders(inst.installPath, modelDirsForLaunch, preLaunchExtras, modelSyncOptions)
     if (newFolders.length > 0) {
       sendOutput(`\n--- Restarting: new model folders detected (${newFolders.join(', ')}) ---\n\n`)
       if (_onModelFolderRelaunch) {
@@ -589,8 +663,8 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
         if (!isModelRelaunch) {
           sendOutput('\n--- ComfyUI restarting ---\n\n')
         }
-        if (useSharedModels) {
-          const { config } = syncCustomModelFolders(inst.installPath, sharedModelsDirs)
+        if (manageModelFolders) {
+          const { config } = syncCustomModelFolders(inst.installPath, modelDirsForLaunch, [], modelSyncOptions)
           if (config) {
             for (const f of config.extraFolders) knownExtras.add(f)
           }
@@ -611,7 +685,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
         writePortLock(launchCmd.port!, { pid: proc.pid!, installationName: inst.name })
         attachExitHandler(proc)
         if (_onComfyRestarted) _onComfyRestarted({ installationId, process: proc })
-        if (useSharedModels) {
+        if (manageModelFolders) {
           rebootModelCheckAbort = new AbortController()
           const checkSignal = rebootModelCheckAbort.signal
           waitForPort(launchCmd.port!, '127.0.0.1', { timeoutMs: COMFY_BOOT_TIMEOUT_MS, signal: checkSignal })
@@ -622,7 +696,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
               const currentExtras = discoverExtraModelFolders(inst.installPath)
               const newFolders = currentExtras.filter((f) => !knownExtras.has(f))
               if (newFolders.length > 0) {
-                const { config } = syncCustomModelFolders(inst.installPath, sharedModelsDirs)
+                const { config } = syncCustomModelFolders(inst.installPath, modelDirsForLaunch, [], modelSyncOptions)
                 if (config) {
                   for (const f of config.extraFolders) knownExtras.add(f)
                 }

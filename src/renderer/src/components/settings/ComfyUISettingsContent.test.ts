@@ -6,6 +6,7 @@ import { computed, ref, nextTick } from 'vue'
 
 import type { Installation } from '../../types/ipc'
 import { useSessionStore } from '../../stores/sessionStore'
+import { TID } from '../../../../shared/testIds'
 
 /**
  * Tests for the picker/drawer's per-install settings body. Locks: (1) overlay
@@ -24,7 +25,7 @@ const messages = {
       tabUpdate: 'Update',
       tabSnapshots: 'Snapshots',
       tabStorage: 'Storage',
-      tabConsole: 'Console',
+      tabTerminal: 'Terminal',
       relaunch: 'Relaunch',
       more: 'More',
     },
@@ -218,6 +219,32 @@ describe('ComfyUISettingsContent', () => {
         },
       })
       expect(w.find('.op-title').text()).toBe('Update complete')
+    })
+  })
+
+  describe('error overlay', () => {
+    // Regression: the error was once rendered in a single-line, ellipsis-clamped
+    // <p>, hiding the actionable detail (issue #1023). It must render in full.
+    it('renders the full multi-line error message with a copy button', async () => {
+      const detail = [
+        'Update process failed with exit code 1.',
+        '',
+        'Traceback (most recent call last):',
+        '  File "main.py", line 42, in <module>',
+        'ModuleNotFoundError: No module named "foo"',
+      ].join('\n')
+      const w = await mountContent({
+        activeOperation: {
+          actionId: 'update-comfyui', actionData: {},
+          done: true, ok: false, error: detail,
+          percent: 100, status: '', cancellable: false, title: '',
+        },
+      })
+      const msg = w.find(`[data-testid="${TID.pickerOpErrorMessage}"]`)
+      expect(msg.exists()).toBe(true)
+      expect(msg.text()).toContain('Update process failed with exit code 1.')
+      expect(msg.text()).toContain('ModuleNotFoundError: No module named "foo"')
+      expect(w.find(`[data-testid="${TID.pickerOpErrorCopy}"]`).exists()).toBe(true)
     })
   })
 
@@ -427,7 +454,7 @@ describe('ComfyUISettingsContent', () => {
      *  Every current tab carries a concept tooltip, so finding a Tooltip whose
      *  text is one of these would mean the tab fell back to the label-echo
      *  path — what these tests are guarding against. */
-    const TAB_LABELS = new Set(['Update', 'Startup Args', 'Snapshots', 'Storage', 'Console', 'About'])
+    const TAB_LABELS = new Set(['Update', 'Startup Args', 'Snapshots', 'Storage', 'Terminal', 'About'])
 
     function tabTooltips(w: VueWrapper) {
       return w
