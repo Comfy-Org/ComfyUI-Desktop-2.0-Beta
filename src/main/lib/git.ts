@@ -676,10 +676,10 @@ export function lsRemoteLatestTag(url: string): Promise<string | undefined> {
 }
 
 /**
- * List the top-N highest stable version tags from a remote URL via the Git
- * protocol. Stable here means a strict `vMAJOR.MINOR.PATCH` shape — no rc /
- * alpha / beta / build suffixes — so a tag like `v1.19.5-rc1` is excluded.
- * Tags are returned sorted descending (newest first).
+ * List every stable version tag from a remote URL via the Git protocol.
+ * Stable here means a strict `vMAJOR.MINOR.PATCH` shape — no rc / alpha /
+ * beta / build suffixes — so a tag like `v1.19.5-rc1` is excluded. Tags are
+ * returned sorted descending (newest first).
  *
  * The pygit2 fallback returns its own newest-first list (see `ls-remote-tags`
  * in `git_operations.py`), but it isn't strict about the stable shape, so we
@@ -687,7 +687,7 @@ export function lsRemoteLatestTag(url: string): Promise<string | undefined> {
  *
  * Returns an empty array on any failure; never throws.
  */
-export function lsRemoteStableTags(url: string, limit: number = 5): Promise<string[]> {
+export function lsRemoteStableTags(url: string): Promise<string[]> {
   const filterAndSort = (raw: string[]): string[] => {
     const versions: Array<{ tag: string; parts: number[] }> = []
     for (const tag of raw) {
@@ -696,7 +696,7 @@ export function lsRemoteStableTags(url: string, limit: number = 5): Promise<stri
       versions.push({ tag, parts: [Number(m[1]), Number(m[2]), Number(m[3])] })
     }
     versions.sort((a, b) => compareVersionArrays(b.parts, a.parts))
-    return versions.slice(0, limit).map((v) => v.tag)
+    return versions.map((v) => v.tag)
   }
 
   if (isPygit2Configured()) {

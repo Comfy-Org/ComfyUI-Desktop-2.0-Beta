@@ -23,7 +23,6 @@ import {
   fetchLatestRelease,
   getLatestStableTag,
   getStableTags,
-  STABLE_TAG_PICKER_LIMIT,
   _clearLatestStableTagCache,
 } from './comfyui-releases'
 import * as settings from '../settings'
@@ -227,23 +226,11 @@ describe('fetchLatestRelease', () => {
 })
 
 describe('getStableTags', () => {
-  it('returns the list from lsRemoteStableTags and defaults to STABLE_TAG_PICKER_LIMIT', async () => {
+  it('returns the full list from lsRemoteStableTags (newest first)', async () => {
     mockedLsRemoteStableTags.mockResolvedValue(['v0.25.1', 'v0.25.0', 'v0.24.1', 'v0.24.0', 'v0.23.5'])
     const tags = await getStableTags()
     expect(tags).toEqual(['v0.25.1', 'v0.25.0', 'v0.24.1', 'v0.24.0', 'v0.23.5'])
-    expect(mockedLsRemoteStableTags).toHaveBeenCalledWith(
-      'https://github.com/Comfy-Org/ComfyUI.git',
-      STABLE_TAG_PICKER_LIMIT,
-    )
-  })
-
-  it('forwards a custom limit to lsRemoteStableTags', async () => {
-    mockedLsRemoteStableTags.mockResolvedValue(['v0.25.1', 'v0.25.0'])
-    await getStableTags({ limit: 2 })
-    expect(mockedLsRemoteStableTags).toHaveBeenCalledWith(
-      'https://github.com/Comfy-Org/ComfyUI.git',
-      2,
-    )
+    expect(mockedLsRemoteStableTags).toHaveBeenCalledWith('https://github.com/Comfy-Org/ComfyUI.git')
   })
 
   it('returns [] (does not throw) when lsRemoteStableTags rejects', async () => {
@@ -293,9 +280,6 @@ describe('getStableTags', () => {
     )
     mockedLsRemoteStableTags.mockResolvedValue(['v0.25.1'])
     await getStableTags()
-    expect(mockedLsRemoteStableTags).toHaveBeenCalledWith(
-      'https://gitcode.com/gh_mirrors/co/ComfyUI.git',
-      STABLE_TAG_PICKER_LIMIT,
-    )
+    expect(mockedLsRemoteStableTags).toHaveBeenCalledWith('https://gitcode.com/gh_mirrors/co/ComfyUI.git')
   })
 })

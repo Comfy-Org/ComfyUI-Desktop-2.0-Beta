@@ -4,7 +4,7 @@ import { fetchJSON } from '../../lib/fetch'
 import { parseArgs, extractPort, formatTime } from '../../lib/util'
 import { t } from '../../lib/i18n'
 import { launchAction } from '../../lib/actions'
-import { getLatestStableTag, getStableTags, STABLE_TAG_PICKER_LIMIT } from '../../lib/comfyui-releases'
+import { getLatestStableTag, getStableTags } from '../../lib/comfyui-releases'
 import { copyDirWithProgress } from '../../lib/copy'
 import {
   PLATFORM_PREFIX, DEFAULT_LAUNCH_ARGS,
@@ -426,7 +426,7 @@ export const standalone: SourcePlugin = {
       // HEAD by intent, and the post-install update already fast-forwards
       // there. Returning [] makes the wizard render an empty/disabled select.
       if (selections.release?.value !== 'stable') return []
-      const tags = await getStableTags({ limit: STABLE_TAG_PICKER_LIMIT })
+      const tags = await getStableTags()
       if (tags.length === 0) return []
       // Newest first; the wizard auto-selects the `recommended` option so
       // the default lands on the most recent stable tag.
@@ -446,18 +446,28 @@ export const standalone: SourcePlugin = {
 
       const isStable = selections.release?.value === 'stable'
       const gpu = context?.gpu as string | undefined
+      // When the user picked a specific stable tag from the comfyVersion
+      // dropdown, the variant card should advertise THAT version (the one
+      // the post-install update checks out), not the channel head. Falls
+      // back to the channel-head's resolved tag when no pick was made.
+      const pickedComfyTag =
+        isStable && typeof selections.comfyVersion?.value === 'string'
+          && /^v\d+\.\d+\.\d+$/.test(selections.comfyVersion.value)
+          ? selections.comfyVersion.value
+          : null
 
       return Object.entries(releaseData.vendorReleases)
         .filter(([vendorId]) => vendorId.startsWith(prefix))
         .map(([vendorId, releases]): FieldOption | null => {
           const release = releases[0]
           if (!release) return null
-          // For Stable, the card must advertise the version the user
-          // ends up with after post-install auto-update (the upstream stable
-          // tag), not the older ComfyUI bundled in the R2 standalone build.
-          // Falls back to the bundled version when the upstream tag couldn't
-          // be resolved (offline, etc.).
-          const displayStableTag = isStable ? releaseData.latestStableTag ?? null : null
+          // Stable: advertise the upstream tag the user lands on after the
+          // post-install auto-update (picked tag wins; otherwise channel
+          // head). Falls back to the bundled version when neither is
+          // resolvable (offline, etc.).
+          const displayStableTag = isStable
+            ? pickedComfyTag ?? releaseData.latestStableTag ?? null
+            : null
           return buildVariantOption(vendorId, release, displayStableTag, gpu)
         })
         .filter((item): item is FieldOption => item != null)

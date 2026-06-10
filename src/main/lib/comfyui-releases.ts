@@ -4,12 +4,6 @@ import * as settings from '../settings'
 
 const REPO = 'Comfy-Org/ComfyUI'
 
-/** Number of stable tags exposed to the version picker. Five is enough to
- *  cover the last few release iterations without inflating the dropdown into
- *  a wall of patch versions; the install wizard caps the visible list to
- *  this count too. */
-export const STABLE_TAG_PICKER_LIMIT = 5
-
 /** Short-lived cache for the latest stable tag, keyed by remote URL, to avoid
  *  repeated `git ls-remote` calls in close succession. */
 const SUCCESS_TTL_MS = 10 * 60 * 1000
@@ -76,40 +70,36 @@ export function _clearLatestStableTagCache(): void {
 }
 
 /**
- * Resolve the last N stable ComfyUI tags via `git ls-remote --tags`. "Stable"
- * means strict `vMAJOR.MINOR.PATCH` (no prerelease / suffix). Cached per remote
- * URL with the same TTLs as {@link getLatestStableTag}; concurrent callers
- * share one in-flight request. Returns an empty array (never throws) on
- * failure. `refresh: true` bypasses the cache.
+ * Resolve every stable ComfyUI tag via `git ls-remote --tags`. "Stable" means
+ * strict `vMAJOR.MINOR.PATCH` (no prerelease / suffix). Tags are returned
+ * newest-first. Cached per remote URL with the same TTLs as
+ * {@link getLatestStableTag}; concurrent callers share one in-flight request.
+ * Returns an empty array (never throws) on failure. `refresh: true` bypasses
+ * the cache.
  */
-export async function getStableTags(opts?: {
-  refresh?: boolean
-  limit?: number
-}): Promise<string[]> {
-  const limit = opts?.limit ?? STABLE_TAG_PICKER_LIMIT
+export async function getStableTags(opts?: { refresh?: boolean }): Promise<string[]> {
   const url = _getRemoteUrl()
-  const cacheKey = `${url}|${limit}`
   const now = Date.now()
   if (!opts?.refresh) {
-    const hit = _stableTagsCache.get(cacheKey)
+    const hit = _stableTagsCache.get(url)
     if (hit && now < hit.expiresAt) return hit.tags
   }
-  const existing = _stableTagsInflight.get(cacheKey)
+  const existing = _stableTagsInflight.get(url)
   if (existing) return existing
   const promise = (async () => {
     try {
-      const tags = await lsRemoteStableTags(url, limit)
+      const tags = await lsRemoteStableTags(url)
       const ttl = tags.length === 0 ? FAILURE_TTL_MS : SUCCESS_TTL_MS
-      _stableTagsCache.set(cacheKey, { tags, expiresAt: Date.now() + ttl })
+      _stableTagsCache.set(url, { tags, expiresAt: Date.now() + ttl })
       return tags
     } catch {
-      _stableTagsCache.set(cacheKey, { tags: [], expiresAt: Date.now() + FAILURE_TTL_MS })
+      _stableTagsCache.set(url, { tags: [], expiresAt: Date.now() + FAILURE_TTL_MS })
       return []
     } finally {
-      _stableTagsInflight.delete(cacheKey)
+      _stableTagsInflight.delete(url)
     }
   })()
-  _stableTagsInflight.set(cacheKey, promise)
+  _stableTagsInflight.set(url, promise)
   return promise
 }
 
