@@ -162,4 +162,5 @@ export function registerPickerSettingsIpc(): void {
 
   // Pull main's full i18n catalog so keys like `actions.restart` resolve inside the popup.
   ipcMain.handle(CH.getLocaleMessages, (event) => dispatchInvoke('get-locale-messages', event))
+  ipcMain.handle(CH.getLocale, (event) => dispatchInvoke('get-locale', event))
 }

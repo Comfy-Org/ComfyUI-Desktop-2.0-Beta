@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, toRef, watch } from 'vue'
-import { useI18n } from 'vue-i18n'
+import { computed, ref, toRef, watch } from 'vue'
 import { LayoutDashboard, Plus, Search, X } from 'lucide-vue-next'
 import BaseInput from '../components/ui/BaseInput.vue'
 import { FILTER_CHIPS, useInstallList } from '../composables/useInstallList'
@@ -13,7 +12,6 @@ import Tooltip from '../components/ui/Tooltip.vue'
 import InstanceRow from './instancePicker/InstanceRow.vue'
 import { resolvePickerTab, type PickerTab } from '../lib/pickerTabs'
 import { resolveProgressRouting } from '../lib/pickerProgressRouting'
-import { mergePanelLocaleIntoPopup } from './pickerSettingsApiShim'
 import type {
   DetailSection,
   Installation,
@@ -85,8 +83,6 @@ const props = defineProps<{
   snapshot: PickerSnapshot
 }>()
 
-const { mergeLocaleMessage } = useI18n()
-
 const sessionStore = useSessionStore()
 function hydrateSessionStoreFromSnapshot(): void {
   const next = new Set(props.snapshot.runningInstallationIds)
@@ -114,12 +110,6 @@ function hydrateSessionStoreFromSnapshot(): void {
       sessionStore.launchingInstances.set(id, { installationName: '' })
     }
   }
-}
-
-let panelLocaleMerge: Promise<void> | null = null
-function ensurePanelLocaleMerged(): Promise<void> {
-  panelLocaleMerge ??= mergePanelLocaleIntoPopup(mergeLocaleMessage)
-  return panelLocaleMerge
 }
 
 interface PickerBridge {
@@ -354,10 +344,6 @@ watch(
   () => hydrateSessionStoreFromSnapshot(),
   { immediate: true }
 )
-
-onMounted(() => {
-  void ensurePanelLocaleMerged()
-})
 
 function handleSettingsShowProgress(opts: ShowProgressOpts): void {
   if (!opts.actionId) return

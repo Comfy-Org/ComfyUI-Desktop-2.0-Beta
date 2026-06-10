@@ -8,6 +8,8 @@ import ModalDialog from '../components/ModalDialog.vue'
 import DialogHost from '../components/DialogHost.vue'
 import { useModal } from '../composables/useModal'
 import { dismissPickerModals } from './dismissPickerModals'
+import { popupLocaleSource } from './pickerSettingsApiShim'
+import { useAppLocale } from '../lib/useAppLocale'
 import type { DetailSection, SnapshotListData } from '../types/ipc'
 
 // Title-bar dropdown popup shell. Hosts every title-bar dropdown in one
@@ -237,6 +239,10 @@ function handleActivate(id: string): void {
 
 const { state: modalState } = useModal()
 
+// Locale lives at the popup root so every kind (menu / downloads / picker /
+// settings) tracks main's language live — the language picker is in this popup.
+const { syncLocale } = useAppLocale(popupLocaleSource())
+
 function handleKeydown(event: KeyboardEvent): void {
   if (event.key !== 'Escape') return
   // Defer to the popup's own ModalDialog when open; otherwise ESC would
@@ -292,6 +298,7 @@ function measureAndRequestSize(): void {
 }
 
 onMounted(() => {
+  void syncLocale()
   unsubConfig = bridge?.onConfig((cfg) => {
     kind.value = cfg.kind
     items.value = cfg.kind === 'menu' ? cfg.items : []
