@@ -16,6 +16,7 @@ const API_MAP = {
   runAction: 'pickerSettingsRunAction',
   getFieldOptions: 'pickerSettingsGetFieldOptions',
   getInstallations: 'pickerSettingsGetInstallations',
+  getStableTags: 'pickerSettingsGetStableTags',
   getInstallationSize: 'pickerSettingsGetInstallationSize',
   stopComfyUI: 'pickerSettingsStopComfyUI',
   cancelOperation: 'pickerSettingsCancelOperation',

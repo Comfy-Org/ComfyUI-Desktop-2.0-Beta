@@ -380,6 +380,14 @@ async function handleUpdateComfyUI(
   }
   const channel = targetChannel as 'stable' | 'latest'
 
+  // The IPP version picker carries a strict `vMAJOR.MINOR.PATCH` ref so the
+  // user can upgrade or downgrade to a specific historical release. Bad
+  // shapes (rc / alpha / blank) are dropped here as a defence-in-depth: the
+  // python script also gates this, but a malformed value should never even
+  // reach the spawn.
+  const rawTargetTag = typeof actionData?.targetTag === 'string' ? actionData.targetTag : undefined
+  const targetTag = rawTargetTag && /^v\d+\.\d+\.\d+$/.test(rawTargetTag) ? rawTargetTag : undefined
+
   sendProgress('steps', { steps: [
     { phase: 'prepare', label: t('standalone.updatePrepare') },
     { phase: 'run', label: t('standalone.updateRun') },
@@ -393,6 +401,7 @@ async function handleUpdateComfyUI(
     installPath,
     installation,
     channel,
+    ...(targetTag ? { targetTag } : {}),
     update,
     sendProgress,
     sendOutput,
