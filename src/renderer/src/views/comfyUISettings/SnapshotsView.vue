@@ -24,6 +24,7 @@ import type {
 import SnapshotRow from './SnapshotRow.vue'
 import SnapshotDiffView from '../../components/SnapshotDiffView.vue'
 import BaseAccordion from '../../components/ui/BaseAccordion.vue'
+import OperationErrorDetail from '../../components/ui/OperationErrorDetail.vue'
 import { humanizeOpStatus } from '../../lib/progressStatusLabel'
 
 interface ActiveOperation {
@@ -205,21 +206,20 @@ const timeline = computed<TimelineItem[]>(() => {
   return out
 })
 
-/** "Latest: 8d ago" stat from the newest timeline item; null when empty. */
+/** "Latest: 8d ago" stat from the newest snapshot; null when none. Copy
+ * events are excluded so an interleaved "Copied from/as X" entry can't hijack
+ * the stat (see issue #1007). */
 const latestRelative = computed<string | null>(() => {
-  const first = timeline.value[0]
-  if (!first) return null
-  const iso = first.kind === 'snapshot' ? first.snapshot.createdAt : first.event.copiedAt
-  return _formatRelative(iso, t)
+  const newest = snapshots.value[0]
+  if (!newest) return null
+  return _formatRelative(newest.createdAt, t)
 })
 
 function autoExpandFirst(): void {
   if (expandedFilenames.value.size > 0) return
-  const firstSnapshot = timeline.value.find(
-    (item): item is Extract<TimelineItem, { kind: 'snapshot' }> => item.kind === 'snapshot'
-  )
-  if (firstSnapshot) {
-    expandedFilenames.value = new Set([firstSnapshot.snapshot.filename])
+  const newest = snapshots.value[0]
+  if (newest) {
+    expandedFilenames.value = new Set([newest.filename])
   }
 }
 
@@ -712,9 +712,7 @@ async function handleImport(): Promise<void> {
               role="alert"
               :data-testid="TID.snapshotsOpCard"
             >
-              <p v-if="restoreErrorMessage" class="snapshots-op-card-error-msg">
-                {{ restoreErrorMessage }}
-              </p>
+              <OperationErrorDetail v-if="restoreErrorMessage" :error="restoreErrorMessage" />
               <div class="snapshots-op-actions">
                 <button
                   type="button"
@@ -755,8 +753,7 @@ async function handleImport(): Promise<void> {
         class="snapshots-rail-node"
         :class="{
           'is-snapshot': item.kind === 'snapshot',
-          'is-copy': item.kind === 'copy',
-          'is-current': item.kind === 'snapshot' && i === 0
+          'is-copy': item.kind === 'copy'
         }"
       >
         <span
@@ -774,7 +771,7 @@ async function handleImport(): Promise<void> {
             <SnapshotRow
               :snapshot="item.snapshot"
               :expanded="isExpanded(item.snapshot.filename)"
-              :is-latest="i === 0"
+              :is-latest="item.snapshotIndex === 0"
               :previous-comfyui-version="snapshots[item.snapshotIndex + 1]?.comfyuiVersion"
               :toggle-test-id="TID.snapshotRow(item.snapshot.filename)"
               @toggle="toggleExpand(item.snapshot.filename)"
@@ -785,8 +782,12 @@ async function handleImport(): Promise<void> {
                 </p>
 
                 <!-- "Release notes": changes vs the previous snapshot.
-                     Hidden for the oldest (no predecessor). -->
-                <div v-if="i < timeline.length - 1" class="snap-diff-accordion">
+                     Hidden for the oldest snapshot (no predecessor); copy
+                     events interleaved in the timeline don't count. -->
+                <div
+                  v-if="item.snapshotIndex < snapshots.length - 1"
+                  class="snap-diff-accordion"
+                >
                   <button
                     type="button"
                     class="snap-diff-trigger"
@@ -831,8 +832,9 @@ async function handleImport(): Promise<void> {
                 </div>
 
                 <!-- "Restore preview": changes vs live state. Hidden for the
-                     newest (restoring it is a no-op). -->
-                <div v-if="i !== 0" class="snap-diff-accordion">
+                     newest snapshot (restoring it is a no-op); copy events
+                     interleaved in the timeline don't count. -->
+                <div v-if="item.snapshotIndex !== 0" class="snap-diff-accordion">
                   <button
                     type="button"
                     class="snap-diff-trigger"
@@ -883,7 +885,7 @@ async function handleImport(): Promise<void> {
                      row stays a clean tap target. -->
                 <div class="snapshots-view-detail-actions">
                   <button
-                    v-if="i !== 0"
+                    v-if="item.snapshotIndex !== 0"
                     type="button"
                     class="snapshots-view-detail-btn"
                     :aria-label="t('snapshots.restore', 'Restore')"
@@ -1359,20 +1361,6 @@ async function handleImport(): Promise<void> {
   }
 }
 
-.snapshots-op-card-error-msg {
-  margin: 0;
-  font-size: var(--takeover-fs-caption);
-  color: var(--danger, #ef4444);
-  /* `pre-wrap` preserves the action's multi-line detail; capped height
-   * keeps a long failure list from pushing the actions off-screen. */
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 168px;
-  overflow-y: auto;
-  text-align: left;
-  font-family: var(--font-mono, ui-monospace, monospace);
-  line-height: 1.45;
-}
 .snapshots-op-actions {
   display: flex;
   gap: 8px;
