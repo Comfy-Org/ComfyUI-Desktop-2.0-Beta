@@ -9,6 +9,7 @@ vi.mock('child_process', async (importOriginal) => {
 import { execFile, spawn } from 'child_process'
 import { EventEmitter } from 'events'
 import { countCommitsAhead, findNearestTag, findLatestVersionTag, lsRemoteLatestTag, lsRemoteRef, isAncestorOf, findMergeBase, revParseRef, fetchTags, configurePygit2, isGitAvailable, isPygit2Configured, getPygit2Status, resetPygit2State, probePygit2, resetGitAvailableCache, countUniqueCommits, gitClone, gitCheckoutCommit, gitFetchAndCheckout, isPygit2AuthFailure, isForcePygit2, isSystemGitAvailable } from './git'
+import * as telemetry from './telemetry'
 
 const mockedExecFile = vi.mocked(execFile)
 const mockedSpawn = vi.mocked(spawn)
@@ -687,6 +688,30 @@ describe('system git fallback on pygit2 auth failure', () => {
       expect(mockedSpawn.mock.calls[0]![0]).toBe('/usr/bin/python3')
       expect(mockedSpawn.mock.calls[1]![0]).toBe('git')
       expect(mockedSpawn.mock.calls[1]![1]).toEqual(['clone', 'https://github.com/test/repo', '/dest'])
+    })
+
+    it('emits a system_fallback telemetry event when it falls back', async () => {
+      const emitSpy = vi.spyOn(telemetry, 'emit').mockImplementation(() => {})
+      mockExecFile((_cmd, _args, _opts, cb) => { cb(null, 'git version 2.43.0\n', '') })
+      mockSpawnSequence([
+        { exitCode: 1, stderr: 'authentication required but no callback set\n' }, // pygit2
+        { exitCode: 0, stderr: 'Cloning...\n' }, // system git
+      ])
+      await gitClone('https://github.com/test/repo', '/dest', () => {})
+      expect(emitSpy).toHaveBeenCalledWith(
+        'comfy.desktop.git.system_fallback',
+        expect.objectContaining({ op: 'clone' })
+      )
+    })
+
+    it('does NOT emit a system_fallback event when pygit2 succeeds', async () => {
+      const emitSpy = vi.spyOn(telemetry, 'emit').mockImplementation(() => {})
+      mockSpawnSequence([{ exitCode: 0, stderr: 'Cloning...\n' }])
+      await gitClone('https://github.com/test/repo', '/dest', () => {})
+      expect(emitSpy).not.toHaveBeenCalledWith(
+        'comfy.desktop.git.system_fallback',
+        expect.anything()
+      )
     })
 
     it('does NOT fall back when COMFY_FORCE_PYGIT2=1, even on an auth error', async () => {
