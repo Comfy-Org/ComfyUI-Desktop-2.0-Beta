@@ -14,6 +14,7 @@ import SettingsSectionList from '../../views/comfyUISettings/SettingsSectionList
 import StoragePane, { type StorageSnapshot } from '../../views/comfyUISettings/StoragePane.vue'
 import ConsoleTerminalPane from '../../views/comfyUISettings/ConsoleTerminalPane.vue'
 import Tooltip from '../ui/Tooltip.vue'
+import OperationErrorDetail from '../ui/OperationErrorDetail.vue'
 import type { PickerTab, SectionTab } from '../../lib/pickerTabs'
 import { isTabAllowedForCategory } from '../../lib/pickerTabs'
 import { humanizeOpStatus, operationInflightLabel, operationSuccessLabel } from '../../lib/progressStatusLabel'
@@ -838,7 +839,7 @@ defineExpose({
                       <XCircle :size="32" />
                     </div>
                     <p class="op-title op-title--error">{{ t('instancePicker.progressError') }}</p>
-                    <p class="op-name op-name--error">{{ activeOperation?.error }}</p>
+                    <OperationErrorDetail v-if="activeOperation?.error" :error="activeOperation.error" />
                     <div class="op-actions">
                       <button type="button" class="op-primary-btn" @click="emit('op-retry')">
                         {{ t('instancePicker.progressRetry') }}
@@ -1147,8 +1148,6 @@ defineExpose({
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.op-name--error { color: var(--brand-error, #e74c3c); opacity: 0.8; }
-
 .op-bar-wrap {
   width: 100%;
   max-width: 260px;

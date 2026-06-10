@@ -9,6 +9,8 @@ export const TID = {
   pickerNewWindow: 'picker-new-window',
   pickerSettingsLoading: 'picker-settings-loading',
   pickerSettingsSections: 'picker-settings-sections',
+  pickerOpErrorMessage: 'picker-op-error-message',
+  pickerOpErrorCopy: 'picker-op-error-copy',
 
   dashboardTile: (installId: string) => `dashboard-tile-${installId}`,
   dashboardTileKebab: (installId: string) => `dashboard-tile-kebab-${installId}`,

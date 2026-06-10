@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { CheckCircle, XCircle, Ban } from 'lucide-vue-next'
 import { operationInflightLabel, operationSuccessLabel } from '../lib/progressStatusLabel'
 import { MSG_CANCELLED } from '../../../shared/operationStatus'
+import OperationErrorDetail from '../components/ui/OperationErrorDetail.vue'
 import type { PopupInstancePickerSnapshot } from '../../../preload/comfyTitlePopupPreload'
 
 type OperationStatus = PopupInstancePickerSnapshot['installOperationStatus'][string]
@@ -89,7 +90,7 @@ const statusLabel = computed(() => {
           <XCircle :size="40" />
         </div>
         <p class="pip__heading pip__heading--error">{{ t('instancePicker.progressError') }}</p>
-        <p class="pip__subtext pip__subtext--error">{{ operation.error }}</p>
+        <OperationErrorDetail v-if="operation.error" :error="operation.error" compact />
         <div class="pip__actions">
           <button
             type="button"
@@ -221,11 +222,6 @@ const statusLabel = computed(() => {
   line-height: 1.5;
   word-break: break-word;
 }
-.pip__subtext--error {
-  color: var(--brand-error, #e74c3c);
-  opacity: 0.8;
-}
-
 .pip__primary-btn {
   margin-top: 4px;
   height: 34px;

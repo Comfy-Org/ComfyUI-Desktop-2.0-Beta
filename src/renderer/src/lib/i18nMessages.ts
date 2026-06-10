@@ -13,7 +13,9 @@ export const en = {
     useSharedModels: 'Use Shared Models',
     useSharedInputOutput: 'Use Shared Input/Output Folders',
     perInstallInputDir: 'Input Directory',
-    perInstallOutputDir: 'Output Directory'
+    perInstallOutputDir: 'Output Directory',
+    copy: 'Copy',
+    copyError: 'Copy error details'
   },
   settings: {
     open: 'Open',
