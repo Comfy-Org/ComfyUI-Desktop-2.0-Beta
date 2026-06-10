@@ -794,6 +794,7 @@
     "updateConfirmMessage": "Update from {installed} to {latest}?",
     "updateConfirmMessageLatest": "Update {installed} to the latest master commit ({latest})?",
     "updateConfirmMessageDowngrade": "Roll back from {installed} to stable {latest}? Newer commits will be removed.",
+    "updateBreakingWarning": "⚠️ This may break your custom nodes and workflows.",
     "updatingTitle": "Updating to {version}",
     "downgradingTitle": "Downgrading to {version}",
     "updatePrepare": "Prepare",
