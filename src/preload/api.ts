@@ -289,8 +289,8 @@ export function buildElectronApi(): ElectronApi {
       return () => ipcRenderer.removeListener('theme-changed', handler)
     },
     onLocaleChanged: (callback) => {
-      const handler = (_event: IpcRendererEvent, messages: unknown) =>
-        callback(messages as Record<string, unknown>)
+      const handler = (_event: IpcRendererEvent, payload: unknown) =>
+        callback(payload as { locale: string; messages: Record<string, unknown> })
       ipcRenderer.on('locale-changed', handler)
       return () => ipcRenderer.removeListener('locale-changed', handler)
     },
