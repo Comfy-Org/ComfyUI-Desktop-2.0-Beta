@@ -18,6 +18,7 @@ import { globalSettingsEvents } from '../globalSettingsEvents'
 import { recordIpcInvocation } from '../e2eOverrides'
 import type { SettingsSection } from '../../../types/ipc'
 import { AUTO_LAUNCH_LAST, AUTO_LAUNCH_NONE } from '../../settings'
+import { MANAGER_SECURITY_LEVELS, DEFAULT_MANAGER_SECURITY_LEVEL } from '../managerConfig'
 
 // Build the App + sources + About settings sections. Shared so the Global
 // Settings popup snapshot can call it without going through IPC.
@@ -145,6 +146,17 @@ export function buildSettingsSections(
           type: 'text' as const,
           value: s.pypiMirror || '',
           placeholder: i18n.t('settings.pypiMirrorPlaceholder')
+        },
+        {
+          id: 'managerSecurityLevel',
+          label: i18n.t('settings.managerSecurityLevel'),
+          type: 'select' as const,
+          value: s.managerSecurityLevel ?? DEFAULT_MANAGER_SECURITY_LEVEL,
+          options: MANAGER_SECURITY_LEVELS.map((level) => ({
+            value: level,
+            label: i18n.t(`settings.managerSecurityLevel_${level}`)
+          })),
+          tooltip: i18n.t('settings.managerSecurityLevelDescription')
         },
         ...(!isChinese ? [chineseMirrorsField] : [])
       ]

@@ -4,6 +4,7 @@ import { app } from 'electron'
 import { configDir, cacheDir, homeDir, setInstallDirResolver } from './lib/paths'
 import { MODEL_FOLDER_TYPES } from './lib/models'
 import { readFileSafe, writeFileSafe } from './lib/safe-file'
+import type { ManagerSecurityLevel } from './lib/managerConfig'
 
 export interface KnownSettings {
   cacheDir: string
@@ -37,6 +38,11 @@ export interface KnownSettings {
   pypiMirror?: string
   useChineseMirrors?: boolean
   chineseMirrorsPrompted?: boolean
+  /** ComfyUI-Manager `security_level`, written to its config.ini before launch.
+   *  Manager has no runtime API to change this (a remote --listen client could
+   *  otherwise relax security), so Desktop owns it. Absent => Manager's default
+   *  (`normal`). Takes effect on the next launch. */
+  managerSecurityLevel?: ManagerSecurityLevel
   telemetryEnabled?: boolean
   /** `true` once the first-use takeover is finished. Mid-flow cancel does NOT
    *  flip this, so the takeover replays from step 1 next launch. */
@@ -86,6 +92,7 @@ const SETTINGS_SCHEMA = {
   pypiMirror: { nullable: false },
   useChineseMirrors: { nullable: false },
   chineseMirrorsPrompted: { nullable: false },
+  managerSecurityLevel: { nullable: false },
   telemetryEnabled: { nullable: false },
   firstUseCompleted: { nullable: false },
   hideCloudFromPicker: { nullable: false },

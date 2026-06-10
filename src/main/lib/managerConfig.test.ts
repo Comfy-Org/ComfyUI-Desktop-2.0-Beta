@@ -3,9 +3,9 @@ import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { _internals, ensureManagerMirrorConfig } from './managerConfig'
+import { _internals, ensureManagerConfig } from './managerConfig'
 
-describe('ensureManagerMirrorConfig', () => {
+describe('ensureManagerConfig', () => {
   let tmpRoot: string
 
   beforeEach(() => {
@@ -16,72 +16,127 @@ describe('ensureManagerMirrorConfig', () => {
     fs.rmSync(tmpRoot, { recursive: true, force: true })
   })
 
-  it('writes the mirror config at the modern Manager config path', async () => {
-    await ensureManagerMirrorConfig(tmpRoot)
-    const target = _internals.modernConfigPath(tmpRoot)
-    expect(fs.existsSync(target)).toBe(true)
-    const written = fs.readFileSync(target, 'utf-8')
-    expect(written).toContain('[default]')
-    expect(written).toContain(`channel_url = ${_internals.MANAGER_MIRROR_CHANNEL_URL}`)
-    expect(written).toContain('bypass_ssl = true')
-    expect(written).toContain('network_mode = public')
-    expect(written).toContain('security_level = normal')
+  function readModern(): string {
+    return fs.readFileSync(_internals.modernConfigPath(tmpRoot), 'utf-8')
+  }
+
+  describe('fresh install', () => {
+    it('writes the mirror block plus the default security level when mirrors are on', async () => {
+      await ensureManagerConfig(tmpRoot, { useChineseMirrors: true })
+      const written = readModern()
+      expect(written).toContain('[default]')
+      expect(written).toContain(`channel_url = ${_internals.MANAGER_MIRROR_CHANNEL_URL}`)
+      expect(written).toContain('bypass_ssl = true')
+      expect(written).toContain('network_mode = public')
+      expect(written).toContain('security_level = normal')
+    })
+
+    it('writes the chosen security level alongside the mirror block', async () => {
+      await ensureManagerConfig(tmpRoot, { useChineseMirrors: true, securityLevel: 'weak' })
+      expect(readModern()).toContain('security_level = weak')
+    })
+
+    it('writes security level only (no mirror keys) when mirrors are off', async () => {
+      await ensureManagerConfig(tmpRoot, { useChineseMirrors: false, securityLevel: 'strong' })
+      const written = readModern()
+      expect(written).toContain('security_level = strong')
+      expect(written).not.toContain('channel_url')
+      expect(written).not.toContain('bypass_ssl')
+    })
+
+    it('writes nothing when neither a mirror nor a security level is requested', async () => {
+      await ensureManagerConfig(tmpRoot, { useChineseMirrors: false })
+      expect(fs.existsSync(_internals.modernConfigPath(tmpRoot))).toBe(false)
+    })
+
+    it('creates intermediate directories', async () => {
+      const target = _internals.modernConfigPath(tmpRoot)
+      expect(fs.existsSync(path.dirname(target))).toBe(false)
+      await ensureManagerConfig(tmpRoot, { useChineseMirrors: true })
+      expect(fs.existsSync(target)).toBe(true)
+    })
   })
 
-  it('creates intermediate directories when they do not exist', async () => {
-    const target = _internals.modernConfigPath(tmpRoot)
-    expect(fs.existsSync(path.dirname(target))).toBe(false)
-    await ensureManagerMirrorConfig(tmpRoot)
-    expect(fs.existsSync(target)).toBe(true)
+  describe('existing modern config', () => {
+    function seed(content: string): string {
+      const target = _internals.modernConfigPath(tmpRoot)
+      fs.mkdirSync(path.dirname(target), { recursive: true })
+      fs.writeFileSync(target, content, 'utf-8')
+      return target
+    }
+
+    it('updates only security_level and preserves the rest of the file', async () => {
+      seed('[default]\nchannel_url = https://my.custom.mirror/\nsecurity_level = normal\n')
+      await ensureManagerConfig(tmpRoot, { useChineseMirrors: false, securityLevel: 'weak' })
+      const written = readModern()
+      expect(written).toContain('channel_url = https://my.custom.mirror/')
+      expect(written).toContain('security_level = weak')
+      expect(written).not.toContain('security_level = normal')
+    })
+
+    it('inserts security_level when the key is absent', async () => {
+      seed('[default]\nchannel_url = https://my.custom.mirror/\n')
+      await ensureManagerConfig(tmpRoot, { useChineseMirrors: false, securityLevel: 'strong' })
+      const written = readModern()
+      expect(written).toContain('channel_url = https://my.custom.mirror/')
+      expect(written).toContain('security_level = strong')
+    })
+
+    it('leaves the file untouched when the user has not chosen a level', async () => {
+      const original = '[default]\nchannel_url = https://my.custom.mirror/\n'
+      seed(original)
+      await ensureManagerConfig(tmpRoot, { useChineseMirrors: true })
+      expect(readModern()).toBe(original)
+    })
+
+    it('ignores an invalid security level', async () => {
+      const original = '[default]\nsecurity_level = normal\n'
+      seed(original)
+      // @ts-expect-error -- exercising runtime guard against a bad persisted value
+      await ensureManagerConfig(tmpRoot, { useChineseMirrors: false, securityLevel: 'bogus' })
+      expect(readModern()).toBe(original)
+    })
   })
 
-  it('does not overwrite an existing modern config (preserves user customisations)', async () => {
-    const target = _internals.modernConfigPath(tmpRoot)
-    fs.mkdirSync(path.dirname(target), { recursive: true })
-    const original = '[default]\nchannel_url = https://my.custom.mirror/\n'
-    fs.writeFileSync(target, original, 'utf-8')
-
-    await ensureManagerMirrorConfig(tmpRoot)
-
-    expect(fs.readFileSync(target, 'utf-8')).toBe(original)
-  })
-
-  it('skips seeding when a legacy ComfyUI-Manager config exists', async () => {
-    // Migrated installs may carry a pre-existing legacy config. Pre-seeding the
-    // modern path while the legacy one exists would silently trigger Manager's
-    // legacy-migration code path (pip install + dir rename). Skip entirely.
+  it('skips seeding entirely when a legacy ComfyUI-Manager config exists', async () => {
     const legacyTarget = _internals.legacyConfigPath(tmpRoot)
     fs.mkdirSync(path.dirname(legacyTarget), { recursive: true })
     fs.writeFileSync(legacyTarget, '[default]\nchannel_url = legacy\n', 'utf-8')
 
-    await ensureManagerMirrorConfig(tmpRoot)
+    await ensureManagerConfig(tmpRoot, { useChineseMirrors: true, securityLevel: 'weak' })
 
     expect(fs.existsSync(_internals.modernConfigPath(tmpRoot))).toBe(false)
   })
 
-  it('targets <installPath>/ComfyUI/user/__manager/config.ini for modern installs', () => {
-    expect(_internals.modernConfigPath('/some/install')).toBe(
-      path.join('/some/install', 'ComfyUI', 'user', '__manager', 'config.ini')
-    )
+  describe('path helpers', () => {
+    it('targets the modern __manager path', () => {
+      expect(_internals.modernConfigPath('/some/install')).toBe(
+        path.join('/some/install', 'ComfyUI', 'user', '__manager', 'config.ini')
+      )
+    })
+
+    it('targets the legacy ComfyUI-Manager path', () => {
+      expect(_internals.legacyConfigPath('/some/install')).toBe(
+        path.join('/some/install', 'ComfyUI', 'user', 'default', 'ComfyUI-Manager', 'config.ini')
+      )
+    })
   })
 
-  it('targets <installPath>/ComfyUI/user/default/ComfyUI-Manager/config.ini for legacy', () => {
-    expect(_internals.legacyConfigPath('/some/install')).toBe(
-      path.join('/some/install', 'ComfyUI', 'user', 'default', 'ComfyUI-Manager', 'config.ini')
-    )
-  })
+  describe('withSecurityLevel', () => {
+    it('replaces an existing key', () => {
+      expect(_internals.withSecurityLevel('[default]\nsecurity_level = normal\n', 'weak')).toBe(
+        '[default]\nsecurity_level = weak\n'
+      )
+    })
 
-  it('written config parses as INI with channel_url under [default]', async () => {
-    await ensureManagerMirrorConfig(tmpRoot)
-    const lines = fs.readFileSync(_internals.modernConfigPath(tmpRoot), 'utf-8').split('\n')
-    const defaultStart = lines.findIndex((l) => l.trim() === '[default]')
-    expect(defaultStart).toBeGreaterThanOrEqual(0)
-    // All non-empty, non-section lines after [default] are key=value pairs
-    // and there are no other sections, so the keys live under [default].
-    const nextSection = lines.slice(defaultStart + 1).findIndex((l) => /^\[.+\]$/.test(l.trim()))
-    expect(nextSection).toBe(-1)
-    const bodyAfter = lines.slice(defaultStart + 1).filter((l) => l.trim().length > 0)
-    expect(bodyAfter.some((l) => l.startsWith('channel_url ='))).toBe(true)
-    expect(bodyAfter.some((l) => l.startsWith('bypass_ssl = true'))).toBe(true)
+    it('inserts under [default] when the key is missing', () => {
+      expect(_internals.withSecurityLevel('[default]\nchannel_url = x\n', 'strong')).toBe(
+        '[default]\nsecurity_level = strong\nchannel_url = x\n'
+      )
+    })
+
+    it('creates a [default] section when none exists', () => {
+      expect(_internals.withSecurityLevel('', 'normal')).toBe('[default]\nsecurity_level = normal\n')
+    })
   })
 })

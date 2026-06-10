@@ -34,7 +34,7 @@ import type { LaunchProgressTracker } from '../../launchProgress'
 import { clearCrash, recordCrash } from '../../crashBuffer'
 import * as telemetry from '../../telemetry'
 import { appendLog } from '../../logsBroadcast'
-import { ensureManagerMirrorConfig } from '../../managerConfig'
+import { ensureManagerConfig, type ManagerSecurityLevel } from '../../managerConfig'
 import type { WriteStream } from 'fs'
 
 // Feature flags injected on every spawned ComfyUI, gated by the running
@@ -235,12 +235,17 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     }
   }
 
-  if (!launchCmd.remote && settings.get('useChineseMirrors') === true) {
+  if (!launchCmd.remote) {
     try {
-      await ensureManagerMirrorConfig(inst.installPath)
+      await ensureManagerConfig(inst.installPath, {
+        useChineseMirrors: settings.get('useChineseMirrors') === true,
+        securityLevel: settings.get('managerSecurityLevel') as
+          | ManagerSecurityLevel
+          | undefined,
+      })
     } catch (err) {
-      console.warn('Failed to seed ComfyUI-Manager mirror config:', err)
-      telemetry.capture('comfy.desktop.manager.mirror_seed_failed', {
+      console.warn('Failed to reconcile ComfyUI-Manager config:', err)
+      telemetry.capture('comfy.desktop.manager.config_seed_failed', {
         error_message: String(err).slice(0, 200),
       })
     }
