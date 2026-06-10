@@ -27,6 +27,7 @@ import { rotateLogFiles, getLogDir } from '../../logRotation'
 import { createExecutionTap } from '../../executionTap'
 import { createLaunchProgressTracker } from '../../launchProgress'
 import { buildLaunchPhases } from '../../launchPhases'
+import type { PreLaunchPhase } from '../../launchPhases'
 import { scanCustomNodes } from '../../nodes'
 import type { LaunchProgressTracker } from '../../launchProgress'
 import { clearCrash, recordCrash } from '../../crashBuffer'
@@ -64,9 +65,9 @@ function writeLog(stream: WriteStream, text: string): void {
 
 export async function handleLaunch({ event, installationId, inst: instArg, actionData }: ActionContext): Promise<ActionResult> {
   let inst = instArg
-  // Set when interrupted-op recovery actually rolls the source back, so the
-  // launch progress leads with a "Repairing installation…" step.
-  let needsRepair = false
+  // Synthetic repair steps that ran during launch prep, prepended to the launch
+  // progress in display order (e.g. a source rollback, then a PyTorch restore).
+  const preLaunchPhases: PreLaunchPhase[] = []
   if (_runningSessions.has(installationId)) {
     return { ok: false, message: i18n.t('errors.alreadyRunning') }
   }
@@ -80,6 +81,40 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
   if (!source.skipInstall && isEffectivelyEmptyInstallDir(inst.installPath)) {
     return { ok: false, message: i18n.t('errors.installDirEmpty') }
   }
+
+  const sender = event.sender
+  const sendProgress = makeSendProgress(sender, installationId)
+
+  /** Enabled custom-node count for the "X of Y" launch detail. Best-effort
+   *  one-shot scan; 0 (scan failed/none) → the tracker shows a streaming line
+   *  instead. */
+  let launchNodeCount = 0
+  async function scanLaunchNodeCount(): Promise<void> {
+    try {
+      const scanned = await scanCustomNodes(path.join(inst.installPath, 'ComfyUI'))
+      launchNodeCount = scanned.filter((n) => n.enabled).length
+    } catch (err) {
+      console.warn('Custom-node scan for launch progress failed:', err)
+    }
+  }
+
+  /** Single launch tracker, armed once and reused. A pre-launch repair arms it
+   *  early (so the repair shows as a live step); otherwise the first spawn arms
+   *  it. `start()` emits the steps payload + enters the first phase exactly
+   *  once — re-arming on a relaunch would reset the stepper. */
+  let launchTracker: LaunchProgressTracker | null = null
+  async function armLaunchTracker(): Promise<LaunchProgressTracker> {
+    if (launchTracker) return launchTracker
+    await scanLaunchNodeCount()
+    launchTracker = createLaunchProgressTracker({
+      phases: buildLaunchPhases(inst, { preLaunchPhases }),
+      nodeCount: launchNodeCount,
+      sendProgress,
+    })
+    launchTracker.start()
+    return launchTracker
+  }
+
   // Migrate legacy envs/default/ → ComfyUI/.venv/ for standalone installs.
   if (inst.sourceId === 'standalone') {
     // Recover from an update/restore interrupted by a hard process kill (power
@@ -98,11 +133,11 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
           recoveryLog.push(text)
           console.log(text.trim())
         },
-        // A real source rollback ran — surface a "Repairing installation…"
-        // step at the head of the launch progress. Only
-        // fires for a genuine repair, never a benign marker cleanup.
+        // A real source rollback ran — lead the launch progress with a
+        // "Repairing installation…" step. Fires only for a genuine repair,
+        // never a benign marker cleanup.
         () => {
-          needsRepair = true
+          preLaunchPhases.push('repair')
         }
       )
       if (recovered) inst = (await installations.get(installationId)) || inst
@@ -132,9 +167,18 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     const repairAbort = new AbortController()
     _operationAborts.set(installationId, repairAbort)
     try {
-      const { maybeRepairTorch } = await import('../../../sources/standalone/torchRepair')
+      const { maybeRepairTorch, getTorchVendorMismatch } = await import(
+        '../../../sources/standalone/torchRepair'
+      )
+      // Arm the launch stepper BEFORE the (slow, multi-GB) copy so it shows as a
+      // live `torchRepair` step rather than flashing a flat status. Detection is
+      // a cheap sync check; arming only when a repair will actually run.
+      if (getTorchVendorMismatch(inst)) {
+        preLaunchPhases.push('torchRepair')
+        await armLaunchTracker()
+      }
       const repaired = await maybeRepairTorch(inst, {
-        sendProgress: makeSendProgress(event.sender, installationId),
+        sendProgress,
         sendOutput: makeSendOutput(event.sender, installationId),
         update: updateFn,
         signal: repairAbort.signal,
@@ -239,36 +283,6 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     }
   }
 
-  const sender = event.sender
-  const sendProgress = makeSendProgress(sender, installationId)
-
-  /** Enabled custom-node count for the "X of Y" launch detail. Best-effort
-   *  one-shot scan; 0 (scan failed/none) → the tracker shows a streaming line
-   *  instead. Awaited once before the spawn loop so the synchronous relaunch
-   *  path can re-arm the tracker without re-scanning. */
-  let launchNodeCount = 0
-  async function scanLaunchNodeCount(): Promise<void> {
-    try {
-      const scanned = await scanCustomNodes(path.join(inst.installPath, 'ComfyUI'))
-      launchNodeCount = scanned.filter((n) => n.enabled).length
-    } catch (err) {
-      console.warn('Custom-node scan for launch progress failed:', err)
-    }
-  }
-
-  /** Fresh tracker, started up front so the op is stepped from frame zero (no
-   *  flat "Starting ComfyUI" window). Re-armed per spawn; the renderer's
-   *  monotonic floor keeps a relaunch from regressing the bar. */
-  function armLaunchTracker(): LaunchProgressTracker {
-    const tracker = createLaunchProgressTracker({
-      phases: buildLaunchPhases(inst, { needsRepair }),
-      nodeCount: launchNodeCount,
-      sendProgress,
-    })
-    tracker.start()
-    return tracker
-  }
-
   /** Pipe a spawned process's output to the log file, renderer, execution tap,
    *  and the launch tracker (ANSI-stripped); returns a bounded stderr tail for
    *  crash diagnostics. */
@@ -347,11 +361,10 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
       variant: (inst.variant as string | undefined) ?? null,
       release: (inst.release as string | undefined) ?? null,
     })
-    await scanLaunchNodeCount()
-    const launchTracker = armLaunchTracker()
+    const tracker = await armLaunchTracker()
 
     const proc = spawnProcess(launchCmd.cmd!, launchCmd.args!, launchCmd.cwd!, launchEnv, { showWindow: launchCmd.showWindow })
-    const { getStderr } = attachLaunchStreams(proc, logStream, sendOutput, execTap, launchTracker)
+    const { getStderr } = attachLaunchStreams(proc, logStream, sendOutput, execTap, tracker)
 
     _operationAborts.delete(installationId)
     const mode = (inst.launchMode as string | undefined) || 'window'
@@ -496,14 +509,12 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     release: (inst.release as string | undefined) ?? null,
   })
 
-  // Real, log-driven launch progress. Phases + the custom-node denominator
-  // are computed once; the tracker is re-armed on each spawn (relaunch loop)
-  // so phases re-emit — the renderer's monotonic floor stops the bar visibly
-  // regressing.
-  await scanLaunchNodeCount()
+  // Arm the log-driven tracker once, here (a pre-launch repair may already have
+  // armed it). Pre-armed so the synchronous relaunch loop can reuse the single
+  // instance — re-arming would re-emit steps and reset the stepper.
+  const tracker = await armLaunchTracker()
 
   function spawnComfy(): { proc: ChildProcess; getStderr: () => string } {
-    const tracker = armLaunchTracker()
     const p = spawnProcess(launchCmd.cmd!, launchCmd.args!, launchCmd.cwd!, launchEnv, { showWindow: launchCmd.showWindow })
     return { proc: p, ...attachLaunchStreams(p, logStream, sendOutput, execTap, tracker) }
   }

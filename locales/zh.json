@@ -243,6 +243,7 @@
     "phaseLabel": {
       "launchStart": "正在启动 ComfyUI……",
       "repair": "正在修复安装……",
+      "torchRepair": "正在恢复 GPU PyTorch……",
       "securityScan": "正在进行安全扫描……",
       "mountLibraries": "正在加载库……",
       "gpu": "正在初始化 GPU……",

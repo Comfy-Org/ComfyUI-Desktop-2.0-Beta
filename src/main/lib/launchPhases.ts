@@ -83,42 +83,40 @@ export const DEFAULT_LAUNCH_PHASES: readonly LaunchPhaseDef[] = [
 ]
 
 /**
- * Repair phase, injected first when interrupted-op recovery rolled the source
- * back before this launch (`opts.needsRepair`; see `handleLaunch`). The repair
- * itself finishes before the process spawns, so this is a synthetic leading
- * step — entered programmatically like `launchStart`, completed once the first
- * real boot milestone fires. Unaffected users never see it.
+ * Synthetic pre-launch steps, injected ahead of the normal phases when a repair
+ * ran during launch prep (see `handleLaunch`). Each uses a `NEVER` matcher and
+ * is entered programmatically like `launchStart`, completed once the first real
+ * boot milestone fires. Weights add on top of the base 1.0; the renderer
+ * normalizes, so injection just shrinks every slot proportionally.
  *
- * Its weight is added on top of the base 1.0; the renderer normalizes the set,
- * so injection just shrinks every slot proportionally.
+ *   - `repair`      interrupted-op source rollback was performed
+ *   - `torchRepair` GPU PyTorch was restored after the v1.13.0 `--upgrade` bug
  */
-const REPAIR_PHASE: LaunchPhaseDef = {
-  phase: 'repair',
-  match: NEVER,
-  weight: 0.1,
-  streaming: true,
+export type PreLaunchPhase = 'repair' | 'torchRepair'
+
+const PRE_LAUNCH_PHASES: Record<PreLaunchPhase, LaunchPhaseDef> = {
+  repair: { phase: 'repair', match: NEVER, weight: 0.1, streaming: true },
+  torchRepair: { phase: 'torchRepair', match: NEVER, weight: 0.1, streaming: true },
 }
 
 export interface BuildLaunchPhasesOpts {
-  /** Inject the v1.13.0 "Repairing installation…" phase. */
-  needsRepair?: boolean
+  /** Synthetic repair steps to prepend, in display order (e.g. a source
+   *  rollback then a PyTorch restore). Omitted/empty for an unaffected launch. */
+  preLaunchPhases?: PreLaunchPhase[]
 }
 
 /**
  * Build the launch phase list for an installation. This is the single hook
- * where a conditional step gets spliced in WITHOUT touching the tracker or
- * the renderer — exactly the arbitrary-step extensibility requested. The
- * tracker derives everything (steps payload, weights, matchers) from whatever
- * array this returns; the renderer keys its weight table off the sorted phase
- * fingerprint, so a new fingerprint just falls back to equal weighting safely.
+ * where conditional steps get spliced in WITHOUT touching the tracker or the
+ * renderer — exactly the arbitrary-step extensibility requested. The tracker
+ * derives everything (steps payload, weights, matchers) from whatever array
+ * this returns; the renderer paces from the inline weights, so an injected step
+ * just renormalizes the bar.
  *
- * Adding a step is one conditional `unshift`/`splice` here. `inst` is untyped
- * so this module stays decoupled from the main/renderer record split.
+ * Adding a step is one entry in `PRE_LAUNCH_PHASES` + a push here. `inst` is
+ * untyped so this module stays decoupled from the main/renderer record split.
  */
 export function buildLaunchPhases(_inst: unknown, opts: BuildLaunchPhasesOpts = {}): LaunchPhaseDef[] {
-  const phases = DEFAULT_LAUNCH_PHASES.map((p) => ({ ...p }))
-  if (opts.needsRepair) {
-    phases.unshift({ ...REPAIR_PHASE })
-  }
-  return phases
+  const pre = (opts.preLaunchPhases ?? []).map((id) => ({ ...PRE_LAUNCH_PHASES[id] }))
+  return [...pre, ...DEFAULT_LAUNCH_PHASES.map((p) => ({ ...p }))]
 }

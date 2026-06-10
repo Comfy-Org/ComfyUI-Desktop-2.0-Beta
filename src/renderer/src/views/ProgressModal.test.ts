@@ -37,6 +37,7 @@ const messages = {
       reboot: 'Reboot',
       phaseLabel: {
         download: 'Downloading ComfyUI…',
+        torchRepair: 'Restoring GPU PyTorch…',
       },
     },
     launch: {
@@ -588,6 +589,22 @@ describe('ProgressModal — unified bar (install→launch chained 0→100)', () 
     // Stepped launch ops surface the active phase in the focus stepper, not the caption.
     expect(body.selectorText('.bpv__row.is-active .bpv__label')).toMatch(/GPU/i)
     expect(body.exists('.bpv__row')).toBe(true)
+  })
+
+  it('renders an injected torchRepair pre-launch step with its curated label', async () => {
+    // The v1.13.0 GPU-PyTorch repair is a first-class launch step (not a flat
+    // `setup` status): it leads the stepper with "Restoring GPU PyTorch…".
+    const { body } = await mountWithOp('inst-torch-repair', {
+      opKind: 'launch',
+      steps: [
+        { phase: 'torchRepair', label: 'torchRepair', weight: 0.1 },
+        { phase: 'launchStart', label: 'launchStart', weight: 0.05 },
+        { phase: 'gpu', label: 'gpu', weight: 0.5 },
+      ],
+      activePhase: 'torchRepair',
+      activePercent: -1,
+    })
+    expect(body.selectorText('.bpv__row.is-active .bpv__label')).toBe('Restoring GPU PyTorch…')
   })
 
   it('caps the bar below 100 while running, reaching 100 only on finish', async () => {

@@ -354,6 +354,7 @@
       "launch": "Starting ComfyUI…",
       "launchStart": "Starting ComfyUI…",
       "repair": "Repairing installation…",
+      "torchRepair": "Restoring GPU PyTorch…",
       "securityScan": "Running security scan…",
       "mountLibraries": "Loading libraries…",
       "gpu": "Initializing GPU…",

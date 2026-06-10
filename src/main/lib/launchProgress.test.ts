@@ -189,29 +189,43 @@ describe('DEFAULT_LAUNCH_PHASES', () => {
 })
 
 describe('buildLaunchPhases — extensibility', () => {
-  it('returns the defaults unchanged when no repair is needed', () => {
+  it('returns the defaults unchanged when no pre-launch phases are injected', () => {
     expect(buildLaunchPhases({}).map((p) => p.phase)).toEqual(
       DEFAULT_LAUNCH_PHASES.map((p) => p.phase)
     )
   })
 
-  it('injects the repair phase first when needsRepair is set (Jędrzej v1.13.0)', () => {
-    const phases = buildLaunchPhases({}, { needsRepair: true })
-    expect(phases[0]!.phase).toBe('repair')
-    expect(phases.length).toBe(DEFAULT_LAUNCH_PHASES.length + 1)
-    // Repair is synthetic (the rollback finished before spawn): start() enters
-    // it up front, then the first real milestone skip-advances past it.
+  it('injects a single pre-launch phase first', () => {
+    expect(buildLaunchPhases({}, { preLaunchPhases: ['repair'] }).map((p) => p.phase)).toEqual([
+      'repair',
+      ...DEFAULT_LAUNCH_PHASES.map((p) => p.phase),
+    ])
+    expect(buildLaunchPhases({}, { preLaunchPhases: ['torchRepair'] })[0]!.phase).toBe('torchRepair')
+  })
+
+  it('injects multiple pre-launch phases in the given order (rollback, then torch)', () => {
+    const phases = buildLaunchPhases({}, { preLaunchPhases: ['repair', 'torchRepair'] })
+    expect(phases.slice(0, 2).map((p) => p.phase)).toEqual(['repair', 'torchRepair'])
+    expect(phases.length).toBe(DEFAULT_LAUNCH_PHASES.length + 2)
+    // Both carry a weight so the renderer can renormalize the bar (no 1/n fallback).
+    expect(phases.every((p) => typeof p.weight === 'number' && p.weight > 0)).toBe(true)
+  })
+
+  it('drives the torchRepair step from torchRepair progress, completed by the first real milestone', () => {
+    const phases = buildLaunchPhases({}, { preLaunchPhases: ['torchRepair'] })
     const emits: Emit[] = []
     const tracker = createLaunchProgressTracker({
       phases,
       sendProgress: (phase, detail) => emits.push({ phase, ...detail }),
     })
+    // Synthetic phase is entered up front (the repair finished before spawn).
     tracker.start()
     expect(emits[0]?.phase).toBe('steps')
-    expect(emits[1]?.phase).toBe('repair')
+    expect(emits[1]?.phase).toBe('torchRepair')
+    // The first real boot milestone skip-advances past the synthetic step.
     tracker.ingest('Adding extra search path checkpoints /x\n[DONE] Security scan\n')
     const order = phaseOrder(emits)
-    expect(order[0]).toBe('repair')
+    expect(order[0]).toBe('torchRepair')
     expect(order).toContain('securityScan')
     expect(order).toContain('mountLibraries')
   })
