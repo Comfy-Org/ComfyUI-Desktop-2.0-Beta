@@ -994,6 +994,80 @@ export function isGitAvailable(): Promise<boolean> {
 /** Reset the cached result of {@link isGitAvailable} (for tests). */
 export function resetGitAvailableCache(): void {
   _gitAvailableCache = null
+  _systemGitAvailableCache = null
+}
+
+let _systemGitAvailableCache: boolean | null = null
+
+/**
+ * Whether a usable system `git` binary exists, regardless of pygit2 state.
+ *
+ * Unlike {@link isGitAvailable} (which reports `true` whenever pygit2 is
+ * configured), this always probes the actual `git` binary. Used by the
+ * auth-failure fallback to decide whether retrying a pygit2 operation via
+ * system git is even possible.
+ */
+export function isSystemGitAvailable(): Promise<boolean> {
+  if (_systemGitAvailableCache !== null) return Promise.resolve(_systemGitAvailableCache)
+  return new Promise((resolve) => {
+    execFile('git', ['--version'], { windowsHide: true, timeout: 5000 }, (error) => {
+      _systemGitAvailableCache = !error
+      resolve(_systemGitAvailableCache)
+    })
+  })
+}
+
+/**
+ * Developers can set `COMFY_FORCE_PYGIT2=1` to keep every git operation on the
+ * bundled pygit2 path even when a system git is present and even when pygit2
+ * fails to authenticate — i.e. it disables the system-git fallback below. This
+ * keeps the pygit2 path exercised during the beta/development phase. The same
+ * flag forces the pygit2 backend in ComfyUI-Manager (via `CM_USE_PYGIT2`).
+ */
+export function isForcePygit2(): boolean {
+  return process.env.COMFY_FORCE_PYGIT2 === '1'
+}
+
+/**
+ * Heuristically classify a failed pygit2 result as an authentication-class
+ * failure that a system git (which honors the user's full git config — proxy,
+ * `insteadOf`, ssh keys, credential helpers) could likely succeed at.
+ *
+ * The bundled pygit2 has HTTPS but no SSH transport, so a global `insteadOf`
+ * https->ssh rewrite surfaces as "authentication required but no callback set"
+ * or "unsupported URL protocol".
+ */
+export function isPygit2AuthFailure(result: ProcessResult): boolean {
+  if (result.exitCode === 0) return false
+  const s = `${result.stdout}\n${result.stderr}`.toLowerCase()
+  return (
+    s.includes('no callback set') ||
+    s.includes('authentication required') ||
+    s.includes('unsupported url protocol') ||
+    s.includes('remote authentication required') ||
+    s.includes('callback returned unsupported credentials type') ||
+    (s.includes('ssh') && s.includes('credential'))
+  )
+}
+
+/**
+ * Run a git operation via pygit2, falling back to system git when pygit2 fails
+ * with an authentication-class error. Skipped when `COMFY_FORCE_PYGIT2=1` or no
+ * system git is available, in which case the original pygit2 result is returned.
+ */
+async function withSystemGitFallback(
+  pygit2Op: () => Promise<ProcessResult>,
+  systemGitOp: () => Promise<ProcessResult>,
+  sendOutput: (text: string) => void
+): Promise<ProcessResult> {
+  const result = await pygit2Op()
+  if (!isPygit2AuthFailure(result) || isForcePygit2()) return result
+  if (!(await isSystemGitAvailable())) return result
+  sendOutput(
+    '\npygit2 could not authenticate (your git config likely rewrites GitHub ' +
+      'HTTPS to SSH, which the bundled pygit2 cannot use); retrying with system git…\n'
+  )
+  return systemGitOp()
 }
 
 export function gitClone(
@@ -1003,9 +1077,19 @@ export function gitClone(
   signal?: AbortSignal
 ): Promise<ProcessResult> {
   if (signal?.aborted) return Promise.resolve({ exitCode: 1, stderr: '', stdout: '' })
+  const systemGitClone = async (): Promise<ProcessResult> => {
+    // A failed pygit2 clone may leave a partial destination behind; clear it
+    // so `git clone` (which refuses a non-empty target) can proceed.
+    await fs.promises.rm(dest, { recursive: true, force: true }).catch(() => {})
+    return spawnStreamed('git', ['clone', url, dest], sendOutput, { signal })
+  }
   if (isPygit2Configured()) {
     const runPygit2Spawn = makeRunPygit2(sendOutput, signal)
-    return runPygit2Spawn(['clone', url, dest])
+    return withSystemGitFallback(
+      () => runPygit2Spawn(['clone', url, dest]),
+      systemGitClone,
+      sendOutput
+    )
   }
   return spawnStreamed('git', ['clone', url, dest], sendOutput, { signal })
 }
@@ -1032,24 +1116,30 @@ export function gitCheckoutCommit(
   signal?: AbortSignal
 ): Promise<ProcessResult> {
   if (signal?.aborted) return Promise.resolve({ exitCode: 1, stderr: '', stdout: '' })
+  const systemGitCheckout = (): Promise<ProcessResult> => {
+    const runGit = makeRunGit(repoPath, sendOutput, signal)
+    return runGit(['checkout', commit]).then((directResult) => {
+      if (directResult.exitCode === 0) return directResult
+      return runGit(['fetch', '--unshallow', 'origin'])
+        .then((result) => {
+          if (result.exitCode !== 0) return runGit(['fetch', 'origin'])
+          return result
+        })
+        .then((fetchResult) => {
+          if (fetchResult.exitCode !== 0) return fetchResult
+          return runGit(['checkout', commit])
+        })
+    })
+  }
   if (isPygit2Configured()) {
     const runPygit2Spawn = makeRunPygit2(sendOutput, signal)
-    return runPygit2Spawn(['checkout', repoPath, commit])
+    return withSystemGitFallback(
+      () => runPygit2Spawn(['checkout', repoPath, commit]),
+      systemGitCheckout,
+      sendOutput
+    )
   }
-  const runGit = makeRunGit(repoPath, sendOutput, signal)
-
-  return runGit(['checkout', commit]).then((directResult) => {
-    if (directResult.exitCode === 0) return directResult
-    return runGit(['fetch', '--unshallow', 'origin'])
-      .then((result) => {
-        if (result.exitCode !== 0) return runGit(['fetch', 'origin'])
-        return result
-      })
-      .then((fetchResult) => {
-        if (fetchResult.exitCode !== 0) return fetchResult
-        return runGit(['checkout', commit])
-      })
-  })
+  return systemGitCheckout()
 }
 
 /**
@@ -1088,37 +1178,44 @@ export function gitFetchAndCheckout(
   signal?: AbortSignal
 ): Promise<ProcessResult> {
   if (signal?.aborted) return Promise.resolve({ exitCode: 1, stderr: '', stdout: '' })
+  const systemGitFetchAndCheckout = (): Promise<ProcessResult> => {
+    const runGit = makeRunGit(repoPath, sendOutput, signal)
+
+    // Fetch master explicitly - grafted/archive-based repos may have no
+    // branch tracking configured, so a bare `git fetch origin` only pulls
+    // tags. Use --unshallow to handle shallow clones; fall back to a
+    // regular fetch if the repo is already complete.
+    const refspec = '+refs/heads/master:refs/remotes/origin/master'
+    return runGit(['fetch', '--unshallow', '--tags', 'origin', refspec])
+      .then((result) => {
+        if (result.exitCode !== 0) return runGit(['fetch', '--tags', 'origin', refspec])
+        return result
+      })
+      .then((result) => {
+        if (result.exitCode !== 0) return result
+        // Ensure a local master branch exists (mirroring the pygit2 update
+        // script) so future updates via update_comfyui.py work correctly.
+        // Detach HEAD first so `branch -f` can't fail due to master being
+        // the currently checked-out branch.
+        return runGit(['checkout', '--detach', 'HEAD'])
+          .then(() => {
+            // Detach may fail if HEAD is invalid (fresh archive with no commits
+            // checked out); that's fine - branch -f will still succeed.
+            return runGit(['branch', '-f', 'master', 'refs/remotes/origin/master'])
+          })
+          .then((branchResult) => {
+            if (branchResult.exitCode !== 0) return branchResult
+            return runGit(['checkout', commit])
+          })
+      })
+  }
   if (isPygit2Configured()) {
     const runPygit2Spawn = makeRunPygit2(sendOutput, signal)
-    return runPygit2Spawn(['fetch-and-checkout', repoPath, commit])
+    return withSystemGitFallback(
+      () => runPygit2Spawn(['fetch-and-checkout', repoPath, commit]),
+      systemGitFetchAndCheckout,
+      sendOutput
+    )
   }
-  const runGit = makeRunGit(repoPath, sendOutput, signal)
-
-  // Fetch master explicitly — grafted/archive-based repos may have no
-  // branch tracking configured, so a bare `git fetch origin` only pulls
-  // tags. Use --unshallow to handle shallow clones; fall back to a
-  // regular fetch if the repo is already complete.
-  const refspec = '+refs/heads/master:refs/remotes/origin/master'
-  return runGit(['fetch', '--unshallow', '--tags', 'origin', refspec])
-    .then((result) => {
-      if (result.exitCode !== 0) return runGit(['fetch', '--tags', 'origin', refspec])
-      return result
-    })
-    .then((result) => {
-      if (result.exitCode !== 0) return result
-      // Ensure a local master branch exists (mirroring the pygit2 update
-      // script) so future updates via update_comfyui.py work correctly.
-      // Detach HEAD first so `branch -f` can't fail due to master being
-      // the currently checked-out branch.
-      return runGit(['checkout', '--detach', 'HEAD'])
-        .then(() => {
-          // Detach may fail if HEAD is invalid (fresh archive with no commits
-          // checked out); that's fine — branch -f will still succeed.
-          return runGit(['branch', '-f', 'master', 'refs/remotes/origin/master'])
-        })
-        .then((branchResult) => {
-          if (branchResult.exitCode !== 0) return branchResult
-          return runGit(['checkout', commit])
-        })
-    })
+  return systemGitFetchAndCheckout()
 }

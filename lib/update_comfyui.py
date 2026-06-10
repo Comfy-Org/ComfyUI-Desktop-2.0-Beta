@@ -14,10 +14,54 @@ Outputs structured markers that the launcher can parse:
 """
 
 import os
-import re
+import subprocess
 import pygit2
 from datetime import datetime
 import sys
+
+
+def is_auth_error(exc):
+    """True when an exception message looks like an auth/transport failure
+    that the bundled (SSH-less) pygit2 can't satisfy but system git could."""
+    msg = str(exc).lower()
+    return (
+        "authentication" in msg
+        or "callback" in msg
+        or "unsupported url protocol" in msg
+        or "credential" in msg
+    )
+
+
+def system_git_available():
+    """True if a usable system `git` binary is on PATH."""
+    try:
+        subprocess.run(
+            ["git", "--version"], capture_output=True, timeout=10
+        )
+        return True
+    except Exception:
+        return False
+
+
+def system_git_fetch(repo_path, refspecs):
+    """Fetch from origin using system git, which honors the user's full git
+    config (proxy, insteadOf, ssh keys, credential helpers). Returns True on
+    success. `-c safe.directory=*` mirrors pygit2's disabled owner validation
+    so launcher-managed repos owned by another user still work."""
+    try:
+        result = subprocess.run(
+            ["git", "-c", "safe.directory=*", "-C", repo_path,
+             "fetch", "origin"] + list(refspecs),
+            capture_output=True, timeout=900, text=True,
+        )
+        if result.stdout:
+            print(result.stdout)
+        if result.stderr:
+            print(result.stderr)
+        return result.returncode == 0
+    except Exception as ex:
+        print("System git fetch error: %s" % ex)
+        return False
 
 
 def read_global_http_proxy():
@@ -68,22 +112,6 @@ def harden_pygit2_config():
         except Exception:
             pass
     return proxy
-
-
-def to_https_url(url):
-    """Rewrite an SSH-form git URL to its anonymous HTTPS equivalent.
-
-    Handles `git@host:owner/repo(.git)` and `ssh://git@host/owner/repo(.git)`.
-    Returns the URL unchanged if it is not SSH-form. Used so launcher-managed
-    clones of public repos never require SSH credentials even when a repo's
-    own config stores an SSH origin (e.g. a legacy-desktop clone).
-    """
-    if not url:
-        return url
-    m = re.match(r"^(?:ssh://)?git@([^:/]+)[:/](.+)$", url)
-    if m:
-        return "https://%s/%s" % (m.group(1), m.group(2))
-    return url
 
 
 def find_latest_stable_tag(repo):
@@ -168,32 +196,46 @@ def main():
     except Exception:
         print("Warning: could not create backup branch.")
 
-    # Fetch master from origin (handles shallow/single-branch clones)
-    print("Fetching from origin…")
+    # Fetch master + tags from origin (handles shallow/single-branch clones).
+    print("Fetching from origin...")
+    refspecs = [
+        "+refs/heads/master:refs/remotes/origin/master",
+        "+refs/tags/*:refs/tags/*",
+    ]
+    origin = None
     for remote in repo.remotes:
         if remote.name == "origin":
-            # Force anonymous HTTPS so a stored SSH origin can't demand creds.
-            https_url = to_https_url(remote.url)
-            if https_url != remote.url:
-                repo.remotes.set_url("origin", https_url)
-                remote = repo.remotes["origin"]
-            refspecs = [
-                "+refs/heads/master:refs/remotes/origin/master",
-                "+refs/tags/*:refs/tags/*",
-            ]
-            try:
-                remote.fetch(refspecs, proxy=http_proxy or None)
-            except Exception as e:
+            origin = remote
+            break
+    if origin is not None:
+        force_pygit2 = os.environ.get("COMFY_FORCE_PYGIT2") == "1"
+        try:
+            origin.fetch(refspecs, proxy=http_proxy or None)
+        except Exception as e:
+            print("[WARN] pygit2 fetch from origin failed: %s" % e)
+            # The bundled pygit2 has no SSH transport, so a git config that
+            # rewrites GitHub HTTPS to SSH (insteadOf) fails here. Retry with
+            # system git, which honors the user's full config. Skipped when
+            # COMFY_FORCE_PYGIT2=1 (developers exercising the pygit2 path).
+            if (not force_pygit2 and is_auth_error(e)
+                    and system_git_available()):
+                print("Retrying fetch with system git (honors your git config)...")
+                if not system_git_fetch(repo_path, refspecs):
+                    print("[ERROR] Failed to fetch from origin.")
+                    print("Check your internet connection and try again.")
+                    sys.exit(1)
+                print("System git fetch succeeded.")
+            else:
                 print("[ERROR] Failed to fetch from origin: %s" % e)
-                if "callback" in str(e) or "authentication" in str(e).lower():
+                if is_auth_error(e):
                     print("Git authentication was required for an anonymous "
                           "fetch. This usually means your git config rewrites "
-                          "GitHub HTTPS URLs to SSH; the updater fetches over "
-                          "anonymous HTTPS and cannot use SSH credentials.")
+                          "GitHub HTTPS URLs to SSH; the bundled updater "
+                          "fetches over anonymous HTTPS and cannot use SSH "
+                          "credentials.")
                 else:
                     print("Check your internet connection and try again.")
                 sys.exit(1)
-            break
 
     # Hard-reset master to origin/master.
     # Launcher-managed installations should not have local modifications to

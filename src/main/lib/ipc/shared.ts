@@ -473,7 +473,14 @@ export function buildLaunchEnv(inst: InstallationRecord, sessionPath?: string): 
     ...userEnvVars,
     PYTHONIOENCODING: 'utf-8',
     ...(sessionPath ? { __COMFY_CLI_SESSION__: sessionPath } : {}),
-    ...(inst.sourceId === 'standalone' ? { CM_USE_PYGIT2: '1' } : {}),
+    // Only force ComfyUI-Manager onto the pygit2 backend when a developer
+    // explicitly opts in via COMFY_FORCE_PYGIT2=1. Otherwise leave CM_USE_PYGIT2
+    // unset so Manager's git_compat prefers system git when available (honoring
+    // the user's full git config: proxy, insteadOf, ssh keys), and auto-falls
+    // back to its bundled pygit2 only when system git is absent.
+    ...(inst.sourceId === 'standalone' && process.env.COMFY_FORCE_PYGIT2 === '1'
+      ? { CM_USE_PYGIT2: '1' }
+      : {}),
   }
 }
 

@@ -231,15 +231,14 @@ def parse_version_tuple(tag_name):
 def get_origin(repo):
     """Return the 'origin' remote, or exit with an error.
 
-    Rewrites a stored SSH origin URL to anonymous HTTPS so fetches never
-    require SSH credentials.
+    A stored SSH origin is left untouched: the bundled pygit2 has no SSH
+    transport, so such a fetch fails with an auth error, and the TypeScript
+    caller (git.ts) retries the whole operation via system git, which honors
+    the user's full git config. We deliberately do not rewrite the remote URL
+    on disk.
     """
     for remote in repo.remotes:
         if remote.name == "origin":
-            https_url = to_https_url(remote.url)
-            if https_url != remote.url:
-                repo.remotes.set_url("origin", https_url)
-                return repo.remotes["origin"]
             return remote
     print("Error: no 'origin' remote found", file=sys.stderr)
     sys.exit(1)
