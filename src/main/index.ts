@@ -16,7 +16,7 @@ import * as updater from './lib/updater'
 import * as settings from './settings'
 import { installAppMenu } from './menu'
 import * as i18n from './lib/i18n'
-import { migrateXdgPaths } from './lib/paths'
+import { migrateXdgPaths, persistWinDataRootChoice } from './lib/paths'
 import { saveWindowBounds } from './lib/windowState'
 import {
   flushLastSessionSync,
@@ -1265,6 +1265,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     registerPanelViewIpc()
 
     migrateXdgPaths()
+    persistWinDataRootChoice()
     registerProcessErrorHandlers()
 
     // Strip Electron's default menu before any BrowserWindow opens so

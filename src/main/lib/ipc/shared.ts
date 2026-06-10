@@ -2,7 +2,7 @@ import path from 'path'
 import fs from 'fs'
 import os from 'os'
 import { EventEmitter } from 'events'
-import { app, ipcMain, dialog, shell, BrowserWindow, nativeTheme } from 'electron'
+import { app, ipcMain, dialog, shell, BrowserWindow, nativeTheme, session } from 'electron'
 import { execFile, spawn, execFileSync } from 'child_process'
 import type { ChildProcess } from 'child_process'
 import sources from '../../sources/index'
@@ -347,6 +347,34 @@ export async function copyBrowserPartition(sourceId: string, destId: string, sou
     }
   } catch (err) {
     console.warn('Failed to copy browser partition:', (err as Error).message)
+  }
+}
+
+/** Delete the on-disk browser partition for a deleted install. Unique-partition
+ *  installs each own a `persist:${id}` bucket under userData/Partitions/<id>
+ *  (created lazily by Electron, deep-copied on install-copy); nothing else ever
+ *  reuses it, so it must be removed when the install is deleted or it leaks
+ *  forever. No-op for shared-partition installs (they all share `persist:shared`,
+ *  which must never be deleted). Best-effort: clears the session first to release
+ *  file handles (Windows locks LevelDB/IndexedDB while open). */
+export async function deleteBrowserPartition(id: string, browserPartition?: string): Promise<void> {
+  if (browserPartition !== 'unique') return
+  // Best-effort, fully bounded: this runs after the install record is already
+  // removed, so it must never hang the delete operation or hold its lock.
+  // clearStorageData has no hard completion guarantee, so race it against a
+  // timeout; rm fails fast (force) with a few transient-lock retries.
+  try {
+    const cleared = session.fromPartition(`persist:${id}`).clearStorageData()
+    const timeout = new Promise<void>((resolve) => setTimeout(resolve, 5000))
+    await Promise.race([cleared, timeout])
+  } catch (err) {
+    console.warn('Failed to clear browser partition storage:', (err as Error).message)
+  }
+  const partitionDir = path.join(app.getPath('userData'), 'Partitions', id)
+  try {
+    await fs.promises.rm(partitionDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
+  } catch (err) {
+    console.warn('Failed to delete browser partition:', (err as Error).message)
   }
 }
 

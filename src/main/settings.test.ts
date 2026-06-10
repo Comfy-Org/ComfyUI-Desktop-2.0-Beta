@@ -17,6 +17,10 @@ const originalXdgCacheHome = process.env.XDG_CACHE_HOME
 process.env.XDG_CONFIG_HOME = xdgConfigHome
 process.env.XDG_CACHE_HOME = xdgCacheHome
 fs.mkdirSync(homePath, { recursive: true })
+// A home-root footprint marks this as an existing install, so on Windows the
+// large-data defaults resolve to the home layout these tests assert (a clean
+// machine would instead default to %LOCALAPPDATA%\Comfy-Desktop).
+fs.mkdirSync(path.join(homePath, 'ComfyUI-Installs'), { recursive: true })
 fs.mkdirSync(userDataPath, { recursive: true })
 fs.mkdirSync(adminHomePath, { recursive: true })
 fs.mkdirSync(adminUserDataPath, { recursive: true })

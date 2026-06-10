@@ -5,6 +5,7 @@ import {
   findLockingProcesses,
   MARKER_FILE,
   makeSendProgress,
+  deleteBrowserPartition,
   instanceModelPathsYaml,
 } from '../shared'
 import type { ActionContext, ActionResult } from './types'
@@ -56,6 +57,7 @@ export async function handleDelete(ctx: ActionContext): Promise<ActionResult> {
     }
     removeInstanceModelPathsYaml(installationId)
     await installations.remove(installationId)
+    await deleteBrowserPartition(inst.id, inst.browserPartition as string | undefined)
     return { ok: true, navigate: 'list' }
   }
   const markerPath = path.join(inst.installPath, MARKER_FILE)
@@ -105,6 +107,7 @@ export async function handleDelete(ctx: ActionContext): Promise<ActionResult> {
     }
     removeInstanceModelPathsYaml(installationId)
     await installations.remove(installationId)
+    await deleteBrowserPartition(inst.id, inst.browserPartition as string | undefined)
     return { ok: true, navigate: 'list' }
   })
 }
