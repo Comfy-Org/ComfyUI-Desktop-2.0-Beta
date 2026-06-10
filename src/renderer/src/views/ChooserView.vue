@@ -7,7 +7,7 @@ import { useInstallContextMenu } from '../composables/useInstallContextMenu'
 import { useInstallList } from '../composables/useInstallList'
 import { useCloudCapacity } from '../composables/useCloudCapacity'
 import { useModal } from '../composables/useModal'
-import { Cloud, Plus, Search } from 'lucide-vue-next'
+import { Plus, Search } from 'lucide-vue-next'
 import ContextMenu from '../components/ContextMenu.vue'
 import BrandBackground from '../components/BrandBackground.vue'
 import BaseInput from '../components/ui/BaseInput.vue'
@@ -25,8 +25,6 @@ import type { Installation, ShowProgressOpts } from '../types/ipc'
  *
  * Layout:
  *   - Top-left: "New Install" (always present).
- *   - First-run only: a "Try Cloud" CTA tile when the user has zero
- *     installs (any source). Once any install exists, it is gone.
  *   - Following: every install (local / cloud / remote) ordered by
  *     `lastLaunchedAt` desc, never-launched at the end.
  *   - Filter chips above the grid narrow by source category.
@@ -77,14 +75,13 @@ onMounted(() => {
 // "Local" includes both standalone local installs and Legacy Desktop
 // installs (both report `sourceCategory === 'local'`) — they're
 // conceptually the same family from the user's POV. Cloud installs
-// flow through `visibleInstalls` like every other source; the
-// dedicated Cloud surface here is now a first-run-only empty-state.
+// flow through `visibleInstalls` like every other source — there is no
+// special cloud surface anymore.
 const installationsRef = toRef(installationStore, 'installations')
 const {
   searchQuery,
   activeFilter,
   visibleInstalls,
-  showTryCloudEmptyState,
   showEmptyHint,
   lastLaunchedLabel
 } = useInstallList({ installations: installationsRef })
@@ -98,11 +95,10 @@ defineExpose({ activeFilter })
 // --- Cluster top offset ---
 
 /** Unfiltered tile count: New Install + every install (cloud included).
- *  The Try-Cloud empty-state CTA only appears when the install list is
- *  empty, so it never collides with the install row count. Reads the raw
- *  list, not `visibleInstalls`, so search never shifts the cluster. */
+ *  Reads the raw list, not `visibleInstalls`, so search never shifts the
+ *  cluster. */
 const baseTileCount = computed(
-  () => 1 + (installationStore.installations.length || 1)
+  () => 1 + installationStore.installations.length
 )
 
 const TILES_PER_ROW = 4
@@ -226,21 +222,6 @@ function viewError(inst: Installation): void {
 // users can't enter cloud during an outage. When `degraded`, the tile
 // surfaces a "Heavy usage" meta pill but the click still proceeds.
 const cloudCapacity = useCloudCapacity()
-/** The capacity tier the tile should render as — collapses raw flag
- *  status with the signed-in tier so a paying user sees a heads-up
- *  chip on `disabled` instead of a "Temporarily unavailable" lockout
- *  they can actually click through. Mirrors what `confirmEntry`
- *  would do on click. */
-const dashboardCapacityStatus = computed(() => cloudCapacity.effectiveStatus())
-
-async function handleTryCloudClick(): Promise<void> {
-  // Try-Cloud empty-state CTA: there is no cloud install yet, so this
-  // routes to new-install. The capacity gate fires here so the user
-  // doesn't sail past a `disabled` outage into the new-install flow.
-  if (!(await cloudCapacity.confirmEntry())) return
-  emit('show-new-install')
-}
-
 function handleNewInstallClick(): void {
   emit('show-new-install')
 }
@@ -288,46 +269,6 @@ function handleNewInstallClick(): void {
           <div class="chooser-tile-name">{{ t('chooser.newInstall') }}</div>
           <div class="chooser-tile-meta">{{ t('chooser.newInstallDesc') }}</div>
         </button>
-
-        <div
-          v-if="showTryCloudEmptyState"
-          key="__cloud"
-          role="button"
-          :tabindex="dashboardCapacityStatus === 'disabled' ? -1 : 0"
-          :aria-disabled="dashboardCapacityStatus === 'disabled' ? true : undefined"
-          class="chooser-tile chooser-tile-cloud"
-          :class="{ 'chooser-tile--cloud-disabled': dashboardCapacityStatus === 'disabled' }"
-          :data-cloud-capacity="dashboardCapacityStatus"
-          @click="handleTryCloudClick"
-          @keydown.enter="handleTryCloudClick"
-          @keydown.space.prevent="handleTryCloudClick"
-        >
-          <div class="chooser-tile-icon"><Cloud :size="32" /></div>
-          <div class="chooser-tile-name">{{ t('cloud.label') }}</div>
-          <div class="chooser-tile-meta">
-            <span
-              v-if="dashboardCapacityStatus !== 'normal'"
-              class="chooser-tile-pill chooser-tile-pill--capacity"
-              :class="{
-                'chooser-tile-pill--capacity-disabled': dashboardCapacityStatus === 'disabled'
-              }"
-              :title="
-                dashboardCapacityStatus === 'disabled'
-                  ? t('cloud.capacityDisabledHint')
-                  : t('cloud.capacityDegradedHint')
-              "
-            >
-              {{
-                dashboardCapacityStatus === 'disabled'
-                  ? t('cloud.capacityDisabled')
-                  : t('cloud.capacityDegraded')
-              }}
-            </span>
-            <span v-else class="chooser-tile-pill" :title="t('cloud.desc')">
-              {{ t('cloud.desc') }}
-            </span>
-          </div>
-        </div>
 
         <ChooserInstallTile
           v-for="inst in visibleInstalls"

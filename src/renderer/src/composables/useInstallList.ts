@@ -36,9 +36,6 @@ export interface UseInstallListApi {
   searchQuery: Ref<string>
   activeFilter: Ref<FilterKey>
   visibleInstalls: ComputedRef<Installation[]>
-  /** True only when the user has zero installs of any source — drives the
-   *  first-run Try-Cloud empty-state CTA on the dashboard. */
-  showTryCloudEmptyState: ComputedRef<boolean>
   showEmptyHint: ComputedRef<boolean>
   matchesQuery: (name: string) => boolean
   lastLaunchedLabel: (inst: Installation) => string
@@ -83,36 +80,8 @@ export function useInstallList(opts: UseInstallListOpts): UseInstallListApi {
       : installations.value,
   )
 
-  const showTryCloudEmptyState = computed<boolean>(() => {
-    // First-run Try-Cloud CTA. The auto-seeded Comfy Cloud install ships
-    // with every install and would suppress this CTA on its own if we
-    // gated on `effectiveInstalls.length === 0`, so we instead require
-    // (a) no non-cloud installs of any kind and (b) cloud has never
-    // actually been launched. A user who has clicked into cloud once is
-    // no longer a "first-run" candidate for the promo.
-    if (hideCloudFromPicker.value) return false
-    if (searchQuery.value.trim()) return false
-    const hasNonCloudInstall = effectiveInstalls.value.some((i) => i.sourceCategory !== 'cloud')
-    if (hasNonCloudInstall) return false
-    const cloudLaunched = effectiveInstalls.value.some(
-      (i) => i.sourceCategory === 'cloud' && typeof i.lastLaunchedAt === 'number',
-    )
-    if (cloudLaunched) return false
-    const inCategory = activeFilter.value === 'all' || activeFilter.value === 'cloud'
-    return inCategory
-  })
-
   const visibleInstalls = computed<Installation[]>(() => {
-    // Hide the auto-seeded, never-launched cloud row while the Try-Cloud
-    // empty-state tile is rendering — the tile is the entry to cloud for
-    // a first-run user and showing both reads as a duplicate.
-    const tileShowing = showTryCloudEmptyState.value
-    const source = tileShowing
-      ? effectiveInstalls.value.filter(
-          (i) => i.sourceCategory !== 'cloud' || typeof i.lastLaunchedAt === 'number',
-        )
-      : effectiveInstalls.value
-    const sorted = [...source].sort(sortByRecency)
+    const sorted = [...effectiveInstalls.value].sort(sortByRecency)
     const byCategory = (() => {
       switch (activeFilter.value) {
         case 'all':
@@ -204,7 +173,6 @@ export function useInstallList(opts: UseInstallListOpts): UseInstallListApi {
     searchQuery,
     activeFilter,
     visibleInstalls,
-    showTryCloudEmptyState,
     showEmptyHint,
     matchesQuery,
     lastLaunchedLabel,

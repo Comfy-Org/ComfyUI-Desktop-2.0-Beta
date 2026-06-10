@@ -106,43 +106,11 @@ describe('ChooserView', () => {
     mockModal.alert.mockClear()
   })
 
-  it('renders the New Instance tile plus a Try-Cloud CTA when the user has zero installs', async () => {
+  it('renders the New Instance tile when the user has zero installs', async () => {
     installMockApi([])
     const wrapper = mountChooser()
     await flushPromises()
     expect(wrapper.text()).toContain('New Instance')
-    // First-run Try-Cloud CTA tile.
-    expect(wrapper.find('.chooser-tile-cloud').exists()).toBe(true)
-    expect(wrapper.text()).toContain('Try Cloud')
-  })
-
-  it('drops the Try-Cloud CTA once any install exists', async () => {
-    installMockApi([makeInstall({ id: 'a', name: 'Local A' })])
-    const wrapper = mountChooser()
-    await flushPromises()
-    expect(wrapper.find('.chooser-tile-cloud').exists()).toBe(false)
-    expect(wrapper.text()).not.toContain('Try Cloud')
-  })
-
-  it('drops the Try-Cloud CTA once the user has launched cloud (cloud becomes just a row)', async () => {
-    installMockApi([
-      makeInstall({
-        id: 'cloud', name: 'Comfy Cloud', sourceCategory: 'cloud', sourceLabel: 'Cloud',
-        lastLaunchedAt: 1234,
-      }),
-    ])
-    const wrapper = mountChooser()
-    await flushPromises()
-    expect(wrapper.find('.chooser-tile-cloud').exists()).toBe(false)
-  })
-
-  it('keeps the Try-Cloud CTA when the only install is an auto-seeded never-launched cloud entry', async () => {
-    installMockApi([
-      makeInstall({ id: 'cloud', name: 'Comfy Cloud', sourceCategory: 'cloud', sourceLabel: 'Cloud' }),
-    ])
-    const wrapper = mountChooser()
-    await flushPromises()
-    expect(wrapper.find('.chooser-tile-cloud').exists()).toBe(true)
   })
 
   it('emits show-new-install when the New Install tile is clicked', async () => {
@@ -154,28 +122,12 @@ describe('ChooserView', () => {
     expect(wrapper.emitted('show-new-install')!.length).toBe(1)
   })
 
-  it('emits show-new-install when the first-run Try-Cloud CTA is clicked', async () => {
-    installMockApi([])
-    const wrapper = mountChooser()
-    await flushPromises()
-    await wrapper.find('.chooser-tile-cloud').trigger('click')
-    await flushPromises()
-    expect(wrapper.emitted('show-new-install')).toBeDefined()
-  })
-
-  it('renders a launched cloud install through the same tile component as local installs', async () => {
+  it('renders a cloud install through the same tile component as local installs', async () => {
     installMockApi([
-      makeInstall({
-        id: 'cloud', name: 'Comfy Cloud', sourceCategory: 'cloud', sourceLabel: 'Cloud',
-        lastLaunchedAt: 1234,
-      }),
+      makeInstall({ id: 'cloud', name: 'Comfy Cloud', sourceCategory: 'cloud', sourceLabel: 'Cloud' }),
     ])
     const wrapper = mountChooser()
     await flushPromises()
-    // Once cloud has been launched the Try-Cloud CTA is gone and the cloud
-    // row renders via the same install tile component (emits the standard
-    // `pick`, not the special new-install path).
-    expect(wrapper.find('.chooser-tile-cloud').exists()).toBe(false)
     const tile = wrapper.findAll('.chooser-tile').find((t) => t.text().includes('Comfy Cloud'))
     expect(tile).toBeTruthy()
     await tile!.trigger('click')

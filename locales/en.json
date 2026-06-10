@@ -409,7 +409,7 @@
     "confirmBeforeClosingWindow": "Confirm before closing a window",
     "confirmBeforeClosingWindowDescription": "Ask for confirmation before closing a window that's running a local install.",
     "hideCloudFromPicker": "Hide Cloud from the Instance Picker",
-    "hideCloudFromPickerDescription": "For local-only users — hides the Cloud tile (and the Try Cloud CTA) from the Dashboard. Cloud remains fully functional; you can re-enable this any time.",
+    "hideCloudFromPickerDescription": "For local-only users — hides the Cloud row from the Dashboard. Cloud remains fully functional; you can re-enable this any time.",
     "checkForUpdates": "Check for updates",
     "checkingForUpdates": "Checking…",
     "telemetry": "Telemetry",

@@ -218,69 +218,6 @@ describe('useInstallList', () => {
     })
   })
 
-  describe('showTryCloudEmptyState', () => {
-    it('shows the Try-Cloud empty-state only when the user has zero installs', () => {
-      const installations = ref<Installation[]>([])
-      const list = withI18nScope(i18n, () => useInstallList({ installations }))
-
-      expect(list.showTryCloudEmptyState.value).toBe(true)
-    })
-
-    it('disappears once any non-cloud install exists OR cloud has been launched', () => {
-      // Local and remote installs immediately suppress the first-run CTA.
-      // For cloud, only a previously-launched cloud install does — an
-      // auto-seeded never-launched cloud install must NOT suppress the CTA,
-      // otherwise first-run users would never see the promo (the app ships
-      // with a default Comfy Cloud install on every fresh boot).
-      const localOnly = ref<Installation[]>([
-        makeInstall({ id: 'a', sourceCategory: 'local' }),
-      ])
-      const cloudLaunched = ref<Installation[]>([
-        makeInstall({ id: 'c', sourceCategory: 'cloud', lastLaunchedAt: 1234 }),
-      ])
-      const remoteOnly = ref<Installation[]>([
-        makeInstall({ id: 'r', sourceCategory: 'remote' }),
-      ])
-      for (const installations of [localOnly, cloudLaunched, remoteOnly]) {
-        const list = withI18nScope(i18n, () => useInstallList({ installations }))
-        expect(list.showTryCloudEmptyState.value).toBe(false)
-      }
-    })
-
-    it('still shows for the auto-seeded never-launched cloud install (first-run candidate)', () => {
-      // Matches the production seed shape: Comfy Cloud added on first boot
-      // with no `lastLaunchedAt`. The CTA is the primary call-to-action to
-      // enter cloud at that point.
-      const installations = ref<Installation[]>([
-        makeInstall({ id: 'cloud', sourceCategory: 'cloud' }),
-      ])
-      const list = withI18nScope(i18n, () => useInstallList({ installations }))
-      expect(list.showTryCloudEmptyState.value).toBe(true)
-    })
-
-    it('hides while a search query is active even with zero installs', () => {
-      const installations = ref<Installation[]>([])
-      const list = withI18nScope(i18n, () => useInstallList({ installations }))
-
-      list.searchQuery.value = 'foo'
-      expect(list.showTryCloudEmptyState.value).toBe(false)
-    })
-
-    it('hides when the active filter excludes cloud', () => {
-      const installations = ref<Installation[]>([])
-      const list = withI18nScope(i18n, () => useInstallList({ installations }))
-
-      list.activeFilter.value = 'local'
-      expect(list.showTryCloudEmptyState.value).toBe(false)
-      list.activeFilter.value = 'remote'
-      expect(list.showTryCloudEmptyState.value).toBe(false)
-      list.activeFilter.value = 'cloud'
-      expect(list.showTryCloudEmptyState.value).toBe(true)
-      list.activeFilter.value = 'all'
-      expect(list.showTryCloudEmptyState.value).toBe(true)
-    })
-  })
-
   describe('showEmptyHint', () => {
     it('hides when the user has not typed anything', () => {
       const installations = ref<Installation[]>([])
@@ -395,16 +332,12 @@ describe('useInstallList', () => {
       expect(list.visibleInstalls.value.length).toBe(2)
     })
 
-    it('adds a launched cloud install to the same list', () => {
-      // A never-launched cloud install is held back from the row list while
-      // the Try-Cloud CTA is showing (avoids duplicate cloud entry points
-      // for first-run users). Once cloud has been launched, the CTA goes
-      // away and the cloud row joins the list.
+    it('adds a newly-added cloud install to the same list', () => {
       const installations = ref<Installation[]>([])
       const list = withI18nScope(i18n, () => useInstallList({ installations }))
 
       expect(list.visibleInstalls.value).toEqual([])
-      installations.value = [makeInstall({ id: 'c', sourceCategory: 'cloud', lastLaunchedAt: 1234 })]
+      installations.value = [makeInstall({ id: 'c', sourceCategory: 'cloud' })]
       expect(list.visibleInstalls.value.map((i) => i.id)).toEqual(['c'])
     })
   })
