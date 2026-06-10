@@ -79,12 +79,12 @@ export function bucketError(input: unknown): ErrorBucket {
   ) {
     return 'validation'
   }
-  // Migration `source` phase — either the legacy ComfyUI tree is gone
-  // ("source-missing-switch-to-managed") or the replacement clone from
-  // a git mirror stalled mid-stream ("source-missing: Downloading
-  // ComfyUI source from …"). Bucketed before `network` because the
-  // mirror-clone failures also reach a fetch site and would otherwise
-  // bucket as network.
+  // Migration `source` phase — adoption couldn't obtain the ComfyUI
+  // source: the legacy tree is gone and the replacement clone from a git
+  // mirror also failed ("source-missing: Downloading ComfyUI source
+  // from …"). Bucketed before `network` because the mirror-clone
+  // failures also reach a fetch site and would otherwise bucket as
+  // network.
   if (
     message.includes('source-missing') ||
     message.includes('source_missing') ||
