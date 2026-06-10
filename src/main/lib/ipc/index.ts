@@ -10,6 +10,7 @@ import {
   createCache,
   fetchJSON,
   getLatestStableTag,
+  getStableTags,
   setCallbacks,
   _broadcastToRenderer,
   migrateDefaults,
@@ -183,10 +184,14 @@ export function register(callbacks: RegisterCallbacks = {}): void {
 
     await configureGitBackend()
 
-    // Pre-warm the latest stable tag so the New Install wizard shows the
-    // concrete version on first open (no local clone needed).
+    // Pre-warm the stable tags so the New Install wizard is responsive on first
+    // open (no local clone needed): the latest tag drives the concrete version
+    // shown for the stable channel, and the full list backs the version picker.
+    // Both go through the same `ls-remote-tags` call, which is the slow part on
+    // cold/proxied setups, so fetching them here moves that cost off the wizard's
+    // blocking field cascade.
     try {
-      await getLatestStableTag()
+      await Promise.all([getLatestStableTag(), getStableTags()])
     } catch {}
   })()
 
