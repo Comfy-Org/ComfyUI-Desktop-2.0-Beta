@@ -385,14 +385,27 @@ const versionOptions = computed<BaseSelectOption[]>(() => {
 })
 
 /** Patch the `update-comfyui` action with the picked stable tag (no-op for
- *  any other action). The orchestrator gates this further server-side, but
- *  we strip non-stable shapes here too so a stale draft can't sneak through. */
+ *  any other action). Also rewrites the confirm modal copy so the user
+ *  sees the version they actually selected — the server-built confirm
+ *  message is locked to the channel head and would otherwise still say
+ *  "Update to v0.24.1" while the picked tag is v0.22.1. The orchestrator
+ *  gates the tag shape server-side too. */
 function attachTargetTagIfNeeded(action: ActionDef): ActionDef {
   if (action.id !== 'update-comfyui') return action
   if (!isStableDraft.value) return action
   const tag = pickedStableTag.value
   if (!tag || !STABLE_TAG_RE.test(tag)) return action
-  return { ...action, data: { ...(action.data ?? {}), targetTag: tag } }
+  const baseMessage = t('standalone.updateConfirmMessagePicked', { tag })
+  const warning = t('standalone.updateBreakingWarning')
+  return {
+    ...action,
+    data: { ...(action.data ?? {}), targetTag: tag },
+    confirm: {
+      ...(action.confirm ?? {}),
+      title: action.confirm?.title ?? t('standalone.updateConfirmTitle'),
+      message: `${baseMessage}\n\n${warning}`,
+    },
+  }
 }
 </script>
 
