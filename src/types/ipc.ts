@@ -428,6 +428,10 @@ export interface ProgressData {
 export interface ProgressStep {
   phase: string
   label: string
+  /** Share of the 0→100 bar this phase owns. When set on any step, the
+   *  renderer paces the bar from these (the producer is the single source of
+   *  truth); when absent it falls back to a curated weight table. */
+  weight?: number
 }
 
 // --- Event data types ---

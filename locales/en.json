@@ -358,6 +358,14 @@
       "restore-nodes": "Restoring custom nodes from your snapshot…",
       "restore-pip": "Reinstalling Python packages from your snapshot…",
       "launch": "Starting ComfyUI…",
+      "launchStart": "Starting ComfyUI…",
+      "repair": "Repairing installation…",
+      "torchRepair": "Restoring GPU PyTorch…",
+      "securityScan": "Running security scan…",
+      "mountLibraries": "Loading libraries…",
+      "gpu": "Initializing GPU…",
+      "customNodes": "Loading custom nodes…",
+      "startingServer": "Starting server…",
       "backup": "Backing up Legacy Desktop state…",
       "tcc": "Checking folder access…",
       "venv": "Validating Legacy Python environment…",
@@ -1019,13 +1027,14 @@
     "modelFolderRelaunchDesc": "New model folders were detected from custom nodes. Restarting so ComfyUI can use them right away.",
     "launchSplashTitle": "Starting ComfyUI",
     "launchSplashDesc": "Launching your ComfyUI instance…",
-    "steps": {
-      "securityScan": "Running security scan…",
-      "mountLibraries": "Mounting model libraries…",
-      "gpu": "Spinning up the GPU ({vram} GB VRAM)…",
-      "gpuFallback": "Spinning up the GPU…",
-      "customNodes": "Loading custom nodes & ComfyUI-Manager…",
-      "startingServer": "Starting server…"
+    "activity": {
+      "manager": "Loading ComfyUI-Manager…",
+      "registry": "Updating node registry…",
+      "vram": "Configuring GPU memory…",
+      "optimizing": "Optimizing for your hardware…",
+      "models": "Preparing model loading…",
+      "database": "Updating database…",
+      "nodes": "Loading custom nodes…"
     },
     "viewLogs": "View logs"
   },

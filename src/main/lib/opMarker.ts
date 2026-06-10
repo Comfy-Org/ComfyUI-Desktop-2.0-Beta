@@ -81,10 +81,15 @@ export async function completeOpMarker(installPath: string): Promise<void> {
  * failed, leaving the marker in place so the next launch can retry — until
  * MAX_RECOVERY_ATTEMPTS is reached, after which it gives up and drops the marker
  * rather than locking the user out of launching forever.
+ *
+ * `onRollback` fires only when an ACTUAL source rollback ran (HEAD had moved) —
+ * i.e. a genuine repair, not a benign marker cleanup. Callers use it to surface
+ * a "Repairing installation…" step in the launch progress UI.
  */
 export async function recoverInterruptedComfyOp(
   installPath: string,
   sendOutput?: (text: string) => void,
+  onRollback?: () => void,
 ): Promise<boolean> {
   const marker = readOpMarker(installPath)
   if (!marker) return false
@@ -123,6 +128,7 @@ export async function recoverInterruptedComfyOp(
     }
     // Successfully recovered a hard-killed op — informational signal (PostHog).
     telemetry.emit('comfy.desktop.recovery.rolled_back', { op: marker.op })
+    onRollback?.()
   }
   await clearOpMarker(installPath)
   return true
