@@ -183,6 +183,22 @@ describe('settings unset/default semantics', () => {
     expect(readPersistedSettings()).not.toHaveProperty('installDir')
   })
 
+  it('autoLaunchOnStartup defaults to "none" when absent and persists explicit choices', () => {
+    expect(settings.get('autoLaunchOnStartup')).toBe('none')
+
+    settings.set('autoLaunchOnStartup', 'last')
+    expect(settings.get('autoLaunchOnStartup')).toBe('last')
+    expect(readPersistedSettings()['autoLaunchOnStartup']).toBe('last')
+
+    settings.set('autoLaunchOnStartup', 'inst-12345')
+    expect(settings.get('autoLaunchOnStartup')).toBe('inst-12345')
+    expect(readPersistedSettings()['autoLaunchOnStartup']).toBe('inst-12345')
+
+    settings.set('autoLaunchOnStartup', 'none')
+    expect(settings.get('autoLaunchOnStartup')).toBe('none')
+    expect(readPersistedSettings()).not.toHaveProperty('autoLaunchOnStartup')
+  })
+
   it('treats empty and whitespace-only strings as unset for pypiMirror', () => {
     settings.set('pypiMirror', 'https://mirrors.aliyun.com/pypi/simple/')
     expect(settings.get('pypiMirror')).toBe('https://mirrors.aliyun.com/pypi/simple/')

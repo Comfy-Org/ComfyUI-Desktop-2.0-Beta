@@ -43,7 +43,7 @@ if (!props.ariaLabel && !props.ariaLabelledby) {
   )
 }
 
-const closeBtnRef = ref<HTMLButtonElement | null>(null)
+const dialogRef = ref<HTMLElement | null>(null)
 // Pre-open focus owner, restored on close so focus returns to the trigger.
 let returnFocusTo: HTMLElement | null = null
 // Prior body `overflow`, restored so we don't clobber a host-set value.
@@ -82,7 +82,9 @@ function unlockBodyScroll(): void {
 
 function captureAndFocus(): void {
   returnFocusTo = document.activeElement instanceof HTMLElement ? document.activeElement : null
-  void nextTick(() => closeBtnRef.value?.focus())
+  // Focus the dialog container, not the close button — keeps focus trapped for
+  // keyboard/AT without painting a focus-visible ring on open.
+  void nextTick(() => dialogRef.value?.focus())
 }
 
 function restoreFocus(): void {
@@ -124,19 +126,20 @@ const sizeClass = computed(() => `is-size-${props.size}`)
     <Transition name="modal-fade" appear>
       <div
         v-if="open"
+        ref="dialogRef"
         class="base-modal-overlay"
         :class="{ 'base-modal-overlay--blur': blurOverlay }"
         role="dialog"
         aria-modal="true"
         :aria-label="ariaLabel"
         :aria-labelledby="ariaLabelledby"
+        tabindex="-1"
         @mousedown="onOverlayMouseDown"
         @click="onOverlayClick"
       >
         <div class="base-modal-panel modal-fade-panel" :class="[sizeClass, contentClass]">
           <button
             v-if="showCloseButton"
-            ref="closeBtnRef"
             type="button"
             class="base-modal-close"
             :aria-label="$t('common.close')"

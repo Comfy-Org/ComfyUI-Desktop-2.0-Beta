@@ -22,7 +22,7 @@ const confirmLabel = ref('')
 const preview = ref<SnapshotDetailData | null>(null)
 const details = ref<MigrateDetailGroup[]>([])
 const checkboxes = ref<MigrateCheckbox[]>([])
-const cancelBtnRef = ref<HTMLButtonElement | null>(null)
+const dialogRef = ref<HTMLElement | null>(null)
 /** Focus owner before open, restored on commit regardless of close path. */
 let returnFocusTo: HTMLElement | null = null
 
@@ -38,7 +38,9 @@ watch(isOpen, async (open) => {
     document.addEventListener('keydown', onKeydown)
     returnFocusTo = document.activeElement instanceof HTMLElement ? document.activeElement : null
     await nextTick()
-    cancelBtnRef.value?.focus()
+    // Focus the dialog container, not the cancel button — keeps focus trapped
+    // for keyboard/AT without painting a focus-visible ring on open.
+    dialogRef.value?.focus()
   } else {
     document.removeEventListener('keydown', onKeydown)
     returnFocusTo?.focus()
@@ -88,7 +90,14 @@ defineExpose({ open, update, commit })
 
 <template>
   <BrandTakeoverLayout v-if="isOpen">
-    <div class="brand-hero migrate-takeover" role="dialog" aria-modal="true" :aria-label="title">
+    <div
+      ref="dialogRef"
+      class="brand-hero migrate-takeover"
+      role="dialog"
+      aria-modal="true"
+      :aria-label="title"
+      tabindex="-1"
+    >
       <h1 class="brand-title">{{ title }}</h1>
       <div class="migrate-takeover__card">
         <div v-if="loading" class="migrate-takeover__loading">
@@ -104,7 +113,6 @@ defineExpose({ open, update, commit })
       </div>
       <div class="migrate-takeover__actions">
         <button
-          ref="cancelBtnRef"
           type="button"
           class="brand-ghost"
           data-testid="migrate-takeover-cancel"
