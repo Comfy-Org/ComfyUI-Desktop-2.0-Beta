@@ -78,7 +78,7 @@ function rowOpacity(index: number): number {
   --bpv-row-h: 46px;
   position: relative;
   width: 100%;
-  max-width: 26rem;
+  max-width: 38rem;
   margin-inline: auto;
   overflow: hidden;
   -webkit-mask-image: linear-gradient(
@@ -146,7 +146,9 @@ function rowOpacity(index: number): number {
   align-items: center;
   gap: 1px;
   min-width: 0;
-  max-width: min(22rem, 72vw);
+  /* Wide enough for the full download detail line (bytes · speed · ETA) so it
+     isn't ellipsized; clamped to the viewport on narrow windows. */
+  max-width: min(34rem, 88vw);
   text-align: center;
 }
 .bpv__label {
