@@ -24,16 +24,11 @@ export interface KnownSettings {
   /** When true (default), Desktop updates download and install silently; when
    *  false, the user is prompted before any download/install. */
   autoInstallUpdates?: boolean
-  /** When true (default), boot reopens the last-used instance window instead of
-   *  the dashboard, when the last active surface was an instance. */
-  reopenLastInstanceOnLaunch?: boolean
   /** Opt-in auto-launch on Desktop startup. Values:
    *  - `'none'` (default) — land on the dashboard, current behavior.
    *  - `'last'` — launch the install with the largest `lastLaunchedAt`.
    *  - any other string — launch the install with that id; falls back to
-   *    `'none'` silently when the id is gone.
-   *  Distinct from `reopenLastInstanceOnLaunch`, which restores the last
-   *  active *surface* only when the user last left an instance window. */
+   *    `'none'` silently when the id is gone. */
   autoLaunchOnStartup?: string
   /** When true, closing a local-install window asks the user to confirm first
    *  (guards against accidentally killing a ComfyUI that took minutes to boot).
@@ -86,7 +81,6 @@ const SETTINGS_SCHEMA = {
   theme: { nullable: false },
   autoUpdate: { nullable: false },
   autoInstallUpdates: { nullable: false },
-  reopenLastInstanceOnLaunch: { nullable: false },
   autoLaunchOnStartup: { nullable: false },
   confirmBeforeClosingWindow: { nullable: false },
   pypiMirror: { nullable: false },

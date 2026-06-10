@@ -59,22 +59,10 @@ export function buildSettingsSections(
         // Theme picker hidden (app is dark-only); the theme plumbing stays
         // wired so re-adding this field is the only change needed to restore it.
 
-        // Boot behavior: reopen the last-used instance on launch. Closing the
-        // last instance window quits Desktop (after a confirm), so the next
-        // launch boots straight back into that instance.
-        {
-          id: 'reopenLastInstanceOnLaunch',
-          label: i18n.t('settings.reopenLastInstanceOnLaunch'),
-          type: 'boolean',
-          value: s.reopenLastInstanceOnLaunch !== false
-        },
-
         // Opt-in auto-launch on Desktop startup. Opt-in (defaults to None) so
         // a user who never picks a specific install lands on the dashboard
         // like today. When set to 'last' the most-recent install opens; when
-        // set to an installation id, that install opens. Takes precedence
-        // over reopenLastInstanceOnLaunch (which is a soft-restore based on
-        // the last active surface, not an explicit user choice).
+        // set to an installation id, that install opens.
         {
           id: 'autoLaunchOnStartup',
           label: i18n.t('settings.autoLaunchOnStartup'),

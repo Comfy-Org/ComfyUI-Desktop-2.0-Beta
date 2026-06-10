@@ -405,7 +405,6 @@
     "autoUpdate": "Check for updates on startup",
     "autoInstallUpdates": "Automatically install Desktop updates",
     "appBehavior": "App Behavior",
-    "reopenLastInstanceOnLaunch": "Auto-restart last instance on launch",
     "autoLaunchOnStartup": "Auto-launch on startup",
     "autoLaunchOnStartupDescription": "Pick an instance to launch automatically when Comfy Desktop opens. Defaults to None.",
     "autoLaunchOnStartupNone": "None (show dashboard)",
