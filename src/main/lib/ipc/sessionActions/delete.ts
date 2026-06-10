@@ -6,9 +6,18 @@ import {
   MARKER_FILE,
   makeSendProgress,
   deleteBrowserPartition,
+  instanceModelPathsYaml,
 } from '../shared'
 import type { ActionContext, ActionResult } from './types'
 import { withAbortableSessionAction } from './withAbortable'
+
+/** Best-effort removal of an install's per-instance model-paths YAML, which
+ *  lives under dataDir() rather than inside the install directory. */
+function removeInstanceModelPathsYaml(installationId: string): void {
+  try {
+    fs.rmSync(instanceModelPathsYaml(installationId), { force: true })
+  } catch {}
+}
 
 // Wipe the launcher-owned parts of an adopted install (.venv + marker) at
 // adoptedBaseDir, leaving the user's data. Best-effort: a locked venv must not
@@ -46,6 +55,7 @@ export async function handleDelete(ctx: ActionContext): Promise<ActionResult> {
       const noopProgress = (): void => {}
       await cleanupAdoptedLegacyDir(adoptedBaseDir, noopProgress)
     }
+    removeInstanceModelPathsYaml(installationId)
     await installations.remove(installationId)
     await deleteBrowserPartition(inst.id, inst.browserPartition as string | undefined)
     return { ok: true, navigate: 'list' }
@@ -95,6 +105,7 @@ export async function handleDelete(ctx: ActionContext): Promise<ActionResult> {
       }
       throw err
     }
+    removeInstanceModelPathsYaml(installationId)
     await installations.remove(installationId)
     await deleteBrowserPartition(inst.id, inst.browserPartition as string | undefined)
     return { ok: true, navigate: 'list' }

@@ -182,3 +182,31 @@ describe('StatusFactPanel — running details', () => {
     expect(titles).not.toContain('Running details')
   })
 })
+
+describe('StatusFactPanel — location', () => {
+  function locationSection(path: string): DetailSection {
+    return {
+      tab: 'status',
+      fields: [{ id: 'location', label: 'Location', value: path }],
+    } as unknown as DetailSection
+  }
+
+  it('opens the location folder via the popup bridge when clicked', async () => {
+    const opened: string[] = []
+    ;(window as unknown as { __comfyTitlePopup: unknown }).__comfyTitlePopup = {
+      globalSettingsOpenPath: (p: string) => opened.push(p),
+    }
+    const wrapper = mountPanel({
+      installation: makeInstall('Maanil'),
+      sections: [locationSection('/tmp/inst-1')],
+    })
+    await nextTick()
+
+    const openBtn = wrapper.find('.status-fact-value-open')
+    expect(openBtn.exists()).toBe(true)
+    await openBtn.trigger('click')
+    expect(opened).toEqual(['/tmp/inst-1'])
+
+    delete (window as unknown as { __comfyTitlePopup?: unknown }).__comfyTitlePopup
+  })
+})

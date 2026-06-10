@@ -6,7 +6,7 @@ import { nextTick } from 'vue'
 
 import { TID } from '../../../../shared/testIds'
 import SnapshotsView from './SnapshotsView.vue'
-import type { SnapshotSummary, SnapshotListData } from '../../types/ipc'
+import type { SnapshotSummary, SnapshotListData, CopyEvent } from '../../types/ipc'
 
 // Tests the snapshots tab + inline restore op-card state machine: in-flight, success (auto-dismiss 1.8s), error (Retry/Dismiss), cancelled.
 
@@ -51,6 +51,8 @@ const messages = {
       exportAll: 'Export All',
       latestLabel: 'Latest:',
       latestBadge: 'Latest',
+      copyEventLabel: 'Copied as {destination}',
+      copyEventLabelIncoming: 'Copied from {source}',
       nodesCount: '{count} nodes',
       packagesCount: '{count} pkgs',
     },
@@ -355,5 +357,70 @@ describe('comfyUISettings/SnapshotsView', () => {
     await nextTick()
 
     expect(scrollSpy).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' })
+  })
+
+  // Regression for #1007: a "Copied from/as X" event that sorts above the
+  // newest snapshot must not steal the "Latest" designation. Latest tracks the
+  // newest *snapshot* (snapshotIndex === 0), not the merged timeline index.
+  describe('latest detection with copy events (#1007)', () => {
+    function makeCopyEvent(overrides: Partial<CopyEvent> = {}): CopyEvent {
+      return {
+        installationId: 'install-B',
+        installationName: 'Copy of A',
+        copiedAt: new Date().toISOString(), // now — newer than the ~1h-old snapshots
+        copyReason: 'copy',
+        exists: true,
+        direction: 'in',
+        ...overrides,
+      }
+    }
+
+    async function mountWithCopyEvent(event: CopyEvent): Promise<VueWrapper> {
+      ;(window as unknown as { api: Record<string, unknown> }).api = {
+        getSnapshots: vi.fn().mockResolvedValue({ ...makeListData(), copyEvents: [event] }),
+        getSnapshotDiff: vi.fn().mockResolvedValue(null),
+        runAction: vi.fn(),
+        exportSnapshot: vi.fn(),
+        exportAllSnapshots: vi.fn(),
+      }
+      return mountView()
+    }
+
+    it('keeps the Latest badge on the newest snapshot when an incoming copy event sorts first', async () => {
+      const w = await mountWithCopyEvent(makeCopyEvent({ direction: 'in' }))
+
+      // The copy event is rendered (and sorts to the top of the rail)…
+      expect(w.text()).toContain('Copied from Copy of A')
+
+      // …but the "Latest" badge appears exactly once, on the newest snapshot.
+      const badges = w.findAll('.snapshot-row-latest')
+      expect(badges).toHaveLength(1)
+      const newestRow = w.find(`[data-testid="${TID.snapshotRow('snap-newest.json')}"]`)
+      expect(newestRow.find('.snapshot-row-latest').exists()).toBe(true)
+
+      // The newest snapshot is auto-expanded; restoring it is a no-op, so it
+      // must not offer a Restore action even though a copy event sorts above it.
+      expect(w.find(`[data-testid="${TID.snapshotRowRestore('snap-newest.json')}"]`).exists())
+        .toBe(false)
+    })
+
+    it('keeps the Latest badge on the newest snapshot for an outgoing copy event', async () => {
+      const w = await mountWithCopyEvent(makeCopyEvent({ direction: 'out' }))
+
+      expect(w.text()).toContain('Copied as Copy of A')
+      expect(w.findAll('.snapshot-row-latest')).toHaveLength(1)
+      expect(w.find(`[data-testid="${TID.snapshotRowRestore('snap-newest.json')}"]`).exists())
+        .toBe(false)
+    })
+
+    it('header "Latest:" stat reflects the newest snapshot, not the copy event time', async () => {
+      const w = await mountWithCopyEvent(makeCopyEvent({ direction: 'in' }))
+
+      // Snapshots are ~1h old; the copy event is "now". The stat must show the
+      // snapshot's age (1h ago), proving the copy event didn't hijack it.
+      const latest = w.find('.snapshots-view-latest')
+      expect(latest.text()).toContain('Latest:')
+      expect(latest.text()).toContain('1h ago')
+    })
   })
 })

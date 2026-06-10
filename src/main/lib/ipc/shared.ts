@@ -39,7 +39,7 @@ import { formatTime } from '../util'
 import { getActiveDownloads } from '../comfyDownloadManager'
 import * as releaseCache from '../release-cache'
 import * as i18n from '../i18n'
-import { syncCustomModelFolders, discoverExtraModelFolders } from '../models'
+import { syncCustomModelFolders, discoverExtraModelFolders, instanceModelPathsYaml, isSamePath } from '../models'
 import { copyDirWithProgress } from '../copy'
 import { fetchJSON } from '../fetch'
 import { fetchLatestRelease, getLatestStableTag } from '../comfyui-releases'
@@ -74,7 +74,7 @@ export {
   performLocalMigration, stageLocalSnapshot,
   getDiskSpace, getDirectorySize, validateInstallPath,
   syncOemSeed, formatTime, getActiveDownloads,
-  syncCustomModelFolders, discoverExtraModelFolders,
+  syncCustomModelFolders, discoverExtraModelFolders, instanceModelPathsYaml, isSamePath,
   copyDirWithProgress, fetchJSON, fetchLatestRelease, getLatestStableTag,
   captureSnapshotIfChanged, getSnapshotCount, getSnapshotListData, getSnapshotDetailData,
   getSnapshotDiffVsPrevious, diffAgainstCurrent, loadSnapshot, listSnapshots, diffSnapshots,
@@ -455,11 +455,11 @@ export async function performCopy(
         adoptedAt: new Date().toISOString(),
         adoptedBaseDir: newComfyUI,
         adoptedPythonPath: newAdoptedPython,
-        // Point per-install I/O at the deep-copied data so launches don't write to the
-        // legacy workspace.
+        // Use per-install I/O so launches write to the deep-copied data, not the
+        // legacy workspace. inputDir/outputDir are left unset so launch falls
+        // back to this copy's own `<comfyDir>/{input,output}` — keeping the
+        // record clone-safe (no absolute path pointing at a specific install).
         useSharedInputOutput: false,
-        inputDir: path.join(newComfyUI, 'input'),
-        outputDir: path.join(newComfyUI, 'output'),
       }
     }
 
