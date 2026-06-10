@@ -1189,6 +1189,10 @@ export interface ElectronApi {
 
   // App
   getAppVersion(): Promise<string>
+  /** Every stable ComfyUI release tag, newest first. Returns `[]` when the
+   *  remote is unreachable. Used by the install-wizard version dropdown and
+   *  the per-install ChannelPicker. */
+  getStableTags(): Promise<string[]>
   /** Capacity-protection switch for Cloud entry points. Resolved at boot
    *  from the `desktop-cloud-capacity` PostHog flag (variants `normal` |
    *  `degraded` | `disabled`); defaults to `'normal'` when the flag is
