@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 vi.mock('child_process', async (importOriginal) => {
   const actual = await importOriginal() as Record<string, unknown>
@@ -8,7 +8,7 @@ vi.mock('child_process', async (importOriginal) => {
 
 import { execFile, spawn } from 'child_process'
 import { EventEmitter } from 'events'
-import { countCommitsAhead, findNearestTag, findLatestVersionTag, lsRemoteLatestTag, lsRemoteRef, isAncestorOf, findMergeBase, revParseRef, fetchTags, configurePygit2, isGitAvailable, isPygit2Configured, getPygit2Status, resetPygit2State, probePygit2, resetGitAvailableCache, countUniqueCommits, gitClone, gitCheckoutCommit, gitFetchAndCheckout } from './git'
+import { countCommitsAhead, findNearestTag, findLatestVersionTag, lsRemoteLatestTag, lsRemoteRef, isAncestorOf, findMergeBase, revParseRef, fetchTags, configurePygit2, isGitAvailable, isPygit2Configured, getPygit2Status, resetPygit2State, probePygit2, resetGitAvailableCache, countUniqueCommits, gitClone, gitCheckoutCommit, gitFetchAndCheckout, isPygit2AuthFailure, isForcePygit2, isSystemGitAvailable } from './git'
 
 const mockedExecFile = vi.mocked(execFile)
 const mockedSpawn = vi.mocked(spawn)
@@ -179,6 +179,14 @@ describe('isGitAvailable (system git)', () => {
   it('returns false when git is not found', async () => {
     mockExecFile((_cmd, _args, _opts, cb) => { cb(new Error('ENOENT'), '', '') })
     expect(await isGitAvailable()).toBe(false)
+  })
+
+  it('coalesces concurrent callers into a single git --version probe', async () => {
+    let spawnCount = 0
+    mockExecFile((_cmd, _args, _opts, cb) => { spawnCount++; cb(null, 'git version 2.40.0\n', '') })
+    const results = await Promise.all([isSystemGitAvailable(), isSystemGitAvailable(), isGitAvailable()])
+    expect(results).toEqual([true, true, true])
+    expect(spawnCount).toBe(1)
   })
 })
 
@@ -617,6 +625,116 @@ describe('pygit2 fallback', () => {
       const result = await gitFetchAndCheckout('/repo', 'abc123', () => {}, controller.signal)
       expect(result.exitCode).toBe(1)
       expect(mockedSpawn).not.toHaveBeenCalled()
+    })
+  })
+})
+
+describe('system git fallback on pygit2 auth failure', () => {
+  const ORIG_FORCE = process.env.COMFY_FORCE_PYGIT2
+
+  beforeEach(() => {
+    vi.resetAllMocks()
+    resetGitAvailableCache()
+    delete process.env.COMFY_FORCE_PYGIT2
+    configurePygit2('/usr/bin/python3', '/path/to/git_operations.py')
+  })
+
+  afterEach(() => {
+    if (ORIG_FORCE === undefined) delete process.env.COMFY_FORCE_PYGIT2
+    else process.env.COMFY_FORCE_PYGIT2 = ORIG_FORCE
+  })
+
+  describe('isPygit2AuthFailure', () => {
+    it('classifies the libgit2 no-callback error as auth failure', () => {
+      expect(isPygit2AuthFailure({ exitCode: 1, stdout: '', stderr: 'authentication required but no callback set' })).toBe(true)
+    })
+
+    it('classifies unsupported URL protocol (ssh) as auth failure', () => {
+      expect(isPygit2AuthFailure({ exitCode: 1, stdout: '', stderr: 'unsupported URL protocol' })).toBe(true)
+    })
+
+    it('does not classify a generic failure as auth failure', () => {
+      expect(isPygit2AuthFailure({ exitCode: 1, stdout: '', stderr: 'fatal: not a git repository' })).toBe(false)
+    })
+
+    it('never classifies a success as auth failure', () => {
+      expect(isPygit2AuthFailure({ exitCode: 0, stdout: '', stderr: 'authentication required but no callback set' })).toBe(false)
+    })
+  })
+
+  describe('isForcePygit2', () => {
+    it('is false when COMFY_FORCE_PYGIT2 is unset', () => {
+      expect(isForcePygit2()).toBe(false)
+    })
+
+    it('is true when COMFY_FORCE_PYGIT2=1', () => {
+      process.env.COMFY_FORCE_PYGIT2 = '1'
+      expect(isForcePygit2()).toBe(true)
+    })
+  })
+
+  describe('gitClone', () => {
+    it('retries with system git when pygit2 fails with an auth error', async () => {
+      // git --version probe for isSystemGitAvailable succeeds.
+      mockExecFile((_cmd, _args, _opts, cb) => { cb(null, 'git version 2.43.0\n', '') })
+      mockSpawnSequence([
+        { exitCode: 1, stderr: 'authentication required but no callback set\n' }, // pygit2
+        { exitCode: 0, stderr: 'Cloning...\n' }, // system git
+      ])
+      const result = await gitClone('https://github.com/test/repo', '/dest', () => {})
+      expect(result.exitCode).toBe(0)
+      // First spawn is pygit2; second is the system `git clone`.
+      expect(mockedSpawn.mock.calls[0]![0]).toBe('/usr/bin/python3')
+      expect(mockedSpawn.mock.calls[1]![0]).toBe('git')
+      expect(mockedSpawn.mock.calls[1]![1]).toEqual(['clone', 'https://github.com/test/repo', '/dest'])
+    })
+
+    it('does NOT fall back when COMFY_FORCE_PYGIT2=1, even on an auth error', async () => {
+      process.env.COMFY_FORCE_PYGIT2 = '1'
+      mockSpawnSequence([
+        { exitCode: 1, stderr: 'authentication required but no callback set\n' },
+      ])
+      const result = await gitClone('https://github.com/test/repo', '/dest', () => {})
+      expect(result.exitCode).toBe(1)
+      expect(mockedSpawn.mock.calls).toHaveLength(1) // only pygit2, no retry
+    })
+
+    it('does NOT fall back when no system git is available', async () => {
+      // git --version probe fails -> no system git.
+      mockExecFile((_cmd, _args, _opts, cb) => { cb(new Error('not found'), '', '') })
+      mockSpawnSequence([
+        { exitCode: 1, stderr: 'authentication required but no callback set\n' },
+      ])
+      const result = await gitClone('https://github.com/test/repo', '/dest', () => {})
+      expect(result.exitCode).toBe(1)
+      expect(mockedSpawn.mock.calls).toHaveLength(1)
+    })
+
+    it('does NOT fall back on a non-auth pygit2 failure', async () => {
+      mockExecFile((_cmd, _args, _opts, cb) => { cb(null, 'git version 2.43.0\n', '') })
+      mockSpawnSequence([
+        { exitCode: 1, stderr: 'fatal: repository not found\n' },
+      ])
+      const result = await gitClone('https://github.com/test/repo', '/dest', () => {})
+      expect(result.exitCode).toBe(1)
+      expect(mockedSpawn.mock.calls).toHaveLength(1)
+    })
+  })
+
+  describe('gitFetchAndCheckout', () => {
+    it('retries with system git when pygit2 fails with an auth error', async () => {
+      mockExecFile((_cmd, _args, _opts, cb) => { cb(null, 'git version 2.43.0\n', '') })
+      mockSpawnSequence([
+        { exitCode: 1, stderr: 'authentication required but no callback set\n' }, // pygit2
+        { exitCode: 0 }, // git fetch --unshallow --tags
+        { exitCode: 0 }, // git checkout --detach
+        { exitCode: 0 }, // git branch -f master
+        { exitCode: 0 }, // git checkout commit
+      ])
+      const result = await gitFetchAndCheckout('/repo', 'abc123', () => {})
+      expect(result.exitCode).toBe(0)
+      expect(mockedSpawn.mock.calls[0]![0]).toBe('/usr/bin/python3')
+      expect(mockedSpawn.mock.calls[1]![0]).toBe('git')
     })
   })
 })

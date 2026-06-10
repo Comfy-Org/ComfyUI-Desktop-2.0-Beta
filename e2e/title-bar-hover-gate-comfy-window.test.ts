@@ -37,13 +37,15 @@ test.beforeAll(async () => {
   ctx = await launchApp({ settings: { firstUseCompleted: true, telemetryEnabled: false } })
   titleBar = ctx.titleBar
 
-  // Click the always-present Cloud tile and wait for the existing
+  // Click the auto-seeded Cloud install row (post unsticky-cloud, it's no
+  // longer a dedicated `.chooser-tile-cloud` CTA — it renders through
+  // `ChooserInstallTile` like any other install). Wait for the existing
   // title-bar view to flip into install-backed mode via the
   // `comfy-titlebar:installation-id-changed` IPC. The pill dropping
   // `.is-install-less` is the user-visible signal that the identity
   // handshake completed; it doubles as a sanity check before the
   // hover-gate assertions below.
-  await ctx.panel.click('.chooser-tile-cloud')
+  await ctx.panel.click('.chooser-tile[data-source-category="cloud"]')
   await expect.poll(() => titleBar.exists('.title-install-pill:not(.is-install-less)'), {
     timeout: 30_000,
     intervals: [100, 200, 500],

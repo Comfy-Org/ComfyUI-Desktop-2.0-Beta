@@ -106,14 +106,11 @@ describe('ChooserView', () => {
     mockModal.alert.mockClear()
   })
 
-  it('always renders the New Instance tile and a Cloud tile', async () => {
+  it('renders the New Instance tile when the user has zero installs', async () => {
     installMockApi([])
     const wrapper = mountChooser()
     await flushPromises()
     expect(wrapper.text()).toContain('New Instance')
-    // Cloud tile shows the Try-Cloud CTA when no cloud install exists.
-    expect(wrapper.text()).toContain('Cloud')
-    expect(wrapper.text()).toContain('Try Cloud')
   })
 
   it('emits show-new-install when the New Install tile is clicked', async () => {
@@ -125,24 +122,15 @@ describe('ChooserView', () => {
     expect(wrapper.emitted('show-new-install')!.length).toBe(1)
   })
 
-  it('emits show-new-install when the Cloud tile is clicked and no cloud install exists', async () => {
-    installMockApi([
-      makeInstall({ id: 'a', name: 'Local A' }),
-    ])
-    const wrapper = mountChooser()
-    await flushPromises()
-    await wrapper.find('.chooser-tile-cloud').trigger('click')
-    expect(wrapper.emitted('show-new-install')).toBeDefined()
-  })
-
-  it('emits pick with the cloud install when the Cloud tile is clicked and one exists', async () => {
+  it('renders a cloud install through the same tile component as local installs', async () => {
     installMockApi([
       makeInstall({ id: 'cloud', name: 'Comfy Cloud', sourceCategory: 'cloud', sourceLabel: 'Cloud' }),
     ])
     const wrapper = mountChooser()
     await flushPromises()
-    await wrapper.find('.chooser-tile-cloud').trigger('click')
-    // `pickInstall` is async (capacity gate), so drain microtasks first.
+    const tile = wrapper.findAll('.chooser-tile').find((t) => t.text().includes('Comfy Cloud'))
+    expect(tile).toBeTruthy()
+    await tile!.trigger('click')
     await flushPromises()
     const events = wrapper.emitted('pick')
     expect(events).toBeDefined()
@@ -157,8 +145,8 @@ describe('ChooserView', () => {
     ])
     const wrapper = mountChooser()
     await flushPromises()
-    // The first two tiles are the fixed New Install + Cloud entries; the
-    // remaining tiles are the install rows in recency order.
+    // First tile is the fixed New Install; the rest are install rows in
+    // recency order. The Try-Cloud CTA is gone (any install present).
     const tiles = wrapper.findAll('.chooser-tile')
     const installTiles = tiles.filter(
       (t) => !t.classes().includes('chooser-tile-new') && !t.classes().includes('chooser-tile-cloud')
@@ -167,6 +155,36 @@ describe('ChooserView', () => {
     expect(installTiles[0]!.text()).toContain('New')
     expect(installTiles[1]!.text()).toContain('Old')
     expect(installTiles[2]!.text()).toContain('Never')
+  })
+
+  // Regression: cloud must not sort above a more-recent local install. Before
+  // the unpin refactor, the dashboard rendered cloud in its own surface and
+  // the IPP tie-break promoted cloud, so this ordering would have failed.
+  it('places a cloud install below a more-recent local install in the tile grid', async () => {
+    installMockApi([
+      makeInstall({
+        id: 'recent-local',
+        name: 'RecentLocal',
+        sourceCategory: 'local',
+        lastLaunchedAt: 1_000,
+      }),
+      makeInstall({
+        id: 'old-cloud',
+        name: 'OldCloud',
+        sourceCategory: 'cloud',
+        sourceLabel: 'Cloud',
+        lastLaunchedAt: 100,
+      }),
+    ])
+    const wrapper = mountChooser()
+    await flushPromises()
+    const tiles = wrapper.findAll('.chooser-tile')
+    const installTiles = tiles.filter(
+      (t) => !t.classes().includes('chooser-tile-new') && !t.classes().includes('chooser-tile-cloud')
+    )
+    expect(installTiles.length).toBe(2)
+    expect(installTiles[0]!.text()).toContain('RecentLocal')
+    expect(installTiles[1]!.text()).toContain('OldCloud')
   })
 
   it('emits pick when an install tile is single-clicked', async () => {

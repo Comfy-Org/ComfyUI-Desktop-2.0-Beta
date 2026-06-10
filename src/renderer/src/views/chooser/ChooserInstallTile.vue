@@ -83,6 +83,7 @@ function handleClick(): void {
     class="chooser-tile"
     :class="statusClasses"
     :data-testid="TID.dashboardTile(inst.id)"
+    :data-source-category="inst.sourceCategory"
     @click="handleClick"
     @keydown.enter="handleClick"
     @keydown.space.prevent="handleClick"

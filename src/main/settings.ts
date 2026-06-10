@@ -24,9 +24,12 @@ export interface KnownSettings {
   /** When true (default), Desktop updates download and install silently; when
    *  false, the user is prompted before any download/install. */
   autoInstallUpdates?: boolean
-  /** When true (default), boot reopens the last-used instance window instead of
-   *  the dashboard, when the last active surface was an instance. */
-  reopenLastInstanceOnLaunch?: boolean
+  /** Opt-in auto-launch on Desktop startup. Values:
+   *  - `'none'` (default) — land on the dashboard, current behavior.
+   *  - `'last'` — launch the install with the largest `lastLaunchedAt`.
+   *  - any other string — launch the install with that id; falls back to
+   *    `'none'` silently when the id is gone. */
+  autoLaunchOnStartup?: string
   /** When true, closing a local-install window asks the user to confirm first
    *  (guards against accidentally killing a ComfyUI that took minutes to boot).
    *  Default false — windows close without a prompt. */
@@ -78,7 +81,7 @@ const SETTINGS_SCHEMA = {
   theme: { nullable: false },
   autoUpdate: { nullable: false },
   autoInstallUpdates: { nullable: false },
-  reopenLastInstanceOnLaunch: { nullable: false },
+  autoLaunchOnStartup: { nullable: false },
   confirmBeforeClosingWindow: { nullable: false },
   pypiMirror: { nullable: false },
   useChineseMirrors: { nullable: false },
@@ -360,14 +363,31 @@ function save(settings: Settings): void {
   writeFileSafe(dataPath, JSON.stringify(settings, null, 2), true)
 }
 
+/** Sentinel values for `autoLaunchOnStartup`. Any string OTHER than these
+ *  is treated as an installation id. */
+export const AUTO_LAUNCH_NONE = 'none'
+export const AUTO_LAUNCH_LAST = 'last'
+
 export function get<K extends KnownSettingKey>(key: K): KnownSettings[K]
 export function get(key: string): unknown
 export function get(key: string): unknown {
-  return load()[key]
+  const value = load()[key]
+  // Absence means the default — surface `'none'` to callers so they don't have
+  // to special-case undefined everywhere they branch on the auto-launch mode.
+  if (key === 'autoLaunchOnStartup' && (value === undefined || value === null)) {
+    return AUTO_LAUNCH_NONE
+  }
+  return value
 }
 
 /** Keys whose values should be deleted when set to an empty or whitespace-only string. */
 const EMPTY_STRING_MEANS_UNSET: ReadonlySet<string> = new Set<KnownSettingKey>(['pypiMirror'])
+
+/** Keys whose default value should be persisted as absence — `set(k, default)`
+ *  drops the key so the file doesn't accumulate no-op writes. */
+const DEFAULT_VALUE_MEANS_UNSET: ReadonlyMap<string, unknown> = new Map<KnownSettingKey, unknown>([
+  ['autoLaunchOnStartup', AUTO_LAUNCH_NONE],
+])
 
 export function set<K extends string>(
   key: K,
@@ -380,6 +400,7 @@ export function set<K extends string>(
     value === undefined
     || (value === null && isKnownSettingKey(key) && !isNullableKnownSettingKey(key))
     || (typeof value === 'string' && value.trim() === '' && EMPTY_STRING_MEANS_UNSET.has(key))
+    || (DEFAULT_VALUE_MEANS_UNSET.has(key) && value === DEFAULT_VALUE_MEANS_UNSET.get(key))
   ) {
     delete settings[key]
     save(settings)

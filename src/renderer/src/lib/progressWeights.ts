@@ -1,12 +1,16 @@
 import type { ProgressStep } from '../types/ipc'
 
 /**
- * Per-op weight tables for the unified `globalProgress` bar. Each maps
- * `phase` → weight in `[0, 1]` summing to 1.0; weights reflect what
- * dominates wall time in the median run. Keyed by the sorted phase-name
- * fingerprint of `op.steps` (durable across install-name-varying titles).
- * Bad calibration only mis-paces a section — the monotonic clamp in
- * `progressStore.globalProgressFor` prevents regressions.
+ * Curated per-op weight tables for the unified `globalProgress` bar, used when
+ * the producer doesn't send per-step weights itself. Each maps `phase` →
+ * weight in `[0, 1]` summing to 1.0; weights reflect what dominates wall time
+ * in the median run. Keyed by the sorted phase-name fingerprint of `op.steps`
+ * (durable across install-name-varying titles). Bad calibration only mis-paces
+ * a section — the monotonic clamp in `progressStore.globalProgressFor`
+ * prevents regressions.
+ *
+ * The launch flow is NOT here: it sends weights inline on its steps (see
+ * `launchPhases.ts` / `launchProgress.ts`), so main is the single source.
  */
 const TABLES: Record<string, Record<string, number>> = {
   // Standalone install — common case (no pending snapshot)
@@ -77,16 +81,26 @@ export function fingerprintSteps(steps: readonly ProgressStep[]): string {
     .join('|')
 }
 
-/** Returns the weight table for an op's phase set, falling back to equal
- *  weights when the fingerprint isn't in `TABLES`. */
+/** Phase → weight for an op's bar. Prefers weights the producer sent inline on
+ *  the steps (normalized to sum 1.0); else a curated `TABLES` entry; else an
+ *  equal split. */
 export function getPhaseWeights(
   steps: readonly ProgressStep[],
 ): Record<string, number> {
-  const fp = fingerprintSteps(steps)
-  const known = TABLES[fp]
-  if (known) return known
   const n = steps.length
   if (n === 0) return {}
+
+  if (steps.some((s) => s.weight !== undefined)) {
+    const total = steps.reduce((a, s) => a + (s.weight ?? 0), 0)
+    const out: Record<string, number> = {}
+    // Normalize so an injected step (e.g. repair) can't push the sum past 1.0;
+    // an all-zero total degrades to an equal split rather than dividing by 0.
+    for (const s of steps) out[s.phase] = total > 0 ? (s.weight ?? 0) / total : 1 / n
+    return out
+  }
+
+  const known = TABLES[fingerprintSteps(steps)]
+  if (known) return known
   const w = 1 / n
   const out: Record<string, number> = {}
   for (const s of steps) out[s.phase] = w

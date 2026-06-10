@@ -29,10 +29,16 @@ import * as mainTelemetry from '../telemetry'
 import { getDeviceId } from '../deviceId'
 import { getCloudCapacityStatusAsync } from '../cloudCapacity'
 import { getUserTierAsync } from '../userTier'
+import { getStableTags } from '../comfyui-releases'
 
 export function registerAppHandlers(): void {
   // App version
   ipcMain.handle('get-app-version', () => getAppVersion())
+
+  // Every stable ComfyUI release tag, newest first. Used by the
+  // install-wizard and the per-install ChannelPicker version dropdown.
+  // Returns `[]` (never throws) when the remote is unreachable.
+  ipcMain.handle('get-stable-tags', () => getStableTags())
 
   // Capacity-protection switch for Cloud entry points. Resolved from the
   // `desktop-cloud-capacity` PostHog flag via the experiments cache; safe

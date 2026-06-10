@@ -118,6 +118,13 @@ export function register(callbacks: RegisterCallbacks = {}): void {
   // Default to bundled bootstrap pygit2 so the pygit2 path is always exercised
   // (system git would otherwise mask bugs real users hit). Falls back to
   // standalone pygit2 then system git; COMFY_FORCE_BOOTSTRAP_GIT=1 disables that.
+  //
+  // Note: individual network operations (clone/fetch/checkout) additionally
+  // fall back to system git at runtime when pygit2 hits an authentication-class
+  // failure — e.g. a global `insteadOf` https->ssh rewrite the SSH-less bundled
+  // pygit2 can't satisfy. Developers can set COMFY_FORCE_PYGIT2=1 to disable
+  // that per-op fallback (and force the pygit2 backend in ComfyUI-Manager too),
+  // keeping the pygit2 path exercised. See git.ts `withSystemGitFallback`.
   void (async () => {
     const configureGitBackend = async (): Promise<void> => {
       const forceBootstrap = process.env.COMFY_FORCE_BOOTSTRAP_GIT === '1'

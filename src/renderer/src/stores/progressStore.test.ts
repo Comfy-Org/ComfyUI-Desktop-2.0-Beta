@@ -454,11 +454,10 @@ describe('useProgressStore', () => {
       expect(store.operations.get('inst-3')?.chainSpan).toBeNull()
     })
 
-    it('does not regress globalProgressFor when chainSpan is set', () => {
-      // chainSpan is consumed by ProgressModal.unifiedPercent, NOT by
-      // globalProgressFor. A stepped op with chainSpan='install' at
-      // download(50%) still returns its raw weighted percent — the
-      // 0–70 mapping is applied upstream in the view.
+    it('caps the install leg of a chain at 0–70% of the continuous bar', () => {
+      // globalProgressFor now folds the install/launch split in directly: a
+      // chainSpan='install' op fills 0–70 (reserving 70–100 for the launch
+      // leg) so the two legs read as one continuous bar.
       store.startOperation({
         installationId: 'inst-4',
         title: 'Installing',
@@ -474,12 +473,40 @@ describe('useProgressStore', () => {
       op.activePercent = 50
 
       const result = store.globalProgressFor(op)
-      // Equal phase weights → download owns 0–50% slot, so 50% of that
-      // slot is ~25% on the bar. The exact figure depends on the weight
-      // table; assert it's mid-bar, not capped at 70.
       expect(result.percent).toBeGreaterThan(0)
       expect(result.percent).toBeLessThan(70)
       expect(result.indeterminate).toBe(false)
+    })
+
+    it('a finished+ok install leg reports 70, not 100 (chain hands off to launch)', () => {
+      // The install leg completing is NOT the end of the journey — capping it
+      // at the 70% boundary stops the bar flashing full before the launch leg
+      // ("Starting ComfyUI") takes over.
+      store.startOperation({
+        installationId: 'inst-5',
+        title: 'Installing',
+        apiCall: () => new Promise<ActionResult>(() => {}),
+        chainSpan: 'install'
+      })
+      const op = store.operations.get('inst-5')!
+      op.steps = [{ phase: 'download', label: 'Download' }]
+      op.finished = true
+      op.result = { ok: true } as ActionResult
+
+      expect(store.globalProgressFor(op).percent).toBe(70)
+    })
+
+    it('a finished+ok standalone op reports 100', () => {
+      store.startOperation({
+        installationId: 'inst-6',
+        title: 'Updating',
+        apiCall: () => new Promise<ActionResult>(() => {})
+      })
+      const op = store.operations.get('inst-6')!
+      op.finished = true
+      op.result = { ok: true } as ActionResult
+
+      expect(store.globalProgressFor(op).percent).toBe(100)
     })
   })
 })

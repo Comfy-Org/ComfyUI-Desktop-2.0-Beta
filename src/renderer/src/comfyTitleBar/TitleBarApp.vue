@@ -18,9 +18,11 @@ import { useTitleBarIdentity } from './useTitleBarIdentity'
 import { useUpdatePills } from './useUpdatePills'
 import { useTitleBarHoverGate } from './useTitleBarHoverGate'
 import { useCentralPillCoachmark } from './useCentralPillCoachmark'
+import { useAppLocale, windowApiLocaleSource } from '../lib/useAppLocale'
 import ComfyCLogo from '../components/icons/ComfyCLogo.vue'
 
 const { t, locale } = useI18n()
+const { syncLocale } = useAppLocale(windowApiLocaleSource())
 
 // Inlined to keep the title-bar renderer self-contained — the preload TS
 // file isn't visible to tsconfig.web (only its .d.ts would be). Kept in
@@ -540,6 +542,10 @@ onMounted(() => {
   // before the first paint instead of flashing 'full' for one frame
   // on a narrow boot width.
   evaluateFit()
+
+  syncLocale().catch((err) => {
+    console.error('TitleBar: syncLocale failed', err)
+  })
 
   if (!bridge) return
   unsubPanel = bridge.onPanelChanged((panel) => {
