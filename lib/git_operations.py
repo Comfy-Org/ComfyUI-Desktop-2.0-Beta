@@ -33,6 +33,8 @@ from collections import deque
 
 import pygit2
 
+from pygit2_compat import harden_pygit2_config
+
 
 # ---------------------------------------------------------------------------
 # pygit2 API compatibility shims
@@ -70,51 +72,6 @@ except (ImportError, AttributeError):
 # search path is blanked) so corporate proxy settings survive and can be
 # passed explicitly to fetch/clone. None means "no proxy".
 HTTP_PROXY = None
-
-
-def read_global_http_proxy():
-    """Return the user's global `http.proxy` setting, or None."""
-    try:
-        cfg = pygit2.Config.get_global_config()
-    except Exception:
-        return None
-    try:
-        value = cfg["http.proxy"]
-    except (KeyError, Exception):
-        return None
-    return value or None
-
-
-def harden_pygit2_config():
-    """Ignore system/global/XDG git config for libgit2 operations.
-
-    These commands operate on anonymous HTTPS clones of public repos. A
-    user's global git config can carry `insteadOf` rewrites (e.g.
-    https->ssh) or credential helpers that force authentication, which
-    libgit2 cannot satisfy without a credentials callback ("authentication
-    required but no callback set"). The bundled pygit2 has no SSH transport,
-    so an SSH rewrite can never succeed; blanking the config search path
-    keeps our operations on anonymous HTTPS.
-
-    The global `http.proxy` is snapshotted into HTTP_PROXY first so a
-    corporate proxy is preserved and re-applied explicitly on fetch/clone.
-    """
-    global HTTP_PROXY
-    HTTP_PROXY = read_global_http_proxy()
-    try:
-        from pygit2.enums import ConfigLevel
-        levels = [ConfigLevel.SYSTEM, ConfigLevel.XDG, ConfigLevel.GLOBAL]
-    except (ImportError, AttributeError):
-        levels = [
-            pygit2.GIT_CONFIG_LEVEL_SYSTEM,
-            pygit2.GIT_CONFIG_LEVEL_XDG,
-            pygit2.GIT_CONFIG_LEVEL_GLOBAL,
-        ]
-    for level in levels:
-        try:
-            pygit2.settings.search_path[level] = ""
-        except Exception:
-            pass
 
 
 def to_https_url(url):
@@ -871,7 +828,7 @@ Subcommands:
 
 if __name__ == "__main__":
     pygit2.option(pygit2.GIT_OPT_SET_OWNER_VALIDATION, 0)
-    harden_pygit2_config()
+    HTTP_PROXY = harden_pygit2_config()
 
     if len(sys.argv) < 2:
         print(USAGE, file=sys.stderr)
