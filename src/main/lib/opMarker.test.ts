@@ -87,6 +87,23 @@ describe('recoverInterruptedComfyOp', () => {
     expect(mockedEmit).toHaveBeenCalledWith('comfy.desktop.recovery.rolled_back', { op: 'update' })
   })
 
+  it('fires onRollback only when an actual rollback runs, not on a benign cleanup', async () => {
+    // Real rollback (HEAD moved) → onRollback fires.
+    await writeOpMarker(installPath, { op: 'update', preHead: 'OLDHEAD', startedAt: 1 })
+    mockedReadGitHead.mockReturnValueOnce('NEWHEAD').mockReturnValue('OLDHEAD')
+    mockedRollback.mockResolvedValue(true)
+    const onRollback = vi.fn()
+    await recoverInterruptedComfyOp(installPath, undefined, onRollback)
+    expect(onRollback).toHaveBeenCalledTimes(1)
+
+    // Benign cleanup (HEAD already matches) → onRollback must NOT fire.
+    await writeOpMarker(installPath, { op: 'restore', preHead: 'SAME', startedAt: 1 })
+    mockedReadGitHead.mockReturnValue('SAME')
+    const onRollback2 = vi.fn()
+    await recoverInterruptedComfyOp(installPath, undefined, onRollback2)
+    expect(onRollback2).not.toHaveBeenCalled()
+  })
+
   it('is a no-op rollback but still clears the marker when HEAD already matches', async () => {
     await writeOpMarker(installPath, { op: 'restore', preHead: 'SAME', startedAt: 1 })
     mockedReadGitHead.mockReturnValue('SAME')

@@ -358,6 +358,14 @@
       "restore-nodes": "正在从快照恢复自定义节点…",
       "restore-pip": "正在从快照重新安装 Python 包…",
       "launch": "正在启动 ComfyUI…",
+      "launchStart": "正在启动 ComfyUI…",
+      "repair": "正在修复安装…",
+      "torchRepair": "正在恢复 GPU PyTorch…",
+      "securityScan": "正在进行安全扫描…",
+      "mountLibraries": "正在加载库…",
+      "gpu": "正在初始化 GPU…",
+      "customNodes": "正在加载自定义节点…",
+      "startingServer": "正在启动服务器…",
       "backup": "正在备份旧版桌面端状态…",
       "tcc": "正在检查文件夹访问权限…",
       "venv": "正在验证旧版 Python 环境…",
@@ -1005,13 +1013,14 @@
     "modelFolderRelaunchDesc": "检测到来自自定义节点的新模型文件夹。正在重启，以便 ComfyUI 立即使用它们。",
     "launchSplashTitle": "正在启动 ComfyUI",
     "launchSplashDesc": "正在启动你的 ComfyUI 实例…",
-    "steps": {
-      "securityScan": "正在运行安全扫描…",
-      "mountLibraries": "正在挂载模型库…",
-      "gpu": "正在启动 GPU（{vram} GB 显存）…",
-      "gpuFallback": "正在启动 GPU…",
-      "customNodes": "正在加载自定义节点和 ComfyUI-Manager…",
-      "startingServer": "正在启动服务器…"
+    "activity": {
+      "manager": "正在加载 ComfyUI-Manager…",
+      "registry": "正在更新节点注册表…",
+      "vram": "正在配置 GPU 显存…",
+      "optimizing": "正在针对你的硬件进行优化…",
+      "models": "正在准备模型加载…",
+      "database": "正在更新数据库…",
+      "nodes": "正在加载自定义节点…"
     },
     "viewLogs": "查看日志"
   },
