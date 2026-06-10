@@ -33,6 +33,10 @@ beforeEach(() => {
   oemRoot = path.join(programDataPath, 'Comfy Desktop', 'OEM')
 
   fs.mkdirSync(homePath, { recursive: true })
+  // Home-root footprint → existing install, so Windows large-data defaults use
+  // the home layout these tests assert (a clean machine would default to
+  // %LOCALAPPDATA%\Comfy-Desktop).
+  fs.mkdirSync(path.join(homePath, 'ComfyUI-Installs'), { recursive: true })
   fs.mkdirSync(userDataPath, { recursive: true })
   fs.mkdirSync(programDataPath, { recursive: true })
 

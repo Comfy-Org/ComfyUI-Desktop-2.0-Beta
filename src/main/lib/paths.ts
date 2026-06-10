@@ -70,22 +70,89 @@ function selectedInstallDrive(): string | null {
   }
 }
 
+/** Windows system-drive layout for the large data dirs. New installs are
+ *  grouped under `%LOCALAPPDATA%\Comfy-Desktop` (the standard per-user,
+ *  non-roaming spot for large app data — the home root and roaming AppData are
+ *  both poor fits); pre-existing installs keep their original home-root layout
+ *  so an upgrade never strands a user's data. */
+type WinSystemDriveMode = "legacy-home" | "local-appdata";
+
+const DATA_ROOT_MARKER = "data-location.json";
+
+let cachedWinMode: WinSystemDriveMode | undefined;
+
+function winDataRootMarkerPath(): string {
+  return path.join(dataDir(), DATA_ROOT_MARKER);
+}
+
+/** Classify a Windows system-drive install. A persisted marker wins so the
+ *  choice can never flip between launches; otherwise an existing home-root
+ *  footprint means an upgrade (keep home), and a clean machine is a new install
+ *  (use LocalAppData). */
+function classifyWinSystemDriveMode(): WinSystemDriveMode {
+  try {
+    const raw = fs.readFileSync(winDataRootMarkerPath(), "utf-8");
+    const mode = (JSON.parse(raw) as { mode?: unknown }).mode;
+    if (mode === "legacy-home" || mode === "local-appdata") return mode;
+  } catch {}
+  const home = app.getPath("home");
+  const hasLegacyFootprint =
+    fs.existsSync(path.join(home, "ComfyUI-Installs")) ||
+    fs.existsSync(path.join(home, "ComfyUI-Shared"));
+  return hasLegacyFootprint ? "legacy-home" : "local-appdata";
+}
+
+function winSystemDriveRoot(): string {
+  cachedWinMode ??= classifyWinSystemDriveMode();
+  if (cachedWinMode === "legacy-home") return app.getPath("home");
+  const localAppData =
+    process.env.LOCALAPPDATA || path.join(app.getPath("home"), "AppData", "Local");
+  return path.join(localAppData, "Comfy-Desktop");
+}
+
+/** Persist the resolved Windows system-drive data-root choice once, so a new
+ *  user's location can never flip on a later launch (e.g. if the legacy folders
+ *  appear externally). No-op off win32, on a redirected install drive, or when a
+ *  marker already exists. Call once after startup — never at module import. */
+export function persistWinDataRootChoice(): void {
+  if (process.platform !== "win32") return;
+  if (selectedInstallDrive()) return; // redirected drive is already deterministic
+  const markerPath = winDataRootMarkerPath();
+  if (fs.existsSync(markerPath)) return;
+  try {
+    fs.mkdirSync(path.dirname(markerPath), { recursive: true });
+    const mode = cachedWinMode ?? classifyWinSystemDriveMode();
+    fs.writeFileSync(markerPath, JSON.stringify({ mode }), "utf-8");
+  } catch {}
+}
+
 /** Base directory under which ComfyUI's large data dirs (installs, shared
  *  models/input/output, download cache) live by default. On Windows, when the
  *  app was installed to a non-system drive, this is a single `Comfy-Desktop`
  *  folder on that drive so everything stays grouped under one parent instead of
- *  scattering folders at the drive root; otherwise the user's home dir. */
+ *  scattering folders at the drive root. On a system-drive Windows install,
+ *  new users get `%LOCALAPPDATA%\Comfy-Desktop` while existing users keep home.
+ *  Non-Windows uses the user's home dir. */
 export function defaultDataRoot(): string {
   const drive = selectedInstallDrive();
-  return drive ? path.join(drive, "Comfy-Desktop") : app.getPath("home");
+  if (drive) return path.join(drive, "Comfy-Desktop");
+  if (process.platform === "win32") return winSystemDriveRoot();
+  return app.getPath("home");
 }
 
-/** Default location for the multi-GB download cache. On a redirected drive it
- *  lives under the same `Comfy-Desktop` parent as the other data dirs; otherwise
- *  the platform cache dir (userData on Windows/macOS, XDG cache on Linux). */
+/** Default location for the multi-GB download cache. When the large data dirs
+ *  are grouped under a `Comfy-Desktop` parent (a redirected drive, or a new
+ *  Windows system-drive install), the cache lives there too; otherwise the
+ *  platform cache dir (roaming userData on Windows/macOS, XDG cache on Linux). */
 export function defaultDownloadCacheDir(): string {
   if (selectedInstallDrive()) {
     return path.join(defaultDataRoot(), "ComfyUI-Cache", "download-cache");
+  }
+  if (process.platform === "win32") {
+    const root = winSystemDriveRoot();
+    if (root !== app.getPath("home")) {
+      return path.join(root, "ComfyUI-Cache", "download-cache");
+    }
   }
   return path.join(cacheDir(), "download-cache");
 }
