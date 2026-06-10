@@ -181,6 +181,7 @@ export function buildElectronApi(): ElectronApi {
 
     // App
     getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+    getStableTags: (): Promise<string[]> => ipcRenderer.invoke('get-stable-tags'),
     getCloudCapacity: () => ipcRenderer.invoke('get-cloud-capacity'),
     getCloudUserTier: () => ipcRenderer.invoke('get-cloud-user-tier'),
     quitApp: () => ipcRenderer.invoke('quit-app'),
@@ -289,8 +290,8 @@ export function buildElectronApi(): ElectronApi {
       return () => ipcRenderer.removeListener('theme-changed', handler)
     },
     onLocaleChanged: (callback) => {
-      const handler = (_event: IpcRendererEvent, messages: unknown) =>
-        callback(messages as Record<string, unknown>)
+      const handler = (_event: IpcRendererEvent, payload: unknown) =>
+        callback(payload as { locale: string; messages: Record<string, unknown> })
       ipcRenderer.on('locale-changed', handler)
       return () => ipcRenderer.removeListener('locale-changed', handler)
     },

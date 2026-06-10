@@ -263,7 +263,10 @@ export function applySettingSet(key: string, value: unknown): void {
   }
   if (key === 'language') {
     i18n.init(value as string)
-    _broadcastToRenderer('locale-changed', i18n.getMessages())
+    _broadcastToRenderer('locale-changed', {
+      locale: i18n.getLocale(),
+      messages: i18n.getMessages()
+    })
     if (_onLocaleChanged) _onLocaleChanged()
   }
   if (key === 'telemetryEnabled') {

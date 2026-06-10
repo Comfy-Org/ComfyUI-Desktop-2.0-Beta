@@ -39,6 +39,11 @@ export interface Operation {
    *  the op completes. */
   successTerminal: NonNullable<ShowProgressOpts['successTerminal']> | null
   steps: ProgressStep[] | null
+  /** Completed steps carried over from the previous leg of a chain (e.g. the
+   *  install op's steps when this is the `chainSpan:'launch'` leg). The
+   *  renderer renders `priorSteps` (all done) + `steps` as one continuous
+   *  stepper so install→launch reads as a single list, no seam. */
+  priorSteps: ProgressStep[] | null
   activePhase: string | null
   activePercent: number
   lastStatus: Record<string, string>
@@ -183,6 +188,15 @@ export const useProgressStore = defineStore('progress', () => {
       actionId
     } = opts
 
+    // Snapshot the outgoing op's steps BEFORE cleanup so the launch leg of a
+    // chain can render the install leg's (now-complete) steps as a prefix —
+    // one continuous stepper across install → launch with no seam.
+    const outgoing = operations.get(installationId)
+    const carriedPriorSteps =
+      chainSpan === 'launch' && outgoing?.steps?.length
+        ? [...(outgoing.priorSteps ?? []), ...outgoing.steps]
+        : null
+
     cleanupOperation(installationId)
 
     sessionStore.startSession(installationId)
@@ -197,6 +211,7 @@ export const useProgressStore = defineStore('progress', () => {
       chainSpan: chainSpan ?? null,
       successTerminal: successTerminal ?? null,
       steps: null,
+      priorSteps: carriedPriorSteps,
       activePhase: null,
       activePercent: -1,
       lastStatus: {},
@@ -359,20 +374,32 @@ export const useProgressStore = defineStore('progress', () => {
     percent: number
     indeterminate: boolean
   } {
+    // Chained install→launch maps to ONE continuous bar via a fixed split:
+    //   - the install leg (`chainSpan:'install'`) fills 0 → 70%
+    //   - the launch leg (`chainSpan:'launch'`, carries `priorSteps`) fills
+    //     70 → 100%
+    // so the two legs read as one stepper with no seam. Standalone ops own
+    // the full 0→100.
+    const PRIOR_FRACTION = 0.7
+    const isLaunchLeg = !!op.priorSteps?.length || op.chainSpan === 'launch'
+    const isInstallLeg = op.chainSpan === 'install'
+    const priorBase = isLaunchLeg ? PRIOR_FRACTION * 100 : 0
+    const span = isLaunchLeg ? 1 - PRIOR_FRACTION : isInstallLeg ? PRIOR_FRACTION : 1
+
     if (op.finished) {
-      if (op.result?.ok) return { percent: 100, indeterminate: false }
+      // A finished INSTALL leg of a chain isn't the end — it hands off to the
+      // launch leg. Cap it at the install/launch boundary (70%), never 100,
+      // so the bar doesn't flash full before "Starting ComfyUI" takes over.
+      if (op.result?.ok) {
+        return { percent: isInstallLeg ? PRIOR_FRACTION * 100 : 100, indeterminate: false }
+      }
       return { percent: op._globalFloor, indeterminate: false }
     }
 
-    // Flat path — pass-through. Bar fills 0→flatPercent. The chooser-
-    // launch path uses this (flat op, percent stays at -1 the whole time
-    // → indeterminate slide animation flows left↔right, exactly what the
-    // CTO described for the "starting server" stage).
+    // Flat path — pass-through (remote launch / single-phase ops).
     if (!op.steps) {
       const raw = op.flatPercent
-      if (raw < 0) {
-        return { percent: op._globalFloor, indeterminate: true }
-      }
+      if (raw < 0) return { percent: op._globalFloor, indeterminate: true }
       const next = Math.max(op._globalFloor, raw)
       op._globalFloor = next
       return { percent: next, indeterminate: false }
@@ -383,38 +410,38 @@ export const useProgressStore = defineStore('progress', () => {
     const activeIdx = op.activePhase ? op.steps.findIndex((s) => s.phase === op.activePhase) : -1
 
     if (activeIdx < 0 || !op.activePhase) {
-      // Steps payload landed but no per-phase update yet. Hold the floor.
-      return { percent: op._globalFloor, indeterminate: false }
+      // Steps payload landed but no per-phase update yet. Hold at the
+      // completed-prior baseline so the bar never drops back.
+      const floor = Math.max(op._globalFloor, priorBase)
+      op._globalFloor = floor
+      return { percent: floor, indeterminate: false }
     }
 
     // Sum the weight of every phase strictly before the active one.
-    let baseline = 0
+    let baselineW = 0
     for (let i = 0; i < activeIdx; i++) {
       const prev = op.steps[i]
       if (!prev) continue
-      baseline += (weights[prev.phase] ?? 0) * 100
+      baselineW += weights[prev.phase] ?? 0
     }
-    const activeWeight = (weights[op.activePhase] ?? 0) * 100
+    const activeW = weights[op.activePhase] ?? 0
+    const baseline = priorBase + baselineW * span * 100
+    const slotEnd = priorBase + (baselineW + activeW) * span * 100
 
-    // For an indeterminate active phase we have no granular percent to
-    // report. Advance the bar smoothly to the END of this phase's slot
-    // (`baseline + activeWeight`) so the user sees forward motion when
-    // we transition from a determinate phase to an indeterminate one
-    // (e.g. download → cleanup). Once the next phase starts, the
-    // baseline absorbs that slot fully and the bar stays where it is.
-    const total =
-      op.activePercent < 0
-        ? baseline + activeWeight
-        : baseline + activeWeight * (op.activePercent / 100)
-
-    const next = Math.max(op._globalFloor, total)
+    // HONEST model — no creep. The bar moves only on real log milestones:
+    //   - indeterminate active phase → HOLD at the slot start; the active
+    //     step's spinner conveys "working" during a silent gap (e.g. the
+    //     ~110s GPU/torch init). The bar advances only when the NEXT phase
+    //     fires (its baseline absorbs this slot).
+    //   - determinate active phase → fill within the slot by the real percent.
+    // Never report 100 while still running — the success branch above owns 100.
+    const raw =
+      op.activePercent < 0 ? baseline : baseline + (slotEnd - baseline) * (op.activePercent / 100)
+    const next = Math.min(99, Math.max(op._globalFloor, raw))
     op._globalFloor = next
-
-    // No indeterminate flag for stepped ops — every phase shows a static
-    // fill. The flat path is where the slide animation lives, which is
-    // what the chooser-launch path uses for its "Starting server…"
-    // final stage.
-    return { percent: next, indeterminate: false }
+    // `indeterminate` flags a silent-gap hold so the renderer keeps the active
+    // step's spinner alive; the bar itself stays put (honest — no creep).
+    return { percent: next, indeterminate: op.activePercent < 0 }
   }
 
   return {

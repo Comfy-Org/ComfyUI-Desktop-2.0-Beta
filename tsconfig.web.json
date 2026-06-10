@@ -17,7 +17,8 @@
     "jsx": "preserve",
     "baseUrl": ".",
     "paths": {
-      "@renderer/*": ["src/renderer/src/*"]
+      "@renderer/*": ["src/renderer/src/*"],
+      "@locales/*": ["locales/*"]
     }
   },
   "include": [
@@ -26,7 +27,8 @@
     "src/renderer/src/**/*.vue",
     "src/preload/*.d.ts",
     "src/types/**/*",
-    "src/shared/**/*"
+    "src/shared/**/*",
+    "locales/*.json"
   ],
   "exclude": [
     "src/**/*.test.ts"

@@ -26,6 +26,11 @@ import type { ActionContext, ActionResult } from './types'
 import { lastNLines, stripAnsi } from '../../stderrTail'
 import { rotateLogFiles, getLogDir } from '../../logRotation'
 import { createExecutionTap } from '../../executionTap'
+import { createLaunchProgressTracker } from '../../launchProgress'
+import { buildLaunchPhases } from '../../launchPhases'
+import type { PreLaunchPhase } from '../../launchPhases'
+import { scanCustomNodes } from '../../nodes'
+import type { LaunchProgressTracker } from '../../launchProgress'
 import { clearCrash, recordCrash } from '../../crashBuffer'
 import * as telemetry from '../../telemetry'
 import { appendLog } from '../../logsBroadcast'
@@ -61,6 +66,9 @@ function writeLog(stream: WriteStream, text: string): void {
 
 export async function handleLaunch({ event, installationId, inst: instArg, actionData }: ActionContext): Promise<ActionResult> {
   let inst = instArg
+  // Synthetic repair steps that ran during launch prep, prepended to the launch
+  // progress in display order (e.g. a source rollback, then a PyTorch restore).
+  const preLaunchPhases: PreLaunchPhase[] = []
   if (_runningSessions.has(installationId)) {
     return { ok: false, message: i18n.t('errors.alreadyRunning') }
   }
@@ -74,6 +82,40 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
   if (!source.skipInstall && isEffectivelyEmptyInstallDir(inst.installPath)) {
     return { ok: false, message: i18n.t('errors.installDirEmpty') }
   }
+
+  const sender = event.sender
+  const sendProgress = makeSendProgress(sender, installationId)
+
+  /** Enabled custom-node count for the "X of Y" launch detail. Best-effort
+   *  one-shot scan; 0 (scan failed/none) → the tracker shows a streaming line
+   *  instead. */
+  let launchNodeCount = 0
+  async function scanLaunchNodeCount(): Promise<void> {
+    try {
+      const scanned = await scanCustomNodes(path.join(inst.installPath, 'ComfyUI'))
+      launchNodeCount = scanned.filter((n) => n.enabled).length
+    } catch (err) {
+      console.warn('Custom-node scan for launch progress failed:', err)
+    }
+  }
+
+  /** Single launch tracker, armed once and reused. A pre-launch repair arms it
+   *  early (so the repair shows as a live step); otherwise the first spawn arms
+   *  it. `start()` emits the steps payload + enters the first phase exactly
+   *  once — re-arming on a relaunch would reset the stepper. */
+  let launchTracker: LaunchProgressTracker | null = null
+  async function armLaunchTracker(): Promise<LaunchProgressTracker> {
+    if (launchTracker) return launchTracker
+    await scanLaunchNodeCount()
+    launchTracker = createLaunchProgressTracker({
+      phases: buildLaunchPhases(inst, { preLaunchPhases }),
+      nodeCount: launchNodeCount,
+      sendProgress,
+    })
+    launchTracker.start()
+    return launchTracker
+  }
+
   // Migrate legacy envs/default/ → ComfyUI/.venv/ for standalone installs.
   if (inst.sourceId === 'standalone') {
     // Recover from an update/restore interrupted by a hard process kill (power
@@ -86,10 +128,19 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     const recoveryLog: string[] = []
     try {
       const { recoverInterruptedComfyOp } = await import('../../opMarker')
-      const recovered = await recoverInterruptedComfyOp(inst.installPath, (text) => {
-        recoveryLog.push(text)
-        console.log(text.trim())
-      })
+      const recovered = await recoverInterruptedComfyOp(
+        inst.installPath,
+        (text) => {
+          recoveryLog.push(text)
+          console.log(text.trim())
+        },
+        // A real source rollback ran — lead the launch progress with a
+        // "Repairing installation…" step. Fires only for a genuine repair,
+        // never a benign marker cleanup.
+        () => {
+          preLaunchPhases.push('repair')
+        }
+      )
       if (recovered) inst = (await installations.get(installationId)) || inst
     } catch (err) {
       // Recovery threw because the source rollback failed: launching now would run
@@ -117,9 +168,18 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     const repairAbort = new AbortController()
     _operationAborts.set(installationId, repairAbort)
     try {
-      const { maybeRepairTorch } = await import('../../../sources/standalone/torchRepair')
+      const { maybeRepairTorch, getTorchVendorMismatch } = await import(
+        '../../../sources/standalone/torchRepair'
+      )
+      // Arm the launch stepper BEFORE the (slow, multi-GB) copy so it shows as a
+      // live `torchRepair` step rather than flashing a flat status. Detection is
+      // a cheap sync check; arming only when a repair will actually run.
+      if (getTorchVendorMismatch(inst)) {
+        preLaunchPhases.push('torchRepair')
+        await armLaunchTracker()
+      }
       const repaired = await maybeRepairTorch(inst, {
-        sendProgress: makeSendProgress(event.sender, installationId),
+        sendProgress,
         sendOutput: makeSendOutput(event.sender, installationId),
         update: updateFn,
         signal: repairAbort.signal,
@@ -248,8 +308,35 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     }
   }
 
-  const sender = event.sender
-  const sendProgress = makeSendProgress(sender, installationId)
+  /** Pipe a spawned process's output to the log file, renderer, execution tap,
+   *  and the launch tracker (ANSI-stripped); returns a bounded stderr tail for
+   *  crash diagnostics. */
+  function attachLaunchStreams(
+    proc: ChildProcess,
+    logStream: WriteStream,
+    sendOutput: (text: string) => void,
+    execTap: ReturnType<typeof createExecutionTap>,
+    tracker: LaunchProgressTracker
+  ): { getStderr: () => string } {
+    let stderrBuf = ''
+    proc.stdout?.on('data', (chunk: Buffer) => {
+      const text = chunk.toString('utf-8')
+      writeLog(logStream, text)
+      sendOutput(text)
+      execTap.ingest(text, 'stdout')
+      tracker.ingest(stripAnsi(text))
+    })
+    proc.stderr?.on('data', (chunk: Buffer) => {
+      const text = chunk.toString('utf-8')
+      stderrBuf += text
+      if (stderrBuf.length > 8192) stderrBuf = stderrBuf.slice(-4096)
+      writeLog(logStream, text)
+      sendOutput(text)
+      execTap.ingest(text, 'stderr')
+      tracker.ingest(stripAnsi(text))
+    })
+    return { getStderr: () => stderrBuf }
+  }
 
   const abort = new AbortController()
   _operationAborts.set(installationId, abort)
@@ -299,23 +386,10 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
       variant: (inst.variant as string | undefined) ?? null,
       release: (inst.release as string | undefined) ?? null,
     })
+    const tracker = await armLaunchTracker()
 
     const proc = spawnProcess(launchCmd.cmd!, launchCmd.args!, launchCmd.cwd!, launchEnv, { showWindow: launchCmd.showWindow })
-    let stderrBuf = ''
-    proc.stdout?.on('data', (chunk: Buffer) => {
-      const text = chunk.toString('utf-8')
-      writeLog(logStream, text)
-      sendOutput(text)
-      execTap.ingest(text, 'stdout')
-    })
-    proc.stderr?.on('data', (chunk: Buffer) => {
-      const text = chunk.toString('utf-8')
-      stderrBuf += text
-      if (stderrBuf.length > 8192) stderrBuf = stderrBuf.slice(-4096)
-      writeLog(logStream, text)
-      sendOutput(text)
-      execTap.ingest(text, 'stderr')
-    })
+    const { getStderr } = attachLaunchStreams(proc, logStream, sendOutput, execTap, tracker)
 
     _operationAborts.delete(installationId)
     const mode = (inst.launchMode as string | undefined) || 'window'
@@ -327,7 +401,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
       // Raw stderr — this payload is shown to the user in the crashed-state
       // lifecycle UI. PII scrubbing happens on the telemetry path
       // (`scrubTelemetryContext` in renderer bootstrap), not here.
-      const lastStderr = lastNLines(stderrBuf, 100)
+      const lastStderr = lastNLines(getStderr(), 100)
       execTap.flushSummary()
       _removeSession(installationId)
       const exitedPayload = {
@@ -460,24 +534,14 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     release: (inst.release as string | undefined) ?? null,
   })
 
+  // Arm the log-driven tracker once, here (a pre-launch repair may already have
+  // armed it). Pre-armed so the synchronous relaunch loop can reuse the single
+  // instance — re-arming would re-emit steps and reset the stepper.
+  const tracker = await armLaunchTracker()
+
   function spawnComfy(): { proc: ChildProcess; getStderr: () => string } {
     const p = spawnProcess(launchCmd.cmd!, launchCmd.args!, launchCmd.cwd!, launchEnv, { showWindow: launchCmd.showWindow })
-    let stderrBuf = ''
-    p.stdout!.on('data', (chunk: Buffer) => {
-      const text = chunk.toString('utf-8')
-      writeLog(logStream, text)
-      sendOutput(text)
-      execTap.ingest(text, 'stdout')
-    })
-    p.stderr!.on('data', (chunk: Buffer) => {
-      const text = chunk.toString('utf-8')
-      stderrBuf += text
-      if (stderrBuf.length > 8192) stderrBuf = stderrBuf.slice(-4096)
-      writeLog(logStream, text)
-      sendOutput(text)
-      execTap.ingest(text, 'stderr')
-    })
-    return { proc: p, getStderr: () => stderrBuf }
+    return { proc: p, ...attachLaunchStreams(p, logStream, sendOutput, execTap, tracker) }
   }
 
   const PORT_RETRY_MAX = 3
@@ -525,16 +589,14 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
       })
     })
 
-    sendProgress('launch', { percent: -1, status: i18n.t('launch.waiting') })
+    // No flat `launch.waiting` progress here: the log-driven stepped phases
+    // own this window. A flat update would race the `startingServer` phase
+    // and flash an indeterminate "(secs)" caption, reflowing the layout.
     try {
       await Promise.race([
         waitForPort(launchCmd.port!, '127.0.0.1', {
           timeoutMs: COMFY_BOOT_TIMEOUT_MS,
           signal: abort.signal,
-          onPoll: ({ elapsedMs }) => {
-            const secs = Math.round(elapsedMs / 1000)
-            sendProgress('launch', { percent: -1, status: i18n.t('launch.waitingTime', { secs }) })
-          },
         }),
         earlyExitPromise,
       ])
@@ -620,14 +682,12 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
         proc.on('exit', (code) => reject(new Error(`Process exited with code ${code}`)))
       })
       try {
+        // Re-armed tracker re-emits stepped phases during this relaunch wait;
+        // no flat poll (would race the stepped caption — see above).
         await Promise.race([
           waitForPort(launchCmd.port!, '127.0.0.1', {
             timeoutMs: COMFY_BOOT_TIMEOUT_MS,
             signal: abort.signal,
-            onPoll: ({ elapsedMs }) => {
-              const secs = Math.round(elapsedMs / 1000)
-              sendProgress('launch', { percent: -1, status: i18n.t('launch.waitingTime', { secs }) })
-            },
           }),
           relaunchEarlyExit,
         ])

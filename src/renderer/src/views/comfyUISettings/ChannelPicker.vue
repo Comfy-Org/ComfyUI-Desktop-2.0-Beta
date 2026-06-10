@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Loader2 } from 'lucide-vue-next'
 import BaseSelect, { type BaseSelectOption } from '../../components/ui/BaseSelect.vue'
@@ -7,6 +7,8 @@ import InfoTooltip from '../../components/InfoTooltip.vue'
 import { formatRelativeFromMs } from '../../lib/datetime'
 import type { ActionDef, DetailField, DetailFieldOption } from '../../types/ipc'
 import { TID } from '../../../../shared/testIds'
+
+const STABLE_TAG_RE = /^v\d+\.\d+\.\d+$/
 
 interface Props {
   field: DetailField
@@ -318,6 +320,93 @@ const selectOptions = computed<BaseSelectOption[]>(() =>
     description: opt.description
   }))
 )
+
+// --- ComfyUI version picker (stable channel only) ---
+//
+// Hits `get-stable-tags` once on mount and caches the result. The dropdown
+// renders below the channel select when the drafted channel is 'stable';
+// picking an older / newer tag patches `update-comfyui` action's data with
+// `targetTag` so the orchestrator checks out that specific release.
+const stableTags = ref<string[]>([])
+const stableTagsLoading = ref<boolean>(false)
+const pickedStableTag = ref<string>('')
+
+const isStableDraft = computed(() => state.draft === 'stable')
+
+function detectCurrentInstalledTag(): string {
+  const installed = preview.value?.installedVersion
+  if (!installed) return ''
+  const v = installed.trim()
+  const candidate = v.startsWith('v') ? v : `v${v}`
+  return STABLE_TAG_RE.test(candidate) ? candidate : ''
+}
+
+onMounted(async () => {
+  if (typeof window.api?.getStableTags !== 'function') return
+  stableTagsLoading.value = true
+  try {
+    stableTags.value = await window.api.getStableTags()
+  } catch {
+    stableTags.value = []
+  } finally {
+    stableTagsLoading.value = false
+  }
+})
+
+watch(
+  () => [isStableDraft.value, stableTags.value, preview.value?.installedVersion] as const,
+  () => {
+    if (!isStableDraft.value || stableTags.value.length === 0) {
+      pickedStableTag.value = ''
+      return
+    }
+    const current = detectCurrentInstalledTag()
+    if (current && stableTags.value.includes(current)) {
+      pickedStableTag.value = current
+      return
+    }
+    if (!pickedStableTag.value || !stableTags.value.includes(pickedStableTag.value)) {
+      pickedStableTag.value = stableTags.value[0] ?? ''
+    }
+  },
+  { immediate: true }
+)
+
+const showVersionPicker = computed(
+  () => isStableDraft.value && (stableTagsLoading.value || stableTags.value.length > 0),
+)
+
+const versionOptions = computed<BaseSelectOption[]>(() => {
+  const latest = stableTags.value[0]
+  return stableTags.value.map((tag) => ({
+    value: tag,
+    label: tag === latest ? t('newInstall.latestStable') + ` — ${tag}` : tag,
+  }))
+})
+
+/** Patch the `update-comfyui` action with the picked stable tag (no-op for
+ *  any other action). Also rewrites the confirm modal copy so the user
+ *  sees the version they actually selected — the server-built confirm
+ *  message is locked to the channel head and would otherwise still say
+ *  "Update to v0.24.1" while the picked tag is v0.22.1. The orchestrator
+ *  gates the tag shape server-side too. */
+function attachTargetTagIfNeeded(action: ActionDef): ActionDef {
+  if (action.id !== 'update-comfyui') return action
+  if (!isStableDraft.value) return action
+  const tag = pickedStableTag.value
+  if (!tag || !STABLE_TAG_RE.test(tag)) return action
+  const baseMessage = t('standalone.updateConfirmMessagePicked', { tag })
+  const warning = t('standalone.updateBreakingWarning')
+  return {
+    ...action,
+    data: { ...(action.data ?? {}), targetTag: tag },
+    confirm: {
+      ...(action.confirm ?? {}),
+      title: action.confirm?.title ?? t('standalone.updateConfirmTitle'),
+      message: `${baseMessage}\n\n${warning}`,
+    },
+  }
+}
 </script>
 
 <template>
@@ -397,6 +486,17 @@ const selectOptions = computed<BaseSelectOption[]>(() =>
         </p>
       </div>
 
+      <div v-if="showVersionPicker" class="channel-picker-version">
+        <span class="channel-picker-field-label">{{ t('standalone.comfyVersion') }}</span>
+        <BaseSelect
+          :model-value="pickedStableTag"
+          :options="versionOptions"
+          :aria-label="t('standalone.comfyVersion')"
+          :disabled="stableTagsLoading || stableTags.length === 0"
+          @update:model-value="pickedStableTag = $event"
+        />
+      </div>
+
       <p v-if="!draftIsCurrent && !preview" class="channel-picker-empty">
         {{ t('channelCards.noInfo', 'No information available for this channel.') }}
       </p>
@@ -414,7 +514,7 @@ const selectOptions = computed<BaseSelectOption[]>(() =>
           :disabled="action.enabled === false || isActionRunning(action.id)"
           :title="action.tooltip"
           :data-testid="TID.updateActionButton(action.id)"
-          @click="emit('action', action)"
+          @click="emit('action', attachTargetTagIfNeeded(action))"
         >
           <Loader2
             v-if="isActionRunning(action.id)"

@@ -37,6 +37,7 @@ const messages = {
       reboot: 'Reboot',
       phaseLabel: {
         download: 'Downloading ComfyUI…',
+        torchRepair: 'Restoring GPU PyTorch…',
       },
     },
     launch: {
@@ -98,6 +99,7 @@ function snapOp(installationId: string, patch: Partial<Operation> = {}): Operati
     destroysInstance: false,
     chainSpan: null,
     steps: null,
+    priorSteps: null,
     activePhase: null,
     activePercent: -1,
     lastStatus: {},
@@ -486,7 +488,7 @@ describe('ProgressModal — brand branch state transitions', () => {
     expect(body.exists('.brand-progress__substatus')).toBe(false)
   })
 
-  it('surfaces the rich main-side detail as a substatus under the curated headline', async () => {
+  it('surfaces the rich main-side detail in the active step row (not the flat substatus)', async () => {
     const { body } = await mountWithOp('inst-1', {
       opKind: 'install',
       steps: [{ phase: 'download', label: 'Download' }],
@@ -496,13 +498,15 @@ describe('ProgressModal — brand branch state transitions', () => {
     })
 
     expect(body.text()).toContain('Downloading ComfyUI…')
-    // Substatus: `formattedSubStatus` locale-groups byte counts >= 4 digits
-    // (`2100 MB` → `2,100 MB`); `1050` stays since it's followed by `/`.
-    expect(body.exists('.brand-progress__substatus')).toBe(true)
-    const subText = body.selectorText('.brand-progress__substatus')
-    expect(subText).toContain('1050 / 2,100 MB')
-    expect(subText).toContain('22 MB/s')
-    expect(subText).toContain('~1m remaining')
+    // Stepped ops show the rich detail inside the active focus-stepper row.
+    // `formattedSubStatus` locale-groups byte counts >= 4 digits (`2100 MB`
+    // → `2,100 MB`); `1050` stays since it's followed by `/`.
+    const detail = body.selectorText('.bpv__detail')
+    expect(detail).toContain('1050 / 2,100 MB')
+    expect(detail).toContain('22 MB/s')
+    expect(detail).toContain('~1m remaining')
+    // The flat substatus line is suppressed when step rows render.
+    expect(body.exists('.brand-progress__substatus')).toBe(false)
   })
 })
 
@@ -526,18 +530,21 @@ describe('ProgressModal — unified bar (install→launch chained 0→100)', () 
     return m ? Number(m[1]) : NaN
   }
 
-  it('caps unifiedPercent at 70% for a chainSpan=install op even at 100% real progress', async () => {
-    // The install leg maps its 0→100% into the bar's 0–70% slot, leaving
-    // 30% for launch so the bar doesn't saturate mid-install.
-    await mountWithOp('inst-chain-install', {
-      opKind: 'install',
-      chainSpan: 'install',
-      steps: [{ phase: 'download', label: 'Download' }],
-      activePhase: 'download',
-      activePercent: 100,
-      _globalFloor: 100,
+  it('a chained launch leg starts the bar at ~70% (prior install leg done)', async () => {
+    // The bar is now ONE continuous 0→100 across the chain: the completed
+    // install leg occupies the first 70% (PRIOR_FRACTION), so the launch leg
+    // begins at ~70 and fills the remaining 30 — no discontinuity, one bar.
+    await mountWithOp('inst-chain-launch', {
+      opKind: 'launch',
+      chainSpan: 'launch',
+      priorSteps: [{ phase: 'download', label: 'Download' }],
+      steps: [{ phase: 'launchStart', label: 'launchStart' }],
+      activePhase: 'launchStart',
+      activePercent: -1,
     })
-    expect(barPercent()).toBeCloseTo(70, 1)
+    await flushPromises()
+    expect(barPercent()).toBeGreaterThanOrEqual(70)
+    expect(barPercent()).toBeLessThan(75)
   })
 
   it('renders the unified bar for launch ops (no separate stepper)', async () => {
@@ -551,50 +558,69 @@ describe('ProgressModal — unified bar (install→launch chained 0→100)', () 
     expect(body.exists('.brand-progress__bar-fill')).toBe(true)
   })
 
-  it('starts a chainSpan=launch op in the 70% region', async () => {
-    // Launch leg → 70 + launchPercent*0.3; at start launchPercent ~= 0,
-    // so the bar reads ~70% with no discontinuity from install.
-    await mountWithOp('inst-chain-launch', {
+  it('a standalone launch (no prior leg) spans the full bar from ~0', async () => {
+    // Direct launch (not chained from an install) owns 0→100 on its own, so
+    // the first phase starts the bar low, not at 70.
+    await mountWithOp('inst-standalone-launch', {
       opKind: 'launch',
-      chainSpan: 'launch',
+      steps: [
+        { phase: 'launchStart', label: 'launchStart', weight: 0.05 },
+        { phase: 'gpu', label: 'gpu', weight: 0.5 },
+      ],
+      activePhase: 'launchStart',
+      activePercent: -1,
     })
-    expect(barPercent()).toBeGreaterThanOrEqual(70)
-    expect(barPercent()).toBeLessThan(75)
-  })
-
-  it('rolls launchCaption through phases on the 900ms caption timer', async () => {
-    // Each 900ms tick bumps captionFloor by 1 so every narrative phase gets
-    // airtime even when stdout races ahead.
-    const { body } = await mountWithOp('inst-launch-roll', { opKind: 'launch' })
-
-    expect(body.selectorText('.brand-progress__caption')).toContain('security')
-    vi.advanceTimersByTime(900 + 50)
     await flushPromises()
-    expect(body.selectorText('.brand-progress__caption')).toMatch(/mount|librar/i)
+    expect(barPercent()).toBeLessThan(20)
   })
 
-  it('snaps unifiedPercent toward 100 for chainSpan=launch when stdout signals server-ready', async () => {
-    // The snap-to-100 fires only when both `launchActiveIndex === 4` and
-    // `stdoutStep === 4`. The 1-per-tick clamp means captionFloor must
-    // catch up first, so advance the timer before injecting the stdout
-    // signal (mutating after mount mirrors production's IPC chunks).
+  it('drives the launch caption from the real active phase (no timer)', async () => {
+    // Launch is now a log-driven stepped op: the caption is the active
+    // phase's curated label, set by main, not a 900ms narrative timer.
+    const { body } = await mountWithOp('inst-launch-roll', {
+      opKind: 'launch',
+      steps: [
+        { phase: 'securityScan', label: 'securityScan', weight: 0.05 },
+        { phase: 'gpu', label: 'gpu', weight: 0.5 },
+      ],
+      activePhase: 'gpu',
+      activePercent: -1,
+    })
+    // Stepped launch ops surface the active phase in the focus stepper, not the caption.
+    expect(body.selectorText('.bpv__row.is-active .bpv__label')).toMatch(/GPU/i)
+    expect(body.exists('.bpv__row')).toBe(true)
+  })
+
+  it('renders an injected torchRepair pre-launch step with its curated label', async () => {
+    // The v1.13.0 GPU-PyTorch repair is a first-class launch step (not a flat
+    // `setup` status): it leads the stepper with "Restoring GPU PyTorch…".
+    const { body } = await mountWithOp('inst-torch-repair', {
+      opKind: 'launch',
+      steps: [
+        { phase: 'torchRepair', label: 'torchRepair', weight: 0.1 },
+        { phase: 'launchStart', label: 'launchStart', weight: 0.05 },
+        { phase: 'gpu', label: 'gpu', weight: 0.5 },
+      ],
+      activePhase: 'torchRepair',
+      activePercent: -1,
+    })
+    expect(body.selectorText('.bpv__row.is-active .bpv__label')).toBe('Restoring GPU PyTorch…')
+  })
+
+  it('caps the bar below 100 while running, reaching 100 only on finish', async () => {
+    // Honest model: the bar moves only on real milestones and NEVER reads 100
+    // while still running — even the final phase at 100% of its slot caps at
+    // 99 until the op actually finishes (then the success branch returns 100).
     await mountWithOp('inst-launch-ready', {
       opKind: 'launch',
-      chainSpan: 'launch',
-      terminalOutput: '',
+      steps: [{ phase: 'startingServer', label: 'startingServer' }],
+      activePhase: 'startingServer',
+      activePercent: 100,
+      _globalFloor: 0,
     })
-    // Five ticks → captionFloor reaches 4.
-    vi.advanceTimersByTime(900 * 5 + 100)
     await flushPromises()
-    // Server-ready signal flips stdoutStep to 4 → unifiedPercent = 100.
-    const store = useProgressStore()
-    const op = store.operations.get('inst-launch-ready')!
-    op.terminalOutput = 'Uvicorn running on http://127.0.0.1:8188\n'
-    await flushPromises()
-    // One launch-percent tick so the bar catches the new active index.
-    vi.advanceTimersByTime(300)
-    await flushPromises()
-    expect(barPercent()).toBeCloseTo(100, 1)
+    expect(barPercent()).toBeLessThanOrEqual(99)
+    expect(barPercent()).toBeGreaterThan(90)
   })
 
   it('uses friendlyCaption (not launchCaption) for non-launch ops', async () => {
@@ -604,11 +630,11 @@ describe('ProgressModal — unified bar (install→launch chained 0→100)', () 
       activePhase: 'download',
       activePercent: 40,
     })
-    // Install op with `activePhase=download` shows the curated
-    // `progress.phaseLabel.download`, not the launch rolling caption.
-    const caption = body.selectorText('.brand-progress__caption')
-    expect(caption).toContain('Downloading')
-    expect(caption).not.toMatch(/security scan|mount.*librar/i)
+    // Install op with `activePhase=download` shows the curated label in the
+    // focus stepper, not the launch rolling caption.
+    const label = body.selectorText('.bpv__row.is-active .bpv__label')
+    expect(label).toContain('Downloading')
+    expect(label).not.toMatch(/security scan|mount.*librar/i)
   })
 })
 

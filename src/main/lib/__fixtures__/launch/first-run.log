@@ -1,0 +1,116 @@
+setup plugin alembic.autogenerate.schemas
+setup plugin alembic.autogenerate.tables
+setup plugin alembic.autogenerate.types
+
+setup plugin alembic.autogenerate.constraints
+setup plugin alembic.autogenerate.defaults
+setup plugin alembic.autogenerate.comments
+
+Could not autodetect AIMDO implementation, assuming Nvidia
+
+comfy-aimdo unsupported operating system: Darwin
+NOTE: comfy-aimdo currently only supports Windows and Linux
+
+Adding extra search path custom_nodes /Users/maanilverma/Documents/ComfyUI/custom_nodes
+Adding extra search path download_model_base /Users/maanilverma/Documents/ComfyUI/models
+Adding extra search path custom_nodes /Applications/ComfyUI.app/Contents/Resources/ComfyUI/custom_nodes
+
+Setting output directory to: /Users/maanilverma/Documents/ComfyUI/output
+Setting input directory to: /Users/maanilverma/Documents/ComfyUI/input
+Setting user directory to: /Users/maanilverma/Documents/ComfyUI/user
+
+[START] Security scan
+[DONE] Security scan
+** ComfyUI startup time: 2026-05-15 18:50:07.551
+
+** Platform: Darwin
+** Python version: 3.12.11 (main, Aug 18 2025, 19:02:39) [Clang 20.1.4 ]
+** Python executable: /Users/maanilverma/Documents/ComfyUI/.venv/bin/python
+** ComfyUI Path: /Applications/ComfyUI.app/Contents/Resources/ComfyUI
+** ComfyUI Base Folder Path: /Applications/ComfyUI.app/Contents/Resources/ComfyUI
+** User directory: /Users/maanilverma/Documents/ComfyUI/user
+** ComfyUI-Manager config path: /Users/maanilverma/Documents/ComfyUI/user/__manager/config.ini
+** Log path: /Users/maanilverma/Documents/ComfyUI/user/comfyui.log
+
+[ComfyUI-Manager] Skipped fixing the 'comfyui-frontend-package' dependency because the ComfyUI is outdated.
+
+[PRE] ComfyUI-Manager
+
+Found comfy_kitchen backend eager: {'available': True, 'disabled': False, 'unavailable_reason': None, 'capabilities': ['apply_rope', 'apply_rope1', 'dequantize_mxfp8', 'dequantize_nvfp4', 'dequantize_per_tensor_fp8', 'quantize_mxfp8', 'quantize_nvfp4', 'quantize_per_tensor_fp8', 'scaled_mm_mxfp8', 'scaled_mm_nvfp4']}
+Found comfy_kitchen backend cuda: {'available': False, 'disabled': True, 'unavailable_reason': 'Extension file not found: /Users/maanilverma/Documents/ComfyUI/.venv/lib/python3.12/site-packages/comfy_kitchen/backends/cuda/_C.abi3.so', 'capabilities': []}
+
+Found comfy_kitchen backend triton: {'available': False, 'disabled': True, 'unavailable_reason': "ImportError: No module named 'triton'", 'capabilities': []}
+
+Checkpoint files will always be loaded safely.
+
+Total VRAM 24576 MB, total RAM 24576 MB
+
+pytorch version: 2.10.0
+
+Mac Version (26, 2)
+
+Set vram state to: SHARED
+Device: mps
+
+Using sub quadratic optimization for attention, if you have memory or speed issues try using: --use-split-cross-attention
+
+Python version: 3.12.11 (main, Aug 18 2025, 19:02:39) [Clang 20.1.4 ]
+
+ComfyUI version: 0.21.1
+comfy-aimdo version: 0.3.0
+comfy-kitchen version: 0.2.8
+[Prompt Server] web root: /Applications/ComfyUI.app/Contents/Resources/ComfyUI/web_custom_versions/desktop_app
+
+Asset seeder disabled
+
+[START] ComfyUI-Manager
+
+[ComfyUI-Manager] Using GitPython backend
+
+[ComfyUI-Manager] network_mode: public
+
+[ComfyUI-Manager] The matrix sharing feature has been disabled because the `matrix-nio` dependency is not installed.
+	To use this feature, please run the following command:
+	/Users/maanilverma/Documents/ComfyUI/.venv/bin/python -m pip install matrix-nio
+
+
+
+Import times for custom nodes:
+   0.0 seconds: /Applications/ComfyUI.app/Contents/Resources/ComfyUI/custom_nodes/websocket_image_save.py
+
+
+
+Context impl SQLiteImpl.
+
+Will assume non-transactional DDL.
+
+Context impl SQLiteImpl.
+
+Will assume non-transactional DDL.
+
+Running upgrade  -> 0001_assets, Initial assets schema
+Revision ID: 0001_assets
+Revises: None
+Create Date: 2025-12-10 00:00:00
+
+Running upgrade 0001_assets -> 0002_merge_to_asset_references, Merge AssetInfo and AssetCacheState into unified asset_references table.
+
+Running upgrade 0002_merge_to_asset_references -> 0003_add_metadata_job_id, Add system_metadata and job_id columns to asset_references.
+Change preview_id FK from assets.id to asset_references.id.
+
+Database upgraded from None to 0003_add_metadata_job_id
+
+Starting server
+
+
+To see the GUI go to: http://127.0.0.1:8000
+
+FETCH ComfyRegistry Data [DONE]
+
+[ComfyUI-Manager] default cache updated: https://api.comfy.org/nodes
+
+FETCH DATA from: /Users/maanilverma/Documents/ComfyUI/user/__manager/cache/1514988643_custom-node-list.json
+ [DONE]
+
+[ComfyUI-Manager] All startup tasks have been completed.
+

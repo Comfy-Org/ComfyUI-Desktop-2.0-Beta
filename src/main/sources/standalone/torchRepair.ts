@@ -250,7 +250,9 @@ export async function repairTorch(
       return { ok: false, message: 'bundle contains no PyTorch package' }
     }
 
-    tools.sendProgress('setup', { percent: -1, status: 'Restoring GPU PyTorch…' })
+    // Drives the synthetic `torchRepair` launch step (label carries the copy);
+    // the caller emits the steps payload before this runs. See `handleLaunch`.
+    tools.sendProgress('torchRepair', { percent: -1 })
     await copyTorchFamily(srcSite, dstSite, tools.signal)
 
     // Verify only the mechanics: the venv's torch version now matches the

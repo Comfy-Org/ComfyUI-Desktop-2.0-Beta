@@ -146,7 +146,14 @@ export async function postInstall(installation: InstallationRecord, { sendProgre
     if (signal?.aborted) throw new Error('Cancelled')
     const channel: 'stable' | 'latest' =
       (installation.updateChannel as 'stable' | 'latest' | undefined) ?? 'stable'
-    const channelLabel = channel === 'latest' ? 'latest version' : 'latest stable version'
+    // The wizard's version picker pins an explicit stable tag for the install.
+    // When set, the post-install update checks out that tag instead of
+    // resolving the channel head, so the user lands on the version they
+    // picked even if a newer one shipped between selection and download.
+    const pickedTag = installation.comfyVersionTag as string | undefined
+    const channelLabel = pickedTag
+      ? `ComfyUI ${pickedTag}`
+      : channel === 'latest' ? 'latest version' : 'latest stable version'
     sendProgress('update', { percent: -1, status: `Fetching ${channelLabel}` })
 
     try {
@@ -157,18 +164,20 @@ export async function postInstall(installation: InstallationRecord, { sendProgre
       const latestTag = latestRelease?.tag_name as string | undefined
       const current = installation.comfyVersion as ComfyVersion | undefined
       const onLatestTag = !!latestTag && tagsEqual(current?.baseTag, latestTag) && current?.commitsAhead === 0
+      const onPickedTag = !!pickedTag && tagsEqual(current?.baseTag, pickedTag) && current?.commitsAhead === 0
 
-      if (!latestTag) {
+      if (!latestTag && !pickedTag) {
         // A network flake must not masquerade as "up to date" — that stranded
         // first installs on the bundled version.
         sendProgress('update', { percent: 100, status: `Skipped — could not verify ${channelLabel}` })
-      } else if (onLatestTag) {
+      } else if (pickedTag ? onPickedTag : onLatestTag) {
         sendProgress('update', { percent: 100, status: 'Already up to date' })
       } else {
         const result = await runComfyUIUpdate({
           installPath: installation.installPath,
           installation,
           channel,
+          ...(pickedTag ? { targetTag: pickedTag } : {}),
           update,
           sendProgress: sendProgress as (step: string, data: Record<string, unknown>) => void,
           signal,

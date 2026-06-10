@@ -178,15 +178,25 @@ function onWindowChange(): void {
   if (open.value) updatePosition()
 }
 
+function onWindowBlur(): void {
+  // Close on focus loss to another window (e.g. clicking out of the IPP).
+  // The document `pointerdown` listener doesn't catch that because the
+  // click lands in a different WebContents — the dropdown would otherwise
+  // stay open and resurface when the user returns.
+  if (open.value) closePanel(false)
+}
+
 watch(open, (isOpen) => {
   if (isOpen) {
     document.addEventListener('pointerdown', onDocPointer, true)
     window.addEventListener('resize', onWindowChange)
     window.addEventListener('scroll', onWindowChange, true)
+    window.addEventListener('blur', onWindowBlur)
   } else {
     document.removeEventListener('pointerdown', onDocPointer, true)
     window.removeEventListener('resize', onWindowChange)
     window.removeEventListener('scroll', onWindowChange, true)
+    window.removeEventListener('blur', onWindowBlur)
   }
 })
 
