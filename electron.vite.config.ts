@@ -54,7 +54,8 @@ export default defineConfig({
     },
     resolve: {
       alias: {
-        '@renderer': resolve('src/renderer/src')
+        '@renderer': resolve('src/renderer/src'),
+        '@locales': resolve('locales')
       }
     },
     plugins: [vue(), tailwindcss()]

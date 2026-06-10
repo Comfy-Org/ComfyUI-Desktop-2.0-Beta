@@ -17,11 +17,13 @@
     "jsx": "preserve",
     "baseUrl": ".",
     "paths": {
-      "@renderer/*": ["src/renderer/src/*"]
+      "@renderer/*": ["src/renderer/src/*"],
+      "@locales/*": ["locales/*"]
     },
     "types": ["vitest/globals"]
   },
   "include": [
-    "src/**/*.test.ts"
+    "src/**/*.test.ts",
+    "locales/*.json"
   ]
 }
