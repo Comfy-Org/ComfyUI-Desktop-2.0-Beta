@@ -1114,6 +1114,7 @@ export function isPygit2AuthFailure(result: ProcessResult): boolean {
  * system git is available, in which case the original pygit2 result is returned.
  */
 async function withSystemGitFallback(
+  op: string,
   pygit2Op: () => Promise<ProcessResult>,
   systemGitOp: () => Promise<ProcessResult>,
   sendOutput: (text: string) => void
@@ -1121,6 +1122,12 @@ async function withSystemGitFallback(
   const result = await pygit2Op()
   if (!isPygit2AuthFailure(result) || isForcePygit2()) return result
   if (!(await isSystemGitAvailable())) return result
+  // Measures how often the auth-failure fallback actually fires (e.g. corporate
+  // git configs that rewrite GitHub HTTPS to SSH, which bundled pygit2 can't use).
+  telemetry.emit('comfy.desktop.git.system_fallback', {
+    op,
+    error_bucket: telemetry.bucketError(result.stderr)
+  })
   sendOutput(
     '\npygit2 could not authenticate (your git config likely rewrites GitHub ' +
       'HTTPS to SSH, which the bundled pygit2 cannot use); retrying with system git…\n'
@@ -1144,6 +1151,7 @@ export function gitClone(
   if (isPygit2Configured()) {
     const runPygit2Spawn = makeRunPygit2(sendOutput, signal)
     return withSystemGitFallback(
+      'clone',
       () => runPygit2Spawn(['clone', url, dest]),
       systemGitClone,
       sendOutput
@@ -1192,6 +1200,7 @@ export function gitCheckoutCommit(
   if (isPygit2Configured()) {
     const runPygit2Spawn = makeRunPygit2(sendOutput, signal)
     return withSystemGitFallback(
+      'checkout',
       () => runPygit2Spawn(['checkout', repoPath, commit]),
       systemGitCheckout,
       sendOutput
@@ -1270,6 +1279,7 @@ export function gitFetchAndCheckout(
   if (isPygit2Configured()) {
     const runPygit2Spawn = makeRunPygit2(sendOutput, signal)
     return withSystemGitFallback(
+      'fetch-and-checkout',
       () => runPygit2Spawn(['fetch-and-checkout', repoPath, commit]),
       systemGitFetchAndCheckout,
       sendOutput
