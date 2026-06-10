@@ -66,6 +66,25 @@ except (ImportError, AttributeError):
 # Helpers
 # ---------------------------------------------------------------------------
 
+# Snapshot of the user's global `http.proxy` (captured before the config
+# search path is blanked) so corporate proxy settings survive and can be
+# passed explicitly to fetch/clone. None means "no proxy".
+HTTP_PROXY = None
+
+
+def read_global_http_proxy():
+    """Return the user's global `http.proxy` setting, or None."""
+    try:
+        cfg = pygit2.Config.get_global_config()
+    except Exception:
+        return None
+    try:
+        value = cfg["http.proxy"]
+    except (KeyError, Exception):
+        return None
+    return value or None
+
+
 def harden_pygit2_config():
     """Ignore system/global/XDG git config for libgit2 operations.
 
@@ -73,9 +92,15 @@ def harden_pygit2_config():
     user's global git config can carry `insteadOf` rewrites (e.g.
     https->ssh) or credential helpers that force authentication, which
     libgit2 cannot satisfy without a credentials callback ("authentication
-    required but no callback set"). Blanking the config search path keeps
-    our operations hermetic.
+    required but no callback set"). The bundled pygit2 has no SSH transport,
+    so an SSH rewrite can never succeed; blanking the config search path
+    keeps our operations on anonymous HTTPS.
+
+    The global `http.proxy` is snapshotted into HTTP_PROXY first so a
+    corporate proxy is preserved and re-applied explicitly on fetch/clone.
     """
+    global HTTP_PROXY
+    HTTP_PROXY = read_global_http_proxy()
     try:
         from pygit2.enums import ConfigLevel
         levels = [ConfigLevel.SYSTEM, ConfigLevel.XDG, ConfigLevel.GLOBAL]
@@ -414,6 +439,7 @@ def cmd_fetch_tags(repo_path):
         origin.fetch(
             ["+refs/tags/*:refs/tags/*"],
             depth=0,  # unshallow
+            proxy=HTTP_PROXY,
         )
         print("Fetched tags (unshallowed).", file=sys.stderr)
         return
@@ -422,7 +448,7 @@ def cmd_fetch_tags(repo_path):
 
     # Fall back to regular tag fetch
     try:
-        origin.fetch(["+refs/tags/*:refs/tags/*"])
+        origin.fetch(["+refs/tags/*:refs/tags/*"], proxy=HTTP_PROXY)
         print("Fetched tags.", file=sys.stderr)
         return
     except Exception as e:
@@ -459,21 +485,21 @@ def cmd_fetch_commit(repo_path, sha):
     # delivers what we asked for (GitHub honours this via
     # allow-reachable-sha1-in-want).
     try:
-        origin.fetch([sha])
+        origin.fetch([sha], proxy=HTTP_PROXY)
     except Exception as e:
         last_error = e
         # Fallback: unshallow so the full default-branch history is
         # local.  Slower but works when the server rejects single-SHA
         # fetches or pygit2/libgit2 can't construct the refspec.
         try:
-            origin.fetch(depth=0)
+            origin.fetch(depth=0, proxy=HTTP_PROXY)
         except Exception as e2:
             last_error = e2
             # Final fallback: plain default-refspec fetch.  Doesn't
             # guarantee the SHA arrives, but no worse than the previous
             # behaviour — the post-fetch verification below catches it.
             try:
-                origin.fetch()
+                origin.fetch(proxy=HTTP_PROXY)
             except Exception as e3:
                 last_error = e3
 
@@ -540,7 +566,7 @@ def cmd_clone(url, dest):
                     _format_bytes(stats.received_bytes)),
                     file=sys.stderr)
 
-        pygit2.clone_repository(url, dest, callbacks=Progress())
+        pygit2.clone_repository(url, dest, callbacks=Progress(), proxy=HTTP_PROXY)
         print("Download complete.", file=sys.stderr)
     except Exception as e:
         print("Error: clone failed: %s" % e, file=sys.stderr)
@@ -618,12 +644,12 @@ def _ensure_commit_local(repo, commit):
         last_error = e
         # Fallback: unshallow so the full default-branch history is local.
         try:
-            origin.fetch(depth=0)
+            origin.fetch(depth=0, proxy=HTTP_PROXY)
         except Exception as e2:
             last_error = e2
             # Final fallback: plain default-refspec fetch.
             try:
-                origin.fetch()
+                origin.fetch(proxy=HTTP_PROXY)
             except Exception as e3:
                 last_error = e3
 
@@ -708,10 +734,10 @@ def cmd_fetch_and_checkout(repo_path, commit):
 
     # Try unshallow first, fall back to regular fetch
     try:
-        origin.fetch(refspecs, depth=0)
+        origin.fetch(refspecs, depth=0, proxy=HTTP_PROXY)
     except Exception:
         try:
-            origin.fetch(refspecs)
+            origin.fetch(refspecs, proxy=HTTP_PROXY)
         except Exception as e:
             print("Error: failed to fetch from origin: %s" % e, file=sys.stderr)
             sys.exit(1)
@@ -775,7 +801,7 @@ def cmd_ls_remote_tags(url):
         repo = pygit2.init_repository(tmpdir, bare=True)
         remote = repo.remotes.create_anonymous(url)
         try:
-            heads = remote.list_heads()
+            heads = remote.list_heads(proxy=HTTP_PROXY)
         except AttributeError:
             heads = remote.ls_remotes()
 
@@ -806,7 +832,7 @@ def cmd_ls_remote_ref(url, ref):
         repo = pygit2.init_repository(tmpdir, bare=True)
         remote = repo.remotes.create_anonymous(url)
         try:
-            heads = remote.list_heads()
+            heads = remote.list_heads(proxy=HTTP_PROXY)
         except AttributeError:
             heads = remote.ls_remotes()
         for head in heads:

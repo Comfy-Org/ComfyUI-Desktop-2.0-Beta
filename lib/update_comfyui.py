@@ -20,6 +20,23 @@ from datetime import datetime
 import sys
 
 
+def read_global_http_proxy():
+    """Return the user's global `http.proxy` setting, or None.
+
+    Read before the config search path is blanked so corporate proxy
+    settings survive and can be passed explicitly to fetch/clone.
+    """
+    try:
+        cfg = pygit2.Config.get_global_config()
+    except Exception:
+        return None
+    try:
+        value = cfg["http.proxy"]
+    except (KeyError, Exception):
+        return None
+    return value or None
+
+
 def harden_pygit2_config():
     """Ignore system/global/XDG git config for libgit2 operations.
 
@@ -27,10 +44,15 @@ def harden_pygit2_config():
     global git config can carry `insteadOf` rewrites (e.g. https->ssh) or
     credential helpers that force authentication, which libgit2 cannot
     satisfy without a credentials callback ("authentication required but no
-    callback set"). Blanking the config search path keeps our operations
-    hermetic. We supply our own commit Signature, so dropping global
-    user.name/email has no effect here.
+    callback set"). The bundled pygit2 has no SSH transport, so an SSH
+    rewrite can never succeed; blanking the config search path keeps our
+    operations on anonymous HTTPS. We supply our own commit Signature, so
+    dropping global user.name/email has no effect here.
+
+    Returns the snapshotted `http.proxy` value (or None) so corporate proxy
+    config is preserved and re-applied explicitly on fetch/clone.
     """
+    proxy = read_global_http_proxy()
     try:
         from pygit2.enums import ConfigLevel
         levels = [ConfigLevel.SYSTEM, ConfigLevel.XDG, ConfigLevel.GLOBAL]
@@ -45,6 +67,7 @@ def harden_pygit2_config():
             pygit2.settings.search_path[level] = ""
         except Exception:
             pass
+    return proxy
 
 
 def to_https_url(url):
@@ -86,7 +109,7 @@ def main():
     stable = "--stable" in sys.argv
 
     pygit2.option(pygit2.GIT_OPT_SET_OWNER_VALIDATION, 0)
-    harden_pygit2_config()
+    http_proxy = harden_pygit2_config()
 
     git_dir = os.path.join(repo_path, '.git')
 
@@ -159,7 +182,7 @@ def main():
                 "+refs/tags/*:refs/tags/*",
             ]
             try:
-                remote.fetch(refspecs)
+                remote.fetch(refspecs, proxy=http_proxy or None)
             except Exception as e:
                 print("[ERROR] Failed to fetch from origin: %s" % e)
                 if "callback" in str(e) or "authentication" in str(e).lower():
