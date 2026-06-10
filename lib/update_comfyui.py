@@ -14,9 +14,53 @@ Outputs structured markers that the launcher can parse:
 """
 
 import os
+import re
 import pygit2
 from datetime import datetime
 import sys
+
+
+def harden_pygit2_config():
+    """Ignore system/global/XDG git config for libgit2 operations.
+
+    The launcher manages anonymous HTTPS clones of public repos. A user's
+    global git config can carry `insteadOf` rewrites (e.g. https->ssh) or
+    credential helpers that force authentication, which libgit2 cannot
+    satisfy without a credentials callback ("authentication required but no
+    callback set"). Blanking the config search path keeps our operations
+    hermetic. We supply our own commit Signature, so dropping global
+    user.name/email has no effect here.
+    """
+    try:
+        from pygit2.enums import ConfigLevel
+        levels = [ConfigLevel.SYSTEM, ConfigLevel.XDG, ConfigLevel.GLOBAL]
+    except (ImportError, AttributeError):
+        levels = [
+            pygit2.GIT_CONFIG_LEVEL_SYSTEM,
+            pygit2.GIT_CONFIG_LEVEL_XDG,
+            pygit2.GIT_CONFIG_LEVEL_GLOBAL,
+        ]
+    for level in levels:
+        try:
+            pygit2.settings.search_path[level] = ""
+        except Exception:
+            pass
+
+
+def to_https_url(url):
+    """Rewrite an SSH-form git URL to its anonymous HTTPS equivalent.
+
+    Handles `git@host:owner/repo(.git)` and `ssh://git@host/owner/repo(.git)`.
+    Returns the URL unchanged if it is not SSH-form. Used so launcher-managed
+    clones of public repos never require SSH credentials even when a repo's
+    own config stores an SSH origin (e.g. a legacy-desktop clone).
+    """
+    if not url:
+        return url
+    m = re.match(r"^(?:ssh://)?git@([^:/]+)[:/](.+)$", url)
+    if m:
+        return "https://%s/%s" % (m.group(1), m.group(2))
+    return url
 
 
 def find_latest_stable_tag(repo):
@@ -42,6 +86,7 @@ def main():
     stable = "--stable" in sys.argv
 
     pygit2.option(pygit2.GIT_OPT_SET_OWNER_VALIDATION, 0)
+    harden_pygit2_config()
 
     git_dir = os.path.join(repo_path, '.git')
 
@@ -104,6 +149,11 @@ def main():
     print("Fetching from origin…")
     for remote in repo.remotes:
         if remote.name == "origin":
+            # Force anonymous HTTPS so a stored SSH origin can't demand creds.
+            https_url = to_https_url(remote.url)
+            if https_url != remote.url:
+                repo.remotes.set_url("origin", https_url)
+                remote = repo.remotes["origin"]
             refspecs = [
                 "+refs/heads/master:refs/remotes/origin/master",
                 "+refs/tags/*:refs/tags/*",
@@ -112,7 +162,13 @@ def main():
                 remote.fetch(refspecs)
             except Exception as e:
                 print("[ERROR] Failed to fetch from origin: %s" % e)
-                print("Check your internet connection and try again.")
+                if "callback" in str(e) or "authentication" in str(e).lower():
+                    print("Git authentication was required for an anonymous "
+                          "fetch. This usually means your git config rewrites "
+                          "GitHub HTTPS URLs to SSH; the updater fetches over "
+                          "anonymous HTTPS and cannot use SSH credentials.")
+                else:
+                    print("Check your internet connection and try again.")
                 sys.exit(1)
             break
 

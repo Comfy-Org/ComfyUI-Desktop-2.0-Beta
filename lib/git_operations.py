@@ -26,6 +26,7 @@ Subcommands:
 """
 
 import os
+import re
 import sys
 import time
 from collections import deque
@@ -64,6 +65,48 @@ except (ImportError, AttributeError):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def harden_pygit2_config():
+    """Ignore system/global/XDG git config for libgit2 operations.
+
+    These commands operate on anonymous HTTPS clones of public repos. A
+    user's global git config can carry `insteadOf` rewrites (e.g.
+    https->ssh) or credential helpers that force authentication, which
+    libgit2 cannot satisfy without a credentials callback ("authentication
+    required but no callback set"). Blanking the config search path keeps
+    our operations hermetic.
+    """
+    try:
+        from pygit2.enums import ConfigLevel
+        levels = [ConfigLevel.SYSTEM, ConfigLevel.XDG, ConfigLevel.GLOBAL]
+    except (ImportError, AttributeError):
+        levels = [
+            pygit2.GIT_CONFIG_LEVEL_SYSTEM,
+            pygit2.GIT_CONFIG_LEVEL_XDG,
+            pygit2.GIT_CONFIG_LEVEL_GLOBAL,
+        ]
+    for level in levels:
+        try:
+            pygit2.settings.search_path[level] = ""
+        except Exception:
+            pass
+
+
+def to_https_url(url):
+    """Rewrite an SSH-form git URL to its anonymous HTTPS equivalent.
+
+    Handles `git@host:owner/repo(.git)` and `ssh://git@host/owner/repo(.git)`.
+    Returns the URL unchanged if it is not SSH-form, so launcher-managed
+    clones of public repos never require SSH credentials even when a repo's
+    own config stores an SSH origin.
+    """
+    if not url:
+        return url
+    m = re.match(r"^(?:ssh://)?git@([^:/]+)[:/](.+)$", url)
+    if m:
+        return "https://%s/%s" % (m.group(1), m.group(2))
+    return url
+
 
 def open_repo(repo_path):
     """Open a pygit2 Repository, mirroring update_comfyui.py patterns."""
@@ -161,9 +204,17 @@ def parse_version_tuple(tag_name):
 
 
 def get_origin(repo):
-    """Return the 'origin' remote, or exit with an error."""
+    """Return the 'origin' remote, or exit with an error.
+
+    Rewrites a stored SSH origin URL to anonymous HTTPS so fetches never
+    require SSH credentials.
+    """
     for remote in repo.remotes:
         if remote.name == "origin":
+            https_url = to_https_url(remote.url)
+            if https_url != remote.url:
+                repo.remotes.set_url("origin", https_url)
+                return repo.remotes["origin"]
             return remote
     print("Error: no 'origin' remote found", file=sys.stderr)
     sys.exit(1)
@@ -459,6 +510,7 @@ def cmd_clone(url, dest):
     (no carriage-return TTY tricks) and throttle to ~1 update per second
     so the UI doesn't get spammed.
     """
+    url = to_https_url(url)
     print("Downloading ComfyUI source from %s into %s ..." % (url, dest),
           file=sys.stderr)
     try:
@@ -492,6 +544,11 @@ def cmd_clone(url, dest):
         print("Download complete.", file=sys.stderr)
     except Exception as e:
         print("Error: clone failed: %s" % e, file=sys.stderr)
+        if "callback" in str(e) or "authentication" in str(e).lower():
+            print("Git authentication was required for an anonymous clone. "
+                  "This usually means your git config rewrites GitHub HTTPS "
+                  "URLs to SSH; the launcher clones over anonymous HTTPS and "
+                  "cannot use SSH credentials.", file=sys.stderr)
         sys.exit(1)
 
 
@@ -713,6 +770,7 @@ def cmd_ls_remote_tags(url):
     """
     import tempfile
 
+    url = to_https_url(url)
     with tempfile.TemporaryDirectory() as tmpdir:
         repo = pygit2.init_repository(tmpdir, bare=True)
         remote = repo.remotes.create_anonymous(url)
@@ -743,6 +801,7 @@ def cmd_ls_remote_ref(url, ref):
     """
     import tempfile
 
+    url = to_https_url(url)
     with tempfile.TemporaryDirectory() as tmpdir:
         repo = pygit2.init_repository(tmpdir, bare=True)
         remote = repo.remotes.create_anonymous(url)
@@ -787,6 +846,7 @@ Subcommands:
 
 if __name__ == "__main__":
     pygit2.option(pygit2.GIT_OPT_SET_OWNER_VALIDATION, 0)
+    harden_pygit2_config()
 
     if len(sys.argv) < 2:
         print(USAGE, file=sys.stderr)
