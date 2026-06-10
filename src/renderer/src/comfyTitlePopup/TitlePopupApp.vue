@@ -327,8 +327,13 @@ onMounted(() => {
   // WebContentsView is visible caused flicker on 2nd+ opens. Picker local
   // state persists across reopens; transient resets ride on the
   // activeInstallationId prop watcher in InstancePickerView.vue.
+  //
+  // Every reopen also clears any pending `useModal` / `useDialogs` entry —
+  // a confirm prompt left open when the user blurred the popup would
+  // otherwise resurface on top of the picker the next time it's shown,
+  // looking stuck (issue raised during version-picker review).
   unsubWillShow = bridge?.onWillShow(() => {
-    /* kept registered for forward compatibility */
+    dismissPickerModals()
   })
   unsubDismissModals = bridge?.onDismissModals(() => {
     dismissPickerModals()

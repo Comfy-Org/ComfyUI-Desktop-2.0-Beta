@@ -4,7 +4,14 @@ Launcher-owned ComfyUI updater using pygit2.
 Performs git operations only — no pip/uv installs, no self-update logic.
 The launcher handles requirements sync separately.
 
-Usage: python update_comfyui.py <repo_path> [--stable]
+Usage: python update_comfyui.py <repo_path> [--stable | --tag <vX.Y.Z>]
+
+Channel selection is mutually exclusive:
+  --stable       Check out the highest local vMAJOR.MINOR.PATCH tag.
+  --tag <ref>    Check out the specified tag (e.g. v1.19.4). Refuses any
+                 ref that doesn't look like a stable version tag, so a
+                 malformed argument can't drop the user onto an arbitrary
+                 commit.
 
 Outputs structured markers that the launcher can parse:
   [BACKUP_BRANCH] <name>
@@ -15,8 +22,15 @@ Outputs structured markers that the launcher can parse:
 
 import os
 import pygit2
+import re
 from datetime import datetime
 import sys
+
+
+# A strict vMAJOR.MINOR.PATCH gate keeps `--tag` from arbitrary-ref territory:
+# the launcher only ever passes user-selected stable release tags, and the
+# update flow assumes the checkout target is a tested release.
+_STABLE_TAG_RE = re.compile(r"^v\d+\.\d+\.\d+$")
 
 
 def find_latest_stable_tag(repo):
@@ -33,13 +47,32 @@ def find_latest_stable_tag(repo):
     return versions[-1][1] if versions else None
 
 
+def _parse_tag_arg(argv):
+    for i, arg in enumerate(argv):
+        if arg == "--tag" and i + 1 < len(argv):
+            return argv[i + 1]
+        if arg.startswith("--tag="):
+            return arg[len("--tag="):]
+    return None
+
+
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python update_comfyui.py <repo_path> [--stable]")
+        print("Usage: python update_comfyui.py <repo_path> [--stable | --tag <vX.Y.Z>]")
         sys.exit(1)
 
     repo_path = os.path.abspath(sys.argv[1].rstrip("/\\"))
     stable = "--stable" in sys.argv
+    explicit_tag = _parse_tag_arg(sys.argv)
+
+    if explicit_tag is not None:
+        if not _STABLE_TAG_RE.match(explicit_tag):
+            print("Error: --tag must be a stable release tag like v1.19.5 "
+                  "(got %r)" % explicit_tag)
+            sys.exit(2)
+        if stable:
+            print("Error: --tag and --stable are mutually exclusive")
+            sys.exit(2)
 
     pygit2.option(pygit2.GIT_OPT_SET_OWNER_VALIDATION, 0)
 
@@ -143,6 +176,21 @@ def main():
             print("[CHECKED_OUT_TAG] %s" % tag_name)
         else:
             print("No stable tags found, staying on master.")
+    elif explicit_tag is not None:
+        ref_name = "refs/tags/%s" % explicit_tag
+        try:
+            ref = repo.lookup_reference(ref_name)
+        except (KeyError, pygit2.GitError):
+            ref = None
+        if ref is None:
+            print("Error: tag %s not found in repository. The fetch step "
+                  "above pulls +refs/tags/*; if this persists the tag may "
+                  "have been deleted upstream or the remote is unreachable."
+                  % explicit_tag)
+            sys.exit(3)
+        print("Checking out tag: %s" % explicit_tag)
+        repo.checkout(ref)
+        print("[CHECKED_OUT_TAG] %s" % explicit_tag)
 
     # Emit post-update HEAD
     post_head = str(repo.head.target)

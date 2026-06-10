@@ -181,29 +181,10 @@ const installationsRef = toRef(() => installations.value)
 const {
   searchQuery,
   activeFilter,
-  cloudInstall,
   visibleInstalls,
-  showCloudCard,
   showEmptyHint,
   lastLaunchedShortLabel
 } = useInstallList({ installations: installationsRef })
-
-/** Folds cloud into the recency-sorted list (sorted by its own
- *  lastLaunchedAt). On a recency tie cloud is ordered first, but the
- *  auto-selected default still favours a real install (see
- *  `resolvePickerSelectedInstallId` in main). */
-const pickerRows = computed<Installation[]>(() => {
-  const rows = [...visibleInstalls.value]
-  if (showCloudCard.value && cloudInstall.value) {
-    rows.push(cloudInstall.value)
-  }
-  return rows.sort((a, b) => {
-    const ta = a.lastLaunchedAt ?? -Infinity
-    const tb = b.lastLaunchedAt ?? -Infinity
-    if (tb !== ta) return tb - ta
-    return (b.sourceCategory === 'cloud' ? 1 : 0) - (a.sourceCategory === 'cloud' ? 1 : 0)
-  })
-})
 
 const visibleChips = computed(() => {
   return FILTER_CHIPS.filter((chip) => {
@@ -218,21 +199,11 @@ const visibleChips = computed(() => {
   })
 })
 
-/** Default selection when the popup opens with no active/selected install.
- *  Tie-break mirrors main's `mostRecentlyLaunchedInstallId`: on a tie a real
- *  install wins so the always-seeded Cloud entry can't claim the default. */
+/** Default selection when the popup opens with no active/selected install. */
 function mostRecentInstallId(installs: PickerInstall[]): string | null {
   let best: PickerInstall | undefined
   for (const inst of installs) {
-    if (!best) {
-      best = inst
-      continue
-    }
-    const ts = inst.lastLaunchedAt ?? 0
-    const bestTs = best.lastLaunchedAt ?? 0
-    if (ts > bestTs) {
-      best = inst
-    } else if (ts === bestTs && best.sourceCategory === 'cloud' && inst.sourceCategory !== 'cloud') {
+    if (!best || (inst.lastLaunchedAt ?? 0) > (best.lastLaunchedAt ?? 0)) {
       best = inst
     }
   }
@@ -327,6 +298,20 @@ function isRowUpdateAvailable(inst: Installation): boolean {
 
 function handleSelect(inst: Installation): void {
   selectedId.value = inst.id
+}
+
+// FLIP: pin a leaving row's box so it fades out of flow while the survivors
+// slide up into the gap (mirrors ChooserView's `lockLeavingTileSize`).
+function lockLeavingRowSize(el: Element): void {
+  const node = el as HTMLElement
+  const list = node.parentElement
+  if (!list) return
+  const rect = node.getBoundingClientRect()
+  const listRect = list.getBoundingClientRect()
+  node.style.width = `${rect.width}px`
+  node.style.height = `${rect.height}px`
+  node.style.left = `${rect.left - listRect.left + list.scrollLeft}px`
+  node.style.top = `${rect.top - listRect.top + list.scrollTop}px`
 }
 
 function handleNewInstall(): void {
@@ -594,9 +579,15 @@ async function handleExpandedNav(decision: NavDecision): Promise<void> {
         <div class="picker-list-section">
           <div class="picker-list-section-title">{{ $t('instancePicker.instances') }}<InfoTooltip :text="$t('tooltips.instances')" side="bottom" /></div>
 
-          <div class="picker-list" role="listbox">
+          <TransitionGroup
+            tag="div"
+            name="picker-row"
+            class="picker-list"
+            role="listbox"
+            @before-leave="lockLeavingRowSize"
+          >
             <InstanceRow
-              v-for="inst in pickerRows"
+              v-for="inst in visibleInstalls"
               :key="inst.id"
               :installation="inst"
               :active="selectedId === inst.id"
@@ -609,10 +600,10 @@ async function handleExpandedNav(decision: NavDecision): Promise<void> {
               @select="handleSelect"
             />
 
-            <div v-if="showEmptyHint" class="picker-list-empty">
+            <div v-if="showEmptyHint" key="__empty" class="picker-list-empty">
               {{ $t('chooser.noMatches') }}
             </div>
-          </div>
+          </TransitionGroup>
         </div>
 
         <footer class="picker-left-footer">
@@ -848,12 +839,51 @@ async function handleExpandedNav(decision: NavDecision): Promise<void> {
   margin-bottom: 14px;
 }
 .picker-list {
+  position: relative;
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+/* Row FLIP: enter rises in, leave fades out of flow so survivors slide into the
+ * gap, move uses the app's iOS-derived curve. Transform/opacity only. Mirrors
+ * ChooserView's `tile` transition so list and dashboard motion stay consistent. */
+.picker-row-enter-active {
+  transition:
+    opacity 200ms ease,
+    transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.picker-row-enter-from {
+  opacity: 0;
+  transform: translateY(8px) scale(0.98);
+}
+.picker-row-leave-active {
+  transition:
+    opacity 140ms ease,
+    transform 140ms cubic-bezier(0.32, 0.72, 0, 1);
+  position: absolute;
+}
+.picker-row-leave-to {
+  opacity: 0;
+  transform: scale(0.98);
+}
+.picker-row-move {
+  transition: transform 220ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .picker-row-enter-active,
+  .picker-row-leave-active,
+  .picker-row-move {
+    /* Non-zero so Vue's transitionend cleanup still fires and leaving nodes get removed. */
+    transition-duration: 1ms;
+  }
+  .picker-row-enter-from,
+  .picker-row-leave-to {
+    transform: none;
+  }
 }
 .picker-list-empty {
   padding: 8px 18px;

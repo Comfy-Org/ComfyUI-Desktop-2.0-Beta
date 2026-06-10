@@ -428,6 +428,10 @@ export interface ProgressData {
 export interface ProgressStep {
   phase: string
   label: string
+  /** Share of the 0→100 bar this phase owns. When set on any step, the
+   *  renderer paces the bar from these (the producer is the single source of
+   *  truth); when absent it falls back to a curated weight table. */
+  weight?: number
 }
 
 // --- Event data types ---
@@ -1191,6 +1195,10 @@ export interface ElectronApi {
 
   // App
   getAppVersion(): Promise<string>
+  /** Every stable ComfyUI release tag, newest first. Returns `[]` when the
+   *  remote is unreachable. Used by the install-wizard version dropdown and
+   *  the per-install ChannelPicker. */
+  getStableTags(): Promise<string[]>
   /** Capacity-protection switch for Cloud entry points. Resolved at boot
    *  from the `desktop-cloud-capacity` PostHog flag (variants `normal` |
    *  `degraded` | `disabled`); defaults to `'normal'` when the flag is
@@ -1498,5 +1506,6 @@ export const PICKER_SETTINGS_CHANNELS = {
   previewDesktopMigration: 'comfy-titlepopup:picker-settings-preview-desktop-migration',
   previewLocalMigration: 'comfy-titlepopup:picker-settings-preview-local-migration',
   relaunchApp: 'comfy-titlepopup:picker-settings-relaunch-app',
-  getLocaleMessages: 'comfy-titlepopup:picker-settings-get-locale-messages'
+  getLocaleMessages: 'comfy-titlepopup:picker-settings-get-locale-messages',
+  getStableTags: 'comfy-titlepopup:picker-settings-get-stable-tags'
 } as const

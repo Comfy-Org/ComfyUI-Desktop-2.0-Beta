@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 vi.mock('./git', () => ({
   lsRemoteLatestTag: vi.fn(),
   lsRemoteRef: vi.fn(),
+  lsRemoteStableTags: vi.fn(),
   isPygit2Configured: vi.fn(() => false),
 }))
 
@@ -17,12 +18,18 @@ vi.mock('../settings', () => ({
   get: vi.fn(() => undefined),
 }))
 
-import { lsRemoteLatestTag, lsRemoteRef } from './git'
-import { fetchLatestRelease, getLatestStableTag, _clearLatestStableTagCache } from './comfyui-releases'
+import { lsRemoteLatestTag, lsRemoteRef, lsRemoteStableTags } from './git'
+import {
+  fetchLatestRelease,
+  getLatestStableTag,
+  getStableTags,
+  _clearLatestStableTagCache,
+} from './comfyui-releases'
 import * as settings from '../settings'
 
 const mockedLsRemoteLatestTag = vi.mocked(lsRemoteLatestTag)
 const mockedLsRemoteRef = vi.mocked(lsRemoteRef)
+const mockedLsRemoteStableTags = vi.mocked(lsRemoteStableTags)
 const mockedSettingsGet = vi.mocked(settings.get)
 
 beforeEach(() => {
@@ -215,5 +222,64 @@ describe('fetchLatestRelease', () => {
         'refs/heads/master'
       )
     })
+  })
+})
+
+describe('getStableTags', () => {
+  it('returns the full list from lsRemoteStableTags (newest first)', async () => {
+    mockedLsRemoteStableTags.mockResolvedValue(['v0.25.1', 'v0.25.0', 'v0.24.1', 'v0.24.0', 'v0.23.5'])
+    const tags = await getStableTags()
+    expect(tags).toEqual(['v0.25.1', 'v0.25.0', 'v0.24.1', 'v0.24.0', 'v0.23.5'])
+    expect(mockedLsRemoteStableTags).toHaveBeenCalledWith('https://github.com/Comfy-Org/ComfyUI.git')
+  })
+
+  it('returns [] (does not throw) when lsRemoteStableTags rejects', async () => {
+    mockedLsRemoteStableTags.mockRejectedValue(new Error('network down'))
+    const tags = await getStableTags()
+    expect(tags).toEqual([])
+  })
+
+  it('caches successful results across calls — second call does not re-fetch', async () => {
+    mockedLsRemoteStableTags.mockResolvedValueOnce(['v0.25.1', 'v0.25.0'])
+    await getStableTags()
+    await getStableTags()
+    expect(mockedLsRemoteStableTags).toHaveBeenCalledTimes(1)
+  })
+
+  it('caches failures briefly (returns the cached [] without re-hitting the network)', async () => {
+    mockedLsRemoteStableTags.mockResolvedValueOnce([])
+    await getStableTags()
+    await getStableTags()
+    expect(mockedLsRemoteStableTags).toHaveBeenCalledTimes(1)
+  })
+
+  it('refresh: true bypasses the cache', async () => {
+    mockedLsRemoteStableTags.mockResolvedValueOnce(['v0.25.1'])
+    mockedLsRemoteStableTags.mockResolvedValueOnce(['v0.25.2', 'v0.25.1'])
+    const first = await getStableTags()
+    const second = await getStableTags({ refresh: true })
+    expect(first).toEqual(['v0.25.1'])
+    expect(second).toEqual(['v0.25.2', 'v0.25.1'])
+    expect(mockedLsRemoteStableTags).toHaveBeenCalledTimes(2)
+  })
+
+  it('coalesces concurrent in-flight calls into a single fetch', async () => {
+    mockedLsRemoteStableTags.mockImplementation(
+      () => new Promise((resolve) => setTimeout(() => resolve(['v0.25.1']), 10))
+    )
+    const [a, b, c] = await Promise.all([getStableTags(), getStableTags(), getStableTags()])
+    expect(a).toEqual(['v0.25.1'])
+    expect(b).toEqual(['v0.25.1'])
+    expect(c).toEqual(['v0.25.1'])
+    expect(mockedLsRemoteStableTags).toHaveBeenCalledTimes(1)
+  })
+
+  it('routes through the Chinese mirror when useChineseMirrors is on', async () => {
+    mockedSettingsGet.mockImplementation((key: string) =>
+      key === 'useChineseMirrors' ? true : undefined
+    )
+    mockedLsRemoteStableTags.mockResolvedValue(['v0.25.1'])
+    await getStableTags()
+    expect(mockedLsRemoteStableTags).toHaveBeenCalledWith('https://gitcode.com/gh_mirrors/co/ComfyUI.git')
   })
 })

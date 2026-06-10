@@ -676,6 +676,63 @@ export function lsRemoteLatestTag(url: string): Promise<string | undefined> {
 }
 
 /**
+ * List every stable version tag from a remote URL via the Git protocol.
+ * Stable here means a strict `vMAJOR.MINOR.PATCH` shape — no rc / alpha /
+ * beta / build suffixes — so a tag like `v1.19.5-rc1` is excluded. Tags are
+ * returned sorted descending (newest first).
+ *
+ * The pygit2 fallback returns its own newest-first list (see `ls-remote-tags`
+ * in `git_operations.py`), but it isn't strict about the stable shape, so we
+ * filter on the JS side here too for parity.
+ *
+ * Returns an empty array on any failure; never throws.
+ */
+export function lsRemoteStableTags(url: string): Promise<string[]> {
+  const filterAndSort = (raw: string[]): string[] => {
+    const versions: Array<{ tag: string; parts: number[] }> = []
+    for (const tag of raw) {
+      const m = tag.match(/^v(\d+)\.(\d+)\.(\d+)$/)
+      if (!m) continue
+      versions.push({ tag, parts: [Number(m[1]), Number(m[2]), Number(m[3])] })
+    }
+    versions.sort((a, b) => compareVersionArrays(b.parts, a.parts))
+    return versions.map((v) => v.tag)
+  }
+
+  if (isPygit2Configured()) {
+    return runPygit2(['ls-remote-tags', url], 15000).then(({ exitCode, stdout }) => {
+      if (exitCode !== 0) return []
+      const tags = stdout.trim().split('\n').map((s) => s.trim()).filter(Boolean)
+      return filterAndSort(tags)
+    })
+  }
+  return new Promise((resolve) => {
+    execFile(
+      'git',
+      ['ls-remote', '--tags', url],
+      {
+        encoding: 'utf-8',
+        windowsHide: true,
+        timeout: 15000
+      },
+      (error, stdout) => {
+        if (error) {
+          resolve([])
+          return
+        }
+        const tags: string[] = []
+        for (const line of stdout.trim().split('\n')) {
+          const ref = line.split(/\s+/)[1]
+          if (!ref || !ref.startsWith('refs/tags/') || ref.endsWith('^{}')) continue
+          tags.push(ref.slice('refs/tags/'.length))
+        }
+        resolve(filterAndSort(tags))
+      }
+    )
+  })
+}
+
+/**
  * Get the SHA of a specific ref from a remote URL via the Git protocol.
  * Uses pygit2 when configured, falling back to system git.
  */

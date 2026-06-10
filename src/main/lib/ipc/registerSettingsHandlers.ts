@@ -17,10 +17,18 @@ import * as updater from '../updater'
 import { globalSettingsEvents } from '../globalSettingsEvents'
 import { recordIpcInvocation } from '../e2eOverrides'
 import type { SettingsSection } from '../../../types/ipc'
+import { AUTO_LAUNCH_LAST, AUTO_LAUNCH_NONE } from '../../settings'
 
 // Build the App + sources + About settings sections. Shared so the Global
 // Settings popup snapshot can call it without going through IPC.
-export function buildSettingsSections(): SettingsSection[] {
+//
+// `installs` populates per-install options for the `autoLaunchOnStartup`
+// dropdown. Optional so the fast-open path can render the basic
+// none/last options without waiting on the installations file; the
+// snapshot rebroadcast then fills in the per-install entries.
+export function buildSettingsSections(
+  installs?: Pick<{ id: string; name: string }, 'id' | 'name'>[]
+): SettingsSection[] {
   const s = settings.getAll()
   // Inline description only shows when ON so it reads as "currently in use".
   const chineseMirrorsField = {
@@ -51,14 +59,21 @@ export function buildSettingsSections(): SettingsSection[] {
         // Theme picker hidden (app is dark-only); the theme plumbing stays
         // wired so re-adding this field is the only change needed to restore it.
 
-        // Boot behavior: reopen the last-used instance on launch. Closing the
-        // last instance window quits Desktop (after a confirm), so the next
-        // launch boots straight back into that instance.
+        // Opt-in auto-launch on Desktop startup. Opt-in (defaults to None) so
+        // a user who never picks a specific install lands on the dashboard
+        // like today. When set to 'last' the most-recent install opens; when
+        // set to an installation id, that install opens.
         {
-          id: 'reopenLastInstanceOnLaunch',
-          label: i18n.t('settings.reopenLastInstanceOnLaunch'),
-          type: 'boolean',
-          value: s.reopenLastInstanceOnLaunch !== false
+          id: 'autoLaunchOnStartup',
+          label: i18n.t('settings.autoLaunchOnStartup'),
+          type: 'select',
+          value: (s.autoLaunchOnStartup as string | undefined) ?? AUTO_LAUNCH_NONE,
+          options: [
+            { value: AUTO_LAUNCH_NONE, label: i18n.t('settings.autoLaunchOnStartupNone') },
+            { value: AUTO_LAUNCH_LAST, label: i18n.t('settings.autoLaunchOnStartupLast') },
+            ...(installs ?? []).map((i) => ({ value: i.id, label: i.name })),
+          ],
+          tooltip: i18n.t('settings.autoLaunchOnStartupDescription'),
         },
 
         // Close confirmation, off by default. When on, closing a local-install

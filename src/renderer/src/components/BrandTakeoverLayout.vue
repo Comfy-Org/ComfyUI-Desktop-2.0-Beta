@@ -22,15 +22,12 @@ let returnFocusTo: HTMLElement | null = null
 
 function focusFirstInteractive(): void {
   if (!rootRef.value) return
+  // Honor an explicit opt-in (e.g. a text input that should be ready to type),
+  // otherwise focus the dialog container itself — not the first button. This
+  // keeps focus trapped for keyboard/AT users without painting a focus-visible
+  // ring on a control the user didn't tab to. They Tab from here to reach it.
   const explicit = rootRef.value.querySelector<HTMLElement>('[autofocus]')
-  if (explicit) {
-    explicit.focus()
-    return
-  }
-  const focusable = rootRef.value.querySelector<HTMLElement>(
-    'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-  )
-  focusable?.focus()
+  ;(explicit ?? rootRef.value).focus()
 }
 
 onMounted(() => {

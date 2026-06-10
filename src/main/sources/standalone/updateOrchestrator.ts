@@ -40,6 +40,15 @@ export interface UpdateOrchestrationOptions {
    *  by the post-install auto-update in `install.ts` to reconcile the
    *  pre-extracted standalone bundle's venv against ComfyUI's pinned deps. */
   forceDepsSync?: boolean
+  /** Optional explicit ComfyUI release tag (e.g. `v1.19.4`). Set by the
+   *  install-wizard / IPP version picker. When present, `update_comfyui.py`
+   *  is invoked with `--tag <ref>` instead of `--stable` / no flag, so the
+   *  checkout lands on a specific historical release (upgrade or downgrade).
+   *  Must be a strict `vMAJOR.MINOR.PATCH` shape; the script rejects anything
+   *  else with exit code 2. The `channel` carried alongside still records the
+   *  user's declared preference — same as a manual checkout on the stable
+   *  channel. */
+  targetTag?: string
 }
 
 export interface UpdateOrchestrationResult {
@@ -169,7 +178,13 @@ export async function runComfyUIUpdate(opts: UpdateOrchestrationOptions): Promis
   const updaterPython = installation.adopted === true
     ? (installation.adoptedPythonPath as string)
     : getMasterPythonPath(installPath)
-  const channelArgs = channel === 'stable' ? ['--stable'] : []
+  // `targetTag` (vMAJOR.MINOR.PATCH) wins over channel: the user explicitly
+  // picked a specific release in the install wizard or IPP, and `--tag` and
+  // `--stable` are mutually exclusive script-side. The orchestration record
+  // still keeps `channel` for downstream bookkeeping (release-cache, snapshots).
+  const channelArgs = opts.targetTag
+    ? ['--tag', opts.targetTag]
+    : channel === 'stable' ? ['--stable'] : []
 
   const reqPath = path.join(comfyuiDir, 'requirements.txt')
   let preReqs = ''

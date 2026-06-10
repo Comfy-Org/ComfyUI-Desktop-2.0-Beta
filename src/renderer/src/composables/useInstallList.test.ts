@@ -35,29 +35,6 @@ describe('useInstallList', () => {
     vi.useRealTimers()
   })
 
-  describe('cloud vs non-cloud split', () => {
-    it('separates the single cloud install from the non-cloud list', () => {
-      const installations = ref<Installation[]>([
-        makeInstall({ id: 'a', name: 'Local A', sourceCategory: 'local' }),
-        makeInstall({ id: 'c', name: 'Cloud', sourceCategory: 'cloud' }),
-        makeInstall({ id: 'r', name: 'Remote', sourceCategory: 'remote' }),
-      ])
-      const list = withI18nScope(i18n, () => useInstallList({ installations }))
-
-      expect(list.cloudInstall.value?.id).toBe('c')
-      expect(list.nonCloudInstalls.value.map((i) => i.id)).toEqual(['a', 'r'])
-    })
-
-    it('reports null cloudInstall when none present', () => {
-      const installations = ref<Installation[]>([
-        makeInstall({ id: 'a', sourceCategory: 'local' }),
-      ])
-      const list = withI18nScope(i18n, () => useInstallList({ installations }))
-
-      expect(list.cloudInstall.value).toBeNull()
-    })
-  })
-
   describe('recency sort', () => {
     it('orders by lastLaunchedAt desc with never-launched at the end', () => {
       const installations = ref<Installation[]>([
@@ -74,6 +51,60 @@ describe('useInstallList', () => {
         'old',
         'never',
       ])
+    })
+
+    // Regression: cloud must not jump above an older local install — recency
+    // is the only thing that decides order. Before the unpin refactor, cloud
+    // lived in its own surface (dashboard) or was tie-break-pinned (picker),
+    // both of which broke straight recency ordering.
+    it('places a cloud install below a more-recent local install (no cloud pinning)', () => {
+      const installations = ref<Installation[]>([
+        makeInstall({
+          id: 'recent-local',
+          name: 'RecentLocal',
+          sourceCategory: 'local',
+          lastLaunchedAt: 1_000,
+        }),
+        makeInstall({
+          id: 'old-cloud',
+          name: 'OldCloud',
+          sourceCategory: 'cloud',
+          lastLaunchedAt: 100,
+        }),
+      ])
+      const list = withI18nScope(i18n, () => useInstallList({ installations }))
+
+      expect(list.visibleInstalls.value.map((i) => i.id)).toEqual([
+        'recent-local',
+        'old-cloud',
+      ])
+    })
+
+    // Tie-break sanity: with equal recency, cloud is no longer pinned ahead
+    // of local — order falls back to whatever sort() lands on, which for a
+    // stable timsort is input order. The contract is "cloud isn't special",
+    // so we just assert both are present and neither got dropped.
+    it('does not pin cloud ahead of a same-recency local install', () => {
+      const installations = ref<Installation[]>([
+        makeInstall({
+          id: 'local-tie',
+          name: 'LocalTie',
+          sourceCategory: 'local',
+          lastLaunchedAt: 500,
+        }),
+        makeInstall({
+          id: 'cloud-tie',
+          name: 'CloudTie',
+          sourceCategory: 'cloud',
+          lastLaunchedAt: 500,
+        }),
+      ])
+      const list = withI18nScope(i18n, () => useInstallList({ installations }))
+
+      const ids = list.visibleInstalls.value.map((i) => i.id)
+      // Stable sort on a tie keeps the input order; the test guards against
+      // a regression that explicitly re-orders cloud to the top.
+      expect(ids).toEqual(['local-tie', 'cloud-tie'])
     })
   })
 
@@ -102,7 +133,7 @@ describe('useInstallList', () => {
       expect(list.visibleInstalls.value.map((i) => i.id)).toEqual(['r'])
     })
 
-    it('cloud filter empties visibleInstalls (Cloud is rendered separately)', () => {
+    it('cloud filter keeps only cloud installs', () => {
       const installations = ref<Installation[]>([
         makeInstall({ id: 'l', sourceCategory: 'local' }),
         makeInstall({ id: 'c', sourceCategory: 'cloud' }),
@@ -110,10 +141,10 @@ describe('useInstallList', () => {
       const list = withI18nScope(i18n, () => useInstallList({ installations }))
 
       list.activeFilter.value = 'cloud'
-      expect(list.visibleInstalls.value).toEqual([])
+      expect(list.visibleInstalls.value.map((i) => i.id)).toEqual(['c'])
     })
 
-    it('all filter shows every non-cloud install', () => {
+    it('all filter shows every install including cloud', () => {
       const installations = ref<Installation[]>([
         makeInstall({ id: 'l', sourceCategory: 'local' }),
         makeInstall({ id: 'r', sourceCategory: 'remote' }),
@@ -123,8 +154,13 @@ describe('useInstallList', () => {
       ])
       const list = withI18nScope(i18n, () => useInstallList({ installations }))
 
-      // 'all' is the default.
-      expect(list.visibleInstalls.value.map((i) => i.id).sort()).toEqual(['d', 'l', 'r'])
+      // 'all' is the default; cloud is no longer split out of the list.
+      expect(list.visibleInstalls.value.map((i) => i.id).sort()).toEqual([
+        'c',
+        'd',
+        'l',
+        'r',
+      ])
     })
   })
 
@@ -150,6 +186,17 @@ describe('useInstallList', () => {
       expect(list.visibleInstalls.value.map((i) => i.id)).toEqual(['a'])
     })
 
+    it('search reaches cloud installs too (cloud is in the same list)', () => {
+      const installations = ref<Installation[]>([
+        makeInstall({ id: 'c', name: 'Comfy Cloud', sourceCategory: 'cloud' }),
+        makeInstall({ id: 'l', name: 'Local Box', sourceCategory: 'local' }),
+      ])
+      const list = withI18nScope(i18n, () => useInstallList({ installations }))
+
+      list.searchQuery.value = 'cloud'
+      expect(list.visibleInstalls.value.map((i) => i.id)).toEqual(['c'])
+    })
+
     it('matchesQuery is case-insensitive', () => {
       const installations = ref<Installation[]>([])
       const list = withI18nScope(i18n, () => useInstallList({ installations }))
@@ -171,53 +218,6 @@ describe('useInstallList', () => {
     })
   })
 
-  describe('showCloudCard', () => {
-    it('shows the cloud CTA when no cloud install exists and no query', () => {
-      const installations = ref<Installation[]>([])
-      const list = withI18nScope(i18n, () => useInstallList({ installations }))
-
-      expect(list.showCloudCard.value).toBe(true)
-    })
-
-    it('hides the cloud CTA once the user starts typing (when no cloud install exists)', () => {
-      const installations = ref<Installation[]>([])
-      const list = withI18nScope(i18n, () => useInstallList({ installations }))
-
-      list.searchQuery.value = 'foo'
-      expect(list.showCloudCard.value).toBe(false)
-    })
-
-    it('keeps the cloud card visible when a real cloud install matches the query', () => {
-      const installations = ref<Installation[]>([
-        makeInstall({ id: 'c', name: 'My Cloud', sourceCategory: 'cloud' }),
-      ])
-      const list = withI18nScope(i18n, () => useInstallList({ installations }))
-
-      list.searchQuery.value = 'cloud'
-      expect(list.showCloudCard.value).toBe(true)
-    })
-
-    it('hides the cloud card when a real cloud install does NOT match the query', () => {
-      const installations = ref<Installation[]>([
-        makeInstall({ id: 'c', name: 'My Cloud', sourceCategory: 'cloud' }),
-      ])
-      const list = withI18nScope(i18n, () => useInstallList({ installations }))
-
-      list.searchQuery.value = 'zzzzzzz'
-      expect(list.showCloudCard.value).toBe(false)
-    })
-
-    it('hides the cloud card when the active filter excludes cloud', () => {
-      const installations = ref<Installation[]>([
-        makeInstall({ id: 'c', sourceCategory: 'cloud' }),
-      ])
-      const list = withI18nScope(i18n, () => useInstallList({ installations }))
-
-      list.activeFilter.value = 'local'
-      expect(list.showCloudCard.value).toBe(false)
-    })
-  })
-
   describe('showEmptyHint', () => {
     it('hides when the user has not typed anything', () => {
       const installations = ref<Installation[]>([])
@@ -226,7 +226,7 @@ describe('useInstallList', () => {
       expect(list.showEmptyHint.value).toBe(false)
     })
 
-    it('shows when query is non-empty AND no installs match AND cloud card is hidden', () => {
+    it('shows when query is non-empty AND no installs match', () => {
       const installations = ref<Installation[]>([
         makeInstall({ id: 'a', name: 'Alpha' }),
       ])
@@ -236,7 +236,7 @@ describe('useInstallList', () => {
       expect(list.showEmptyHint.value).toBe(true)
     })
 
-    it('hides when the cloud card is still visible (its match counts as a result)', () => {
+    it('hides when a cloud install matches the query (it counts as a result now)', () => {
       const installations = ref<Installation[]>([
         makeInstall({ id: 'c', name: 'Comfy Cloud', sourceCategory: 'cloud' }),
       ])
@@ -332,13 +332,13 @@ describe('useInstallList', () => {
       expect(list.visibleInstalls.value.length).toBe(2)
     })
 
-    it('keeps cloud install reactive to input changes', () => {
+    it('adds a newly-added cloud install to the same list', () => {
       const installations = ref<Installation[]>([])
       const list = withI18nScope(i18n, () => useInstallList({ installations }))
 
-      expect(list.cloudInstall.value).toBeNull()
+      expect(list.visibleInstalls.value).toEqual([])
       installations.value = [makeInstall({ id: 'c', sourceCategory: 'cloud' })]
-      expect(list.cloudInstall.value?.id).toBe('c')
+      expect(list.visibleInstalls.value.map((i) => i.id)).toEqual(['c'])
     })
   })
 })

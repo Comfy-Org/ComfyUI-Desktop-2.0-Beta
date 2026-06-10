@@ -70,6 +70,8 @@ export function registerPickerSettingsIpc(): void {
 
   ipcMain.handle(CH.getInstallations, (event) => dispatchInvoke('get-installations', event))
 
+  ipcMain.handle(CH.getStableTags, (event) => dispatchInvoke('get-stable-tags', event))
+
   ipcMain.handle(CH.stopComfyUI, (event, payload: { installationId?: unknown }) =>
     dispatchInvoke('stop-comfyui', event, payload?.installationId),
   )
