@@ -1,18 +1,25 @@
-import { describe, it, expect, afterAll, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
 
-const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'models-yaml-'))
-
-// `models.ts` reads `dataDir()` at module-load time to derive YAML_PATH. The
-// real `dataDir()` calls `electron.app.getPath('userData')`, which crashes
-// outside Electron. Mock the import so YAML_PATH lands inside our tmp root.
+// `models.ts` reads `dataDir()` at module-load time to derive YAML_PATH, and
+// `instanceModelPathsYaml()` reads it per call. The real `dataDir()` calls
+// `electron.app.getPath('userData')`, which crashes outside Electron. A hoisted
+// holder lets the mock resolve to a disposable temp dir we control per suite.
+const holder = vi.hoisted(() => ({ dataDir: '' }))
 vi.mock('./paths', () => ({
-  dataDir: () => tmpRoot,
+  dataDir: () => holder.dataDir,
 }))
 
-const { ensureModelPathsConfig } = await import('./models')
+// Module-load dataDir for the YAML_PATH-dependent (shared) tests below. Set
+// before the dynamic import so the module-level YAML_PATH lands inside it.
+const sharedTmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'models-yaml-'))
+holder.dataDir = sharedTmpRoot
+
+const { instanceModelPathsYaml, ensureModelPathsConfig, syncCustomModelFolders } = await import(
+  './models'
+)
 
 /**
  * Locks the YAML shape that `ensureModelPathsConfig` emits, with focus on the
@@ -23,12 +30,15 @@ const { ensureModelPathsConfig } = await import('./models')
  * to `DualCLIPLoader` / `UNETLoader` even though Storage shows the dir.
  */
 describe('ensureModelPathsConfig — YAML emission', () => {
+  beforeEach(() => {
+    holder.dataDir = sharedTmpRoot
+  })
   afterAll(() => {
-    fs.rmSync(tmpRoot, { recursive: true, force: true })
+    fs.rmSync(sharedTmpRoot, { recursive: true, force: true })
   })
 
   it('emits clip/, unet/, t2i_adapter/ entries for every shared dir', () => {
-    const sharedDir = fs.mkdtempSync(path.join(tmpRoot, 'shared-'))
+    const sharedDir = fs.mkdtempSync(path.join(sharedTmpRoot, 'shared-'))
     const result = ensureModelPathsConfig([sharedDir])
     expect(result).not.toBeNull()
     const yaml = fs.readFileSync(result!.yamlPath, 'utf-8')
@@ -46,8 +56,8 @@ describe('ensureModelPathsConfig — YAML emission', () => {
   })
 
   it('emits the alias entries for each shared dir (not just the first)', () => {
-    const d1 = fs.mkdtempSync(path.join(tmpRoot, 'd1-'))
-    const d2 = fs.mkdtempSync(path.join(tmpRoot, 'd2-'))
+    const d1 = fs.mkdtempSync(path.join(sharedTmpRoot, 'd1-'))
+    const d2 = fs.mkdtempSync(path.join(sharedTmpRoot, 'd2-'))
     const result = ensureModelPathsConfig([d1, d2])
     const yaml = fs.readFileSync(result!.yamlPath, 'utf-8')
 
@@ -58,12 +68,122 @@ describe('ensureModelPathsConfig — YAML emission', () => {
   })
 
   it('canonical entries come before legacy aliases (search-order matters)', () => {
-    const sharedDir = fs.mkdtempSync(path.join(tmpRoot, 'order-'))
+    const sharedDir = fs.mkdtempSync(path.join(sharedTmpRoot, 'order-'))
     const result = ensureModelPathsConfig([sharedDir])
     const yaml = fs.readFileSync(result!.yamlPath, 'utf-8')
     const canonical = yaml.indexOf("'text_encoders': 'text_encoders/'")
     const alias = yaml.indexOf("'clip': 'clip/'")
     expect(canonical).toBeGreaterThan(0)
     expect(alias).toBeGreaterThan(canonical)
+  })
+})
+
+describe('models per-install YAML', () => {
+  let tmpRoot = ''
+
+  beforeEach(() => {
+    tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'models-test-'))
+    holder.dataDir = path.join(tmpRoot, 'data')
+    fs.mkdirSync(holder.dataDir, { recursive: true })
+  })
+
+  afterEach(() => {
+    try {
+      fs.rmSync(tmpRoot, { recursive: true, force: true })
+    } catch {}
+    holder.dataDir = sharedTmpRoot
+  })
+
+  it('builds a per-install YAML path under dataDir()', () => {
+    const p = instanceModelPathsYaml('inst-123')
+    expect(p).toBe(path.join(holder.dataDir, 'instance-model-paths', 'inst-123.yaml'))
+  })
+
+  it('writes the config to the supplied YAML path; first dir is default when primaryDir is omitted', () => {
+    const dirA = path.join(tmpRoot, 'a')
+    const dirB = path.join(tmpRoot, 'b')
+    fs.mkdirSync(dirA, { recursive: true })
+    fs.mkdirSync(dirB, { recursive: true })
+    const yamlPath = instanceModelPathsYaml('inst-xyz')
+
+    const result = ensureModelPathsConfig([dirA, dirB], { yamlPath })
+
+    expect(result).not.toBeNull()
+    expect(result!.yamlPath).toBe(yamlPath)
+    expect(fs.existsSync(yamlPath)).toBe(true)
+    const yaml = fs.readFileSync(yamlPath, 'utf-8')
+    expect(yaml).toContain(`base_path: '${dirA}'`)
+    expect(yaml).toContain(`base_path: '${dirB}'`)
+    // Only the first (primary) directory is marked as the default save location.
+    // (The header comment also mentions is_default, so match the real entry.)
+    expect(yaml.match(/^ {2}is_default: true$/gm)).toHaveLength(1)
+    const firstIdx = yaml.indexOf(`base_path: '${dirA}'`)
+    const defaultIdx = yaml.search(/^ {2}is_default: true$/m)
+    const secondIdx = yaml.indexOf(`base_path: '${dirB}'`)
+    expect(defaultIdx).toBeGreaterThan(firstIdx)
+    expect(defaultIdx).toBeLessThan(secondIdx)
+  })
+
+  it('marks the supplied primaryDir as default, not the first dir', () => {
+    const dirA = path.join(tmpRoot, 'a')
+    const dirB = path.join(tmpRoot, 'b')
+    fs.mkdirSync(dirA, { recursive: true })
+    fs.mkdirSync(dirB, { recursive: true })
+    const yamlPath = instanceModelPathsYaml('inst-pri')
+
+    ensureModelPathsConfig([dirA, dirB], { yamlPath, primaryDir: dirB })
+
+    const yaml = fs.readFileSync(yamlPath, 'utf-8')
+    expect(yaml.match(/^ {2}is_default: true$/gm)).toHaveLength(1)
+    // The default marker sits with dirB (the second entry), not dirA.
+    const aIdx = yaml.indexOf(`base_path: '${dirA}'`)
+    const bIdx = yaml.indexOf(`base_path: '${dirB}'`)
+    const defaultIdx = yaml.search(/^ {2}is_default: true$/m)
+    expect(defaultIdx).toBeGreaterThan(bIdx)
+    expect(defaultIdx).toBeGreaterThan(aIdx)
+  })
+
+  it('emits NO is_default when primaryDir is null (install-owned primary)', () => {
+    const dirA = path.join(tmpRoot, 'a')
+    const dirB = path.join(tmpRoot, 'b')
+    fs.mkdirSync(dirA, { recursive: true })
+    fs.mkdirSync(dirB, { recursive: true })
+    const yamlPath = instanceModelPathsYaml('inst-own')
+
+    const result = ensureModelPathsConfig([dirA, dirB], { yamlPath, primaryDir: null })
+
+    expect(result).not.toBeNull()
+    const yaml = fs.readFileSync(yamlPath, 'utf-8')
+    expect(yaml).toContain(`base_path: '${dirA}'`)
+    expect(yaml.match(/^ {2}is_default: true$/gm)).toBeNull()
+  })
+
+  it('does not write the global YAML when targeting a per-install path', () => {
+    const dir = path.join(tmpRoot, 'models')
+    fs.mkdirSync(dir, { recursive: true })
+    const yamlPath = instanceModelPathsYaml('inst-1')
+
+    ensureModelPathsConfig([dir], { yamlPath })
+
+    expect(fs.existsSync(path.join(holder.dataDir, 'shared_model_paths.yaml'))).toBe(false)
+  })
+
+  it('returns null for empty/missing model dirs', () => {
+    expect(ensureModelPathsConfig([], { yamlPath: instanceModelPathsYaml('x') })).toBeNull()
+    expect(ensureModelPathsConfig(undefined, { yamlPath: instanceModelPathsYaml('x') })).toBeNull()
+  })
+
+  it('syncCustomModelFolders writes to the supplied per-install YAML', () => {
+    const installPath = path.join(tmpRoot, 'install')
+    fs.mkdirSync(path.join(installPath, 'ComfyUI', 'models'), { recursive: true })
+    const dir = path.join(tmpRoot, 'instance-models')
+    fs.mkdirSync(dir, { recursive: true })
+    const yamlPath = instanceModelPathsYaml('inst-9')
+
+    const { config } = syncCustomModelFolders(installPath, [dir], [], { yamlPath })
+
+    expect(config).not.toBeNull()
+    expect(config!.yamlPath).toBe(yamlPath)
+    expect(fs.existsSync(yamlPath)).toBe(true)
   })
 })

@@ -6,6 +6,7 @@ import { computed, ref, nextTick } from 'vue'
 
 import type { Installation } from '../../types/ipc'
 import { useSessionStore } from '../../stores/sessionStore'
+import { TID } from '../../../../shared/testIds'
 
 /**
  * Tests for the picker/drawer's per-install settings body. Locks: (1) overlay
@@ -218,6 +219,32 @@ describe('ComfyUISettingsContent', () => {
         },
       })
       expect(w.find('.op-title').text()).toBe('Update complete')
+    })
+  })
+
+  describe('error overlay', () => {
+    // Regression: the error was once rendered in a single-line, ellipsis-clamped
+    // <p>, hiding the actionable detail (issue #1023). It must render in full.
+    it('renders the full multi-line error message with a copy button', async () => {
+      const detail = [
+        'Update process failed with exit code 1.',
+        '',
+        'Traceback (most recent call last):',
+        '  File "main.py", line 42, in <module>',
+        'ModuleNotFoundError: No module named "foo"',
+      ].join('\n')
+      const w = await mountContent({
+        activeOperation: {
+          actionId: 'update-comfyui', actionData: {},
+          done: true, ok: false, error: detail,
+          percent: 100, status: '', cancellable: false, title: '',
+        },
+      })
+      const msg = w.find(`[data-testid="${TID.pickerOpErrorMessage}"]`)
+      expect(msg.exists()).toBe(true)
+      expect(msg.text()).toContain('Update process failed with exit code 1.')
+      expect(msg.text()).toContain('ModuleNotFoundError: No module named "foo"')
+      expect(w.find(`[data-testid="${TID.pickerOpErrorCopy}"]`).exists()).toBe(true)
     })
   })
 
