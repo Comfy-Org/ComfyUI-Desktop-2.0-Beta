@@ -27,6 +27,16 @@ const props = defineProps<Props>()
 const { t } = useI18n()
 const sessionStore = useSessionStore()
 
+/** Popup bridge for opening a folder in the OS file manager (same one the
+ *  Storage tab uses). */
+const popupBridge = (
+  window as unknown as { __comfyTitlePopup?: { globalSettingsOpenPath(path: string): void } }
+).__comfyTitlePopup
+
+function openPath(path: string): void {
+  if (path && path !== '—') popupBridge?.globalSettingsOpenPath(path)
+}
+
 // The Comfy Cloud entry is not user-renamable (issue #922): render its name as
 // static text with no contenteditable / pencil affordance.
 const nameEditable = computed(() => props.installation?.sourceCategory !== 'cloud')
@@ -207,6 +217,8 @@ interface FactRow {
   label: string
   value: string
   copyable?: boolean
+  /** Clickable path that opens the folder in the OS file manager. */
+  openable?: boolean
   /** `'start'` keeps the tail visible (used by paths); everything else end-truncates. */
   truncate?: 'start' | 'end'
 }
@@ -285,7 +297,10 @@ const locationRows = computed<FactRow[]>(() => {
   for (const field of allFields.value) {
     if (matchLabel(field, ['location', 'path', 'install path'])) {
       const row = toRow(field)
-      if (isPathLike(row.value)) row.truncate = 'start'
+      if (isPathLike(row.value)) {
+        row.truncate = 'start'
+        row.openable = true
+      }
       rows.push(row)
     }
   }
@@ -335,8 +350,13 @@ const groups = computed<FactGroup[]>(() => {
       rows: running,
     })
   }
+  // Location & storage only makes sense for a local on-disk install. Cloud and
+  // remote connections have no local footprint, so suppress the whole group
+  // (covers the "no disk storage data available" case too — `diskUsage` is null
+  // for them and the path rows describe a remote host, not local storage).
+  const isLocalInstall = props.installation?.sourceCategory === 'local'
   const location = locationRows.value
-  if (location.length > 0) {
+  if (isLocalInstall && location.length > 0) {
     out.push({
       id: 'location-storage',
       title: t('statusFactPanel.locationStorage', 'Location & storage'),
@@ -430,7 +450,19 @@ const groups = computed<FactGroup[]>(() => {
             </span>
           </dd>
           <dd v-else>
+            <button
+              v-if="row.openable"
+              type="button"
+              class="status-fact-value status-fact-value-open"
+              :class="{ 'is-truncate-start': row.truncate === 'start' }"
+              :title="t('models.openDir', 'Open folder')"
+              @click="openPath(row.value)"
+            >
+              <bdi v-if="row.truncate === 'start'" dir="ltr">{{ row.value }}</bdi>
+              <template v-else>{{ row.value }}</template>
+            </button>
             <span
+              v-else
               class="status-fact-value"
               :class="{ 'is-truncate-start': row.truncate === 'start' }"
               :title="row.value"
@@ -635,6 +667,23 @@ const groups = computed<FactGroup[]>(() => {
   text-align: left;
 }
 
+/* Clickable path that opens the folder in the OS file manager. */
+.status-fact-value-open {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.status-fact-value-open:hover,
+.status-fact-value-open:focus-visible {
+  color: var(--accent);
+  text-decoration: underline;
+  outline: none;
+}
+
 /* Editable URL row: stack the field over the reconnect hint, keeping the right alignment of the fact list. */
 .status-fact-url-dd {
   flex-wrap: wrap;
@@ -686,17 +735,12 @@ const groups = computed<FactGroup[]>(() => {
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
-  opacity: 0;
+  /* Always visible so the edit affordance is discoverable without hover. */
+  opacity: 0.6;
   transition:
     opacity 120ms ease,
     background-color 120ms ease,
     color 120ms ease;
-}
-
-/* Reveal on row hover or whenever the field/button itself has focus, so keyboard users can find it. */
-.status-fact-url-edit:hover .status-fact-url-edit-btn,
-.status-fact-url-edit:focus-within .status-fact-url-edit-btn {
-  opacity: 0.6;
 }
 
 .status-fact-url-edit-btn:hover,

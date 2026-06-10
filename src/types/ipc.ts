@@ -125,7 +125,7 @@ export interface ComfyArgDef {
 export interface DetailField {
   id: string
   label: string
-  value: string | boolean | number | Record<string, string> | null
+  value: string | boolean | number | string[] | Record<string, string> | null
   editable?: boolean
   editType?:
     | 'select'
@@ -136,6 +136,8 @@ export interface DetailField {
     | 'channel-cards'
     | 'args-builder'
     | 'env-vars'
+    | 'model-dirs'
+    | 'hidden'
   options?: DetailFieldOption[]
   refreshSection?: boolean
   /** Action id to fire automatically when this field's value changes
@@ -426,6 +428,10 @@ export interface ProgressData {
 export interface ProgressStep {
   phase: string
   label: string
+  /** Share of the 0→100 bar this phase owns. When set on any step, the
+   *  renderer paces the bar from these (the producer is the single source of
+   *  truth); when absent it falls back to a curated weight table. */
+  weight?: number
 }
 
 // --- Event data types ---

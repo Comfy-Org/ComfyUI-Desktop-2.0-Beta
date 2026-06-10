@@ -69,7 +69,7 @@
     "diskUsage": "磁盘占用",
     "envVarsCount": "已定义 {n} 项",
     "emptyInstallLess": "打开一个 ComfyUI 安装以查看其设置。",
-    "useSharedModelsOffWarning": "此安装已关闭共享模型。它只能看到自己文件夹中的模型——在你重新启用之前，共享模型库将被隐藏。"
+    "useSharedModelsOffWarning": "此安装已关闭共享模型。它只能看到自己文件夹中的模型以及你在下方添加的自定义目录——在你重新启用之前，共享模型库将保持隐藏。"
   },
 
   "running": {
@@ -94,7 +94,12 @@
     "removeDir": "移除",
     "primary": "主要",
     "default": "默认",
-    "makePrimary": "设为主要"
+    "makePrimary": "设为主要",
+    "openDir": "打开文件夹",
+    "instanceOnly": "此实例",
+    "lockedDir": "此目录始终被使用，无法移除。",
+    "removeInstanceDirTitle": "移除模型目录？",
+    "removeInstanceDirConfirm": "此操作不会删除任何文件。你之后可以从此列表重新添加该目录。"
   },
 
   "common": {
@@ -128,8 +133,9 @@
     "extract": "解压",
     "useSharedModels": "使用共享模型",
     "useSharedInputOutput": "使用共享的输入/输出文件夹",
-    "perInstallInputDir": "输入文件夹",
-    "perInstallOutputDir": "输出文件夹",
+    "perInstallModelDirs": "模型目录",
+    "perInstallInputDir": "输入目录",
+    "perInstallOutputDir": "输出目录",
     "done": "完成",
     "noItems": "没有可用项目。",
     "advanced": "高级",
@@ -239,7 +245,17 @@
     "error": "错误：{message}",
     "completedSuccess": "操作成功完成",
     "completedError": "操作失败",
-    "completedCancelled": "操作已取消"
+    "completedCancelled": "操作已取消",
+    "phaseLabel": {
+      "launchStart": "正在启动 ComfyUI……",
+      "repair": "正在修复安装……",
+      "torchRepair": "正在恢复 GPU PyTorch……",
+      "securityScan": "正在进行安全扫描……",
+      "mountLibraries": "正在加载库……",
+      "gpu": "正在初始化 GPU……",
+      "customNodes": "正在加载自定义节点……",
+      "startingServer": "正在启动服务器……"
+    }
   },
 
   "console": {
@@ -268,12 +284,14 @@
     "closeQuitConfirm": "退出",
     "autoUpdate": "启动时检查更新",
     "autoInstallUpdates": "自动安装桌面更新",
-    "reopenLastInstanceOnLaunch": "启动时重新打开上次的实例",
     "checkForUpdates": "检查更新",
     "checkingForUpdates": "检查中…",
     "telemetry": "遥测",
     "telemetryEnabled": "共享匿名使用遥测数据",
     "models": "共享模型",
+    "modelDirectories": "模型目录",
+    "modelStorage": "模型",
+    "inputOutputStorage": "输入与输出",
     "cache": "缓存",
     "cacheDir": "缓存目录",
     "open": "打开",
@@ -639,7 +657,16 @@
     "modelFolderRelaunchTitle": "正在重启 ComfyUI",
     "modelFolderRelaunchDesc": "检测到自定义节点创建了新的模型文件夹。正在重启以便 ComfyUI 立即使用这些文件夹。",
     "launchSplashTitle": "正在启动 ComfyUI",
-    "launchSplashDesc": "正在启动您的 ComfyUI 实例……"
+    "launchSplashDesc": "正在启动您的 ComfyUI 实例……",
+    "activity": {
+      "manager": "正在加载 ComfyUI-Manager……",
+      "registry": "正在更新节点注册表……",
+      "vram": "正在配置 GPU 显存……",
+      "optimizing": "正在针对您的硬件进行优化……",
+      "models": "正在准备模型加载……",
+      "database": "正在更新数据库……",
+      "nodes": "正在加载自定义节点……"
+    }
   },
 
   "errors": {
@@ -676,7 +703,9 @@
     "updateNow": "就地更新此安装。",
     "copyAndUpdate": "复制此安装并更新副本。原始安装保持不变。",
     "useSharedModels": "启用后，此安装可以看到您全局共享模型文件夹中的所有模型。关闭后将隐藏这些模型——大多数用户应保持启用。",
+    "instanceOwnModelsDir": "此实例自带的模型文件夹。它始终被使用，且不会与其他实例共享。",
     "useSharedInputOutput": "启用后，此安装将从全局共享文件夹读取和写入输入与输出文件。关闭后可在下方将此安装指向自己的文件夹。",
+    "perInstallModelDirs": "仅供此安装使用的额外模型目录，在关闭共享模型时生效。第一个目录为主目录，新下载的模型会保存到该目录。",
     "perInstallInputDir": "此安装读取输入文件的文件夹。留空则使用该安装自带的内部输入文件夹。",
     "perInstallOutputDir": "此安装写入生成的输出文件的文件夹。留空则使用该安装自带的内部输出文件夹。",
     "installDir": "创建新安装时建议使用的默认上级文件夹。现有安装不会被移动。"

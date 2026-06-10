@@ -203,6 +203,34 @@ describe('comfyTitlePopup/InstancePickerView', () => {
       expect(namesInOrder).toEqual(['New', 'Old', 'Never'])
     })
 
+    // Regression: cloud rows are no longer pinned ahead of more-recent
+    // installs — they sort by their own lastLaunchedAt like everyone else.
+    it('places a cloud row below a more-recent local row (no cloud pinning)', async () => {
+      const wrapper = await mountPicker({
+        installs: [
+          makeInstall({
+            id: 'old-cloud',
+            name: 'OldCloud',
+            sourceCategory: 'cloud',
+            sourceLabel: 'Cloud',
+            lastLaunchedAt: 100,
+          }),
+          makeInstall({
+            id: 'recent-local',
+            name: 'RecentLocal',
+            sourceCategory: 'local',
+            lastLaunchedAt: 1_000,
+          }),
+        ],
+        activeInstallationId: null,
+        runningInstallationIds: [],
+      })
+      const namesInOrder = wrapper
+        .findAll('.picker-row-name')
+        .map((n) => n.text())
+      expect(namesInOrder).toEqual(['RecentLocal', 'OldCloud'])
+    })
+
     it('marks running rows with the is-running class', async () => {
       const wrapper = await mountPicker({
         installs: [

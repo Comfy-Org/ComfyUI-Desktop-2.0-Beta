@@ -32,6 +32,7 @@ import {
   buildInstallLocationFields
 } from '../lib/ipc/registerSettingsHandlers'
 import { globalSettingsEvents } from '../lib/globalSettingsEvents'
+import * as installations from '../installations'
 import { getCachedGithubStarCount, getGithubStarCount } from '../lib/githubStars'
 import {
   comfyWindows,
@@ -1655,6 +1656,8 @@ function openGlobalSettingsForHost(
     await getGithubStarCount('comfy-org/ComfyUI').catch(() => null)
     githubStarsFetchAttempted = true
     if (parentEntry.window.isDestroyed()) return
+    // Rebroadcast hydrates per-install options into the auto-launch
+    // dropdown (the fast-open snapshot only carries none/last).
     await broadcastGlobalSettingsSnapshotToTitlePopups(bindings)
   })()
 }
@@ -2017,8 +2020,10 @@ function findSettingsFields(
   return src.map(toDetailField)
 }
 
-function buildGlobalSettingsSnapshot(): GlobalSettingsSnapshot {
-  const settingsSections = buildSettingsSections()
+function buildGlobalSettingsSnapshot(
+  installs?: Pick<{ id: string; name: string }, 'id' | 'name'>[]
+): GlobalSettingsSnapshot {
+  const settingsSections = buildSettingsSections(installs)
   const mediaSections = buildMediaSections()
   const modelsPayload = buildModelsPayload()
   const generalRaw = findSettingsFields(settingsSections, 'settings.general', 0)
@@ -2088,11 +2093,14 @@ async function broadcastGlobalSettingsSnapshotToTitlePopups(
     (e) => e.kind === 'global-settings' && (e.view.isOpen || e.view.pendingShowTimer !== null)
   )
   if (!hasOpen) return
+  // Load installs once so each open popup gets the same hydrated list
+  // for the auto-launch dropdown — and we don't re-read the file per popup.
+  const installs = (await installations.list()).map((i) => ({ id: i.id, name: i.name }))
   for (const entry of titlePopupsByParent.values()) {
     if (entry.kind !== 'global-settings') continue
     if (!entry.view.isOpen && entry.view.pendingShowTimer === null) continue
     if (entry.view.popup.webContents.isDestroyed()) continue
-    const snapshot = buildGlobalSettingsSnapshot()
+    const snapshot = buildGlobalSettingsSnapshot(installs)
     const snapshotJson = JSON.stringify(snapshot)
     if (entry.lastGlobalSettingsBroadcastJson === snapshotJson) continue
     entry.lastGlobalSettingsBroadcastJson = snapshotJson

@@ -36,6 +36,13 @@ export interface InstallationRecord {
    *  `--output-directory` from the global settings; else uses the per-install
    *  dirs below or ComfyUI's `<installPath>/{input,output}` defaults. */
   useSharedInputOutput?: boolean
+  /** Per-install extra (external) model directories, used only when
+   *  `useSharedModels === false`. Never includes the install's own models dir.
+   *  Written to a per-install `--extra-model-paths-config` YAML at launch. */
+  modelDirs?: string[]
+  /** External `modelDirs` entry promoted to primary (`is_default`). Null/absent
+   *  means the install's own models dir is primary (ComfyUI's built-in default). */
+  modelDirsPrimary?: string | null
   /** Per-install input dir, used only when `useSharedInputOutput === false`. */
   inputDir?: string
   /** Per-install output dir, used only when `useSharedInputOutput === false`. */
@@ -308,6 +315,27 @@ export async function getRecentByCategory(
     }
   }
   return best && bestTs > -Infinity ? best : null
+}
+
+/** Sentinels for the global auto-launch setting. Duplicated from
+ *  `settings.ts` to keep this module free of a settings dependency (which
+ *  would cycle: settings depends on paths, paths depends on this module's
+ *  `dataDir`). Callers pass the raw setting value through.
+ *
+ *  - `'none'` / empty / undefined → return null (no auto-launch).
+ *  - `'last'` → resolve via `getRecent()`; null when nothing has ever launched.
+ *  - any other string → look up by id; null when the id is gone (caller
+ *    treats that as "stale selection, fall back to dashboard silently"). */
+export async function resolveAutoLaunchInstall(
+  autoLaunchValue: string | undefined | null,
+): Promise<InstallationRecord | null> {
+  if (autoLaunchValue == null || autoLaunchValue === '' || autoLaunchValue === 'none') {
+    return null
+  }
+  if (autoLaunchValue === 'last') {
+    return getRecent()
+  }
+  return get(autoLaunchValue)
 }
 
 export async function seedDefaults(defaults: Record<string, unknown>[]): Promise<void> {

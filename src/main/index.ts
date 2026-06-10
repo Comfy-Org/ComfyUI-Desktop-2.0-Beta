@@ -19,9 +19,7 @@ import * as i18n from './lib/i18n'
 import { migrateXdgPaths } from './lib/paths'
 import { saveWindowBounds } from './lib/windowState'
 import {
-  clearLastActiveSurface,
   flushLastSessionSync,
-  getLastActiveSurface,
   recordDashboardSurface
 } from './lib/lastSession'
 import { registerProcessErrorHandlers } from './lib/processErrorHandlers'
@@ -67,7 +65,8 @@ import {
 } from './lib/ipc/shared'
 import { enrichInstallationsForRenderer } from './lib/ipc/registerInstallationHandlers'
 import { getSnapshotListData } from './lib/snapshots'
-import { update as updateInstallation } from './installations'
+import { update as updateInstallation, resolveAutoLaunchInstall } from './installations'
+import { AUTO_LAUNCH_NONE } from './settings'
 import { lookupInstallUpdateOverride, recordIpcInvocation } from './lib/e2eOverrides'
 import * as mainTelemetry from './lib/telemetry'
 import {
@@ -233,24 +232,27 @@ function revealStartupRestoreDashboard(windowKey: number): void {
  * error, console/external mode, slow/absent renderer) falls back to revealing
  * the dashboard.
  */
-function openStartupSurface(): void {
-  // Read the persisted surface BEFORE opening the chooser host: showing the
-  // chooser fires its `focus` handler, which would record 'dashboard' and
-  // clobber the instance we're about to restore.
-  const surface = getLastActiveSurface()
-  const restoreEnabled =
-    settings.get('reopenLastInstanceOnLaunch') !== false &&
-    settings.get('firstUseCompleted') === true
-  const shouldRestore = restoreEnabled && surface?.kind === 'instance'
+async function openStartupSurface(): Promise<void> {
+  // Single auto-launch path: the user-configured `autoLaunchOnStartup`
+  // dropdown is the only opt-in to "boot straight into an instance". When
+  // unset (`'none'` / first-use not yet completed) we just open the
+  // dashboard like today.
+  const firstUseDone = settings.get('firstUseCompleted') === true
+  const autoLaunchValue = firstUseDone
+    ? (settings.get('autoLaunchOnStartup') as string | undefined)
+    : undefined
+  const explicitInst = autoLaunchValue && autoLaunchValue !== AUTO_LAUNCH_NONE
+    ? await resolveAutoLaunchInstall(autoLaunchValue)
+    : null
 
   // Restore opens hidden (revealed on takeover-ready / fallback); the plain
   // dashboard boot reveals on first paint as before.
-  const chooserWindow = shouldRestore
+  const chooserWindow = explicitInst
     ? openChooserHostWindow('comfy', { deferColdStartReveal: true })
     : openOrFocusChooserHostWindow()
 
-  if (!shouldRestore) return
-  const installationId = surface.installationId
+  if (!explicitInst) return
+  const installationId = explicitInst.id
 
   void (async () => {
     const entry = findEntryByHostWindow(chooserWindow)
@@ -271,9 +273,8 @@ function openStartupSurface(): void {
 
     const inst = await getInstallation(installationId)
     if (!inst) {
-      // The remembered install was deleted — drop the stale state so we don't
-      // retry forever, and reveal the dashboard.
-      clearLastActiveSurface()
+      // Raced with a delete between `resolveAutoLaunchInstall` and this IPC
+      // dispatch — silently fall back to the dashboard.
       revealStartupRestoreDashboard(entry.windowKey)
       return
     }
@@ -1980,7 +1981,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     // picking / creating installs. When the user last left an instance
     // window (and the reopen setting is on), restore that instance
     // in-place on top of the freshly-opened chooser host.
-    openStartupSurface()
+    void openStartupSurface()
 
     // Single subscription rebroadcasts every install-list mutation
     // (add/remove/update/markLaunched/reorder/...) to all renderers as

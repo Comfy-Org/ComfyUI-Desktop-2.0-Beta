@@ -14,6 +14,7 @@ import SettingsSectionList from '../../views/comfyUISettings/SettingsSectionList
 import StoragePane, { type StorageSnapshot } from '../../views/comfyUISettings/StoragePane.vue'
 import ConsoleTerminalPane from '../../views/comfyUISettings/ConsoleTerminalPane.vue'
 import Tooltip from '../ui/Tooltip.vue'
+import OperationErrorDetail from '../ui/OperationErrorDetail.vue'
 import type { PickerTab, SectionTab } from '../../lib/pickerTabs'
 import { isTabAllowedForCategory } from '../../lib/pickerTabs'
 import { humanizeOpStatus, operationInflightLabel, operationSuccessLabel } from '../../lib/progressStatusLabel'
@@ -649,7 +650,6 @@ defineExpose({
       :class="{ 'is-subpage-active': subPage !== null }"
       role="tablist"
       :aria-label="t('comfyUISettings.title', 'Settings')"
-      :aria-hidden="subPage !== null"
     >
       <Tooltip
         v-for="(tab, i) in tabs"
@@ -704,6 +704,7 @@ defineExpose({
           key="subpage-args"
           :installation-id="installation.id"
           :initial-value="argsValue"
+          :pending-restart="argsField != null && pendingRestartFieldIds.has(argsField.id)"
           @back="closeSubPage"
           @update="handleArgsUpdate"
         />
@@ -771,8 +772,6 @@ defineExpose({
                 :snapshot="globalSettingsSnapshot"
                 :sections="storageSections"
                 :pending-restart-field-ids="pendingRestartFieldIds"
-                :field-error-messages="fieldErrorMessages"
-                :running-action-ids="runningActionIds"
                 @update-field="updateField"
               />
             </div>
@@ -840,7 +839,7 @@ defineExpose({
                       <XCircle :size="32" />
                     </div>
                     <p class="op-title op-title--error">{{ t('instancePicker.progressError') }}</p>
-                    <p class="op-name op-name--error">{{ activeOperation?.error }}</p>
+                    <OperationErrorDetail v-if="activeOperation?.error" :error="activeOperation.error" />
                     <div class="op-actions">
                       <button type="button" class="op-primary-btn" @click="emit('op-retry')">
                         {{ t('instancePicker.progressRetry') }}
@@ -960,9 +959,10 @@ defineExpose({
   }
 }
 
+/* Dim the strip while a sub-page is open to signal the nested context,
+   but keep tabs clickable so a tab switch can exit the sub-page. */
 .settings-v2-tabs.is-subpage-active {
-  opacity: 0.35;
-  pointer-events: none;
+  opacity: 0.6;
 }
 
 .settings-v2-tab {
@@ -1148,8 +1148,6 @@ defineExpose({
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.op-name--error { color: var(--brand-error, #e74c3c); opacity: 0.8; }
-
 .op-bar-wrap {
   width: 100%;
   max-width: 260px;
