@@ -232,9 +232,17 @@ const checkUpdateAction = computed<ActionDef | undefined>(() =>
   allActions.value.find((a) => a.id === 'check-update')
 )
 
-const promotedPrimaryActions = computed<ActionDef[]>(() =>
-  selectedActions.value.filter((a) => a.id === 'update-comfyui' || a.id === 'copy-update')
-)
+const promotedPrimaryActions = computed<ActionDef[]>(() => {
+  const fromServer = selectedActions.value.filter(
+    (a) => a.id === 'update-comfyui' || a.id === 'copy-update'
+  )
+  // Up-to-date installs ship no `update-comfyui` action, so picking a different
+  // stable tag below would otherwise have no button to act on. Surface a
+  // synthesized one in that case.
+  if (fromServer.some((a) => a.id === 'update-comfyui')) return fromServer
+  const synth = synthesizedUpdateAction.value
+  return synth ? [synth, ...fromServer] : fromServer
+})
 
 const otherSecondaryActions = computed<ActionDef[]>(() =>
   selectedActions.value.filter(
@@ -254,12 +262,14 @@ const showCheckInHeader = computed(
     otherSecondaryActions.value.length === 0
 )
 
-// Only surface the manual check when no update is already visible.
+// Only surface the manual check when no update is already visible — including
+// the synthesized "update to picked tag" action on an up-to-date install.
 const showCheckUpdateInFooter = computed(
   () =>
     checkUpdateAction.value != null &&
     !showCheckInHeader.value &&
-    preview.value?.updateAvailable !== true
+    preview.value?.updateAvailable !== true &&
+    synthesizedUpdateAction.value == null
 )
 
 const showFooterActions = computed(
@@ -382,6 +392,30 @@ const versionOptions = computed<BaseSelectOption[]>(() => {
     value: tag,
     label: tag === latest ? t('newInstall.latestStable') + ` — ${tag}` : tag,
   }))
+})
+
+// When the install is already up to date the server sends no `update-comfyui`
+// action, so picking a *different* stable tag from the dropdown would have no
+// button. Synthesize one here (e.g. downgrade to an older release). The backend
+// resolves the exact ref via `targetTag`, added by `attachTargetTagIfNeeded` on
+// click; only the known-installed-tag case is handled so we never surface an
+// update for an install whose current tag we can't pin.
+const synthesizedUpdateAction = computed<ActionDef | null>(() => {
+  if (!isStableDraft.value) return null
+  const tag = pickedStableTag.value
+  if (!tag || !STABLE_TAG_RE.test(tag)) return null
+  if (selectedActions.value.some((a) => a.id === 'update-comfyui')) return null
+  const current = detectCurrentInstalledTag()
+  if (!current || current === tag) return null
+  return {
+    id: 'update-comfyui',
+    label: t('standalone.updateNow'),
+    style: 'primary',
+    enabled: true,
+    showProgress: true,
+    progressTitle: t('standalone.updatingTitle', { version: tag }),
+    data: { channel: 'stable' },
+  }
 })
 
 /** Patch the `update-comfyui` action with the picked stable tag (no-op for
