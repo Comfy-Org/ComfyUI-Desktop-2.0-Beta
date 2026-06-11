@@ -59,8 +59,8 @@ describe('buildExistenceCandidates', () => {
       downloadBaseDir: '/install/models',
       modelRoots: ['/install/models'],
       extraPaths: [
-        { section: 's', type: 'loras', rawType: 'loras', dir: '/custom/somedir/myname', isDefault: false },
-        { section: 's', type: 'checkpoints', rawType: 'checkpoints', dir: '/custom/cp', isDefault: false },
+        { section: 's', basePath: null, type: 'loras', rawType: 'loras', dir: '/custom/somedir/myname', isDefault: false },
+        { section: 's', basePath: null, type: 'checkpoints', rawType: 'checkpoints', dir: '/custom/cp', isDefault: false },
       ],
     }
     const candidates = buildExistenceCandidates(ctx, '/install/models', 'loras', 'x.safetensors')
@@ -87,7 +87,7 @@ describe('buildExistenceCandidates', () => {
       downloadBaseDir: '/install/models',
       modelRoots: ['/install/models'],
       extraPaths: [
-        { section: 's', type: 'text_encoders', rawType: 'clip', dir: '/custom/clip', isDefault: false },
+        { section: 's', basePath: null, type: 'text_encoders', rawType: 'clip', dir: '/custom/clip', isDefault: false },
       ],
     }
     const candidates = buildExistenceCandidates(ctx, '/install/models', 'clip', 'x.safetensors')
@@ -99,7 +99,7 @@ describe('buildExistenceCandidates', () => {
       downloadBaseDir: '/install/models',
       modelRoots: ['/install/models'],
       extraPaths: [
-        { section: 's', type: 'loras', rawType: 'loras', dir: '/custom/loras', isDefault: false },
+        { section: 's', basePath: null, type: 'loras', rawType: 'loras', dir: '/custom/loras', isDefault: false },
       ],
     }
     const candidates = buildExistenceCandidates(ctx, '/install/models', 'loras/sub', 'x.safetensors')

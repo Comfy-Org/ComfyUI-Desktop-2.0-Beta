@@ -10,16 +10,30 @@ import {
 } from '../../lib/models'
 import type { InstallationRecord } from '../../installations'
 
-/** Read-only view of an install's own `extra_model_paths.yaml` for the Storage
- *  tab. One row per resolved per-type directory; `dirExists` lets the UI flag
- *  entries pointing at folders that aren't present (yet). */
-export interface ExtraModelPathRow {
-  section: string
+/** One resolved per-type directory inside an `extra_model_paths.yaml` section.
+ *  `dirExists` lets the UI flag entries pointing at folders not present (yet). */
+export interface ExtraModelPathDir {
   type: string
   rawType: string
   dir: string
-  isDefault: boolean
   dirExists: boolean
+}
+
+/** A single `extra_model_paths.yaml` section, grouped for read-only display in
+ *  the Storage tab. Rendered as one row in the models-dir list (keyed by its
+ *  `base_path`, or `name` when the section declares none), with the per-type
+ *  `dirs` shown in a detail modal. */
+export interface ExtraModelPathSection {
+  /** Section key from the YAML (e.g. `comfyui_desktop`, `my_external`). */
+  name: string
+  /** Resolved absolute `base_path`, or null when the section declares none. */
+  basePath: string | null
+  /** Whether `basePath` currently exists on disk (false when null). */
+  basePathExists: boolean
+  /** `is_default: true` on the section. */
+  isDefault: boolean
+  /** Per-type directories the section contributes. */
+  dirs: ExtraModelPathDir[]
 }
 
 export interface ExtraModelPathsView {
@@ -27,24 +41,43 @@ export interface ExtraModelPathsView {
   yamlPath: string
   /** Whether that file currently exists on disk. */
   exists: boolean
-  rows: ExtraModelPathRow[]
+  /** One entry per YAML section, in declaration order. */
+  sections: ExtraModelPathSection[]
 }
 
-/** Resolve an install's `extra_model_paths.yaml` the same way ComfyUI does, for
- *  read-only display. Returns an empty view when the install has no path yet. */
+/** Resolve an install's `extra_model_paths.yaml` the same way ComfyUI does and
+ *  group the per-type directories by section for read-only display. Returns an
+ *  empty view when the install has no path yet. */
 export function buildExtraModelPathsView(installation: InstallationRecord): ExtraModelPathsView {
   const installPath = installation.installPath as string | undefined
-  if (!installPath) return { yamlPath: '', exists: false, rows: [] }
+  if (!installPath) return { yamlPath: '', exists: false, sections: [] }
   const yamlPath = path.join(resolveComfyDir(installPath), 'extra_model_paths.yaml')
-  const rows: ExtraModelPathRow[] = resolveExtraModelPaths(yamlPath).map((r) => ({
-    section: r.section,
-    type: r.type,
-    rawType: r.rawType,
-    dir: r.dir,
-    isDefault: r.isDefault,
-    dirExists: fs.existsSync(r.dir),
-  }))
-  return { yamlPath, exists: fs.existsSync(yamlPath), rows }
+
+  // Group resolved per-type dirs by section, preserving declaration order.
+  const sections: ExtraModelPathSection[] = []
+  const byName = new Map<string, ExtraModelPathSection>()
+  for (const r of resolveExtraModelPaths(yamlPath)) {
+    let section = byName.get(r.section)
+    if (!section) {
+      section = {
+        name: r.section,
+        basePath: r.basePath,
+        basePathExists: r.basePath != null && fs.existsSync(r.basePath),
+        isDefault: r.isDefault,
+        dirs: [],
+      }
+      byName.set(r.section, section)
+      sections.push(section)
+    }
+    section.dirs.push({
+      type: r.type,
+      rawType: r.rawType,
+      dir: r.dir,
+      dirExists: fs.existsSync(r.dir),
+    })
+  }
+
+  return { yamlPath, exists: fs.existsSync(yamlPath), sections }
 }
 
 export interface LaunchSettingsOptions {

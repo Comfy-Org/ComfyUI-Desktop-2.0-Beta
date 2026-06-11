@@ -474,6 +474,9 @@ function expandUserVars(p: string): string {
 export interface ResolvedExtraPath {
   /** Section the entry came from (for display grouping). */
   section: string
+  /** Section's resolved absolute `base_path`, or null when the section declares
+   *  none (per-type subpaths then resolve absolute or relative to the YAML). */
+  basePath: string | null
   /** Canonical folder type (legacy aliases mapped). */
   type: string
   /** Folder type exactly as written in the YAML (for display). */
@@ -520,6 +523,7 @@ export function resolveExtraModelPaths(yamlPath: string): ResolvedExtraPath[] {
       }
       out.push({
         section: section.name,
+        basePath: base ? normpath(base) : null,
         type: mapLegacyFolderType(type),
         rawType: type,
         dir: normpath(full),

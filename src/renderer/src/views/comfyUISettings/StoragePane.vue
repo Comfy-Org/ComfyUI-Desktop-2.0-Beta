@@ -7,6 +7,7 @@ import GlobalSettingsMicroSection from '../../comfyTitlePopup/globalSettings/Glo
 import ModelsDirList from '../../comfyTitlePopup/globalSettings/ModelsDirList.vue'
 import StorageDirRow from './StorageDirRow.vue'
 import BooleanToggle from './BooleanToggle.vue'
+import ExtraModelPathsModal, { type ExtraModelPathSection } from './ExtraModelPathsModal.vue'
 import InfoTooltip from '../../components/InfoTooltip.vue'
 import type { DetailField, DetailSection, Installation } from '../../types/ipc'
 
@@ -21,6 +22,12 @@ interface ModelsDir {
   isPrimary: boolean
   locked?: boolean
   promotable?: boolean
+  /** Read-only row contributed by `extra_model_paths.yaml` (opens a modal). */
+  kind?: 'extra'
+  /** Index into `extraSections` for the detail modal (extra rows only). */
+  detailIndex?: number
+  isDefault?: boolean
+  missingCount?: number
 }
 
 export interface StorageSnapshot {
@@ -123,27 +130,55 @@ function findField(id: string): DetailField | undefined {
 
 /** Read-only directories contributed by the install's own
  *  `extra_model_paths.yaml`, resolved in the main process the same way ComfyUI
- *  does and passed through as a hidden field. */
-interface ExtraModelPathRow {
-  section: string
-  type: string
-  rawType: string
-  dir: string
-  isDefault: boolean
-  dirExists: boolean
-}
+ *  does and passed through as a hidden field. Grouped by section so each
+ *  `base_path` shows as one row in the models-dir list. */
 interface ExtraModelPathsView {
   yamlPath: string
   exists: boolean
-  rows: ExtraModelPathRow[]
+  sections: ExtraModelPathSection[]
 }
 const extraModelPaths = computed<ExtraModelPathsView>(() => {
   const v = findField('extraModelPaths')?.value as ExtraModelPathsView | undefined
-  return v ?? { yamlPath: '', exists: false, rows: [] }
+  return v ?? { yamlPath: '', exists: false, sections: [] }
 })
-const hasExtraModelPaths = computed(
-  () => extraModelPaths.value.exists && extraModelPaths.value.rows.length > 0
+const extraSections = computed<ExtraModelPathSection[]>(() => extraModelPaths.value.sections)
+
+/** `extra_model_paths.yaml` sections as read-only rows for the models-dir list.
+ *  ComfyUI loads this file regardless of the Use-Shared-Models toggle, so these
+ *  rows append to both the shared-on and shared-off lists. */
+const extraModelRows = computed<ModelsDir[]>(() =>
+  extraSections.value.map((s, i) => ({
+    path: s.basePath || s.name,
+    isPrimary: false,
+    kind: 'extra',
+    detailIndex: i,
+    isDefault: s.isDefault,
+    missingCount: s.dirs.filter((d) => !d.dirExists).length,
+  }))
 )
+
+// --- Custom model paths detail modal --------------------------------------
+
+const extraModalSection = ref<ExtraModelPathSection | null>(null)
+const extraModalOpen = ref(false)
+
+function openExtraDetails(row: ModelsDir | undefined): void {
+  if (!row || row.kind !== 'extra' || row.detailIndex == null) return
+  const section = extraSections.value[row.detailIndex]
+  if (!section) return
+  extraModalSection.value = section
+  extraModalOpen.value = true
+}
+
+function handleSharedModelDetails(index: number): void {
+  openExtraDetails(sharedModelDirs.value[index])
+}
+function handleInstanceModelDetails(index: number): void {
+  openExtraDetails(instanceModelDirs.value[index])
+}
+function closeExtraModal(): void {
+  extraModalOpen.value = false
+}
 
 function persistField(id: string, value: unknown): void {
   const field = findField(id)
@@ -204,8 +239,12 @@ const instanceModelDirs = computed<ModelsDir[]>(() => {
     isPrimary: primary !== null && samePath(p, primary),
     locked: false,
   }))
-  if (ownRow?.isPrimary) return [ownRow, ...extraRows]
-  return ownRow ? [...extraRows, ownRow] : extraRows
+  const base = ownRow?.isPrimary
+    ? [ownRow, ...extraRows]
+    : ownRow
+      ? [...extraRows, ownRow]
+      : extraRows
+  return [...base, ...extraModelRows.value]
 })
 
 async function handleAddInstanceModelDir(): Promise<void> {
@@ -243,7 +282,7 @@ async function handleRemoveInstanceModelDir(index: number): Promise<void> {
 
 function handleMakeInstancePrimary(index: number): void {
   const row = instanceModelDirs.value[index]
-  if (!row) return
+  if (!row || row.kind === 'extra') return
   // The locked install-own row becoming primary means "no external primary".
   persistField('modelDirsPrimary', row.locked ? null : row.path)
 }
@@ -315,7 +354,7 @@ const sharedModelDirs = computed<ModelsDir[]>(() => {
   }))
   const own = installOwnModelsDir.value
   if (own) rows.push({ path: own, isPrimary: false, locked: true, promotable: false })
-  return rows
+  return [...rows, ...extraModelRows.value]
 })
 
 /** Index of a displayed row's path within the editable global shared dirs. */
@@ -454,6 +493,7 @@ function handleBrowseSharedOutput(): void {
         @remove="handleRemoveModelsDir"
         @make-primary="handleMakePrimary"
         @open="handleOpenModelsDir"
+        @details="handleSharedModelDetails"
         @add="handleAddModelsDir"
       />
 
@@ -475,43 +515,10 @@ function handleBrowseSharedOutput(): void {
           @open="handleOpenInstanceModelDir"
           @remove="handleRemoveInstanceModelDir"
           @make-primary="handleMakeInstancePrimary"
+          @details="handleInstanceModelDetails"
           @add="handleAddInstanceModelDir"
         />
       </template>
-    </GlobalSettingsMicroSection>
-
-    <!-- Read-only: directories contributed by this install's own
-         extra_model_paths.yaml. ComfyUI searches these; the launcher only
-         displays them (never edits the file). Hidden when there are none. -->
-    <GlobalSettingsMicroSection
-      v-if="hasExtraModelPaths"
-      :title="t('settings.extraModelPaths', 'Custom Model Paths')"
-    >
-      <p class="storage-extra-note">
-        {{
-          t(
-            'comfyUISettings.extraModelPathsNote',
-            'From this install’s extra_model_paths.yaml. Read-only — ComfyUI searches these directories, but the launcher does not manage them.'
-          )
-        }}
-      </p>
-      <div
-        v-for="(row, i) in extraModelPaths.rows"
-        :key="`${row.section}-${row.rawType}-${i}`"
-        class="storage-extra-row"
-      >
-        <span class="storage-extra-type">{{ row.rawType }}</span>
-        <button
-          type="button"
-          class="storage-extra-path"
-          :title="t('models.openDir', 'Open folder')"
-          @click="handleOpenPath(row.dir)"
-        >{{ row.dir }}</button>
-        <span v-if="row.isDefault" class="storage-extra-tag">{{ t('common.default', 'default') }}</span>
-        <span v-if="!row.dirExists" class="storage-extra-missing">{{
-          t('comfyUISettings.dirMissing', 'missing')
-        }}</span>
-      </div>
     </GlobalSettingsMicroSection>
 
     <!-- Input/Output group: the Use-Shared-I/O toggle lives here. -->
@@ -568,6 +575,16 @@ function handleBrowseSharedOutput(): void {
         />
       </template>
     </GlobalSettingsMicroSection>
+
+    <!-- Read-only details for a custom-model-paths (extra_model_paths.yaml)
+         section, opened from its row in the models list above. -->
+    <ExtraModelPathsModal
+      :open="extraModalOpen"
+      :section="extraModalSection"
+      :yaml-path="extraModelPaths.yamlPath"
+      @close="closeExtraModal"
+      @open-path="handleOpenPath"
+    />
   </div>
 </template>
 
@@ -668,56 +685,4 @@ function handleBrowseSharedOutput(): void {
   line-height: 1.45;
 }
 
-.storage-extra-note {
-  margin: 0 0 8px;
-  font-size: 12px;
-  line-height: 1.45;
-  opacity: 0.75;
-}
-
-.storage-extra-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 0;
-  font-size: 12px;
-  min-width: 0;
-}
-
-.storage-extra-type {
-  flex: 0 0 auto;
-  font-weight: 600;
-  opacity: 0.85;
-}
-
-.storage-extra-path {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-align: left;
-  background: none;
-  border: none;
-  padding: 0;
-  color: inherit;
-  cursor: pointer;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-.storage-extra-tag {
-  flex: 0 0 auto;
-  font-size: 11px;
-  padding: 1px 6px;
-  border-radius: 999px;
-  background: color-mix(in srgb, currentColor 12%, transparent);
-  opacity: 0.85;
-}
-
-.storage-extra-missing {
-  flex: 0 0 auto;
-  font-size: 11px;
-  color: #d9822b;
-}
 </style>

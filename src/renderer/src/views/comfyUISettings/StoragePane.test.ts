@@ -479,4 +479,89 @@ describe('StoragePane', () => {
       expect(bridge.updateFieldCalls).toEqual([{ id: 'inputDir', value: '/picked/in' }])
     })
   })
+
+  // Read-only rows contributed by the install's extra_model_paths.yaml. Each
+  // YAML section is one row in the models list (Instance pill), and clicking it
+  // opens a detail modal with the per-type dirs and a link to the .yaml file.
+  describe('custom model paths (extra_model_paths.yaml)', () => {
+    function makeExtraSection() {
+      return {
+        name: 'my_external',
+        basePath: '/ext/base',
+        basePathExists: true,
+        isDefault: false,
+        dirs: [
+          { type: 'checkpoints', rawType: 'checkpoints', dir: '/ext/base/checkpoints', dirExists: true },
+          { type: 'controlnet', rawType: 'controlnet', dir: '/ext/base/t2i_adapter', dirExists: false },
+        ],
+      }
+    }
+
+    function sectionsWithExtra(view: unknown) {
+      return [
+        {
+          fields: [
+            { id: 'useSharedModels', label: 'Use Shared Models', value: false, editable: true, editType: 'boolean' },
+            { id: 'modelDirs', label: 'Model Directories', value: [], editable: true, editType: 'model-dirs' },
+            { id: 'modelDirsPrimary', label: 'modelDirsPrimary', value: null, editable: true, editType: 'hidden' },
+            { id: 'installModelsDir', label: 'installModelsDir', value: '/own/models', editable: false, editType: 'hidden' },
+            { id: 'extraModelPaths', label: 'extraModelPaths', value: view, editable: false, editType: 'hidden' },
+          ],
+        },
+      ]
+    }
+
+    function extraView() {
+      return { yamlPath: '/own/extra_model_paths.yaml', exists: true, sections: [makeExtraSection()] }
+    }
+
+    function findExtraRow(wrapper: ReturnType<typeof mountPaneWithSections>) {
+      return wrapper.findAll('.models-dir-row').find((r) => r.text().includes('/ext/base'))!
+    }
+
+    it('renders each YAML section as a read-only row with the Instance pill and missing count', async () => {
+      installMockBridge()
+      const wrapper = mountPaneWithSections(sectionsWithExtra(extraView()))
+      await nextTick()
+      const extraRow = findExtraRow(wrapper)
+      expect(extraRow).toBeTruthy()
+      expect(extraRow.find('.tag-local').exists()).toBe(true) // Instance pill
+      expect(extraRow.find('.tag-missing').text()).toContain('1') // one missing dir
+      // Read-only: no browse / make-primary affordance on extra rows.
+      expect(extraRow.find('.tag-primary').exists()).toBe(false)
+    })
+
+    it('opens the detail modal listing per-type dirs when the row is clicked', async () => {
+      installMockBridge()
+      const wrapper = mountPaneWithSections(sectionsWithExtra(extraView()))
+      await nextTick()
+      await findExtraRow(wrapper).find('.models-dir-name').trigger('click')
+      await nextTick()
+      expect(document.body.textContent).toContain('/ext/base/checkpoints')
+      expect(document.body.textContent).toContain('/ext/base/t2i_adapter')
+    })
+
+    it('opens the yaml file path from the modal footer', async () => {
+      const bridge = installMockBridge()
+      const wrapper = mountPaneWithSections(sectionsWithExtra(extraView()))
+      await nextTick()
+      await findExtraRow(wrapper).find('.models-dir-name').trigger('click')
+      await nextTick()
+      const actions = Array.from(document.querySelectorAll('.empm-action')) as HTMLButtonElement[]
+      const yamlBtn = actions.find((b) => b.textContent?.includes('.yaml'))!
+      yamlBtn.click()
+      expect(bridge.openPathCalls).toContain('/own/extra_model_paths.yaml')
+    })
+
+    it('opens a per-type dir from the modal when its path is clicked', async () => {
+      const bridge = installMockBridge()
+      const wrapper = mountPaneWithSections(sectionsWithExtra(extraView()))
+      await nextTick()
+      await findExtraRow(wrapper).find('.models-dir-name').trigger('click')
+      await nextTick()
+      const dirBtns = Array.from(document.querySelectorAll('.empm-dir-path')) as HTMLButtonElement[]
+      dirBtns.find((b) => b.textContent === '/ext/base/checkpoints')!.click()
+      expect(bridge.openPathCalls).toContain('/ext/base/checkpoints')
+    })
+  })
 })

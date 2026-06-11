@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Folder, FolderLock, FolderOpen, MoreHorizontal, Plus } from 'lucide-vue-next'
+import { ChevronRight, Folder, FolderLock, FolderOpen, Layers, MoreHorizontal, Plus } from 'lucide-vue-next'
 import InfoTooltip from '../../components/InfoTooltip.vue'
 
 interface ModelsDir {
@@ -14,6 +14,17 @@ interface ModelsDir {
    *  install's own models dir while shared models is on — the primary is a
    *  global shared dir there). Defaults to true. */
   promotable?: boolean
+  /** Read-only row contributed by the install's `extra_model_paths.yaml`. These
+   *  open a detail modal (via `details`) instead of the OS folder, and offer no
+   *  browse/promote/remove actions. */
+  kind?: 'extra'
+  /** Index passed back with the `details` event so the parent can find the
+   *  matching YAML section. Only set on `kind: 'extra'` rows. */
+  detailIndex?: number
+  /** `is_default: true` on the YAML section → shows a `default` tag. */
+  isDefault?: boolean
+  /** Number of the section's per-type dirs that don't exist on disk yet. */
+  missingCount?: number
 }
 
 interface Props {
@@ -27,6 +38,8 @@ const emit = defineEmits<{
   remove: [index: number]
   'make-primary': [index: number]
   open: [index: number]
+  /** Open the detail modal for a read-only `kind: 'extra'` row. */
+  details: [index: number]
   add: []
 }>()
 
@@ -46,11 +59,11 @@ function setMenuRef(index: number, el: Element | null): void {
 }
 
 function canPromote(dir: ModelsDir): boolean {
-  return !dir.isPrimary && dir.promotable !== false
+  return dir.kind !== 'extra' && !dir.isPrimary && dir.promotable !== false
 }
 
 function canRemove(dir: ModelsDir): boolean {
-  return !dir.isPrimary && !dir.locked
+  return dir.kind !== 'extra' && !dir.isPrimary && !dir.locked
 }
 
 function hasMenuActions(dir: ModelsDir): boolean {
@@ -132,6 +145,8 @@ const rows = computed(() =>
     ...dir,
     index,
     locked: dir.locked === true,
+    isExtra: dir.kind === 'extra',
+    missingCount: dir.missingCount ?? 0,
     showMenu: hasMenuActions(dir),
     canPromote: canPromote(dir),
     canRemove: canRemove(dir)
@@ -148,7 +163,7 @@ const rows = computed(() =>
       :class="{ 'is-just-promoted': row.path === justPromotedPath }"
     >
       <component
-        :is="row.locked ? FolderLock : Folder"
+        :is="row.isExtra ? Layers : row.locked ? FolderLock : Folder"
         :size="14"
         class="models-dir-icon"
         :title="row.locked ? t('models.lockedDir', 'This directory is always used and cannot be removed.') : undefined"
@@ -157,21 +172,37 @@ const rows = computed(() =>
         <button
           type="button"
           class="models-dir-name"
-          :title="t('models.openDir', 'Open folder')"
-          @click.stop="emit('open', row.index)"
+          :title="row.isExtra ? t('comfyUISettings.viewCustomPathDetails', 'View custom path details') : t('models.openDir', 'Open folder')"
+          @click.stop="row.isExtra ? emit('details', row.index) : emit('open', row.index)"
         >{{ row.path }}</button>
       </div>
+      <span v-if="row.missingCount > 0" class="models-dir-tag tag-missing">
+        {{ t('comfyUISettings.nMissing', { n: row.missingCount }) }}
+      </span>
+      <span v-if="row.isDefault" class="models-dir-tag tag-local">
+        {{ t('common.default', 'default') }}
+      </span>
       <span v-if="row.isPrimary" class="models-dir-tag tag-primary">
         {{ t('models.primary', 'Primary') }}
         <InfoTooltip :text="t('tooltips.modelsPrimary')" />
       </span>
-      <span v-if="row.locked" class="models-dir-tag tag-local">
+      <span v-if="row.locked || row.isExtra" class="models-dir-tag tag-local">
         {{ t('models.instanceOnly', 'Instance') }}
-        <InfoTooltip :text="t('tooltips.instanceOwnModelsDir')" />
+        <InfoTooltip :text="row.isExtra ? t('tooltips.extraModelPathsInstance') : t('tooltips.instanceOwnModelsDir')" />
       </span>
       <div class="models-dir-actions">
         <button
-          v-if="!row.locked"
+          v-if="row.isExtra"
+          type="button"
+          class="models-dir-action"
+          :aria-label="t('comfyUISettings.viewCustomPathDetails', 'View custom path details')"
+          :title="t('comfyUISettings.viewCustomPathDetails', 'View custom path details')"
+          @click.stop="emit('details', row.index)"
+        >
+          <ChevronRight :size="14" aria-hidden="true" />
+        </button>
+        <button
+          v-if="!row.locked && !row.isExtra"
           type="button"
           class="models-dir-action"
           :aria-label="t('common.browse', 'Browse')"
@@ -335,6 +366,13 @@ const rows = computed(() =>
   color: var(--text-muted);
   border: 1px solid var(--chooser-surface-border);
   background: color-mix(in srgb, var(--text) 6%, transparent);
+}
+
+/* Flags an extra-paths row whose section has one or more missing directories. */
+.models-dir-tag.tag-missing {
+  color: #d9822b;
+  border: 1px solid color-mix(in srgb, #d9822b 35%, transparent);
+  background: color-mix(in srgb, #d9822b 10%, transparent);
 }
 
 .models-dir-actions {
