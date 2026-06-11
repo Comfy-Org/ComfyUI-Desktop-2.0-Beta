@@ -102,6 +102,7 @@
     "storageRestartNote": "重启应用（或关闭后重新打开）以使这些更改生效。",
     "dirMissingTitle": "找不到文件夹 —— {dir}",
     "viewCustomPathDetails": "查看自定义路径详情",
+    "yamlTag": "YAML",
     "refreshCustomPaths": "刷新状态",
     "extraModelPathsModalTitle": "自定义模型路径",
     "extraModelPathsModalNote": "只读 —— ComfyUI 会搜索这些目录，但启动器不会管理它们。请编辑 extra_model_paths.yaml 以更改它们。",

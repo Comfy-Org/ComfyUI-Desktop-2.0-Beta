@@ -102,6 +102,7 @@
     "storageRestartNote": "Restart the application (or close and reopen) for these changes to take effect.",
     "dirMissingTitle": "Folder not found — {dir}",
     "viewCustomPathDetails": "View custom path details",
+    "yamlTag": "YAML",
     "refreshCustomPaths": "Refresh status",
     "extraModelPathsModalTitle": "Custom model paths",
     "extraModelPathsModalNote": "Read-only — ComfyUI searches these directories, but the launcher does not manage them. Edit extra_model_paths.yaml to change them.",

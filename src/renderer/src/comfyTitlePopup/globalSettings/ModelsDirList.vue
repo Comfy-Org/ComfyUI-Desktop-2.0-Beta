@@ -181,7 +181,7 @@ const rows = computed(() =>
         <InfoTooltip :text="t('tooltips.modelsPrimary')" />
       </span>
       <span v-if="row.locked || row.isExtra" class="models-dir-tag tag-local">
-        {{ t('models.instanceOnly', 'Instance') }}
+        {{ row.isExtra ? t('comfyUISettings.yamlTag', 'YAML') : t('models.instanceOnly', 'Instance') }}
         <InfoTooltip :text="row.isExtra ? t('tooltips.extraModelPathsInstance') : t('tooltips.instanceOwnModelsDir')" />
       </span>
       <div class="models-dir-actions">
