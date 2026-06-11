@@ -152,22 +152,35 @@ function getCategory(flagName: string): string {
   return CATEGORY_MAP[flagName] || 'Other'
 }
 
-/** Parse the usage line's mutually exclusive groups: `[--flag1 | --flag2 | --flag3]`. */
+/** Parse the usage line's mutually exclusive groups: `[--flag1 | --flag2 | --flag3]`.
+ *  Walks brackets depth-first so nested optional metavars (e.g. `--cache-ram [GB ...]`)
+ *  don't prematurely close the surrounding group and drop later members. */
 function parseExclusiveGroups(usageLine: string): Map<string, string> {
   const flagToGroup = new Map<string, string>()
-  // Match bracketed/parenthesized groups with pipes: [--a | --b] or (--a | --b)
-  const groupRegex = /[[(]([^\])]*\|[^\])]*)[)\]]/g
-  let match: RegExpExecArray | null
   let groupId = 0
-  while ((match = groupRegex.exec(usageLine)) !== null) {
-    const content = match[1]!
-    const flags = content.match(/--[\w_-]+/g)
-    if (flags && flags.length > 1) {
-      const gid = `group_${groupId++}`
-      for (const flag of flags) {
-        flagToGroup.set(flag.slice(2), gid)
+  for (let i = 0; i < usageLine.length; i++) {
+    const open = usageLine[i]
+    if (open !== '[' && open !== '(') continue
+    // Find the matching close bracket, tracking nesting of both [] and ().
+    let depth = 0
+    let j = i
+    for (; j < usageLine.length; j++) {
+      const c = usageLine[j]
+      if (c === '[' || c === '(') depth++
+      else if ((c === ']' || c === ')') && --depth === 0) break
+    }
+    const content = usageLine.slice(i + 1, j)
+    // A mutually exclusive group is a bracket containing `|`-separated alternatives.
+    if (content.includes('|')) {
+      const flags = content.match(/--[\w_-]+/g)
+      if (flags && flags.length > 1) {
+        const gid = `group_${groupId++}`
+        for (const flag of flags) {
+          flagToGroup.set(flag.slice(2), gid)
+        }
       }
     }
+    i = j // skip the whole group; nested brackets are part of it
   }
   return flagToGroup
 }

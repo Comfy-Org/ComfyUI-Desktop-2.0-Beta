@@ -180,7 +180,7 @@ export function validateArgs(
           i++
         }
       } else if (eqValue !== undefined) {
-        if (eqValue === '' && def.type === 'value') {
+        if (eqValue === '' && (def.type === 'value' || def.type === 'multi-value')) {
           result.push({
             text: token,
             status: 'missing-value',
@@ -275,7 +275,7 @@ export function validateArgs(
 export function serialize(
   known: Map<string, string>,
   extra: string[],
-  schema: ComfyArgDef[] = []
+  schema: ComfyArgDef[]
 ): string {
   const multiValue = new Set(schema.filter((a) => a.type === 'multi-value').map((a) => a.name))
   const parts: string[] = []

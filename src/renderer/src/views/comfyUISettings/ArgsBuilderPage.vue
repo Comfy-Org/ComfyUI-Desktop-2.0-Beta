@@ -165,6 +165,15 @@ function activeInGroup(group: string): string {
   return ''
 }
 
+// The active member of an exclusive group, when it takes a value — lets the
+// cluster show a value input (e.g. `--cache-ram 4 8`, `--cache-lru 10`).
+function activeValueDefInGroup(group: string): ComfyArgDef | null {
+  const name = activeInGroup(group)
+  if (!name) return null
+  const def = schema.value.find((a) => a.name === name)
+  return def && def.type !== 'boolean' ? def : null
+}
+
 // Dropdown options for an exclusive cluster: a synthetic "None" entry that
 // clears the group, followed by each member flag.
 function clusterOptions(args: ComfyArgDef[]): BaseSelectOption[] {
@@ -417,6 +426,18 @@ function onRawChange(value: string): void {
                 :aria-label="`${t('comfyUISettings.argsExclusiveLabel', 'Choose one')}: ${clusterSummary(item.args)}`"
                 :placeholder="t('comfyUISettings.argsExclusiveNone', 'None (default)')"
                 @update:model-value="(v) => onExclusivePick(item.group!, v)"
+              />
+              <BaseInput
+                v-if="activeValueDefInGroup(item.group)"
+                class="args-page-value-input"
+                :model-value="getValue(activeValueDefInGroup(item.group)!.name)"
+                :placeholder="
+                  activeValueDefInGroup(item.group)!.type === 'multi-value'
+                    ? t('comfyUISettings.argsMultiPlaceholder', 'space-separated values')
+                    : (activeValueDefInGroup(item.group)!.metavar ??
+                      t('comfyUISettings.argsValuePlaceholder', 'value'))
+                "
+                @change="(v) => setValue(activeValueDefInGroup(item.group!)!, v)"
               />
             </div>
           </template>

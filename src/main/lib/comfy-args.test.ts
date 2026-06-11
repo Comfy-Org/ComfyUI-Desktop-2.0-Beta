@@ -271,4 +271,26 @@ options:
     expect(byName.get('aaa')?.exclusiveGroup).toBeDefined()
     expect(byName.get('aaa')?.exclusiveGroup).toBe(byName.get('bbb')?.exclusiveGroup)
   })
+
+  it('keeps every member of a group whose alternative has a nested optional metavar', () => {
+    // `--cache-ram [GB ...]` embeds brackets that must not close the cache group
+    // early and drop `--cache-none`.
+    const help = `usage: main.py [-h] [--cache-classic | --cache-lru CACHE_LRU | --cache-ram [GB ...] | --cache-none]
+
+options:
+  -h, --help            show this help message and exit
+  --cache-classic       Old caching.
+  --cache-lru CACHE_LRU
+                        LRU caching.
+  --cache-ram [GB ...]  RAM caching.
+  --cache-none          No caching.
+`
+    const schema = parseHelpOutput(help)
+    const byName = new Map(schema.args.map((a) => [a.name, a]))
+    const group = byName.get('cache-classic')?.exclusiveGroup
+    expect(group).toBeDefined()
+    for (const name of ['cache-lru', 'cache-ram', 'cache-none']) {
+      expect(byName.get(name)?.exclusiveGroup).toBe(group)
+    }
+  })
 })

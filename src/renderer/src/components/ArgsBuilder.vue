@@ -444,12 +444,20 @@ const textTokens = computed<TextToken[]>(() => {
           i++
         }
       } else if (eqValue !== undefined) {
-        if (eqValue === '' && def.type === 'value') {
+        if (eqValue === '' && (def.type === 'value' || def.type === 'multi-value')) {
           result.push({ text: token, status: 'missing-value', tooltip: `Requires a value: ${def.metavar || 'VALUE'}` })
         } else {
           result.push({ text: token, status: 'ok' })
         }
         i++
+      } else if (def.type === 'multi-value') {
+        // Variadic flag: the flag and every following non-flag value are valid.
+        result.push({ text: token, status: 'ok' })
+        i++
+        while (i < tokens.length && !tokens[i]!.startsWith('--')) {
+          result.push({ text: tokens[i]!, status: 'ok' })
+          i++
+        }
       } else if (def.type === 'value') {
         const next = tokens[i + 1]
         if (next !== undefined && !next.startsWith('--')) {
