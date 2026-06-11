@@ -9,6 +9,7 @@ import {
   resolveInstallModelSearchPaths,
   mapLegacyFolderType,
   isSamePath,
+  TEMP_DIR_NAME,
   type InstallModelSearch,
 } from './models'
 import { _broadcastToRenderer } from './ipc/shared'
@@ -269,8 +270,6 @@ export function buildExistenceCandidates(
   }
   return [...out]
 }
-
-const TEMP_DIR_NAME = '.desktop2-downloads'
 
 /** Temp dir kept on the same volume as the destination so the final
  *  `fs.renameSync(tempPath, savePath)` is atomic (avoids cross-device EXDEV). */

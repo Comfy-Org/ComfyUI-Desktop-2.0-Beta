@@ -53,6 +53,11 @@ export const KNOWN_MODEL_FOLDERS = new Set<string>([
   't2i_adapter' // secondary dir for controlnet
 ])
 
+/** In-progress download temp dir name; created inside the models base dir by
+ *  comfyDownloadManager. Exported so the download manager and the folder filter
+ *  below share a single source of truth and can't drift apart. */
+export const TEMP_DIR_NAME = '.desktop2-downloads'
+
 // Folder names that must NEVER be registered as model search paths (system dirs, tooling
 // dotfolders, `models` self-reference). `custom_nodes` is critical: ComfyUI's prestartup
 // does `os.listdir` on every registered custom_nodes path and crashes if it's missing.
@@ -67,7 +72,7 @@ const NON_MODEL_FOLDERS = new Set<string>([
   '.snapshots',
   '.git',
   '__pycache__',
-  '.desktop2-downloads' // in-progress download temp dir (see comfyDownloadManager)
+  TEMP_DIR_NAME // in-progress download temp dir (see comfyDownloadManager)
 ])
 
 export interface ModelPathsResult {
