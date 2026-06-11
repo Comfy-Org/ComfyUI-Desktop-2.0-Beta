@@ -110,6 +110,10 @@ interface RetryParams {
   directory?: string
   outputDir?: string
   authToken?: string
+  /** Install that initiated a model download, captured so a retry resolves the
+   *  same per-install destination even when the originating comfy view is gone
+   *  (e.g. retry from the Downloads panel). */
+  installationId?: string | null
 }
 const retryParamsByUrl = new Map<string, RetryParams>()
 
@@ -178,18 +182,23 @@ function getSharedModelsDirs(): string[] {
   return modelsDirs && modelsDirs.length > 0 ? modelsDirs : settings.defaults.modelsDirs
 }
 
-/**
- * Resolve the model search context for the install that initiated a download,
- * so the destination and existence check honor that install's settings (shared
- * vs per-install model dirs, plus its own `extra_model_paths.yaml`). Returns
- * null when the download can't be attributed to a running install, in which
- * case callers fall back to the global shared dir (legacy behavior).
- */
-async function resolveDownloadContext(
-  senderContents?: Electron.WebContents,
-): Promise<InstallModelSearch | null> {
+/** The installationId backing a download's originating comfy webview, or null
+ *  when it can't be attributed (destroyed view / non-comfy sender). */
+function resolveSenderInstallationId(senderContents?: Electron.WebContents): string | null {
   if (!senderContents || senderContents.isDestroyed()) return null
-  const installationId = findInstallationIdByComfySender(senderContents)
+  return findInstallationIdByComfySender(senderContents)
+}
+
+/**
+ * Resolve the model search context for an install, so the destination and
+ * existence check honor that install's settings (shared vs per-install model
+ * dirs, plus its own `extra_model_paths.yaml`). Returns null when the download
+ * can't be attributed to an install, in which case callers fall back to the
+ * global shared dir (legacy behavior).
+ */
+async function resolveDownloadContextById(
+  installationId: string | null,
+): Promise<InstallModelSearch | null> {
   if (!installationId) return null
   try {
     const inst = await installations.get(installationId)
@@ -198,6 +207,27 @@ async function resolveDownloadContext(
   } catch {
     return null
   }
+}
+
+/** Folder types whose ComfyUI defaults register more than one directory, so a
+ *  download targeting the canonical name must also check the alternates (and
+ *  vice versa). Mirrors `folder_paths.py` (`text_encoders`+`clip`,
+ *  `diffusion_models`+`unet`, `controlnet`+`t2i_adapter`). */
+const ROOT_FOLDER_ALTERNATES: Readonly<Record<string, string[]>> = {
+  text_encoders: ['text_encoders', 'clip'],
+  diffusion_models: ['diffusion_models', 'unet'],
+  controlnet: ['controlnet', 't2i_adapter'],
+}
+
+/** Relative `<type>/<remainder>` directory candidates for a download hint,
+ *  expanded to include a model root's legacy/secondary type dirs. */
+function rootRelDirsForDirectory(directory: string): string[] {
+  const segments = directory.split(/[\\/]+/).filter(Boolean)
+  if (segments.length === 0) return [directory]
+  const rawType = segments[0]!
+  const remainder = segments.slice(1)
+  const heads = ROOT_FOLDER_ALTERNATES[mapLegacyFolderType(rawType)] ?? [rawType]
+  return heads.map((head) => path.join(head, ...remainder))
 }
 
 /**
@@ -216,9 +246,15 @@ export function buildExistenceCandidates(
   const out = new Set<string>()
   out.add(path.join(baseDir, directory, filename))
   if (ctx) {
+    // Each complete root, including legacy/secondary type dirs ComfyUI also
+    // searches (e.g. a `text_encoders` download is satisfied by `<root>/clip`).
+    const relDirs = rootRelDirsForDirectory(directory)
     for (const root of ctx.modelRoots) {
-      out.add(path.join(root, directory, filename))
+      for (const rel of relDirs) {
+        out.add(path.join(root, rel, filename))
+      }
     }
+    // Arbitrarily-mapped dirs from the install's own extra_model_paths.yaml.
     const segments = directory.split(/[\\/]+/).filter(Boolean)
     if (segments.length > 0) {
       const type = mapLegacyFolderType(segments[0]!)
@@ -392,6 +428,17 @@ async function fileExists(filePath: string): Promise<boolean> {
   }
 }
 
+/** True only when `filePath` is an existing *regular file*. The instant-complete
+ *  shortcut must not fire on a directory that merely shares the model's name,
+ *  which `fs.access` would treat as "exists". */
+async function regularFileExists(filePath: string): Promise<boolean> {
+  try {
+    return (await fs.promises.stat(filePath)).isFile()
+  } catch {
+    return false
+  }
+}
+
 export function parseContentDispositionFilename(header: string | null): string | null {
   if (!header) return null
   // Try filename*= (RFC 5987 encoded)
@@ -439,12 +486,16 @@ export async function startModelDownload(
   rawFilename: string,
   directory: string,
   senderContents?: Electron.WebContents,
+  installationId?: string | null,
 ): Promise<boolean> {
   const filename = stripQueryParams(rawFilename)
   // Resolve the initiating install so the destination + existence check follow
   // its model settings (shared vs per-install dirs + its extra_model_paths.yaml)
-  // rather than always assuming the global shared library.
-  const ctx = await resolveDownloadContext(senderContents)
+  // rather than always assuming the global shared library. An explicit
+  // `installationId` (passed by retries) wins over the live sender so a retry
+  // still targets the right install after its comfy view has gone away.
+  const resolvedInstallId = installationId ?? resolveSenderInstallationId(senderContents)
+  const ctx = await resolveDownloadContextById(resolvedInstallId)
   const baseDir = ctx ? ctx.downloadBaseDir : getModelsBaseDir()
   const savePath = path.join(baseDir, directory, filename)
   const tempDir = modelTempDirFor(baseDir)
@@ -452,7 +503,14 @@ export async function startModelDownload(
 
   // Capture before the validation early-returns so even a synchronous
   // error (bad path / extension) lands a retryable terminal entry.
-  retryParamsByUrl.set(url, { kind: 'model', filename, directory, window: win, senderContents })
+  retryParamsByUrl.set(url, {
+    kind: 'model',
+    filename,
+    directory,
+    window: win,
+    senderContents,
+    installationId: resolvedInstallId,
+  })
 
   const makeProgress = (
     overrides: Partial<DownloadProgress>,
@@ -482,7 +540,7 @@ export async function startModelDownload(
   // somewhere the install's ComfyUI actually searches - not merely in the
   // global shared library that a shared-models-off install can't see.
   for (const candidate of buildExistenceCandidates(ctx, baseDir, directory, filename)) {
-    if (await fileExists(candidate)) {
+    if (await regularFileExists(candidate)) {
       const progress = makeProgress({ progress: 1, status: 'completed', savePath: candidate })
       broadcastProgress(progress)
       return true
@@ -911,7 +969,7 @@ export function retryDownload(url: string): boolean {
     // download simply re-enters `error` and stays retryable.
     void startAssetDownload(win, url, params.filename, params.outputDir!, params.authToken, sender)
   } else {
-    void startModelDownload(win, url, params.filename, params.directory ?? '', sender)
+    void startModelDownload(win, url, params.filename, params.directory ?? '', sender, params.installationId)
   }
   return true
 }

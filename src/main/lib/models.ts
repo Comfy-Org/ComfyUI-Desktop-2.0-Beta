@@ -27,6 +27,11 @@ export const MODEL_FOLDER_TYPES = [
   'style_models',
   'text_encoders',
   'upscale_models',
+  'background_removal',
+  'frame_interpolation',
+  'geometry_estimation',
+  'optical_flow',
+  'detection',
   'vae',
   'vae_approx'
 ] as const
@@ -61,7 +66,8 @@ const NON_MODEL_FOLDERS = new Set<string>([
   '.venv',
   '.snapshots',
   '.git',
-  '__pycache__'
+  '__pycache__',
+  '.desktop2-downloads' // in-progress download temp dir (see comfyDownloadManager)
 ])
 
 export interface ModelPathsResult {
@@ -415,7 +421,9 @@ export function parseExtraModelsYaml(content: string): string[] {
  *  `<base>/loras/`, so existence checks line up). */
 function normpath(p: string): string {
   const norm = path.normalize(p)
-  if (norm.length <= 1) return norm
+  // Never strip a filesystem root's trailing separator (e.g. `C:\` or `/`),
+  // which would corrupt it into `C:` / ``.
+  if (norm === path.parse(norm).root) return norm
   const stripped = norm.replace(/[\\/]+$/, '')
   return stripped.length > 0 ? stripped : norm
 }
