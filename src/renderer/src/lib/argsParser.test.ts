@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { validateArgs } from './argsParser'
+import { parseArgs, serialize, validateArgs } from './argsParser'
 import type { ComfyArgDef } from '../types/ipc'
 
 const SCHEMA: ComfyArgDef[] = [
@@ -12,6 +12,14 @@ const SCHEMA: ComfyArgDef[] = [
     type: 'optional-value',
     metavar: 'METHOD',
     category: 'Net',
+  },
+  {
+    name: 'cache-ram',
+    flag: '--cache-ram',
+    help: 'RAM caching thresholds.',
+    type: 'multi-value',
+    metavar: 'GB',
+    category: 'Cache',
   },
 ]
 
@@ -65,6 +73,21 @@ describe('validateArgs', () => {
     expect(empty.hasIssues).toBe(true)
   })
 
+  it('treats multi-value flags as ok with zero, one, or many values', () => {
+    expect(validateArgs('--cache-ram', SCHEMA).hasIssues).toBe(false)
+    expect(validateArgs('--cache-ram 4', SCHEMA).hasIssues).toBe(false)
+    const two = validateArgs('--cache-ram 4 8', SCHEMA)
+    expect(two.tokens.map((t) => t.status)).toEqual(['ok', 'ok', 'ok'])
+    expect(two.orphanedTokens).toEqual([])
+    expect(two.hasIssues).toBe(false)
+  })
+
+  it('keeps validating flags that follow a multi-value flag', () => {
+    const v = validateArgs('--cache-ram 4 8 --port 8188', SCHEMA)
+    expect(v.tokens.map((t) => t.status)).toEqual(['ok', 'ok', 'ok', 'ok', 'ok'])
+    expect(v.hasIssues).toBe(false)
+  })
+
   it('treats optional-value flags as ok with or without a value', () => {
     expect(validateArgs('--preview-method', SCHEMA).hasIssues).toBe(false)
     expect(validateArgs('--preview-method latent2rgb', SCHEMA).hasIssues).toBe(false)
@@ -102,5 +125,42 @@ describe('validateArgs', () => {
       expect(v.tokens.map((t) => t.status)).toEqual(['ok', 'ok'])
       expect(v.hasIssues).toBe(false)
     })
+  })
+})
+
+describe('parseArgs', () => {
+  it('collects all values of a multi-value flag space-joined', () => {
+    const { known, extra } = parseArgs('--cache-ram 4 8', SCHEMA)
+    expect(known.get('cache-ram')).toBe('4 8')
+    expect(extra).toEqual([])
+  })
+
+  it('stops a multi-value flag at the next --flag', () => {
+    const { known } = parseArgs('--cache-ram 4 8 --port 8188', SCHEMA)
+    expect(known.get('cache-ram')).toBe('4 8')
+    expect(known.get('port')).toBe('8188')
+  })
+
+  it('accepts a multi-value flag with no values', () => {
+    const { known } = parseArgs('--cache-ram', SCHEMA)
+    expect(known.get('cache-ram')).toBe('')
+  })
+})
+
+describe('serialize', () => {
+  it('emits multi-value flag values as bare tokens, not one quoted blob', () => {
+    const known = new Map([['cache-ram', '4 8']])
+    expect(serialize(known, [], SCHEMA)).toBe('--cache-ram 4 8')
+  })
+
+  it('still quotes spaced values for non-multi-value flags', () => {
+    const known = new Map([['port', 'a b']])
+    expect(serialize(known, [], SCHEMA)).toBe('--port "a b"')
+  })
+
+  it('round-trips a multi-value flag through parse + serialize', () => {
+    const raw = '--cache-ram 4 8 --port 8188'
+    const { known, extra } = parseArgs(raw, SCHEMA)
+    expect(serialize(known, extra, SCHEMA)).toBe(raw)
   })
 })

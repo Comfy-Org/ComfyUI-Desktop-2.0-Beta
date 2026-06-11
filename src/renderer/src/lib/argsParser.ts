@@ -60,6 +60,17 @@ export function parseArgs(raw: string, schema: ComfyArgDef[]): ParsedArgs {
         } else if (eqValue !== undefined) {
           known.set(name, eqValue)
           i++
+        } else if (def.type === 'multi-value') {
+          // Variadic flag: greedily consume every following non-flag token and
+          // store them space-joined (e.g. `--cache-ram 4 8` -> "4 8").
+          const values: string[] = []
+          let j = i + 1
+          while (j < tokens.length && !tokens[j]!.startsWith('--')) {
+            values.push(tokens[j]!)
+            j++
+          }
+          known.set(name, values.join(' '))
+          i = j
         } else {
           const next = tokens[i + 1]
           if (next !== undefined && !next.startsWith('--')) {
@@ -169,7 +180,7 @@ export function validateArgs(
           i++
         }
       } else if (eqValue !== undefined) {
-        if (eqValue === '' && def.type === 'value') {
+        if (eqValue === '' && (def.type === 'value' || def.type === 'multi-value')) {
           result.push({
             text: token,
             status: 'missing-value',
@@ -198,6 +209,15 @@ export function validateArgs(
             status: 'missing-value',
             tooltip: `Requires a value: ${def.metavar || 'VALUE'}`
           })
+          i++
+        }
+      } else if (def.type === 'multi-value') {
+        // Variadic flag: the flag and every following non-flag value are valid
+        // (zero values is fine for nargs `*`), so none get flagged as orphaned.
+        result.push({ text: token, status: 'ok' })
+        i++
+        while (i < tokens.length && !tokens[i]!.startsWith('--')) {
+          result.push({ text: tokens[i]!, status: 'ok' })
           i++
         }
       } else {
@@ -249,13 +269,22 @@ export function validateArgs(
   }
 }
 
-/** Render parsed args back to a shell string, quoting values with whitespace so they round-trip. */
-export function serialize(known: Map<string, string>, extra: string[]): string {
+/** Render parsed args back to a shell string, quoting values with whitespace so they round-trip.
+ *  `schema` lets multi-value flags emit their space-separated values as bare tokens
+ *  (`--cache-ram 4 8`) instead of one quoted blob (`--cache-ram "4 8"`). */
+export function serialize(
+  known: Map<string, string>,
+  extra: string[],
+  schema: ComfyArgDef[]
+): string {
+  const multiValue = new Set(schema.filter((a) => a.type === 'multi-value').map((a) => a.name))
   const parts: string[] = []
   for (const [name, value] of known) {
     parts.push(`--${name}`)
     if (value !== '') {
-      parts.push(value.includes(' ') ? `"${value}"` : value)
+      // A multi-value flag's value is already space-separated tokens; emitting it
+      // raw keeps them as distinct args once the whole string is re-tokenized.
+      parts.push(multiValue.has(name) || !value.includes(' ') ? value : `"${value}"`)
     }
   }
   parts.push(...extra.map((e) => (e.includes(' ') ? `"${e}"` : e)))
