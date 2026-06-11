@@ -112,9 +112,8 @@ interface RetryParams {
   directory?: string
   outputDir?: string
   authToken?: string
-  /** Install that initiated a model download, captured so a retry resolves the
-   *  same per-install destination even when the originating comfy view is gone
-   *  (e.g. retry from the Downloads panel). */
+  /** Install that initiated the download, so a retry resolves the same
+   *  destination even after the originating comfy view is gone. */
   installationId?: string | null
 }
 const retryParamsByUrl = new Map<string, RetryParams>()
@@ -177,27 +176,23 @@ function getModelsBaseDir(): string {
   return modelsDirs?.[0] || settings.defaults.modelsDirs[0]!
 }
 
-/** Global shared model dirs, used as the search set when a download can't be
- *  attributed to a specific install (e.g. panel-initiated retries). */
+/** Global shared model dirs; the fallback search set when a download can't be
+ *  attributed to a specific install. */
 function getSharedModelsDirs(): string[] {
   const modelsDirs = settings.get('modelsDirs') as string[] | undefined
   return modelsDirs && modelsDirs.length > 0 ? modelsDirs : settings.defaults.modelsDirs
 }
 
-/** The installationId backing a download's originating comfy webview, or null
- *  when it can't be attributed (destroyed view / non-comfy sender). */
+/** installationId backing a download's originating comfy webview, or null when
+ *  it can't be attributed (destroyed view / non-comfy sender). */
 function resolveSenderInstallationId(senderContents?: Electron.WebContents): string | null {
   if (!senderContents || senderContents.isDestroyed()) return null
   return findInstallationIdByComfySender(senderContents)
 }
 
-/**
- * Resolve the model search context for an install, so the destination and
- * existence check honor that install's settings (shared vs per-install model
- * dirs, plus its own `extra_model_paths.yaml`). Returns null when the download
- * can't be attributed to an install, in which case callers fall back to the
- * global shared dir (legacy behavior).
- */
+/** Resolve an install's model search context (shared vs per-install dirs + its
+ *  `extra_model_paths.yaml`). Null when unattributable; callers then fall back
+ *  to the global shared dir. */
 async function resolveDownloadContextById(
   installationId: string | null,
 ): Promise<InstallModelSearch | null> {
@@ -211,10 +206,8 @@ async function resolveDownloadContextById(
   }
 }
 
-/** Folder types whose ComfyUI defaults register more than one directory, so a
- *  download targeting the canonical name must also check the alternates (and
- *  vice versa). Mirrors `folder_paths.py` (`text_encoders`+`clip`,
- *  `diffusion_models`+`unet`, `controlnet`+`t2i_adapter`). */
+/** Folder types whose ComfyUI defaults register multiple dirs, so a download
+ *  must also check the alternates. Mirrors `folder_paths.py`. */
 const ROOT_FOLDER_ALTERNATES: Readonly<Record<string, string[]>> = {
   text_encoders: ['text_encoders', 'clip'],
   diffusion_models: ['diffusion_models', 'unet'],
@@ -232,13 +225,9 @@ function rootRelDirsForDirectory(directory: string): string[] {
   return heads.map((head) => path.join(head, ...remainder))
 }
 
-/**
- * Every place a model file of `directory`/`filename` could already exist for an
- * install — so an instant "completed" only fires when the install's ComfyUI
- * would actually find the file. Mirrors ComfyUI's search set: the destination,
- * every complete model root (`<root>/<directory>`), and any arbitrarily-mapped
- * dir for the folder type from the install's `extra_model_paths.yaml`.
- */
+/** Every place a model file could already exist for an install — so an instant
+ *  "completed" only fires when its ComfyUI would actually find the file:
+ *  destination, every model root, and matching `extra_model_paths.yaml` dirs. */
 export function buildExistenceCandidates(
   ctx: InstallModelSearch | null,
   baseDir: string,
@@ -271,8 +260,7 @@ export function buildExistenceCandidates(
   return [...out]
 }
 
-/** Temp dir kept on the same volume as the destination so the final
- *  `fs.renameSync(tempPath, savePath)` is atomic (avoids cross-device EXDEV). */
+/** Temp dir on the destination's volume so the final rename is atomic (no EXDEV). */
 function modelTempDirFor(baseDir: string): string {
   return path.join(baseDir, TEMP_DIR_NAME)
 }
@@ -428,9 +416,8 @@ async function fileExists(filePath: string): Promise<boolean> {
   }
 }
 
-/** True only when `filePath` is an existing *regular file*. The instant-complete
- *  shortcut must not fire on a directory that merely shares the model's name,
- *  which `fs.access` would treat as "exists". */
+/** True only for an existing regular file, so the instant-complete shortcut
+ *  doesn't fire on a directory that merely shares the model's name. */
 async function regularFileExists(filePath: string): Promise<boolean> {
   try {
     return (await fs.promises.stat(filePath)).isFile()
@@ -489,11 +476,9 @@ export async function startModelDownload(
   installationId?: string | null,
 ): Promise<boolean> {
   const filename = stripQueryParams(rawFilename)
-  // Resolve the initiating install so the destination + existence check follow
-  // its model settings (shared vs per-install dirs + its extra_model_paths.yaml)
-  // rather than always assuming the global shared library. An explicit
-  // `installationId` (passed by retries) wins over the live sender so a retry
-  // still targets the right install after its comfy view has gone away.
+  // Resolve the initiating install so destination + existence check follow its
+  // model settings. An explicit `installationId` (from retries) wins over the
+  // live sender so a retry still targets the right install after its view is gone.
   const resolvedInstallId = installationId ?? resolveSenderInstallationId(senderContents)
   const ctx = await resolveDownloadContextById(resolvedInstallId)
   const baseDir = ctx ? ctx.downloadBaseDir : getModelsBaseDir()
@@ -537,8 +522,7 @@ export async function startModelDownload(
   }
 
   // Report completed without downloading only when the file already exists
-  // somewhere the install's ComfyUI actually searches - not merely in the
-  // global shared library that a shared-models-off install can't see.
+  // somewhere the install's ComfyUI actually searches.
   for (const candidate of buildExistenceCandidates(ctx, baseDir, directory, filename)) {
     if (await regularFileExists(candidate)) {
       const progress = makeProgress({ progress: 1, status: 'completed', savePath: candidate })
@@ -548,11 +532,9 @@ export async function startModelDownload(
   }
   const existing = pendingDownloads.get(url)
   if (existing) {
-    // Downloads are keyed solely by URL across the whole IPC surface
-    // (progress / pause / resume / cancel / retry), so a single URL can't carry
-    // two concurrent destinations. If another install is already fetching this
-    // URL into a different directory, fail closed rather than reporting a
-    // completion that lands somewhere this install's ComfyUI can't see.
+    // Downloads are keyed solely by URL, so one URL can't carry two concurrent
+    // destinations. If another install is already fetching this URL into a
+    // different dir, fail closed rather than complete into the wrong place.
     if (!isSamePath(path.dirname(existing.savePath), path.dirname(savePath))) {
       return false
     }

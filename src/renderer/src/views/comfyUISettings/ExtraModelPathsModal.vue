@@ -198,9 +198,8 @@ const title = computed(() =>
 }
 
 .empm-dir-path {
-  /* Don't grow: the clickable area must hug the text (matching the storage
-     list's row links), leaving the rest of the row unclickable. Still shrinks
-     with an ellipsis for long paths. */
+  /* Don't grow: the clickable area hugs the text, but still shrinks with an
+     ellipsis for long paths. */
   flex: 0 1 auto;
   min-width: 0;
   max-width: 100%;
@@ -223,8 +222,7 @@ const title = computed(() =>
   outline: none;
 }
 
-/* Missing directory: color the path red instead of a separate badge, keeping
-   the row's right side free for future per-dir controls. */
+/* Missing directory: color the path red instead of a separate badge. */
 .empm-dir-path.is-missing {
   color: var(--danger);
 }

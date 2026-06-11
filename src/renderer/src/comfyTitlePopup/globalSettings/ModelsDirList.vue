@@ -14,12 +14,10 @@ interface ModelsDir {
    *  install's own models dir while shared models is on — the primary is a
    *  global shared dir there). Defaults to true. */
   promotable?: boolean
-  /** Read-only row contributed by the install's `extra_model_paths.yaml`. These
-   *  open a detail modal (via `details`) instead of the OS folder, and offer no
-   *  browse/promote/remove actions. */
+  /** Read-only row from `extra_model_paths.yaml`: opens a detail modal (via
+   *  `details`), no browse/promote/remove. */
   kind?: 'extra'
-  /** Index passed back with the `details` event so the parent can find the
-   *  matching YAML section. Only set on `kind: 'extra'` rows. */
+  /** Index sent with the `details` event to find the YAML section (extra rows). */
   detailIndex?: number
   /** `is_default: true` on the YAML section → shows a `default` tag. */
   isDefault?: boolean

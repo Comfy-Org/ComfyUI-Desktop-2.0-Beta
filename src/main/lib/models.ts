@@ -53,9 +53,8 @@ export const KNOWN_MODEL_FOLDERS = new Set<string>([
   't2i_adapter' // secondary dir for controlnet
 ])
 
-/** In-progress download temp dir name; created inside the models base dir by
- *  comfyDownloadManager. Exported so the download manager and the folder filter
- *  below share a single source of truth and can't drift apart. */
+/** In-progress download temp dir name (inside the models base dir). Shared with
+ *  comfyDownloadManager and the folder filter below. */
 export const TEMP_DIR_NAME = '.desktop2-downloads'
 
 // Folder names that must NEVER be registered as model search paths (system dirs, tooling
@@ -147,33 +146,21 @@ function discoverExtraFoldersFromSharedDirs(modelsDirs: string[]): string[] {
 }
 
 /**
- * Legacy directory aliases that ComfyUI's `map_legacy` folds into a canonical
- * folder type (`folder_paths.py`):
- *   - a YAML `clip:` key is mapped to `text_encoders`.
- *   - a YAML `unet:` key is mapped to `diffusion_models`.
- *
- * Without these in the YAML, shared-dir users who keep encoders in
- * `<shared>/clip/` (the historical ComfyUI layout) or diffusion models in
- * `<shared>/unet/` see their files invisible to `DualCLIPLoader` / `UNETLoader`,
- * even though Storage shows the shared dir is configured. ComfyUI's defaults
- * find them when they live under `<install>/ComfyUI/models/clip|unet/` because
- * those are baked into `folder_names_and_paths`, but the extra-paths YAML only
- * registers what we explicitly list. Emitting the aliases for every shared dir
- * keeps the shared layout on equal footing with the install's own defaults.
- *
- * `t2i_adapter` is handled separately (see `SECONDARY_TYPE_DIRS`): it is NOT a
- * legacy alias, so a standalone `t2i_adapter:` key would create its own folder
- * type that ControlNet loaders never read. */
+ * Legacy dir aliases `map_legacy` folds into a canonical type (`folder_paths.py`):
+ * YAML `clip:` → `text_encoders`, `unet:` → `diffusion_models`. Emitting them per
+ * shared dir lets users keeping encoders in `<shared>/clip/` or models in
+ * `<shared>/unet/` (the historical layout) have those folders registered, since
+ * the extra-paths YAML only registers what we list.
+ * `t2i_adapter` is NOT a legacy alias — see `SECONDARY_TYPE_DIRS`. */
 const LEGACY_FOLDER_ALIASES: ReadonlyArray<{ key: string; dir: string }> = [
   { key: 'clip', dir: 'clip' },
   { key: 'unet', dir: 'unet' },
 ]
 
-/** Extra directories ComfyUI's built-in defaults search under a canonical type
- * even though their name has no `map_legacy` entry. ComfyUI registers
- * `<models>/t2i_adapter` under `controlnet` (`folder_paths.py`), so we must emit
- * it as a second path on the `controlnet:` key — a standalone `t2i_adapter:`
- * key would become its own folder type and stay invisible to ControlNet. */
+/** Dirs ComfyUI's defaults search under a canonical type without a `map_legacy`
+ * entry. `<models>/t2i_adapter` registers under `controlnet` (`folder_paths.py`),
+ * so emit it as a second path on `controlnet:` (a standalone `t2i_adapter:` key
+ * would become its own type, invisible to ControlNet). */
 const SECONDARY_TYPE_DIRS: Readonly<Record<string, string[]>> = {
   controlnet: ['t2i_adapter']
 }
@@ -336,16 +323,13 @@ export function syncCustomModelFolders(
 // ---------------------------------------------------------------------------
 // extra_model_paths.yaml parsing + resolution
 //
-// ComfyUI auto-loads `<comfyDir>/extra_model_paths.yaml` at startup (see
-// main.py `apply_custom_paths` + utils/extra_config.py), in addition to every
-// `--extra-model-paths-config` the launcher passes. The launcher otherwise has
-// no knowledge of that user-authored file, so model downloads and existence
-// checks must resolve it the same way ComfyUI does to stay consistent.
+// ComfyUI auto-loads `<comfyDir>/extra_model_paths.yaml` at startup (main.py
+// `apply_custom_paths` + utils/extra_config.py). Downloads and existence checks
+// must resolve this user-authored file the same way to stay consistent.
 // ---------------------------------------------------------------------------
 
-/** ComfyUI's `folder_paths.map_legacy`: a couple of folder names are aliases
- *  for canonical types. Normalising both sides lets us match a download's
- *  folder hint against an arbitrarily-named extra-paths override. */
+/** `folder_paths.map_legacy`: a few folder names alias canonical types.
+ *  Normalising both sides matches a download hint against a YAML override. */
 const LEGACY_FOLDER_TYPE_MAP: Readonly<Record<string, string>> = {
   unet: 'diffusion_models',
   clip: 'text_encoders',
@@ -355,12 +339,9 @@ export function mapLegacyFolderType(type: string): string {
   return LEGACY_FOLDER_TYPE_MAP[type] ?? type
 }
 
-/**
- * Keys under a section that are NOT per-type model-folder overrides and must
- * never be treated as model dirs. `custom_nodes` is excluded because pointing
- * the model scanner at a custom-nodes tree would register Python packages as
- * "models"; the others are section metadata.
- */
+/** Section keys that are NOT per-type model-folder overrides (section metadata).
+ *  `custom_nodes` excluded so the model scanner never treats Python packages as
+ *  "models". */
 const NON_MODEL_SECTION_KEYS: ReadonlySet<string> = new Set([
   'base_path',
   'is_default',
@@ -376,17 +357,14 @@ export interface ExtraModelsSection {
   basePath?: string
   /** `is_default: true` on the section. ComfyUI applies it per declared type. */
   isDefault?: boolean
-  /** Per-type override key (`checkpoints`, `loras`, …) → path. A value may
-   *  carry multiple newline-delimited paths (`|`-block scalar); each becomes its
-   *  own entry keyed by the same type. */
+  /** Per-type override key (`checkpoints`, `loras`, …) → path. A `|`-block scalar
+   *  value yields one entry per line, all keyed by the same type. */
   overrides: Array<{ type: string; path: string }>
 }
 
-/** Split an already-parsed YAML scalar into individual path lines, mirroring
- *  ComfyUI's `load_extra_path_config` exactly: split on newlines and drop empty
- *  lines (`conf[x].split("\n")` + `if len(y) == 0: continue`). No trimming or
- *  comment stripping — the YAML parser already resolved quoting and comments, so
- *  a path that legitimately contains `#` or surrounding spaces is preserved. */
+/** Split a parsed YAML scalar into path lines like `load_extra_path_config`:
+ *  split on newlines, drop empty lines. No trimming/comment stripping — the YAML
+ *  parser already handled that, so a `#` or spaces in a path are preserved. */
 function splitYamlPaths(value: unknown): string[] {
   if (value == null) return []
   return String(value)
@@ -394,13 +372,8 @@ function splitYamlPaths(value: unknown): string[] {
     .filter((s) => s.length > 0)
 }
 
-/**
- * Parse an `extra_model_paths.yaml` into structured sections, each with its
- * optional `base_path`, `is_default` flag, and every per-type model-folder
- * override. Uses a real YAML parser so `|`-block scalar multi-path values are
- * handled correctly. Returns `[]` on any parse failure so
- * a malformed file never aborts the caller.
- */
+/** Parse an `extra_model_paths.yaml` into sections (base_path, is_default, and
+ *  per-type overrides). Returns `[]` on parse failure. */
 export function parseExtraModelsSections(content: string): ExtraModelsSection[] {
   let doc: unknown
   try {
@@ -429,11 +402,8 @@ export function parseExtraModelsSections(content: string): ExtraModelsSection[] 
   return sections
 }
 
-/**
- * Back-compat: pull out every `base_path:` string value across sections.
- * Retained for callers that only need the bare base paths. Prefer
- * `parseExtraModelsSections` for the full structured view.
- */
+/** Back-compat: just the `base_path:` values. Prefer `parseExtraModelsSections`
+ *  for the full structured view. */
 export function parseExtraModelsYaml(content: string): string[] {
   return parseExtraModelsSections(content)
     .map((s) => s.basePath)
@@ -441,12 +411,10 @@ export function parseExtraModelsYaml(content: string): string[] {
 }
 
 /** Normalise like Python's `os.path.normpath`: collapse separators and strip a
- *  trailing one (a YAML subpath such as `loras/` must equal `<base>/loras`, not
- *  `<base>/loras/`, so existence checks line up). */
+ *  trailing one so `loras/` equals `<base>/loras` for existence checks. */
 function normpath(p: string): string {
   const norm = path.normalize(p)
-  // Never strip a filesystem root's trailing separator (e.g. `C:\` or `/`),
-  // which would corrupt it into `C:` / ``.
+  // Don't strip a filesystem root's trailing separator (`C:\` / `/`).
   if (norm === path.parse(norm).root) return norm
   const stripped = norm.replace(/[\\/]+$/, '')
   return stripped.length > 0 ? stripped : norm
@@ -488,14 +456,11 @@ export interface ResolvedExtraPath {
 }
 
 /**
- * Resolve an `extra_model_paths.yaml` into per-type absolute directories,
- * mirroring ComfyUI's `utils/extra_config.load_extra_path_config`:
- *  - `base_path` is `~`/env-expanded, then made absolute relative to the YAML's
- *    own directory when relative; per-type subpaths are NOT expanded.
- *  - each per-type subpath is joined onto `base_path` (an absolute subpath wins,
- *    matching `os.path.join`), or resolved relative to the YAML dir when there
- *    is no `base_path`.
- * Returns `[]` when the file is absent or unparseable.
+ * Resolve an `extra_model_paths.yaml` into per-type absolute dirs, mirroring
+ * `load_extra_path_config`: `base_path` is `~`/env-expanded then made absolute
+ * relative to the YAML dir; each subpath is joined onto `base_path` (absolute
+ * subpath wins) or resolved relative to the YAML dir when there's no base_path.
+ * Returns `[]` when absent or unparseable.
  */
 export function resolveExtraModelPaths(yamlPath: string): ResolvedExtraPath[] {
   let content: string
@@ -537,26 +502,21 @@ export function resolveExtraModelPaths(yamlPath: string): ResolvedExtraPath[] {
 /** The complete set of model locations a single install's ComfyUI will search,
  *  matching what the launcher should download into / check before downloading. */
 export interface InstallModelSearch {
-  /** Models root new downloads land in (the UI-visible primary). Always a
-   *  launcher-managed root with a `<type>/` layout, so any folder type is a
-   *  safe target. */
+  /** Models root new downloads land in (UI-visible primary); a launcher-managed
+   *  root with a `<type>/` layout. */
   downloadBaseDir: string
-  /** Complete model roots (built-in `<comfyDir>/models` + launcher dirs); each
-   *  holds files at `<root>/<type>`. */
+  /** Complete model roots (built-in `<comfyDir>/models` + launcher dirs); files
+   *  live at `<root>/<type>`. */
   modelRoots: string[]
   /** Arbitrary per-type dirs from the install's `extra_model_paths.yaml`. */
   extraPaths: ResolvedExtraPath[]
 }
 
 /**
- * Resolve every model search location for an install, mirroring the directories
- * its ComfyUI process actually sees: the built-in `<comfyDir>/models`, the
- * launcher-generated extra-paths (global `modelsDirs` when shared models are on,
- * else the per-install `modelDirs`), and the user-authored
- * `<comfyDir>/extra_model_paths.yaml`.
- *
- * `sharedModelsDirs` is passed in (rather than read from settings) to keep this
- * module free of a settings import cycle.
+ * Resolve every model search location an install's ComfyUI sees: built-in
+ * `<comfyDir>/models`, launcher dirs (shared `modelsDirs` when shared models on,
+ * else per-install `modelDirs`), and `<comfyDir>/extra_model_paths.yaml`.
+ * `sharedModelsDirs` is passed in to avoid a settings import cycle.
  */
 export function resolveInstallModelSearchPaths(
   inst: InstallationRecord,

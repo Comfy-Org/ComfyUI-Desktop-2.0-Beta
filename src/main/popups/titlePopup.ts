@@ -2899,9 +2899,8 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
     void openPathHelper(targetPath)
   })
 
-  // Reveal a file in the OS file manager (highlights it in its parent folder).
-  // Used for files like extra_model_paths.yaml, where opening in the default app
-  // is undesirable (and unreliable on Linux's folder-oriented open helper).
+  // Reveal a file in the OS file manager (highlights it in its parent folder),
+  // e.g. extra_model_paths.yaml, which shouldn't open in its default app.
   ipcMain.on('comfy-titlepopup:global-settings-reveal-path', (event, payload: { path?: unknown }) => {
     if (!settingsEntryFor(event.sender.id)) return
     const targetPath = payload?.path

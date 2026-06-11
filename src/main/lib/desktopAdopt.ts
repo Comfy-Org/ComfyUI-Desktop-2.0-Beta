@@ -36,8 +36,7 @@ import {
   type ExtraModelsSection,
 } from './models'
 
-// Re-exported from ./models (their canonical home) for back-compat with
-// existing importers and tests.
+// Re-exported from ./models for back-compat with existing importers and tests.
 export { parseExtraModelsSections, parseExtraModelsYaml }
 export type { ExtraModelsSection }
 

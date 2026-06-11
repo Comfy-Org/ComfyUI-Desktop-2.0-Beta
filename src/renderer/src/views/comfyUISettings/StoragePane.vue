@@ -60,9 +60,8 @@ const props = defineProps<Props>()
 
 const emit = defineEmits<{
   'update-field': [field: DetailField, value: unknown]
-  /** Ask the parent to re-fetch the install's detail sections (refreshes the
-   *  custom-model-paths on-disk status, which the main process computes once
-   *  per fetch). */
+  /** Ask the parent to re-fetch detail sections (refreshes custom-paths on-disk
+   *  status, computed once per fetch in the main process). */
   refresh: []
 }>()
 
@@ -132,10 +131,8 @@ function findField(id: string): DetailField | undefined {
   return perInstallFields.value.find((f) => f.id === id)
 }
 
-/** Read-only directories contributed by the install's own
- *  `extra_model_paths.yaml`, resolved in the main process the same way ComfyUI
- *  does and passed through as a hidden field. Grouped by section so each
- *  `base_path` shows as one row in the models-dir list. */
+/** Read-only dirs from the install's `extra_model_paths.yaml`, resolved in the
+ *  main process and passed as a hidden field, grouped by section. */
 interface ExtraModelPathsView {
   yamlPath: string
   exists: boolean
@@ -147,9 +144,8 @@ const extraModelPaths = computed<ExtraModelPathsView>(() => {
 })
 const extraSections = computed<ExtraModelPathSection[]>(() => extraModelPaths.value.sections)
 
-/** `extra_model_paths.yaml` sections as read-only rows for the models-dir list.
- *  ComfyUI loads this file regardless of the Use-Shared-Models toggle, so these
- *  rows append to both the shared-on and shared-off lists. */
+/** `extra_model_paths.yaml` sections as read-only rows. ComfyUI loads this file
+ *  regardless of the shared-models toggle, so they append to both lists. */
 const extraModelRows = computed<ModelsDir[]>(() =>
   extraSections.value.map((s, i) => ({
     path: s.basePath || s.name,
@@ -162,9 +158,8 @@ const extraModelRows = computed<ModelsDir[]>(() =>
 
 // --- Custom model paths detail modal --------------------------------------
 
-// Track the open section by name (unique per YAML), not by object, so a refresh
-// (which rebuilds `extraSections`) re-resolves to the fresh section and the open
-// modal updates in place.
+// Track the open section by name (not object) so a refresh re-resolves to the
+// fresh section and the modal updates in place.
 const extraModalSectionName = ref<string | null>(null)
 const extraModalSection = computed<ExtraModelPathSection | null>(
   () => extraSections.value.find((s) => s.name === extraModalSectionName.value) ?? null
