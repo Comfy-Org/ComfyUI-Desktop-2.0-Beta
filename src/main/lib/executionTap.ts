@@ -83,10 +83,15 @@ export function createExecutionTap(opts: {
     tracebackPhase: 'none'
   }
 
+  // Every event emitted from this tap originates in the ComfyUI Python
+  // subprocess (parsed from its stdout/stderr). Tagging at the baseContext
+  // level lets PostHog separate engine-origin errors from any future
+  // shell-origin emissions without renaming the event family.
   const baseContext = {
     installation_id: state.installationId,
     variant: state.variant,
-    release: state.release
+    release: state.release,
+    source_layer: 'comfyui' as const
   }
 
   function pushPromptStart(): void {

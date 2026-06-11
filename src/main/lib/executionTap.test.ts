@@ -176,6 +176,34 @@ describe('executionTap', () => {
     expect(events).toContain('comfy.desktop.execution.completed')
   })
 
+  it('tags every emission with source_layer="comfyui" so engine-origin events are filterable in PostHog', () => {
+    const tap = createExecutionTap({ installationId: 'inst-1' })
+    tap.ingest(
+      [
+        'got prompt',
+        'Prompt executed in 1.0 seconds',
+        'Failed to validate prompt for output 7:',
+        'Traceback (most recent call last):',
+        '  File "x.py", line 1, in <module>',
+        '    raise RuntimeError("boom")',
+        'RuntimeError: boom',
+        '',
+        'next-line'
+      ].join('\n'),
+      'stderr'
+    )
+    tap.flushSummary()
+    // Cover every event family this tap emits — none should leak without the tag.
+    const families = new Set(captured.map((c) => c.event))
+    expect(families).toContain('comfy.desktop.execution.started')
+    expect(families).toContain('comfy.desktop.execution.completed')
+    expect(families).toContain('comfy.desktop.execution.error')
+    expect(families).toContain('comfy.desktop.execution.session_summary')
+    for (const c of captured) {
+      expect(c.ctx['source_layer']).toBe('comfyui')
+    }
+  })
+
   it('redacts Bearer tokens and api keys from traceback messages (secret scrub)', () => {
     const bearer = 'Bearer ' + 'a'.repeat(30)
     const apiKey = 's' + 'k-' + 'a'.repeat(24)
