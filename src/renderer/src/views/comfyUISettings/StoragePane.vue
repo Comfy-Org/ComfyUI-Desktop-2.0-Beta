@@ -511,19 +511,8 @@ function handleBrowseSharedOutput(): void {
         @add="handleAddModelsDir"
       />
 
-      <!-- Shared off: warning + per-instance list (locked install-own row). -->
+      <!-- Shared off: per-instance list (locked install-own row). -->
       <template v-else>
-        <div class="storage-pane-warning" role="alert">
-          <AlertTriangle :size="14" class="storage-pane-warning-icon" aria-hidden="true" />
-          <p class="storage-pane-warning-text">
-            {{
-              t(
-                'comfyUISettings.useSharedModelsOffWarning',
-                'Shared models is OFF for this instance. It can only see models in its own folder plus any custom directories you add below — your shared library stays hidden until you turn this back on.'
-              )
-            }}
-          </p>
-        </div>
         <ModelsDirList
           :dirs="instanceModelDirs"
           @open="handleOpenInstanceModelDir"
@@ -673,32 +662,6 @@ function handleBrowseSharedOutput(): void {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-/* Inline warning shown when `useSharedModels` is OFF. */
-.storage-pane-warning {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  margin: 0;
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--warning) 14%, transparent);
-  border: 1px solid var(--warning);
-  color: var(--warning);
-  font-weight: 500;
-}
-
-.storage-pane-warning-icon {
-  flex-shrink: 0;
-  margin-top: 2px;
-  color: var(--warning);
-}
-
-.storage-pane-warning-text {
-  margin: 0;
-  font-size: 12px;
-  line-height: 1.45;
 }
 
 </style>
