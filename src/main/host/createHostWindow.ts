@@ -540,6 +540,15 @@ function findLiveSiblingOrigin(boundsKey: string): { x: number; y: number } | nu
   return null
 }
 
+/** Layout is safe only while the window is alive and not minimized — a
+ *  minimized window reports a bogus content size on Windows, collapsing the
+ *  child views (the grey-screen bug). */
+export function isWindowLayoutable(
+  win: Pick<BrowserWindow, 'isDestroyed' | 'isMinimized'>,
+): boolean {
+  return !win.isDestroyed() && !win.isMinimized()
+}
+
 export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
   const fx = getFactories()
   const windowKey = nextWindowKey()
@@ -638,7 +647,9 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
   // comfyTitleBar.html sits below the native buttons.
   const titleBarTotal = TITLEBAR_HEIGHT + 1
   const layoutViews = (): void => {
-    if (comfyWindow.isDestroyed()) return
+    // Skip while minimized (bogus content size would collapse the views); the
+    // 'restore'/'show' handlers re-run this once the window is visible again.
+    if (!isWindowLayoutable(comfyWindow)) return
     const entry = comfyWindows.get(windowKey)
     const [width, height] = comfyWindow.getContentSize() as [number, number]
     const bodyHeight = Math.max(0, height - titleBarTotal)
@@ -687,6 +698,30 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
   }
   comfyWindow.on('resize', layoutViews)
 
+  // Re-lay-out when the window becomes visible again: restoring at the same size
+  // emits no 'resize', and a WebContentsView won't repaint after restore on
+  // Windows unless its bounds are reapplied. Two passes (next tick + short
+  // delay) because right after restore() the OS can still report the stale
+  // minimized size for a moment; layoutViews() is idempotent so it self-heals.
+  let delayedRelayoutTimer: ReturnType<typeof setTimeout> | null = null
+  const relayoutWhenVisible = (): void => {
+    setImmediate(() => {
+      if (!isWindowLayoutable(comfyWindow)) return
+      layoutViews()
+    })
+    if (delayedRelayoutTimer) clearTimeout(delayedRelayoutTimer)
+    delayedRelayoutTimer = setTimeout(() => {
+      delayedRelayoutTimer = null
+      if (!isWindowLayoutable(comfyWindow)) return
+      layoutViews()
+    }, 50)
+  }
+  comfyWindow.on('restore', relayoutWhenVisible)
+  comfyWindow.on('show', relayoutWhenVisible)
+  comfyWindow.on('closed', () => {
+    if (delayedRelayoutTimer) clearTimeout(delayedRelayoutTimer)
+  })
+
   if (saved?.maximized) comfyWindow.maximize()
 
   // On macOS fullscreen the traffic-light buttons disappear, so the title bar
@@ -712,6 +747,8 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
   const persistBounds = (): void => {
     const live = comfyWindows.get(windowKey)
     if (!live || isChooserHost(live)) return
+    // Don't persist a minimized window's bogus bounds (would poison next launch).
+    if (!isWindowLayoutable(comfyWindow)) return
     saveWindowBounds(liveBoundsKeyFor(live), comfyWindow)
   }
   comfyWindow.on('resize', persistBounds)

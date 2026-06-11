@@ -22,6 +22,7 @@ import {
   cascadeOffsetForCollisions,
   expectedPartitionFor,
   installCloseNeedsConfirm,
+  isWindowLayoutable,
   shouldBailAfterCloseChoice,
   shouldBailAfterConsult,
   shouldShowInstallCloseConfirm,
@@ -160,6 +161,24 @@ describe('shouldShowInstallCloseConfirm', () => {
     // bailed in the prior check (this case is unreachable in practice).
     expect(shouldShowInstallCloseConfirm(true, 'cleared', true, false, true)).toBe(false)
     expect(shouldShowInstallCloseConfirm(true, 'aborted', true, false, true)).toBe(false)
+  })
+})
+
+describe('isWindowLayoutable', () => {
+  it('is true for a live, non-minimized window', () => {
+    expect(isWindowLayoutable({ isDestroyed: () => false, isMinimized: () => false })).toBe(true)
+  })
+
+  it('is false while minimized — minimized windows report a bogus content size, so laying out collapses the child views', () => {
+    expect(isWindowLayoutable({ isDestroyed: () => false, isMinimized: () => true })).toBe(false)
+  })
+
+  it('is false for a destroyed window', () => {
+    expect(isWindowLayoutable({ isDestroyed: () => true, isMinimized: () => false })).toBe(false)
+  })
+
+  it('is false for a destroyed window even if it never reports minimized', () => {
+    expect(isWindowLayoutable({ isDestroyed: () => true, isMinimized: () => true })).toBe(false)
   })
 })
 
