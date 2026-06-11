@@ -104,6 +104,15 @@ export function getModelDownloadContentScript(): string {
     }
   }
 
+  // Strip the trailing reference count from a category header, e.g.
+  // "clip_vision (1)" → "clip_vision". Returns the raw (untranslated) folder
+  // name; collapses internal whitespace first so multi-line headers normalize.
+  function parseDirectoryName(text) {
+    var normalized = text.replace(/\\s+/g, ' ').trim();
+    var match = normalized.match(/^(.*?)\\s*\\(\\d+\\)\\s*$/);
+    return match ? match[1].trim() : normalized;
+  }
+
   // ---- Scrape the right side panel Errors tab (Missing Models section) ----
   function scrapeErrorsTab() {
     var panel = document.querySelector('[data-testid="properties-panel"]');
@@ -128,10 +137,7 @@ export function getModelDownloadContentScript(): string {
       // e.g. "clip_vision (1)" → "clip_vision"
       var headerSpan = cat.querySelector('p[class*="text-destructive-background-hover"] span');
       if (!headerSpan) continue;
-      var headerText = headerSpan.textContent.trim();
-      // Strip the trailing count e.g. " (1)" or " (3)"
-      var dirMatch = headerText.match(/^(.+?)\\s*\\(\\d+\\)\\s*$/);
-      var directory = dirMatch ? dirMatch[1].trim() : headerText;
+      var directory = parseDirectoryName(headerSpan.textContent);
       if (!directory) continue;
 
       // Find all model name elements within this category
@@ -173,19 +179,10 @@ export function getModelDownloadContentScript(): string {
 
       // The category header is the first <p> without a title attribute; model
       // name <p> elements always carry a title, so this disambiguates them.
-      var header = null;
-      var paragraphs = group.querySelectorAll('p');
-      for (var p = 0; p < paragraphs.length; p++) {
-        if (!paragraphs[p].hasAttribute('title')) {
-          header = paragraphs[p];
-          break;
-        }
-      }
+      var header = group.querySelector('p:not([title])');
       if (!header) continue;
 
-      var headerText = header.textContent.replace(/\\s+/g, ' ').trim();
-      var dirMatch = headerText.match(/^(.*?)\\s*\\(\\d+\\)\\s*$/);
-      var directory = dirMatch ? dirMatch[1].trim() : headerText;
+      var directory = parseDirectoryName(header.textContent);
       if (!directory) continue;
 
       var nameEls = group.querySelectorAll('p[title]');
