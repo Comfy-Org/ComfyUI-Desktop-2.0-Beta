@@ -8,6 +8,7 @@ import { findInstallationIdByComfySender } from '../host/registry'
 import {
   resolveInstallModelSearchPaths,
   mapLegacyFolderType,
+  isSamePath,
   type InstallModelSearch,
 } from './models'
 import { _broadcastToRenderer } from './ipc/shared'
@@ -548,6 +549,14 @@ export async function startModelDownload(
   }
   const existing = pendingDownloads.get(url)
   if (existing) {
+    // Downloads are keyed solely by URL across the whole IPC surface
+    // (progress / pause / resume / cancel / retry), so a single URL can't carry
+    // two concurrent destinations. If another install is already fetching this
+    // URL into a different directory, fail closed rather than reporting a
+    // completion that lands somewhere this install's ComfyUI can't see.
+    if (!isSamePath(path.dirname(existing.savePath), path.dirname(savePath))) {
+      return false
+    }
     if (win !== existing.window) {
       existing.subscriberWindows.add(win)
     }

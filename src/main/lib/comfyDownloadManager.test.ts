@@ -69,6 +69,19 @@ describe('buildExistenceCandidates', () => {
     expect(candidates).not.toContain(path.join('/custom/cp', 'x.safetensors'))
   })
 
+  it('probes a model root for both controlnet/ and its t2i_adapter/ alternate', () => {
+    const ctx = {
+      downloadBaseDir: '/install/models',
+      modelRoots: ['/install/models'],
+      extraPaths: [],
+    }
+    const candidates = buildExistenceCandidates(ctx, '/install/models', 'controlnet', 'x.safetensors')
+    // ComfyUI's controlnet defaults also search <root>/t2i_adapter, and the
+    // launcher YAML registers it under controlnet, so both must be probed.
+    expect(candidates).toContain(path.join('/install/models', 'controlnet', 'x.safetensors'))
+    expect(candidates).toContain(path.join('/install/models', 't2i_adapter', 'x.safetensors'))
+  })
+
   it('matches legacy folder aliases (clip → text_encoders)', () => {
     const ctx = {
       downloadBaseDir: '/install/models',

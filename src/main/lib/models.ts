@@ -142,13 +142,10 @@ function discoverExtraFoldersFromSharedDirs(modelsDirs: string[]): string[] {
 }
 
 /**
- * Legacy directory aliases that ComfyUI's own defaults register under canonical
- * folder types (`folder_paths.py`):
- *   - `clip/` is a second path on `text_encoders` (ComfyUI's `map_legacy` maps
- *     a YAML `clip:` key to `text_encoders` automatically).
- *   - `unet/` is a second path on `diffusion_models` (same legacy mapping).
- *   - `t2i_adapter/` is a second path on `controlnet` (no legacy mapping —
- *     emitted as its own key, ComfyUI's controlnet defaults already list it).
+ * Legacy directory aliases that ComfyUI's `map_legacy` folds into a canonical
+ * folder type (`folder_paths.py`):
+ *   - a YAML `clip:` key is mapped to `text_encoders`.
+ *   - a YAML `unet:` key is mapped to `diffusion_models`.
  *
  * Without these in the YAML, shared-dir users who keep encoders in
  * `<shared>/clip/` (the historical ComfyUI layout) or diffusion models in
@@ -157,12 +154,24 @@ function discoverExtraFoldersFromSharedDirs(modelsDirs: string[]): string[] {
  * find them when they live under `<install>/ComfyUI/models/clip|unet/` because
  * those are baked into `folder_names_and_paths`, but the extra-paths YAML only
  * registers what we explicitly list. Emitting the aliases for every shared dir
- * keeps the shared layout on equal footing with the install's own defaults. */
+ * keeps the shared layout on equal footing with the install's own defaults.
+ *
+ * `t2i_adapter` is handled separately (see `SECONDARY_TYPE_DIRS`): it is NOT a
+ * legacy alias, so a standalone `t2i_adapter:` key would create its own folder
+ * type that ControlNet loaders never read. */
 const LEGACY_FOLDER_ALIASES: ReadonlyArray<{ key: string; dir: string }> = [
   { key: 'clip', dir: 'clip' },
   { key: 'unet', dir: 'unet' },
-  { key: 't2i_adapter', dir: 't2i_adapter' },
 ]
+
+/** Extra directories ComfyUI's built-in defaults search under a canonical type
+ * even though their name has no `map_legacy` entry. ComfyUI registers
+ * `<models>/t2i_adapter` under `controlnet` (`folder_paths.py`), so we must emit
+ * it as a second path on the `controlnet:` key — a standalone `t2i_adapter:`
+ * key would become its own folder type and stay invisible to ControlNet. */
+const SECONDARY_TYPE_DIRS: Readonly<Record<string, string[]>> = {
+  controlnet: ['t2i_adapter']
+}
 
 /** Case-insensitive on Windows, case-sensitive elsewhere. Both inputs are
  *  expected to already be absolute (path.resolve'd by the caller). */
@@ -219,7 +228,16 @@ function buildYaml(
     if (primaryDir != null && samePath(dir, primaryDir)) lines.push('  is_default: true')
     for (const folder of allFolders) {
       const escapedFolder = folder.replace(/'/g, "''")
-      lines.push(`  '${escapedFolder}': '${escapedFolder}/'`)
+      const secondaries = SECONDARY_TYPE_DIRS[folder]
+      if (secondaries && secondaries.length > 0) {
+        // Emit a block scalar so ComfyUI registers the canonical dir AND its
+        // built-in secondary dirs (e.g. `t2i_adapter/`) under this one type.
+        lines.push(`  '${escapedFolder}': |-`)
+        lines.push(`    ${folder}/`)
+        for (const sec of secondaries) lines.push(`    ${sec}/`)
+      } else {
+        lines.push(`  '${escapedFolder}': '${escapedFolder}/'`)
+      }
     }
     // Emit legacy aliases AFTER the canonical entries so the canonical
     // directories (e.g. `text_encoders/`) stay first in ComfyUI's search
@@ -354,27 +372,28 @@ export interface ExtraModelsSection {
   /** `is_default: true` on the section. ComfyUI applies it per declared type. */
   isDefault?: boolean
   /** Per-type override key (`checkpoints`, `loras`, …) → path. A value may
-   *  carry multiple newline/pipe-delimited paths; each becomes its own entry
-   *  keyed by the same type. */
+   *  carry multiple newline-delimited paths (`|`-block scalar); each becomes its
+   *  own entry keyed by the same type. */
   overrides: Array<{ type: string; path: string }>
 }
 
-/** Coerce a YAML scalar into one or more trimmed, non-empty path strings.
- *  ComfyUI allows `|`-block and pipe-delimited multi-path values
- *  (e.g. `text_encoders: models/text_encoders/\nmodels/clip/`). */
+/** Split an already-parsed YAML scalar into individual path lines, mirroring
+ *  ComfyUI's `load_extra_path_config` exactly: split on newlines and drop empty
+ *  lines (`conf[x].split("\n")` + `if len(y) == 0: continue`). No trimming or
+ *  comment stripping — the YAML parser already resolved quoting and comments, so
+ *  a path that legitimately contains `#` or surrounding spaces is preserved. */
 function splitYamlPaths(value: unknown): string[] {
   if (value == null) return []
   return String(value)
-    .split(/[\r\n|]+/)
-    .map((s) => s.replace(/#.*$/, '').trim())
+    .split(/\r\n|\r|\n/)
     .filter((s) => s.length > 0)
 }
 
 /**
  * Parse an `extra_model_paths.yaml` into structured sections, each with its
  * optional `base_path`, `is_default` flag, and every per-type model-folder
- * override. Uses a real YAML parser so `|`-block scalars and pipe-delimited
- * multi-path values are handled correctly. Returns `[]` on any parse failure so
+ * override. Uses a real YAML parser so `|`-block scalar multi-path values are
+ * handled correctly. Returns `[]` on any parse failure so
  * a malformed file never aborts the caller.
  */
 export function parseExtraModelsSections(content: string): ExtraModelsSection[] {

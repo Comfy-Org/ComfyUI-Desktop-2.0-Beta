@@ -54,12 +54,23 @@ describe('ensureModelPathsConfig — YAML emission', () => {
     expect(yaml).toMatch(/'loras': 'loras\/'/)
     expect(yaml).toMatch(/'text_encoders': 'text_encoders\/'/)
     expect(yaml).toMatch(/'diffusion_models': 'diffusion_models\/'/)
-    expect(yaml).toMatch(/'controlnet': 'controlnet\/'/)
 
     // Legacy alias entries — the actual bug fix.
     expect(yaml).toMatch(/'clip': 'clip\/'/)
     expect(yaml).toMatch(/'unet': 'unet\/'/)
-    expect(yaml).toMatch(/'t2i_adapter': 't2i_adapter\/'/)
+
+    // `t2i_adapter` is NOT legacy-mapped, so it must ride under the `controlnet`
+    // key as a block scalar — a standalone `t2i_adapter:` key would create its
+    // own folder type that ControlNet loaders never read. Parse to verify both
+    // dirs resolve under `controlnet`.
+    const resolved = resolveExtraModelPaths(result!.yamlPath)
+    const controlnetDirs = resolved
+      .filter((r) => r.type === 'controlnet')
+      .map((r) => path.basename(r.dir))
+    expect(controlnetDirs).toContain('controlnet')
+    expect(controlnetDirs).toContain('t2i_adapter')
+    // No standalone t2i_adapter folder type.
+    expect(resolved.some((r) => r.type === 't2i_adapter')).toBe(false)
   })
 
   it('emits the alias entries for each shared dir (not just the first)', () => {
