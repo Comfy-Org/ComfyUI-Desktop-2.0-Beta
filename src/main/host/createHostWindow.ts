@@ -540,6 +540,17 @@ function findLiveSiblingOrigin(boundsKey: string): { x: number; y: number } | nu
   return null
 }
 
+/** A host window can be laid out only while it's alive AND not minimized.
+ *  Minimized windows report a bogus content size on Windows, so reading their
+ *  bounds to position the child views collapses them (the grey-screen bug).
+ *  Shared by the `layoutViews` guard and the deferred `restore`/`show` relayout
+ *  so the two can't drift. */
+export function isWindowLayoutable(
+  win: Pick<BrowserWindow, 'isDestroyed' | 'isMinimized'>,
+): boolean {
+  return !win.isDestroyed() && !win.isMinimized()
+}
+
 export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
   const fx = getFactories()
   const windowKey = nextWindowKey()
@@ -638,7 +649,12 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
   // comfyTitleBar.html sits below the native buttons.
   const titleBarTotal = TITLEBAR_HEIGHT + 1
   const layoutViews = (): void => {
-    if (comfyWindow.isDestroyed()) return
+    // While minimized, Windows reports a bogus (minimum/zero) content size, so
+    // laying out here would collapse both child views — and since restoring at
+    // the same size emits no 'resize', they'd stay collapsed (grey window) until
+    // a maximize. Skip; the 'restore'/'show' handlers re-run a real layout once
+    // the window is visible again.
+    if (!isWindowLayoutable(comfyWindow)) return
     const entry = comfyWindows.get(windowKey)
     const [width, height] = comfyWindow.getContentSize() as [number, number]
     const bodyHeight = Math.max(0, height - titleBarTotal)
@@ -686,6 +702,23 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
     }
   }
   comfyWindow.on('resize', layoutViews)
+
+  // Re-lay-out when the window becomes visible again after being minimized or
+  // hidden. Restoring at the previous (non-maximized) size emits no 'resize',
+  // so without this the child views keep whatever (collapsed) bounds they were
+  // left with while minimized — a grey window with no title bar or content until
+  // the user maximizes. A WebContentsView also won't repaint after restore on
+  // Windows unless its bounds are reapplied. Defer one tick: on 'restore' the OS
+  // still reports the stale minimized content size for a moment, so reading it
+  // synchronously would lay out against the wrong size.
+  const relayoutWhenVisible = (): void => {
+    setImmediate(() => {
+      if (!isWindowLayoutable(comfyWindow)) return
+      layoutViews()
+    })
+  }
+  comfyWindow.on('restore', relayoutWhenVisible)
+  comfyWindow.on('show', relayoutWhenVisible)
 
   if (saved?.maximized) comfyWindow.maximize()
 
