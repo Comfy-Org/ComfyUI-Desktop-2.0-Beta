@@ -129,6 +129,16 @@ function parseArgs(raw: string): ParsedArgs {
         } else if (eqValue !== undefined) {
           known.set(name, eqValue)
           i++
+        } else if (def.type === 'multi-value') {
+          // Variadic flag: consume all following non-flag tokens, space-joined.
+          const values: string[] = []
+          let j = i + 1
+          while (j < tokens.length && !tokens[j]!.startsWith('--')) {
+            values.push(tokens[j]!)
+            j++
+          }
+          known.set(name, values.join(' '))
+          i = j
         } else {
           const next = tokens[i + 1]
           if (next !== undefined && !next.startsWith('--')) {
@@ -158,11 +168,16 @@ function parseArgs(raw: string): ParsedArgs {
 }
 
 function serialize(known: Map<string, string>, extra: string[]): string {
+  const multiValue = new Set(
+    schema.value.filter((a) => a.type === 'multi-value').map((a) => a.name)
+  )
   const parts: string[] = []
   for (const [name, value] of known) {
     parts.push(`--${name}`)
     if (value !== '') {
-      parts.push(value.includes(' ') ? `"${value}"` : value)
+      // Multi-value flags hold already space-separated tokens; emit them raw so
+      // they re-tokenize into distinct args instead of one quoted blob.
+      parts.push(multiValue.has(name) || !value.includes(' ') ? value : `"${value}"`)
     }
   }
   parts.push(...extra.map((e) => (e.includes(' ') ? `"${e}"` : e)))

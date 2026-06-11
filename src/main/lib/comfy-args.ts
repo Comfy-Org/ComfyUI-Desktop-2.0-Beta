@@ -13,7 +13,7 @@ export interface ComfyArgDef {
   /** The full flag string, e.g. "--port" */
   flag: string
   help: string
-  type: 'boolean' | 'value' | 'optional-value'
+  type: 'boolean' | 'value' | 'optional-value' | 'multi-value'
   /** Metavar from argparse (e.g. "PORT", "IP") */
   metavar?: string
   choices?: string[]
@@ -175,7 +175,7 @@ function parseExclusiveGroups(usageLine: string): Map<string, string> {
 interface ParsedOption {
   name: string
   flag: string
-  type: 'boolean' | 'value' | 'optional-value'
+  type: 'boolean' | 'value' | 'optional-value' | 'multi-value'
   metavar?: string
   choices?: string[]
   help: string
@@ -242,6 +242,10 @@ function parseOptionBlock(flagLine: string, helpText: string): ParsedOption {
   const flag = `--${name}`
   const afterFlag = flagLine.slice(flagLine.indexOf(flag) + flag.length).trim()
 
+  // A `...` marks a variadic flag (argparse nargs `*`/`+`), e.g. `--cache-ram [GB ...]`
+  // or `--whitelist-custom-nodes WL [WL ...]`, which accept several space-separated values.
+  const isMulti = afterFlag.includes('...')
+
   // Choices: {a,b,c} or [a,b,c] or [{a,b,c}]
   const choicesMatch = afterFlag.match(/\[?\{([^}]+)\}\]?/) || afterFlag.match(/\[([\w,]+)\]/)
   if (choicesMatch) {
@@ -250,7 +254,7 @@ function parseOptionBlock(flagLine: string, helpText: string): ParsedOption {
     const isOptional = afterFlag.startsWith('[')
     return {
       name, flag, help: helpText, choices,
-      type: isOptional ? 'optional-value' : 'value',
+      type: isMulti ? 'multi-value' : isOptional ? 'optional-value' : 'value',
       metavar: undefined,
     }
   }
@@ -261,7 +265,7 @@ function parseOptionBlock(flagLine: string, helpText: string): ParsedOption {
     const isOptional = afterFlag.startsWith('[')
     return {
       name, flag, help: helpText,
-      type: isOptional ? 'optional-value' : 'value',
+      type: isMulti ? 'multi-value' : isOptional ? 'optional-value' : 'value',
       metavar: metaMatch[1]!.replace(/\s+\.\.\./, ''),
     }
   }

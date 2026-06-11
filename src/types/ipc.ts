@@ -115,7 +115,9 @@ export interface ComfyArgDef {
   name: string
   flag: string
   help: string
-  type: 'boolean' | 'value' | 'optional-value'
+  /** `multi-value` is a variadic flag (argparse nargs `*`/`+`, shown as `[X ...]`
+   *  in --help) that accepts several space-separated values, e.g. `--cache-ram 4 8`. */
+  type: 'boolean' | 'value' | 'optional-value' | 'multi-value'
   metavar?: string
   choices?: string[]
   exclusiveGroup?: string

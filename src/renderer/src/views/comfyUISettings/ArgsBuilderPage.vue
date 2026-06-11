@@ -104,7 +104,7 @@ function getValue(name: string): string {
 }
 
 function commit(known: Map<string, string>): void {
-  const next = serialize(known, parsed.value.extra)
+  const next = serialize(known, parsed.value.extra, schema.value)
   localValue.value = next
   emit('update', next)
 }
@@ -441,15 +441,19 @@ function onRawChange(value: string): void {
                 <BaseInput
                   v-if="
                     isActive(item.arg.name) &&
-                    (item.arg.type === 'value' || item.arg.type === 'optional-value')
+                    (item.arg.type === 'value' ||
+                      item.arg.type === 'optional-value' ||
+                      item.arg.type === 'multi-value')
                   "
                   class="args-page-value-input"
                   :model-value="getValue(item.arg.name)"
                   :placeholder="
-                    item.arg.metavar ??
-                    (item.arg.type === 'optional-value'
-                      ? t('comfyUISettings.argsOptionalPlaceholder', 'optional')
-                      : t('comfyUISettings.argsValuePlaceholder', 'value'))
+                    item.arg.type === 'multi-value'
+                      ? t('comfyUISettings.argsMultiPlaceholder', 'space-separated values')
+                      : (item.arg.metavar ??
+                        (item.arg.type === 'optional-value'
+                          ? t('comfyUISettings.argsOptionalPlaceholder', 'optional')
+                          : t('comfyUISettings.argsValuePlaceholder', 'value')))
                   "
                   @change="(v) => setValue(item.arg!, v)"
                 />

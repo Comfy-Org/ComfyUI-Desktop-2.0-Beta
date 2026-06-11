@@ -56,6 +56,30 @@ describe('parseHelpOutput', () => {
     expect(byName.has('help')).toBe(false)
   })
 
+  it('parses variadic (nargs */+) flags as multi-value, stripping the ellipsis from the metavar', () => {
+    const help = `usage: main.py [-h] [--cache-ram [GB ...] | --cache-lru CACHE_LRU] [--fast [FAST ...]] [--whitelist-custom-nodes WHITELIST_CUSTOM_NODES [WHITELIST_CUSTOM_NODES ...]]
+
+options:
+  -h, --help            show this help message and exit
+  --cache-ram [GB ...]  Use RAM pressure caching with the given headroom thresholds.
+  --cache-lru CACHE_LRU
+                        Use LRU caching with N node results.
+  --fast [FAST ...]     Enable fast features.
+  --whitelist-custom-nodes WHITELIST_CUSTOM_NODES [WHITELIST_CUSTOM_NODES ...]
+                        Custom nodes to load.
+`
+    const schema = parseHelpOutput(help)
+    const byName = new Map(schema.args.map((a) => [a.name, a]))
+
+    expect(byName.get('cache-ram')?.type).toBe('multi-value')
+    expect(byName.get('cache-ram')?.metavar).toBe('GB')
+    expect(byName.get('fast')?.type).toBe('multi-value')
+    expect(byName.get('whitelist-custom-nodes')?.type).toBe('multi-value')
+
+    // A single-value flag in the same exclusive group stays a plain value flag.
+    expect(byName.get('cache-lru')?.type).toBe('value')
+  })
+
   it('extracts choices for select-style args', () => {
     const schema = parseHelpOutput(SAMPLE_HELP)
     const byName = new Map(schema.args.map((a) => [a.name, a]))
@@ -215,6 +239,22 @@ describe('filterUnsupportedArgs', () => {
       schema
     )
     expect(filtered).toEqual(['--port=8188', '--enable-manager'])
+  })
+
+  it('keeps all values of a supported multi-value flag', () => {
+    const help = `usage: main.py [-h] [--cache-ram [GB ...]] [--port PORT]
+
+options:
+  -h, --help            show this help message and exit
+  --cache-ram [GB ...]  RAM caching thresholds.
+  --port PORT           Set the listen port.
+`
+    const schema = parseHelpOutput(help)
+    const filtered = filterUnsupportedArgs(
+      ['--cache-ram', '4', '8', '--port', '8188'],
+      schema
+    )
+    expect(filtered).toEqual(['--cache-ram', '4', '8', '--port', '8188'])
   })
 })
 
