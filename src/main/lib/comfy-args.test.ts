@@ -126,6 +126,21 @@ options:
     expect(byName.get('enable-manager')?.category).toBe('Manager')
   })
 
+  it('categorizes --fast-disk and --enable-triton-backend', () => {
+    const help = `usage: main.py [-h] [--fast-disk] [--enable-triton-backend]
+
+options:
+  -h, --help            show this help message and exit
+  --fast-disk           Prefer disk-backed dynamic loading and offload.
+  --enable-triton-backend
+                        Enable the Triton backend in comfy-kitchen.
+`
+    const schema = parseHelpOutput(help)
+    const byName = new Map(schema.args.map((a) => [a.name, a]))
+    expect(byName.get('fast-disk')?.category).toBe('GPU & VRAM')
+    expect(byName.get('enable-triton-backend')?.category).toBe('Performance')
+  })
+
   it('handles Windows \\r\\n line endings', () => {
     const windowsHelp = SAMPLE_HELP.replace(/\n/g, '\r\n')
     const schema = parseHelpOutput(windowsHelp)
