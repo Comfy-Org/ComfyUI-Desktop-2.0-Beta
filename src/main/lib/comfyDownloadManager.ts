@@ -3,6 +3,13 @@ import { EventEmitter } from 'events'
 import fs from 'fs'
 import path from 'path'
 import * as settings from '../settings'
+import * as installations from '../installations'
+import { findInstallationIdByComfySender } from '../host/registry'
+import {
+  resolveInstallModelSearchPaths,
+  mapLegacyFolderType,
+  type InstallModelSearch,
+} from './models'
 import { _broadcastToRenderer } from './ipc/shared'
 
 export const ALLOWED_EXTENSIONS = ['.safetensors', '.sft', '.ckpt', '.pth', '.pt']
@@ -164,10 +171,78 @@ function getModelsBaseDir(): string {
   return modelsDirs?.[0] || settings.defaults.modelsDirs[0]!
 }
 
+/** Global shared model dirs, used as the search set when a download can't be
+ *  attributed to a specific install (e.g. panel-initiated retries). */
+function getSharedModelsDirs(): string[] {
+  const modelsDirs = settings.get('modelsDirs') as string[] | undefined
+  return modelsDirs && modelsDirs.length > 0 ? modelsDirs : settings.defaults.modelsDirs
+}
+
+/**
+ * Resolve the model search context for the install that initiated a download,
+ * so the destination and existence check honor that install's settings (shared
+ * vs per-install model dirs, plus its own `extra_model_paths.yaml`). Returns
+ * null when the download can't be attributed to a running install, in which
+ * case callers fall back to the global shared dir (legacy behavior).
+ */
+async function resolveDownloadContext(
+  senderContents?: Electron.WebContents,
+): Promise<InstallModelSearch | null> {
+  if (!senderContents || senderContents.isDestroyed()) return null
+  const installationId = findInstallationIdByComfySender(senderContents)
+  if (!installationId) return null
+  try {
+    const inst = await installations.get(installationId)
+    if (!inst || !inst.installPath) return null
+    return resolveInstallModelSearchPaths(inst, getSharedModelsDirs())
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Every place a model file of `directory`/`filename` could already exist for an
+ * install — so an instant "completed" only fires when the install's ComfyUI
+ * would actually find the file. Mirrors ComfyUI's search set: the destination,
+ * every complete model root (`<root>/<directory>`), and any arbitrarily-mapped
+ * dir for the folder type from the install's `extra_model_paths.yaml`.
+ */
+export function buildExistenceCandidates(
+  ctx: InstallModelSearch | null,
+  baseDir: string,
+  directory: string,
+  filename: string,
+): string[] {
+  const out = new Set<string>()
+  out.add(path.join(baseDir, directory, filename))
+  if (ctx) {
+    for (const root of ctx.modelRoots) {
+      out.add(path.join(root, directory, filename))
+    }
+    const segments = directory.split(/[\\/]+/).filter(Boolean)
+    if (segments.length > 0) {
+      const type = mapLegacyFolderType(segments[0]!)
+      const remainder = segments.slice(1)
+      for (const extra of ctx.extraPaths) {
+        if (extra.type === type) {
+          out.add(path.join(extra.dir, ...remainder, filename))
+        }
+      }
+    }
+  }
+  return [...out]
+}
+
 const TEMP_DIR_NAME = '.desktop2-downloads'
 
+/** Temp dir kept on the same volume as the destination so the final
+ *  `fs.renameSync(tempPath, savePath)` is atomic (avoids cross-device EXDEV). */
+function modelTempDirFor(baseDir: string): string {
+  return path.join(baseDir, TEMP_DIR_NAME)
+}
+
 function getTempDir(): string {
-  return path.join(getModelsBaseDir(), TEMP_DIR_NAME)
+  return modelTempDirFor(getModelsBaseDir())
 }
 
 function getAssetTempDir(): string {
@@ -366,9 +441,13 @@ export async function startModelDownload(
   senderContents?: Electron.WebContents,
 ): Promise<boolean> {
   const filename = stripQueryParams(rawFilename)
-  const baseDir = getModelsBaseDir()
+  // Resolve the initiating install so the destination + existence check follow
+  // its model settings (shared vs per-install dirs + its extra_model_paths.yaml)
+  // rather than always assuming the global shared library.
+  const ctx = await resolveDownloadContext(senderContents)
+  const baseDir = ctx ? ctx.downloadBaseDir : getModelsBaseDir()
   const savePath = path.join(baseDir, directory, filename)
-  const tempDir = getTempDir()
+  const tempDir = modelTempDirFor(baseDir)
   const tempPath = path.join(tempDir, `${Date.now()}-${filename}.tmp`)
 
   // Capture before the validation early-returns so even a synchronous
@@ -399,13 +478,16 @@ export async function startModelDownload(
     return false
   }
 
-  if (await fileExists(savePath)) {
-    // File already exists — report completed without starting a download
-    const progress = makeProgress({ progress: 1, status: 'completed', savePath })
-    broadcastProgress(progress)
-    return true
+  // Report completed without downloading only when the file already exists
+  // somewhere the install's ComfyUI actually searches - not merely in the
+  // global shared library that a shared-models-off install can't see.
+  for (const candidate of buildExistenceCandidates(ctx, baseDir, directory, filename)) {
+    if (await fileExists(candidate)) {
+      const progress = makeProgress({ progress: 1, status: 'completed', savePath: candidate })
+      broadcastProgress(progress)
+      return true
+    }
   }
-
   const existing = pendingDownloads.get(url)
   if (existing) {
     if (win !== existing.window) {

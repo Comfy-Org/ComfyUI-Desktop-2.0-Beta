@@ -121,6 +121,30 @@ function findField(id: string): DetailField | undefined {
   return perInstallFields.value.find((f) => f.id === id)
 }
 
+/** Read-only directories contributed by the install's own
+ *  `extra_model_paths.yaml`, resolved in the main process the same way ComfyUI
+ *  does and passed through as a hidden field. */
+interface ExtraModelPathRow {
+  section: string
+  type: string
+  rawType: string
+  dir: string
+  isDefault: boolean
+  dirExists: boolean
+}
+interface ExtraModelPathsView {
+  yamlPath: string
+  exists: boolean
+  rows: ExtraModelPathRow[]
+}
+const extraModelPaths = computed<ExtraModelPathsView>(() => {
+  const v = findField('extraModelPaths')?.value as ExtraModelPathsView | undefined
+  return v ?? { yamlPath: '', exists: false, rows: [] }
+})
+const hasExtraModelPaths = computed(
+  () => extraModelPaths.value.exists && extraModelPaths.value.rows.length > 0
+)
+
 function persistField(id: string, value: unknown): void {
   const field = findField(id)
   if (field) emit('update-field', field, value)
@@ -456,6 +480,40 @@ function handleBrowseSharedOutput(): void {
       </template>
     </GlobalSettingsMicroSection>
 
+    <!-- Read-only: directories contributed by this install's own
+         extra_model_paths.yaml. ComfyUI searches these; the launcher only
+         displays them (never edits the file). Hidden when there are none. -->
+    <GlobalSettingsMicroSection
+      v-if="hasExtraModelPaths"
+      :title="t('settings.extraModelPaths', 'Custom Model Paths')"
+    >
+      <p class="storage-extra-note">
+        {{
+          t(
+            'comfyUISettings.extraModelPathsNote',
+            'From this install’s extra_model_paths.yaml. Read-only — ComfyUI searches these directories, but the launcher does not manage them.'
+          )
+        }}
+      </p>
+      <div
+        v-for="(row, i) in extraModelPaths.rows"
+        :key="`${row.section}-${row.rawType}-${i}`"
+        class="storage-extra-row"
+      >
+        <span class="storage-extra-type">{{ row.rawType }}</span>
+        <button
+          type="button"
+          class="storage-extra-path"
+          :title="t('models.openDir', 'Open folder')"
+          @click="handleOpenPath(row.dir)"
+        >{{ row.dir }}</button>
+        <span v-if="row.isDefault" class="storage-extra-tag">{{ t('common.default', 'default') }}</span>
+        <span v-if="!row.dirExists" class="storage-extra-missing">{{
+          t('comfyUISettings.dirMissing', 'missing')
+        }}</span>
+      </div>
+    </GlobalSettingsMicroSection>
+
     <!-- Input/Output group: the Use-Shared-I/O toggle lives here. -->
     <GlobalSettingsMicroSection :title="t('settings.inputOutputStorage', 'Input & Output')">
       <div v-if="useSharedInputOutputField" class="storage-toggle-row">
@@ -608,5 +666,58 @@ function handleBrowseSharedOutput(): void {
   margin: 0;
   font-size: 12px;
   line-height: 1.45;
+}
+
+.storage-extra-note {
+  margin: 0 0 8px;
+  font-size: 12px;
+  line-height: 1.45;
+  opacity: 0.75;
+}
+
+.storage-extra-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 12px;
+  min-width: 0;
+}
+
+.storage-extra-type {
+  flex: 0 0 auto;
+  font-weight: 600;
+  opacity: 0.85;
+}
+
+.storage-extra-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.storage-extra-tag {
+  flex: 0 0 auto;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  opacity: 0.85;
+}
+
+.storage-extra-missing {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: #d9822b;
 }
 </style>

@@ -1,8 +1,11 @@
 import path from 'path'
 import fs from 'fs'
+import os from 'os'
+import { parse as parseYaml } from 'yaml'
 import { dataDir } from './paths'
 import { writeFileSafe } from './safe-file'
 import { findComfyUIDir } from './migrate'
+import type { InstallationRecord } from '../installations'
 
 // Canonical ComfyUI model folder types from folder_paths.py. Must stay in sync with that list.
 export const MODEL_FOLDER_TYPES = [
@@ -299,4 +302,260 @@ export function syncCustomModelFolders(
   const config = ensureModelPathsConfig(modelsDirs, options)
 
   return { newFolders, config }
+}
+
+// ---------------------------------------------------------------------------
+// extra_model_paths.yaml parsing + resolution
+//
+// ComfyUI auto-loads `<comfyDir>/extra_model_paths.yaml` at startup (see
+// main.py `apply_custom_paths` + utils/extra_config.py), in addition to every
+// `--extra-model-paths-config` the launcher passes. The launcher otherwise has
+// no knowledge of that user-authored file, so model downloads and existence
+// checks must resolve it the same way ComfyUI does to stay consistent.
+// ---------------------------------------------------------------------------
+
+/** ComfyUI's `folder_paths.map_legacy`: a couple of folder names are aliases
+ *  for canonical types. Normalising both sides lets us match a download's
+ *  folder hint against an arbitrarily-named extra-paths override. */
+const LEGACY_FOLDER_TYPE_MAP: Readonly<Record<string, string>> = {
+  unet: 'diffusion_models',
+  clip: 'text_encoders',
+}
+
+export function mapLegacyFolderType(type: string): string {
+  return LEGACY_FOLDER_TYPE_MAP[type] ?? type
+}
+
+/**
+ * Keys under a section that are NOT per-type model-folder overrides and must
+ * never be treated as model dirs. `custom_nodes` is excluded because pointing
+ * the model scanner at a custom-nodes tree would register Python packages as
+ * "models"; the others are section metadata.
+ */
+const NON_MODEL_SECTION_KEYS: ReadonlySet<string> = new Set([
+  'base_path',
+  'is_default',
+  'custom_nodes',
+  'download_model_base',
+])
+
+/** One config group from an `extra_model_paths.yaml`. */
+export interface ExtraModelsSection {
+  /** Section name (e.g. `comfyui_desktop`, `my_external`). */
+  name: string
+  /** `base_path:` value when present (raw, may be relative). */
+  basePath?: string
+  /** `is_default: true` on the section. ComfyUI applies it per declared type. */
+  isDefault?: boolean
+  /** Per-type override key (`checkpoints`, `loras`, …) → path. A value may
+   *  carry multiple newline/pipe-delimited paths; each becomes its own entry
+   *  keyed by the same type. */
+  overrides: Array<{ type: string; path: string }>
+}
+
+/** Coerce a YAML scalar into one or more trimmed, non-empty path strings.
+ *  ComfyUI allows `|`-block and pipe-delimited multi-path values
+ *  (e.g. `text_encoders: models/text_encoders/\nmodels/clip/`). */
+function splitYamlPaths(value: unknown): string[] {
+  if (value == null) return []
+  return String(value)
+    .split(/[\r\n|]+/)
+    .map((s) => s.replace(/#.*$/, '').trim())
+    .filter((s) => s.length > 0)
+}
+
+/**
+ * Parse an `extra_model_paths.yaml` into structured sections, each with its
+ * optional `base_path`, `is_default` flag, and every per-type model-folder
+ * override. Uses a real YAML parser so `|`-block scalars and pipe-delimited
+ * multi-path values are handled correctly. Returns `[]` on any parse failure so
+ * a malformed file never aborts the caller.
+ */
+export function parseExtraModelsSections(content: string): ExtraModelsSection[] {
+  let doc: unknown
+  try {
+    doc = parseYaml(content)
+  } catch {
+    return []
+  }
+  if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return []
+
+  const sections: ExtraModelsSection[] = []
+  for (const [name, raw] of Object.entries(doc as Record<string, unknown>)) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
+    const group = raw as Record<string, unknown>
+    const section: ExtraModelsSection = { name, overrides: [] }
+    const basePathVals = splitYamlPaths(group['base_path'])
+    if (basePathVals.length > 0) section.basePath = basePathVals[0]
+    if (group['is_default'] === true) section.isDefault = true
+    for (const [key, value] of Object.entries(group)) {
+      if (NON_MODEL_SECTION_KEYS.has(key)) continue
+      for (const p of splitYamlPaths(value)) {
+        section.overrides.push({ type: key, path: p })
+      }
+    }
+    sections.push(section)
+  }
+  return sections
+}
+
+/**
+ * Back-compat: pull out every `base_path:` string value across sections.
+ * Retained for callers that only need the bare base paths. Prefer
+ * `parseExtraModelsSections` for the full structured view.
+ */
+export function parseExtraModelsYaml(content: string): string[] {
+  return parseExtraModelsSections(content)
+    .map((s) => s.basePath)
+    .filter((b): b is string => typeof b === 'string' && b.length > 0)
+}
+
+/** Normalise like Python's `os.path.normpath`: collapse separators and strip a
+ *  trailing one (a YAML subpath such as `loras/` must equal `<base>/loras`, not
+ *  `<base>/loras/`, so existence checks line up). */
+function normpath(p: string): string {
+  const norm = path.normalize(p)
+  if (norm.length <= 1) return norm
+  const stripped = norm.replace(/[\\/]+$/, '')
+  return stripped.length > 0 ? stripped : norm
+}
+
+/** Expand `~` and environment variables, mirroring Python's
+ *  `os.path.expandvars(os.path.expanduser(...))` for the common cases. */
+function expandUserVars(p: string): string {
+  let out = p
+  if (out === '~' || out.startsWith('~/') || out.startsWith('~\\')) {
+    out = path.join(os.homedir(), out.slice(1))
+  }
+  out = out.replace(/\$\{([^}]+)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g, (m, braced, bare) => {
+    const name = braced ?? bare
+    return process.env[name] ?? m
+  })
+  if (process.platform === 'win32') {
+    out = out.replace(/%([^%]+)%/g, (m, name) => process.env[name] ?? m)
+  }
+  return out
+}
+
+/** A model directory contributed by an `extra_model_paths.yaml`, resolved the
+ *  same way ComfyUI's `load_extra_path_config` does. */
+export interface ResolvedExtraPath {
+  /** Section the entry came from (for display grouping). */
+  section: string
+  /** Canonical folder type (legacy aliases mapped). */
+  type: string
+  /** Folder type exactly as written in the YAML (for display). */
+  rawType: string
+  /** Absolute, normalised directory holding files of this type. */
+  dir: string
+  /** Whether the section carried `is_default: true`. */
+  isDefault: boolean
+}
+
+/**
+ * Resolve an `extra_model_paths.yaml` into per-type absolute directories,
+ * mirroring ComfyUI's `utils/extra_config.load_extra_path_config`:
+ *  - `base_path` is `~`/env-expanded, then made absolute relative to the YAML's
+ *    own directory when relative; per-type subpaths are NOT expanded.
+ *  - each per-type subpath is joined onto `base_path` (an absolute subpath wins,
+ *    matching `os.path.join`), or resolved relative to the YAML dir when there
+ *    is no `base_path`.
+ * Returns `[]` when the file is absent or unparseable.
+ */
+export function resolveExtraModelPaths(yamlPath: string): ResolvedExtraPath[] {
+  let content: string
+  try {
+    content = fs.readFileSync(yamlPath, 'utf-8')
+  } catch {
+    return []
+  }
+  const yamlDir = path.dirname(path.resolve(yamlPath))
+  const out: ResolvedExtraPath[] = []
+  for (const section of parseExtraModelsSections(content)) {
+    let base: string | null = null
+    if (section.basePath) {
+      base = expandUserVars(section.basePath)
+      if (!path.isAbsolute(base)) base = path.resolve(yamlDir, base)
+    }
+    for (const { type, path: sub } of section.overrides) {
+      let full: string
+      if (base) {
+        full = path.isAbsolute(sub) ? sub : path.join(base, sub)
+      } else if (path.isAbsolute(sub)) {
+        full = sub
+      } else {
+        full = path.resolve(yamlDir, sub)
+      }
+      out.push({
+        section: section.name,
+        type: mapLegacyFolderType(type),
+        rawType: type,
+        dir: normpath(full),
+        isDefault: !!section.isDefault,
+      })
+    }
+  }
+  return out
+}
+
+/** The complete set of model locations a single install's ComfyUI will search,
+ *  matching what the launcher should download into / check before downloading. */
+export interface InstallModelSearch {
+  /** Models root new downloads land in (the UI-visible primary). Always a
+   *  launcher-managed root with a `<type>/` layout, so any folder type is a
+   *  safe target. */
+  downloadBaseDir: string
+  /** Complete model roots (built-in `<comfyDir>/models` + launcher dirs); each
+   *  holds files at `<root>/<type>`. */
+  modelRoots: string[]
+  /** Arbitrary per-type dirs from the install's `extra_model_paths.yaml`. */
+  extraPaths: ResolvedExtraPath[]
+}
+
+/**
+ * Resolve every model search location for an install, mirroring the directories
+ * its ComfyUI process actually sees: the built-in `<comfyDir>/models`, the
+ * launcher-generated extra-paths (global `modelsDirs` when shared models are on,
+ * else the per-install `modelDirs`), and the user-authored
+ * `<comfyDir>/extra_model_paths.yaml`.
+ *
+ * `sharedModelsDirs` is passed in (rather than read from settings) to keep this
+ * module free of a settings import cycle.
+ */
+export function resolveInstallModelSearchPaths(
+  inst: InstallationRecord,
+  sharedModelsDirs: string[]
+): InstallModelSearch {
+  const installPath = inst.installPath
+  const comfyDir = resolveComfyDir(installPath)
+  const builtinRoot = path.resolve(installModelsDir(installPath))
+
+  const useShared = (inst.useSharedModels as boolean | undefined) !== false
+  let launcherRoots: string[]
+  let primary: string
+  if (useShared) {
+    launcherRoots = sharedModelsDirs.map((d) => path.resolve(d))
+    primary = launcherRoots[0] ?? builtinRoot
+  } else {
+    const instanceDirs = ((inst.modelDirs as string[] | undefined) ?? []).map((d) => path.resolve(d))
+    launcherRoots = instanceDirs
+    const primaryRaw = inst.modelDirsPrimary as string | undefined
+    primary =
+      typeof primaryRaw === 'string' && instanceDirs.some((d) => isSamePath(d, primaryRaw))
+        ? path.resolve(primaryRaw)
+        : builtinRoot
+  }
+
+  const modelRoots: string[] = []
+  const seen = new Set<string>()
+  for (const root of [builtinRoot, ...launcherRoots]) {
+    const key = process.platform === 'win32' ? root.toLowerCase() : root
+    if (seen.has(key)) continue
+    seen.add(key)
+    modelRoots.push(root)
+  }
+
+  const extraPaths = resolveExtraModelPaths(path.join(comfyDir, 'extra_model_paths.yaml'))
+
+  return { downloadBaseDir: primary, modelRoots, extraPaths }
 }

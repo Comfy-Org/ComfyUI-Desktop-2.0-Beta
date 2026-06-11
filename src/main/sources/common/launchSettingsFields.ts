@@ -1,6 +1,51 @@
+import fs from 'fs'
+import path from 'path'
 import { t } from '../../lib/i18n'
-import { installModelsDir, installInputDir, installOutputDir } from '../../lib/models'
+import {
+  installModelsDir,
+  installInputDir,
+  installOutputDir,
+  resolveComfyDir,
+  resolveExtraModelPaths,
+} from '../../lib/models'
 import type { InstallationRecord } from '../../installations'
+
+/** Read-only view of an install's own `extra_model_paths.yaml` for the Storage
+ *  tab. One row per resolved per-type directory; `dirExists` lets the UI flag
+ *  entries pointing at folders that aren't present (yet). */
+export interface ExtraModelPathRow {
+  section: string
+  type: string
+  rawType: string
+  dir: string
+  isDefault: boolean
+  dirExists: boolean
+}
+
+export interface ExtraModelPathsView {
+  /** Absolute path of the resolved `extra_model_paths.yaml`. */
+  yamlPath: string
+  /** Whether that file currently exists on disk. */
+  exists: boolean
+  rows: ExtraModelPathRow[]
+}
+
+/** Resolve an install's `extra_model_paths.yaml` the same way ComfyUI does, for
+ *  read-only display. Returns an empty view when the install has no path yet. */
+export function buildExtraModelPathsView(installation: InstallationRecord): ExtraModelPathsView {
+  const installPath = installation.installPath as string | undefined
+  if (!installPath) return { yamlPath: '', exists: false, rows: [] }
+  const yamlPath = path.join(resolveComfyDir(installPath), 'extra_model_paths.yaml')
+  const rows: ExtraModelPathRow[] = resolveExtraModelPaths(yamlPath).map((r) => ({
+    section: r.section,
+    type: r.type,
+    rawType: r.rawType,
+    dir: r.dir,
+    isDefault: r.isDefault,
+    dirExists: fs.existsSync(r.dir),
+  }))
+  return { yamlPath, exists: fs.existsSync(yamlPath), rows }
+}
 
 export interface LaunchSettingsOptions {
   defaultLaunchArgs: string
@@ -87,6 +132,14 @@ export function buildStorageFields(installation: InstallationRecord): Record<str
     {
       id: 'outputDirDefault', label: t('common.perInstallOutputDir'),
       value: ownOutputDir, editable: false, editType: 'hidden',
+    },
+    // Read-only view of the install's own extra_model_paths.yaml (the dirs
+    // ComfyUI sees but the launcher doesn't manage). StoragePane.vue renders
+    // this manually; the generic renderer ignores `hidden` fields.
+    {
+      id: 'extraModelPaths', label: 'extraModelPaths',
+      value: buildExtraModelPathsView(installation),
+      editable: false, editType: 'hidden',
     },
   ]
 }

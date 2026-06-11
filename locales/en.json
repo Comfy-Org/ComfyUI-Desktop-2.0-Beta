@@ -100,6 +100,8 @@
     "emptyInstallLess": "Open a ComfyUI instance to view its settings.",
     "storageGlobalNote": "Changes here apply to all of your ComfyUI instances.",
     "storageRestartNote": "Restart the application (or close and reopen) for these changes to take effect.",
+    "extraModelPathsNote": "From this install’s extra_model_paths.yaml. Read-only — ComfyUI searches these directories, but the launcher does not manage them.",
+    "dirMissing": "missing",
     "useSharedModelsOffWarning": "Shared models is OFF for this instance. It can only see models in its own folder plus any custom directories you add below — your shared library stays hidden until you turn this back on."
   },
   "comfyLifecycle": {
@@ -196,6 +198,7 @@
     "portConflictAuto": "Use next available port (asks if --port is set)",
     "download": "Download",
     "extract": "Extract",
+    "default": "default",
     "useSharedModels": "Use Shared Models",
     "useSharedInputOutput": "Use Shared Input/Output Folders",
     "perInstallModelDirs": "Model Directories",
@@ -434,6 +437,7 @@
     "modelDirectories": "Model Directories",
     "modelStorage": "Models",
     "inputOutputStorage": "Input & Output",
+    "extraModelPaths": "Custom Model Paths",
     "cache": "Cache",
     "cacheDir": "Cache Directory",
     "open": "Open",
