@@ -320,7 +320,6 @@ describe('startup update install + session-end guard (issue #1065)', () => {
     readyVersion = null
     mockAppVersion = '1.0.0'
     delete process.env.E2E
-    delete process.env.COMFY_STARTUP_UPDATE_INSTALL
     // Non-system, non-darwin platform so isSystemPackageInstall() is false and
     // installUpdate() skips the darwin single-instance-lock dance.
     Object.defineProperty(process, 'platform', { value: 'win32', configurable: true })
@@ -375,14 +374,6 @@ describe('startup update install + session-end guard (issue #1065)', () => {
   })
 
   it('register() disables install-on-quit when the startup-install flag is on (Option C)', async () => {
-    const updater = await import('./updater')
-    updater.register()
-    expect(electronUpdaterMock.autoInstallOnAppQuit).toBe(false)
-  })
-
-  it('register() honors the COMFY_STARTUP_UPDATE_INSTALL env override', async () => {
-    delete settingsStore['installUpdatesOnStartup']
-    process.env.COMFY_STARTUP_UPDATE_INSTALL = '1'
     const updater = await import('./updater')
     updater.register()
     expect(electronUpdaterMock.autoInstallOnAppQuit).toBe(false)

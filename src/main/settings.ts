@@ -65,8 +65,8 @@ export interface KnownSettings {
    *  update on the next launch instead of letting electron-updater install it on
    *  quit. Off: install-on-quit stays armed and is only suppressed while the OS
    *  is shutting down. On: install-on-quit is disabled and the update applies at
-   *  startup. Not remote yet — flipped by hand (or the
-   *  `COMFY_STARTUP_UPDATE_INSTALL` env var) to canary the startup-install path. */
+   *  startup. Not remote yet — flipped by hand in settings.json to canary the
+   *  startup-install path. */
   installUpdatesOnStartup?: boolean
 }
 

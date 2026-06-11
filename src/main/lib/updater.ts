@@ -138,11 +138,10 @@ function isSystemPackageInstall(): boolean {
  * staged update applies on the next boot.
  *
  * Not a remote flag yet — flip it via the hidden `installUpdatesOnStartup`
- * setting (edited by hand in settings.json) or the `COMFY_STARTUP_UPDATE_INSTALL`
- * env var, so the startup-install path can be canaried before any wider rollout.
+ * setting (edited by hand in settings.json), so the startup-install path can be
+ * canaried before any wider rollout.
  */
 function isStartupInstallEnabled(): boolean {
-  if (process.env['COMFY_STARTUP_UPDATE_INSTALL'] === '1') return true
   return settings.get('installUpdatesOnStartup') === true
 }
 
