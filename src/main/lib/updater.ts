@@ -1,7 +1,8 @@
 import { app, ipcMain } from 'electron'
 import todesktop from '@todesktop/runtime'
+import { autoUpdater as electronAutoUpdater } from 'electron-updater'
 import * as settings from '../settings'
-import { clearQuitReason, setQuitReason } from './quit-state'
+import { clearQuitReason, isSessionEnding, setQuitReason } from './quit-state'
 import { _broadcastToRenderer } from './ipc/shared'
 import { emit as emitTelemetry, bucketError } from './telemetry'
 
@@ -200,6 +201,14 @@ function bindUpdaterEvents(): void {
     if (_shouldEmitAppUpdateOnce('comfy.desktop.app_update.download_complete', version)) {
       emitTelemetry('comfy.desktop.app_update.download_complete', { version })
     }
+    // Persist that an installer is staged on disk so the next launch knows to
+    // run the (bounded) startup-install check. The download is cached by
+    // electron-updater across restarts, so we apply it on the next boot rather
+    // than on quit — installing on quit is what gets killed mid-write during a
+    // Windows shutdown and corrupts the install.
+    try {
+      settings.set('pendingDownloadedUpdateVersion', version)
+    } catch {}
     _setUpdateState({ kind: 'ready', version, autoUpdate: isAutoInstallEnabled() })
     if (_userInitiatedDownload) {
       // The user opted in to download via the auto-off available pill
@@ -428,6 +437,13 @@ export async function downloadUpdate(): Promise<void> {
  * system-modal "Restart" confirm) share a single implementation.
  */
 export function installUpdate(): void {
+  if (isSessionEnding()) {
+    // The OS is shutting down / logging off. Spawning the installer now risks
+    // it being force-killed mid-write, corrupting the install — the exact
+    // failure this whole flow exists to avoid. The staged update stays put and
+    // applies on the next launch instead.
+    return
+  }
   const updater = getAutoUpdater()
   if (!updater) {
     _broadcastToRenderer('app-update:user-action-failed', { message: UPDATER_UNAVAILABLE_MESSAGE })
@@ -472,8 +488,99 @@ export function _test_setUpdateState(next: AppUpdateState): void {
   _setUpdateState(next)
 }
 
+/** Upper bound on how long the startup-install check may delay boot. The
+ *  installer was already downloaded in a previous session, so this only
+ *  re-validates the cached file against the release feed (no re-download); the
+ *  cap keeps a slow / offline network from ever hanging the launch. */
+const STARTUP_UPDATE_CHECK_TIMEOUT_MS = 5000
+
+/**
+ * True when there is a staged Desktop update we should try to install on this
+ * launch. Cheap and synchronous (reads only persisted markers + environment),
+ * so callers can use it to decide whether to show an "Updating…" splash before
+ * the bounded `applyPendingUpdateOnStartup` check runs.
+ *
+ * Returns false for: E2E runs, system-package-managed installs (apt/dnf own the
+ * update), an OS session that's already ending, no staged download, a staged
+ * version that's already the running version, and the loop-breaker case (we
+ * already auto-attempted this exact version and are still on the old one).
+ */
+function shouldAttemptStartupInstall(): boolean {
+  if (process.env['E2E'] === '1') return false
+  if (isSystemPackageInstall()) return false
+  if (isSessionEnding()) return false
+  const pending = settings.get('pendingDownloadedUpdateVersion')
+  if (!pending) return false
+  if (pending === app.getVersion()) return false
+  const lastAttempt = settings.get('lastStartupUpdateAttemptVersion')
+  if (lastAttempt === pending) return false
+  return true
+}
+
+export function hasPendingStartupUpdate(): boolean {
+  return shouldAttemptStartupInstall()
+}
+
+/**
+ * Apply a previously-downloaded Desktop update at startup instead of on quit.
+ * Installing on quit is what gets interrupted by a Windows shutdown and leaves
+ * a corrupted install; doing it at launch decouples the install from the
+ * shutdown entirely. Returns `true` when an install was triggered (the caller
+ * should then keep the splash up and NOT open the normal UI — the app is about
+ * to quit and the installer relaunches it). Returns `false` (open the UI as
+ * usual) when there's nothing to do, the check can't confirm a ready update, or
+ * the loop-breaker is engaged.
+ */
+export async function applyPendingUpdateOnStartup(): Promise<boolean> {
+  // Clear stale markers once the attempted/staged version is actually running
+  // (the install succeeded on a previous boot).
+  const running = app.getVersion()
+  if (settings.get('lastStartupUpdateAttemptVersion') === running) {
+    settings.set('lastStartupUpdateAttemptVersion', undefined)
+  }
+  if (settings.get('pendingDownloadedUpdateVersion') === running) {
+    settings.set('pendingDownloadedUpdateVersion', undefined)
+  }
+
+  if (!shouldAttemptStartupInstall()) return false
+
+  // The installer is cached on disk from a previous session; this check
+  // re-validates it (no re-download) and populates the updater's ready state.
+  // Bounded so a slow/offline network can't hang boot — if it doesn't resolve
+  // to a ready update in time, we open the UI and try again next launch.
+  await Promise.race([
+    runCheck('startup-install').catch(() => {}),
+    new Promise((resolve) => setTimeout(resolve, STARTUP_UPDATE_CHECK_TIMEOUT_MS))
+  ])
+
+  const state = getCurrentUpdateState()
+  if (state.kind !== 'ready' || !state.version) return false
+  if (state.version === running) return false
+  // The session may have started ending while we awaited the check.
+  if (isSessionEnding()) return false
+
+  // Record the attempt BEFORE installing so a failed install (app relaunches on
+  // the old version) trips the loop-breaker next boot instead of looping.
+  settings.set('lastStartupUpdateAttemptVersion', state.version)
+  emitTelemetry('comfy.desktop.app_update.startup_install', { version: state.version })
+  installUpdate()
+  return true
+}
+
 export function register(): void {
   bindUpdaterEvents()
+
+  // Disable electron-updater's silent install-on-quit. Its default
+  // (`autoInstallOnAppQuit = true`) registers a quit handler that spawns the
+  // installer whenever the app closes — including during a Windows shutdown,
+  // where the OS kills the installer mid-write and corrupts the install
+  // (the "reinstall on every shutdown" loop). Installs now happen only via the
+  // explicit pill (`installUpdate`) or on the next launch
+  // (`applyPendingUpdateOnStartup`). `electronAutoUpdater` is the same singleton
+  // the ToDesktop runtime drives, so this affects the actual updater.
+  try {
+    electronAutoUpdater.autoInstallOnAppQuit = false
+  } catch {}
 
   ipcMain.handle('check-for-update', async () => {
     try {

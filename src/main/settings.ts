@@ -51,6 +51,16 @@ export interface KnownSettings {
   /** Directory the user last chose in the general "Save image/file" dialog.
    *  Used to seed the dialog's defaultPath so it matches browser behavior. */
   lastSaveDialogDir?: string
+  /** Version of a Desktop update whose installer finished downloading in a
+   *  previous session and is staged on disk. Gates the bounded startup
+   *  install check so boots without a staged update aren't delayed. Cleared
+   *  once that version is actually running. */
+  pendingDownloadedUpdateVersion?: string
+  /** Version we last auto-attempted to install at startup. Loop-breaker: if an
+   *  attempt didn't take (still running the old version), we don't auto-retry
+   *  the same version on the next boot — the user can still install it manually
+   *  via the update pill. Cleared once that version is actually running. */
+  lastStartupUpdateAttemptVersion?: string
 }
 
 export type Settings = KnownSettings & Record<string, unknown>
@@ -92,6 +102,8 @@ const SETTINGS_SCHEMA = {
   oemManagedModelDirs: { nullable: false },
   oemWorkflowImportVersion: { nullable: false },
   lastSaveDialogDir: { nullable: true },
+  pendingDownloadedUpdateVersion: { nullable: true },
+  lastStartupUpdateAttemptVersion: { nullable: true },
 } as const satisfies Record<keyof KnownSettings, { nullable: boolean }>
 
 export type KnownSettingKey = keyof typeof SETTINGS_SCHEMA

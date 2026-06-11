@@ -33,7 +33,13 @@ import {
 } from './popups/titlePopup'
 import { registerPickerSettingsIpc } from './popups/pickerSettingsHandlers'
 import { waitForPort, COMFY_BOOT_TIMEOUT_MS } from './lib/process'
-import { isQuitInProgress, setQuitReason } from './lib/quit-state'
+import {
+  isQuitInProgress,
+  isUpdateInstallQuit,
+  setQuitReason,
+  setSessionEnding
+} from './lib/quit-state'
+import { showUpdateInstallSplash } from './lib/updateSplash'
 import type { InstallationRecord } from './installations'
 import {
   cleanupTempDownloads,
@@ -207,6 +213,11 @@ function quitApp(): void {
  *  never reaches the restore handler, so the window can't stay invisible. */
 const STARTUP_RESTORE_REVEAL_BACKSTOP_MS = 10_000
 const pendingStartupRestoreRevealTimers = new Map<number, ReturnType<typeof setTimeout>>()
+
+/** A successful startup update install quits the app within a tick. If the quit
+ *  hasn't happened by now the install didn't proceed, so we recover into the
+ *  normal surface rather than leaving the user on the "Updating…" splash. */
+const STARTUP_INSTALL_QUIT_BACKSTOP_MS = 4_000
 
 function clearStartupRestoreRevealTimer(windowKey: number): void {
   const timer = pendingStartupRestoreRevealTimers.get(windowKey)
@@ -1227,6 +1238,18 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     })
   }
 
+  // Record OS session-end (Windows shutdown / restart / logoff, also macOS) so
+  // the update install paths can bail out — spawning the installer while the OS
+  // is tearing everything down risks it being force-killed mid-write, which is
+  // the corruption mode behind the "reinstall on every shutdown" reports.
+  // `session-end` is a BrowserWindow event, so attach it to every window as it
+  // is created.
+  app.on('browser-window-created', (_event, window) => {
+    window.on('session-end', () => {
+      setSessionEnding()
+    })
+  })
+
   app.whenReady().then(async () => {
     // Test-only hooks for the E2E suite. Registered before any host
     // opens so seeded state (downloads, install-update overrides,
@@ -1975,13 +1998,32 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     // and the tray-aware `window-all-closed` gating will all come back
     // when the docked-app flow is reinstated. Until then, see git
     // history for the previous tray construction code.
-    // The install-less chooser host is the primary surface. Each
-    // install gets its own ComfyUI window via openComfyWindow()
-    // when launched, and the chooser host is the entry-point for
-    // picking / creating installs. When the user last left an instance
-    // window (and the reopen setting is on), restore that instance
-    // in-place on top of the freshly-opened chooser host.
-    void openStartupSurface()
+    // Apply a previously-downloaded Desktop update at startup rather than on
+    // quit (installing on quit is what a Windows shutdown interrupts and
+    // corrupts). When an update is staged we show a brief "Updating…" splash
+    // while the bounded check runs; if it commits to installing, the app quits
+    // here and the installer relaunches it — so we skip opening the normal UI.
+    const updateSplash = updater.hasPendingStartupUpdate() ? showUpdateInstallSplash() : undefined
+    const installingUpdate = await updater.applyPendingUpdateOnStartup()
+    if (installingUpdate) {
+      // Safety net: a successful install quits the app within a tick. If it
+      // didn't (e.g. the staged installer was gone), don't strand the user on
+      // the splash — fall back to the normal surface.
+      setTimeout(() => {
+        if (isUpdateInstallQuit()) return
+        if (updateSplash && !updateSplash.isDestroyed()) updateSplash.destroy()
+        void openStartupSurface()
+      }, STARTUP_INSTALL_QUIT_BACKSTOP_MS)
+    } else {
+      if (updateSplash && !updateSplash.isDestroyed()) updateSplash.destroy()
+      // The install-less chooser host is the primary surface. Each
+      // install gets its own ComfyUI window via openComfyWindow()
+      // when launched, and the chooser host is the entry-point for
+      // picking / creating installs. When the user last left an instance
+      // window (and the reopen setting is on), restore that instance
+      // in-place on top of the freshly-opened chooser host.
+      void openStartupSurface()
+    }
 
     // Single subscription rebroadcasts every install-list mutation
     // (add/remove/update/markLaunched/reorder/...) to all renderers as

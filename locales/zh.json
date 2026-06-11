@@ -1015,6 +1015,8 @@
     "instanceRunningReplace": "关闭并启动",
     "modelFolderRelaunchTitle": "正在重启 ComfyUI",
     "modelFolderRelaunchDesc": "检测到来自自定义节点的新模型文件夹。正在重启，以便 ComfyUI 立即使用它们。",
+    "updateInstallTitle": "正在安装更新",
+    "updateInstallDesc": "正在应用最新的 ComfyUI Desktop 更新。应用将自动重启。",
     "launchSplashTitle": "正在启动 ComfyUI",
     "launchSplashDesc": "正在启动你的 ComfyUI 实例…",
     "activity": {
