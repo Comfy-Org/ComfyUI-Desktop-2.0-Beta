@@ -643,7 +643,10 @@ export async function applyPendingUpdateOnStartup(): Promise<boolean> {
   await waitForReadyState(STARTUP_UPDATE_CHECK_TIMEOUT_MS)
 
   const state = getCurrentUpdateState()
-  if (state.kind !== 'ready' || !state.version || state.version === running) {
+  // Require the ready version to be the exact staged version we decided to
+  // install — a concurrent check could surface a different (or no) ready
+  // version, which must not bypass the loop-breaker recorded for `decision.version`.
+  if (state.kind !== 'ready' || state.version !== decision.version) {
     emitTelemetry('comfy.desktop.app_update.startup_install_skipped', {
       reason: 'not_ready',
       version: decision.version

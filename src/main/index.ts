@@ -1244,14 +1244,18 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
   // the corruption mode behind the "reinstall on every shutdown" reports.
   // `session-end` is a BrowserWindow event, so attach it to every window as it
   // is created.
+  const onSessionEnding = (): void => {
+    setSessionEnding()
+    // Default mode keeps electron-updater's install-on-quit armed; flip it off
+    // now so the quit handler it registered after a download won't spawn the
+    // installer the OS is about to kill mid-write.
+    updater.suppressInstallOnQuit()
+  }
   app.on('browser-window-created', (_event, window) => {
-    window.on('session-end', () => {
-      setSessionEnding()
-      // Default mode keeps electron-updater's install-on-quit armed; flip it off
-      // now so the quit handler it registered after a download won't spawn the
-      // installer the OS is about to kill mid-write.
-      updater.suppressInstallOnQuit()
-    })
+    // `query-session-end` fires earlier than `session-end` on Windows, widening
+    // the margin to suppress install-on-quit before the OS tears things down.
+    window.on('query-session-end', onSessionEnding)
+    window.on('session-end', onSessionEnding)
   })
 
   app.whenReady().then(async () => {
