@@ -350,8 +350,13 @@ const groups = computed<FactGroup[]>(() => {
       rows: running,
     })
   }
+  // Location & storage only makes sense for a local on-disk install. Cloud and
+  // remote connections have no local footprint, so suppress the whole group
+  // (covers the "no disk storage data available" case too — `diskUsage` is null
+  // for them and the path rows describe a remote host, not local storage).
+  const isLocalInstall = props.installation?.sourceCategory === 'local'
   const location = locationRows.value
-  if (location.length > 0) {
+  if (isLocalInstall && location.length > 0) {
     out.push({
       id: 'location-storage',
       title: t('statusFactPanel.locationStorage', 'Location & storage'),
@@ -730,17 +735,12 @@ const groups = computed<FactGroup[]>(() => {
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
-  opacity: 0;
+  /* Always visible so the edit affordance is discoverable without hover. */
+  opacity: 0.6;
   transition:
     opacity 120ms ease,
     background-color 120ms ease,
     color 120ms ease;
-}
-
-/* Reveal on row hover or whenever the field/button itself has focus, so keyboard users can find it. */
-.status-fact-url-edit:hover .status-fact-url-edit-btn,
-.status-fact-url-edit:focus-within .status-fact-url-edit-btn {
-  opacity: 0.6;
 }
 
 .status-fact-url-edit-btn:hover,

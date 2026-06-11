@@ -70,6 +70,8 @@ export function registerPickerSettingsIpc(): void {
 
   ipcMain.handle(CH.getInstallations, (event) => dispatchInvoke('get-installations', event))
 
+  ipcMain.handle(CH.getStableTags, (event) => dispatchInvoke('get-stable-tags', event))
+
   ipcMain.handle(CH.stopComfyUI, (event, payload: { installationId?: unknown }) =>
     dispatchInvoke('stop-comfyui', event, payload?.installationId),
   )
@@ -160,4 +162,5 @@ export function registerPickerSettingsIpc(): void {
 
   // Pull main's full i18n catalog so keys like `actions.restart` resolve inside the popup.
   ipcMain.handle(CH.getLocaleMessages, (event) => dispatchInvoke('get-locale-messages', event))
+  ipcMain.handle(CH.getLocale, (event) => dispatchInvoke('get-locale', event))
 }

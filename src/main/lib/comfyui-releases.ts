@@ -1,4 +1,4 @@
-import { lsRemoteLatestTag, lsRemoteRef } from './git'
+import { lsRemoteLatestTag, lsRemoteRef, lsRemoteStableTags } from './git'
 import { getComfyUIRemoteUrl } from './github-mirror'
 import * as settings from '../settings'
 
@@ -14,6 +14,13 @@ interface CacheEntry {
 }
 const _latestTagCache = new Map<string, CacheEntry>()
 let _inflight: Map<string, Promise<string | null>> = new Map()
+
+interface StableTagsCacheEntry {
+  tags: string[]
+  expiresAt: number
+}
+const _stableTagsCache = new Map<string, StableTagsCacheEntry>()
+let _stableTagsInflight: Map<string, Promise<string[]>> = new Map()
 
 function _getRemoteUrl(): string {
   return getComfyUIRemoteUrl(settings.get('useChineseMirrors') === true)
@@ -58,6 +65,42 @@ export async function getLatestStableTag(opts?: { refresh?: boolean }): Promise<
 export function _clearLatestStableTagCache(): void {
   _latestTagCache.clear()
   _inflight = new Map()
+  _stableTagsCache.clear()
+  _stableTagsInflight = new Map()
+}
+
+/**
+ * Resolve every stable ComfyUI tag via `git ls-remote --tags`. "Stable" means
+ * strict `vMAJOR.MINOR.PATCH` (no prerelease / suffix). Tags are returned
+ * newest-first. Cached per remote URL with the same TTLs as
+ * {@link getLatestStableTag}; concurrent callers share one in-flight request.
+ * Returns an empty array (never throws) on failure. `refresh: true` bypasses
+ * the cache.
+ */
+export async function getStableTags(opts?: { refresh?: boolean }): Promise<string[]> {
+  const url = _getRemoteUrl()
+  const now = Date.now()
+  if (!opts?.refresh) {
+    const hit = _stableTagsCache.get(url)
+    if (hit && now < hit.expiresAt) return hit.tags
+  }
+  const existing = _stableTagsInflight.get(url)
+  if (existing) return existing
+  const promise = (async () => {
+    try {
+      const tags = await lsRemoteStableTags(url)
+      const ttl = tags.length === 0 ? FAILURE_TTL_MS : SUCCESS_TTL_MS
+      _stableTagsCache.set(url, { tags, expiresAt: Date.now() + ttl })
+      return tags
+    } catch {
+      _stableTagsCache.set(url, { tags: [], expiresAt: Date.now() + FAILURE_TTL_MS })
+      return []
+    } finally {
+      _stableTagsInflight.delete(url)
+    }
+  })()
+  _stableTagsInflight.set(url, promise)
+  return promise
 }
 
 export async function fetchLatestRelease(

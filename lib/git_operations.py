@@ -26,11 +26,14 @@ Subcommands:
 """
 
 import os
+import re
 import sys
 import time
 from collections import deque
 
 import pygit2
+
+from pygit2_compat import harden_pygit2_config
 
 
 # ---------------------------------------------------------------------------
@@ -64,6 +67,28 @@ except (ImportError, AttributeError):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+# Snapshot of the user's global `http.proxy` (captured before the config
+# search path is blanked) so corporate proxy settings survive and can be
+# passed explicitly to fetch/clone. None means "no proxy".
+HTTP_PROXY = None
+
+
+def to_https_url(url):
+    """Rewrite an SSH-form git URL to its anonymous HTTPS equivalent.
+
+    Handles `git@host:owner/repo(.git)` and `ssh://git@host/owner/repo(.git)`.
+    Returns the URL unchanged if it is not SSH-form, so launcher-managed
+    clones of public repos never require SSH credentials even when a repo's
+    own config stores an SSH origin.
+    """
+    if not url:
+        return url
+    m = re.match(r"^(?:ssh://)?git@([^:/]+)[:/](.+)$", url)
+    if m:
+        return "https://%s/%s" % (m.group(1), m.group(2))
+    return url
+
 
 def open_repo(repo_path):
     """Open a pygit2 Repository, mirroring update_comfyui.py patterns."""
@@ -161,7 +186,14 @@ def parse_version_tuple(tag_name):
 
 
 def get_origin(repo):
-    """Return the 'origin' remote, or exit with an error."""
+    """Return the 'origin' remote, or exit with an error.
+
+    A stored SSH origin is left untouched: the bundled pygit2 has no SSH
+    transport, so such a fetch fails with an auth error, and the TypeScript
+    caller (git.ts) retries the whole operation via system git, which honors
+    the user's full git config. We deliberately do not rewrite the remote URL
+    on disk.
+    """
     for remote in repo.remotes:
         if remote.name == "origin":
             return remote
@@ -363,6 +395,7 @@ def cmd_fetch_tags(repo_path):
         origin.fetch(
             ["+refs/tags/*:refs/tags/*"],
             depth=0,  # unshallow
+            proxy=HTTP_PROXY,
         )
         print("Fetched tags (unshallowed).", file=sys.stderr)
         return
@@ -371,7 +404,7 @@ def cmd_fetch_tags(repo_path):
 
     # Fall back to regular tag fetch
     try:
-        origin.fetch(["+refs/tags/*:refs/tags/*"])
+        origin.fetch(["+refs/tags/*:refs/tags/*"], proxy=HTTP_PROXY)
         print("Fetched tags.", file=sys.stderr)
         return
     except Exception as e:
@@ -408,21 +441,21 @@ def cmd_fetch_commit(repo_path, sha):
     # delivers what we asked for (GitHub honours this via
     # allow-reachable-sha1-in-want).
     try:
-        origin.fetch([sha])
+        origin.fetch([sha], proxy=HTTP_PROXY)
     except Exception as e:
         last_error = e
         # Fallback: unshallow so the full default-branch history is
         # local.  Slower but works when the server rejects single-SHA
         # fetches or pygit2/libgit2 can't construct the refspec.
         try:
-            origin.fetch(depth=0)
+            origin.fetch(depth=0, proxy=HTTP_PROXY)
         except Exception as e2:
             last_error = e2
             # Final fallback: plain default-refspec fetch.  Doesn't
             # guarantee the SHA arrives, but no worse than the previous
             # behaviour — the post-fetch verification below catches it.
             try:
-                origin.fetch()
+                origin.fetch(proxy=HTTP_PROXY)
             except Exception as e3:
                 last_error = e3
 
@@ -459,6 +492,7 @@ def cmd_clone(url, dest):
     (no carriage-return TTY tricks) and throttle to ~1 update per second
     so the UI doesn't get spammed.
     """
+    url = to_https_url(url)
     print("Downloading ComfyUI source from %s into %s ..." % (url, dest),
           file=sys.stderr)
     try:
@@ -488,10 +522,15 @@ def cmd_clone(url, dest):
                     _format_bytes(stats.received_bytes)),
                     file=sys.stderr)
 
-        pygit2.clone_repository(url, dest, callbacks=Progress())
+        pygit2.clone_repository(url, dest, callbacks=Progress(), proxy=HTTP_PROXY)
         print("Download complete.", file=sys.stderr)
     except Exception as e:
         print("Error: clone failed: %s" % e, file=sys.stderr)
+        if "callback" in str(e) or "authentication" in str(e).lower():
+            print("Git authentication was required for an anonymous clone. "
+                  "This usually means your git config rewrites GitHub HTTPS "
+                  "URLs to SSH; the launcher clones over anonymous HTTPS and "
+                  "cannot use SSH credentials.", file=sys.stderr)
         sys.exit(1)
 
 
@@ -561,12 +600,12 @@ def _ensure_commit_local(repo, commit):
         last_error = e
         # Fallback: unshallow so the full default-branch history is local.
         try:
-            origin.fetch(depth=0)
+            origin.fetch(depth=0, proxy=HTTP_PROXY)
         except Exception as e2:
             last_error = e2
             # Final fallback: plain default-refspec fetch.
             try:
-                origin.fetch()
+                origin.fetch(proxy=HTTP_PROXY)
             except Exception as e3:
                 last_error = e3
 
@@ -651,10 +690,10 @@ def cmd_fetch_and_checkout(repo_path, commit):
 
     # Try unshallow first, fall back to regular fetch
     try:
-        origin.fetch(refspecs, depth=0)
+        origin.fetch(refspecs, depth=0, proxy=HTTP_PROXY)
     except Exception:
         try:
-            origin.fetch(refspecs)
+            origin.fetch(refspecs, proxy=HTTP_PROXY)
         except Exception as e:
             print("Error: failed to fetch from origin: %s" % e, file=sys.stderr)
             sys.exit(1)
@@ -713,11 +752,12 @@ def cmd_ls_remote_tags(url):
     """
     import tempfile
 
+    url = to_https_url(url)
     with tempfile.TemporaryDirectory() as tmpdir:
         repo = pygit2.init_repository(tmpdir, bare=True)
         remote = repo.remotes.create_anonymous(url)
         try:
-            heads = remote.list_heads()
+            heads = remote.list_heads(proxy=HTTP_PROXY)
         except AttributeError:
             heads = remote.ls_remotes()
 
@@ -743,11 +783,12 @@ def cmd_ls_remote_ref(url, ref):
     """
     import tempfile
 
+    url = to_https_url(url)
     with tempfile.TemporaryDirectory() as tmpdir:
         repo = pygit2.init_repository(tmpdir, bare=True)
         remote = repo.remotes.create_anonymous(url)
         try:
-            heads = remote.list_heads()
+            heads = remote.list_heads(proxy=HTTP_PROXY)
         except AttributeError:
             heads = remote.ls_remotes()
         for head in heads:
@@ -787,6 +828,7 @@ Subcommands:
 
 if __name__ == "__main__":
     pygit2.option(pygit2.GIT_OPT_SET_OWNER_VALIDATION, 0)
+    HTTP_PROXY = harden_pygit2_config()
 
     if len(sys.argv) < 2:
         print(USAGE, file=sys.stderr)

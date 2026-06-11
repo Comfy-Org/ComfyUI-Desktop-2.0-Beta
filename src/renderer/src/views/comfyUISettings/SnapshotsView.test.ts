@@ -269,7 +269,7 @@ describe('comfyUISettings/SnapshotsView', () => {
 
     // Red card present, error message visible.
     expect(w.find('.snapshots-rail-save-box.is-op-error').exists()).toBe(true)
-    expect(w.find('.snapshots-op-card-error-msg').text()).toBe('Permission denied')
+    expect(w.find(`[data-testid="${TID.pickerOpErrorMessage}"]`).text()).toBe('Permission denied')
 
     // Retry button.
     await w.find(`[data-testid="${TID.snapshotsOpCardRetry}"]`).trigger('click')

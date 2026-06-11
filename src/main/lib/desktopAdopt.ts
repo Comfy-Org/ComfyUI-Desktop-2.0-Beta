@@ -677,12 +677,14 @@ interface RequirementsInstallReport {
  * legacy CUDA build.
  *
  * Also installs `pygit2` so:
- *   - ComfyUI-Manager v4 picks the pygit2 backend (gated by
- *     `CM_USE_PYGIT2=1`, which `buildLaunchEnv` already sets for every
- *     `sourceId === 'standalone'` install — adopted included). Without
- *     pygit2 Manager falls back to GitPython, which requires `git` on
- *     PATH — Legacy Desktop never required system git, so adopted users
- *     often don't have it.
+ *   - ComfyUI-Manager v4 has a git backend even when system git is
+ *     absent. Manager prefers system git when present (honoring the
+ *     user's full git config) and falls back to its bundled pygit2
+ *     otherwise; `buildLaunchEnv` only forces the pygit2 backend via
+ *     `CM_USE_PYGIT2=1` when a developer sets `COMFY_FORCE_PYGIT2=1`.
+ *     Legacy Desktop never required system git, so adopted users often
+ *     don't have it — without pygit2 Manager would fall back to
+ *     GitPython, which requires `git` on PATH.
  *   - The launcher-bundled `update_comfyui.py` can run against the
  *     adopted Python (it imports pygit2 unconditionally), which is what
  *     unblocks in-place ComfyUI source updates for adopted installs.

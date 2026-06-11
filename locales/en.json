@@ -1,6 +1,5 @@
 {
   "_label": "English",
-
   "dashboard": {
     "launchedAgo": "Launched {time}",
     "neverLaunched": "Not launched yet",
@@ -16,7 +15,6 @@
       "confirmLabel": "Return to Dashboard"
     }
   },
-
   "installType": {
     "standalone": "Standalone",
     "cloud": "Cloud",
@@ -24,7 +22,6 @@
     "remote": "Remote",
     "unknown": "Unknown"
   },
-
   "chooser": {
     "title": "Choose an instance",
     "recent": "Recent",
@@ -56,9 +53,10 @@
     "statusStopping": "Stopping…",
     "statusError": "Error",
     "viewErrorTooltip": "View error details",
-    "errorTitle": "Error"
+    "errorTitle": "Error",
+    "searchPlaceholder": "Search for and open an instance",
+    "noMatches": "No instances match"
   },
-
   "titleBar": {
     "panelComfy": "ComfyUI",
     "panelInstallSettings": "Instance Settings",
@@ -68,9 +66,25 @@
     "appUpdateAvailable": "Update {version}",
     "appUpdateReady": "Restart to update",
     "installUpdateAvailable": "Update available",
-    "installUpdateShort": "Update"
+    "installUpdateShort": "Update",
+    "menu": "Menu",
+    "feedback": "Feedback",
+    "feedbackTooltip": "Send Feedback",
+    "downloads": "Downloads",
+    "downloadsInProgress": "no downloads in progress | {n} download in progress | {n} downloads in progress",
+    "downloadsCompleteUnseen": "no recent downloads | {n} download finished — click to review | {n} downloads finished — click to review",
+    "downloadsFailedUnseen": "no downloads failed | {n} download failed — click to review | {n} downloads failed — click to review",
+    "desktopUpdateAvailable": "Desktop Update",
+    "desktopUpdateDownloading": "Downloading update…",
+    "desktopUpdateReady": "Desktop Update Ready",
+    "desktopUpdateWithVersion": "{label} (v{version})",
+    "installUpdateVersion": "ComfyUI {version}",
+    "refreshInstanceTooltip": "Refresh",
+    "resetZoomTooltip": "Reset zoom to 100%",
+    "pillHintTitle": "Switch & manage instances",
+    "pillHintBody": "Click here to switch instances, start a new local instance, or return to the dashboard.",
+    "pillHintDismiss": "Got it"
   },
-
   "comfyUISettings": {
     "title": "Settings",
     "tabConfig": "Startup Args",
@@ -88,7 +102,6 @@
     "storageRestartNote": "Restart the application (or close and reopen) for these changes to take effect.",
     "useSharedModelsOffWarning": "Shared models is OFF for this instance. It can only see models in its own folder plus any custom directories you add below — your shared library stays hidden until you turn this back on."
   },
-
   "comfyLifecycle": {
     "preparingTitle": "Preparing…",
     "launchingTitle": "Starting ComfyUI…",
@@ -105,13 +118,11 @@
     "relaunch": "Relaunch ComfyUI",
     "launchProgressTitle": "Starting ComfyUI"
   },
-
   "running": {
     "title": "Running",
     "dismiss": "Dismiss",
     "showWindow": "Show Window"
   },
-
   "downloads": {
     "title": "Model Downloads",
     "empty": "No downloads in progress.",
@@ -128,17 +139,14 @@
     "error": "Failed",
     "sizeProgress": "{received} / {total}"
   },
-
   "media": {
     "sharedDirs": "Media",
     "inputDir": "Input Directory",
     "outputDir": "Output Directory"
   },
-
   "directories": {
     "title": "Directories"
   },
-
   "models": {
     "directories": "Models",
     "directoriesDesc": "Model directories shared across all instances. Models placed here are available to every ComfyUI instance, avoiding duplicate downloads. The first directory is the primary (default for ComfyUI).",
@@ -151,9 +159,11 @@
     "instanceOnly": "Instance",
     "lockedDir": "This directory is always used and cannot be removed.",
     "removeInstanceDirTitle": "Remove model directory?",
-    "removeInstanceDirConfirm": "This won't delete any files. You can re-add the directory later from this list."
+    "removeInstanceDirConfirm": "This won't delete any files. You can re-add the directory later from this list.",
+    "removeDirTitle": "Remove shared models directory?",
+    "removeDirConfirm": "This won't delete any files. You can re-add the directory later from this list.",
+    "moreActions": "More actions"
   },
-
   "common": {
     "back": "Back",
     "backToDashboard": "Back to Dashboard",
@@ -203,9 +213,9 @@
     "tabSnapshots": "Snapshots",
     "tabSettings": "Settings",
     "loading": "Loading…",
-    "envVars": "Environment Variables"
+    "envVars": "Environment Variables",
+    "copyError": "Copy error details"
   },
-
   "list": {
     "loadSnapshot": "Load Snapshot",
     "snapshotSourceName": "Source Instance",
@@ -219,12 +229,10 @@
     "snapshotOriginalRelease": "Snapshot version: {tag}",
     "snapshotDevice": "Device",
     "snapshotHardwareMismatch": "The snapshot was created with {snapshotDevice}. Your detected hardware is {detectedDevice}. The recommended variant for your hardware has been pre-selected.",
-
     "view": "Manage",
     "console": "Console",
     "viewProgress": "View Progress"
   },
-
   "quickInstall": {
     "title": "Install ComfyUI",
     "grandTitle": "Quick Install",
@@ -233,12 +241,10 @@
     "selectVariant": "Select your GPU",
     "confirmInstall": "Install ComfyUI"
   },
-
   "loadSnapshot": {
     "grandTitle": "Restore From Snapshot",
     "grandSubtitle": "Load a saved snapshot file to recreate that instance here."
   },
-
   "newInstall": {
     "title": "New Instance",
     "grandTitle": "New Instance",
@@ -255,6 +261,7 @@
     "nvidiaDriverWarning": "Your NVIDIA driver ({driverVersion}) may be too old for the bundled PyTorch. Recommended minimum: {minimumVersion}. Please consider updating your NVIDIA drivers if you run into issues.",
     "nvidiaDriverContinue": "Continue Anyway",
     "noOptions": "No options available",
+    "latestStable": "Latest stable",
     "installing": "Installing",
     "chooseMethod": "Choose Install Method",
     "configuration": "Configuration",
@@ -272,7 +279,6 @@
     "nameWhitespace": "Enter a name, or leave blank to use the suggested one.",
     "urlInvalid": "Enter a valid URL (e.g. http://localhost:8188)."
   },
-
   "diskSpace": {
     "free": "{size} free",
     "checking": "Checking disk space…",
@@ -286,7 +292,6 @@
     "sizeUnavailable": "—",
     "estimatedRequired": "~{size} required"
   },
-
   "pathValidation": {
     "insideAppBundleTitle": "Unsafe Install Location",
     "insideAppBundleMessage": "This path is inside the app's installation directory. Files here will be deleted when the app is updated. Please choose a different location.",
@@ -297,9 +302,7 @@
     "insideExistingInstallTitle": "Overlapping Instance",
     "insideExistingInstallMessage": "This path overlaps with an existing instance. Installing here can cause conflicts and data corruption. Please choose a different location."
   },
-
   "detail": {},
-
   "channelCards": {
     "installedVersion": "Installed Version",
     "latestVersion": "Latest Version",
@@ -316,7 +319,6 @@
     "switchingToTitle": "Switching to {channel}",
     "computingCommitsAhead": "Computing commits ahead…"
   },
-
   "track": {
     "title": "Add Existing Instance",
     "grandTitle": "Add Existing Instance",
@@ -333,7 +335,6 @@
     "repository": "Repository",
     "branch": "Branch"
   },
-
   "progress": {
     "working": "Working…",
     "starting": "Starting…",
@@ -358,6 +359,14 @@
       "restore-nodes": "Restoring custom nodes from your snapshot…",
       "restore-pip": "Reinstalling Python packages from your snapshot…",
       "launch": "Starting ComfyUI…",
+      "launchStart": "Starting ComfyUI…",
+      "repair": "Repairing installation…",
+      "torchRepair": "Restoring GPU PyTorch…",
+      "securityScan": "Running security scan…",
+      "mountLibraries": "Loading libraries…",
+      "gpu": "Initializing GPU…",
+      "customNodes": "Loading custom nodes…",
+      "startingServer": "Starting server…",
       "backup": "Backing up Legacy Desktop state…",
       "tcc": "Checking folder access…",
       "venv": "Validating Legacy Python environment…",
@@ -370,7 +379,6 @@
       "register": "Registering the adopted installation…"
     }
   },
-
   "console": {
     "title": "ComfyUI Console",
     "openInBrowser": "Open in Browser",
@@ -384,14 +392,13 @@
     "restartSession": "Restart console",
     "shellLabel": "Shell"
   },
-
   "settingsModal": {
     "title": "Settings",
     "tabComfy": "ComfyUI Settings",
     "tabDirectories": "Shared Directories",
-    "tabGlobal": "Desktop Settings"
+    "tabGlobal": "Desktop Settings",
+    "tabDownloads": "Downloads"
   },
-
   "settings": {
     "title": "Settings",
     "general": "Preferences",
@@ -411,11 +418,14 @@
     "autoUpdate": "Check for updates on startup",
     "autoInstallUpdates": "Automatically install Desktop updates",
     "appBehavior": "App Behavior",
-    "reopenLastInstanceOnLaunch": "Auto-restart last instance on launch",
+    "autoLaunchOnStartup": "Auto-launch on startup",
+    "autoLaunchOnStartupDescription": "Pick an instance to launch automatically when Comfy Desktop opens. Defaults to None.",
+    "autoLaunchOnStartupNone": "None (show dashboard)",
+    "autoLaunchOnStartupLast": "Last used instance",
     "confirmBeforeClosingWindow": "Confirm before closing a window",
     "confirmBeforeClosingWindowDescription": "Ask for confirmation before closing a window that's running a local install.",
     "hideCloudFromPicker": "Hide Cloud from the Instance Picker",
-    "hideCloudFromPickerDescription": "For local-only users — hides the Cloud tile (and the Try Cloud CTA) from the Dashboard. Cloud remains fully functional; you can re-enable this any time.",
+    "hideCloudFromPickerDescription": "For local-only users — hides the Cloud row from the Dashboard. Cloud remains fully functional; you can re-enable this any time.",
     "checkForUpdates": "Check for updates",
     "checkingForUpdates": "Checking…",
     "telemetry": "Telemetry",
@@ -447,20 +457,18 @@
     "installLocation": "Default Install Location",
     "updatesTab": "Updates"
   },
-
   "zoom": {
     "changed": "Zoom level has been changed",
     "reset": "Reset Zoom",
     "dismiss": "Dismiss"
   },
-
   "update": {
     "updateCheck": "Update Check",
     "updateError": "Update Error",
     "upToDate": "You are running the latest version of Comfy Desktop.",
-    "debUpToDate": "You are running the latest version. Updates for .deb installs are delivered through your system package manager (apt)."
+    "debUpToDate": "You are running the latest version. Updates for .deb installs are delivered through your system package manager (apt).",
+    "debManagedShort": "System-managed updates"
   },
-
   "appUpdate": {
     "fallbackVersion": "this update",
     "readyTitle": "Desktop Update Ready",
@@ -483,14 +491,12 @@
     "latestLabel": "Latest {version}",
     "systemManagedNote": "Updates for this install are delivered through your system package manager."
   },
-
   "modal": {
     "ok": "OK",
     "confirm": "Confirm",
     "areYouSure": "Are you sure?",
     "required": "This field is required."
   },
-
   "overlay": {
     "cancelCurrentTitle": "Cancel current operation?",
     "cancelNamedTitle": "Cancel \"{name}\"?",
@@ -503,7 +509,6 @@
     "discardSetupMessage": "If you close now, your wizard selections won't be saved. No install has been created yet, so nothing will be rolled back.",
     "discardSetupConfirm": "Discard setup"
   },
-
   "firstUse": {
     "title": "Welcome to Comfy Desktop",
     "grandTitle": "Welcome to Comfy Desktop",
@@ -565,14 +570,17 @@
     "localBranchMigrateLabel": "Migrate",
     "localBranchMigrateDesc": "Bring over existing workflows, models, and settings.",
     "localBranchInstallNewLabel": "Start Fresh",
-    "localBranchInstallNewDesc": "Clean install. Leave existing projects in Comfy-{'{'}Name{'}'}."
+    "localBranchInstallNewDesc": "Clean install. Leave existing projects in Comfy-{'{'}Name{'}'}.",
+    "localModeLabel": "Local install mode",
+    "localModeExpressLabel": "Quick",
+    "localModeConfigureLabel": "Configure",
+    "localDescRecommended": "Fast install with **recommended settings** — skips optional setup steps.",
+    "localDescRecommendedGpu": "Fast install tuned for **{gpu}** with recommended settings. Pick **Configure** if that's not your hardware."
   },
-
   "tray": {
     "showApp": "Show Comfy Desktop",
     "quit": "Quit"
   },
-
   "actions": {
     "launch": "Launch",
     "restart": "Restart",
@@ -607,7 +615,6 @@
     "renameTitle": "Rename Instance",
     "renameMessage": "Enter a new name for this instance."
   },
-
   "migrate": {
     "migrateFrom": "Migrate From",
     "migrating": "Migrating",
@@ -666,7 +673,6 @@
     "addModels": "Add models to shared paths",
     "enablePipSync": "Advanced: sync all pip packages (slower, usually not needed)"
   },
-
   "git": {
     "label": "Git Clone",
     "desc": "Track an existing ComfyUI git clone with a Python virtual environment.",
@@ -685,7 +691,6 @@
     "noVenv": "No virtual environment configured. Cannot launch.",
     "noMainPy": "Cannot find ComfyUI main.py in this directory."
   },
-
   "remote": {
     "label": "Remote Connection",
     "desc": "Connect to a running ComfyUI instance on another machine.",
@@ -694,7 +699,6 @@
     "url": "URL",
     "added": "Added"
   },
-
   "cloud": {
     "label": "Cloud",
     "desc": "Run workflows on managed GPUs.",
@@ -711,7 +715,6 @@
     "capacityDisabledHint": "ComfyUI Cloud is temporarily unavailable due to high demand. Please try again later.",
     "capacityProceed": "Continue anyway"
   },
-
   "desktop": {
     "label": "Legacy Desktop",
     "desc": "Detected Legacy Desktop instance.",
@@ -755,7 +758,6 @@
     "adoptStepSettings": "Carry over settings",
     "adoptStepRegister": "Register installation"
   },
-
   "standalone": {
     "_note": "standalone.label and portable.label are product names — keep in English across all translations.",
     "label": "Standalone",
@@ -763,6 +765,7 @@
     "comfyui": "ComfyUI",
     "currentVersion": "Current Version",
     "variant": "Hardware",
+    "comfyVersion": "ComfyUI Version",
     "python": "Python",
     "pytorch": "PyTorch",
     "pythonEnvs": "Python Environments",
@@ -801,6 +804,8 @@
     "updateConfirmMessage": "Update from {installed} to {latest}?",
     "updateConfirmMessageLatest": "Update {installed} to the latest master commit ({latest})?",
     "updateConfirmMessageDowngrade": "Roll back from {installed} to stable {latest}? Newer commits will be removed.",
+    "updateBreakingWarning": "⚠️ This may break your custom nodes and workflows.",
+    "updateConfirmMessagePicked": "Update ComfyUI to **{tag}**?",
     "updatingTitle": "Updating to {version}",
     "downgradingTitle": "Downgrading to {version}",
     "updatePrepare": "Prepare",
@@ -871,7 +876,6 @@
     "snapshotDiffNoChanges": "No differences — environment matches this snapshot.",
     "snapshotNoFile": "No snapshot file specified."
   },
-
   "snapshots": {
     "empty": "No snapshots yet. Snapshots are captured automatically when ComfyUI starts.",
     "createSnapshot": "Create Snapshot",
@@ -943,7 +947,7 @@
     "viewInstall": "View",
     "restorePreviewTitle": "Restore Preview — changes that will be applied:",
     "restoreNoChanges": "No changes needed — environment already matches this snapshot.",
-    "restoreConfirm": "Confirm Restore",
+    "restoreConfirm": "Are you sure you want to restore this snapshot? Your current instance state will be replaced.",
     "restoreCancel": "Cancel",
     "restoringStatus": "Restoring snapshot",
     "restoringFrom": "from {label}",
@@ -963,7 +967,6 @@
     "importInvalidFile": "Invalid snapshot file.",
     "exportSuccess": "Snapshot exported."
   },
-
   "portable": {
     "label": "Portable",
     "desc": "Official portable Windows builds with embedded Python.",
@@ -991,7 +994,6 @@
     "checkingForUpdate": "Checking for update…",
     "noUpdateDir": "No update directory found in this portable install."
   },
-
   "installer": {
     "cachedDownload": "Using cached download",
     "startingDownload": "Starting download…",
@@ -999,7 +1001,6 @@
     "downloading": "Downloading… {progress}",
     "extracting": "Extracting… {progress}"
   },
-
   "launch": {
     "connecting": "Connecting to {url}",
     "connectingTime": "Connecting to {url}… ({secs}s)",
@@ -1016,17 +1017,17 @@
     "modelFolderRelaunchDesc": "New model folders were detected from custom nodes. Restarting so ComfyUI can use them right away.",
     "launchSplashTitle": "Starting ComfyUI",
     "launchSplashDesc": "Launching your ComfyUI instance…",
-    "steps": {
-      "securityScan": "Running security scan…",
-      "mountLibraries": "Mounting model libraries…",
-      "gpu": "Spinning up the GPU ({vram} GB VRAM)…",
-      "gpuFallback": "Spinning up the GPU…",
-      "customNodes": "Loading custom nodes & ComfyUI-Manager…",
-      "startingServer": "Starting server…"
+    "activity": {
+      "manager": "Loading ComfyUI-Manager…",
+      "registry": "Updating node registry…",
+      "vram": "Configuring GPU memory…",
+      "optimizing": "Optimizing for your hardware…",
+      "models": "Preparing model loading…",
+      "database": "Updating database…",
+      "nodes": "Loading custom nodes…"
     },
     "viewLogs": "View logs"
   },
-
   "errors": {
     "invalidUrl": "Enter a valid URL (e.g. http://localhost:8188).",
     "noLaunchSupport": "This source does not support launching yet.",
@@ -1064,7 +1065,6 @@
     "willStopRunning": "{name} is running and will be stopped first.",
     "folderPermissionDenied": "macOS denied access to \"{path}\". Please open System Settings → Privacy & Security → Files and Folders, grant access to Comfy Desktop, then retry."
   },
-
   "tooltips": {
     "instances": "A separate ComfyUI instance with its own version, models, and settings.",
     "snapshots": "A saved point-in-time state of an instance (versions + custom nodes) you can restore later.",
@@ -1103,7 +1103,6 @@
     "copyAndUpdate": "Copy this instance and update the copy. The original is untouched.",
     "envVars": "Custom environment variables passed to ComfyUI when it starts. Warning: values are stored unencrypted in the configuration file — do not add API keys, tokens, or other sensitive information."
   },
-
   "envVars": {
     "name": "Name",
     "value": "Value",
@@ -1113,7 +1112,6 @@
     "valuePlaceholder": "value",
     "securityWarning": "Environment variable values are stored unencrypted on disk. Do not add API keys, tokens, passwords, or other secrets."
   },
-
   "contextMenu": {
     "openLinkInBrowser": "Open Link in Browser",
     "copyLinkAddress": "Copy Link Address",
@@ -1121,5 +1119,100 @@
     "copy": "Copy",
     "paste": "Paste",
     "selectAll": "Select All"
+  },
+  "statusFactPanel": {
+    "editName": "Edit instance name",
+    "editUrl": "Edit connection URL",
+    "restartToApply": "Restart to apply"
+  },
+  "fileMenu": {
+    "newWindow": "New Window",
+    "newInstall": "New Instance",
+    "addExistingInstall": "Add Existing Instance",
+    "loadSnapshot": "Load Snapshot",
+    "globalSettings": "Desktop Settings",
+    "sendFeedback": "Send Feedback",
+    "returnToDashboard": "Return to Dashboard",
+    "closeAllWindows": "Close All Windows",
+    "exitWindow": "Close Window",
+    "exitAllWindows": "Quit Desktop",
+    "skipOnboarding": "Skip Onboarding"
+  },
+  "downloadsPopup": {
+    "title": "Downloads",
+    "empty": "No downloads yet",
+    "pause": "Pause",
+    "resume": "Resume",
+    "cancel": "Cancel",
+    "retry": "Retry",
+    "showInFolder": "Show in Finder",
+    "remove": "Remove from list",
+    "viewAllInSettings": "View All Downloads",
+    "completed": "Completed",
+    "thumbnailAlt": "Thumbnail of {name}"
+  },
+  "downloadsTab": {
+    "title": "Downloads",
+    "empty": "No downloads yet",
+    "emptyHint": "Downloads will appear here.",
+    "filterAll": "All",
+    "filterActive": "Active",
+    "filterCompleted": "Completed",
+    "filterErrored": "Failed",
+    "filterAriaLabel": "Status filter",
+    "retry": "Retry",
+    "badgeFailed": "Failed",
+    "badgeCancelled": "Cancelled",
+    "footerActive": "{n} active",
+    "footerCompleted": "{n} completed",
+    "clearFinished": "Clear finished"
+  },
+  "instancePicker": {
+    "instances": "Instances",
+    "newInstance": "New Instance",
+    "openDashboard": "Open Dashboard",
+    "openDashboardHint": "Opens the dashboard in a new window. Your running instance keeps running.",
+    "latestOnGithub": "Latest on GitHub",
+    "open": "Start",
+    "restart": "Restart",
+    "switch": "Switch",
+    "restartConfirmTitle": "Restart this instance?",
+    "restartConfirmDetail": "Restarting will stop the running session. Any unsaved work in the workflow will be lost.",
+    "restartConfirmAction": "Restart",
+    "more": "More",
+    "settings": "Settings",
+    "snapshots": "Snapshots",
+    "manage": "Manage",
+    "running": "Running",
+    "empty": "Select an instance",
+    "progressCancel": "Cancel",
+    "progressDone": "Done",
+    "progressOpenInstance": "Open Instance",
+    "progressRetry": "Try Again",
+    "progressDismiss": "Dismiss",
+    "progressSuccessRunning": "Updated & relaunched",
+    "progressSuccessStopped": "Update complete",
+    "progressSuccessSubtext": "is ready to launch.",
+    "progressSuccessCountdown": "Returning to settings in {n}…",
+    "progressUpdating": "Updating…",
+    "progressDowngrading": "Downgrading…",
+    "progressDowngraded": "Downgrade complete",
+    "progressCopying": "Copying…",
+    "progressCopied": "Copy complete",
+    "progressCopyingUpdating": "Copying & updating…",
+    "progressCopiedUpdated": "Copy complete",
+    "progressDeleting": "Deleting…",
+    "progressDeleted": "Deleted",
+    "progressRestoring": "Restoring snapshot…",
+    "progressRestored": "Snapshot restored",
+    "progressSavingSnapshot": "Saving snapshot…",
+    "progressSnapshotSaved": "Snapshot saved",
+    "progressDeletingSnapshot": "Deleting snapshot…",
+    "progressSnapshotDeleted": "Snapshot deleted",
+    "progressMigrating": "Migrating…",
+    "progressMigrated": "Migration complete",
+    "progressWorking": "Working…",
+    "progressError": "Something went wrong",
+    "progressCancelled": "Cancelled"
   }
 }

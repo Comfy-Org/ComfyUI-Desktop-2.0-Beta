@@ -128,16 +128,16 @@ export interface DetailField {
   value: string | boolean | number | string[] | Record<string, string> | null
   editable?: boolean
   editType?:
-    | 'select'
-    | 'boolean'
-    | 'text'
-    | 'number'
-    | 'path'
-    | 'channel-cards'
-    | 'args-builder'
-    | 'env-vars'
-    | 'model-dirs'
-    | 'hidden'
+  | 'select'
+  | 'boolean'
+  | 'text'
+  | 'number'
+  | 'path'
+  | 'channel-cards'
+  | 'args-builder'
+  | 'env-vars'
+  | 'model-dirs'
+  | 'hidden'
   options?: DetailFieldOption[]
   refreshSection?: boolean
   /** Action id to fire automatically when this field's value changes
@@ -428,6 +428,10 @@ export interface ProgressData {
 export interface ProgressStep {
   phase: string
   label: string
+  /** Share of the 0→100 bar this phase owns. When set on any step, the
+   *  renderer paces the bar from these (the producer is the single source of
+   *  truth); when absent it falls back to a curated weight table. */
+  weight?: number
 }
 
 // --- Event data types ---
@@ -899,11 +903,8 @@ export interface ElectronApi {
   getLocaleMessages(): Promise<Record<string, unknown>>
   getAvailableLocales(): Promise<{ value: string; label: string }[]>
   /** Resolved locale string from main (`language` setting or
-   *  `app.getLocale()` fallback). The renderer's vue-i18n locale is
-   *  always 'en' (messages are deep-merged onto the en bundle), so
-   *  consumers needing the user's actual language — e.g. the first-use
-   *  takeover deciding whether to insert the China-mirror sub-step —
-   *  must read it from main via this call. */
+   *  `app.getLocale()` fallback). Renderers mirror this into vue-i18n;
+   *  main is the single locale authority. */
   getLocale(): Promise<string>
 
   /** Categorised snapshot of the persisted installs for the first-use
@@ -1191,6 +1192,10 @@ export interface ElectronApi {
 
   // App
   getAppVersion(): Promise<string>
+  /** Every stable ComfyUI release tag, newest first. Returns `[]` when the
+   *  remote is unreachable. Used by the install-wizard version dropdown and
+   *  the per-install ChannelPicker. */
+  getStableTags(): Promise<string[]>
   /** Capacity-protection switch for Cloud entry points. Resolved at boot
    *  from the `desktop-cloud-capacity` PostHog flag (variants `normal` |
    *  `degraded` | `disabled`); defaults to `'normal'` when the flag is
@@ -1267,7 +1272,9 @@ export interface ElectronApi {
   onInstanceStopping(callback: (data: { installationId: string }) => void): Unsubscribe
   onInstanceStopped(callback: (data: { installationId: string }) => void): Unsubscribe
   onThemeChanged(callback: (theme: ResolvedTheme) => void): Unsubscribe
-  onLocaleChanged(callback: (messages: Record<string, unknown>) => void): Unsubscribe
+  onLocaleChanged(
+    callback: (payload: { locale: string; messages: Record<string, unknown> }) => void
+  ): Unsubscribe
   onConfirmQuit(callback: (details: QuitActiveItem[]) => void): Unsubscribe
   onInstallationsChanged(callback: () => void): Unsubscribe
   onInstallationsVersionsUpdated(
@@ -1424,13 +1431,13 @@ export interface ElectronApi {
   onPanelTriggerOverlay(
     callback: (data: {
       kind:
-        | 'install-update'
-        | 'app-update-restart-prompt'
-        | 'app-update-download-prompt'
-        | 'open-settings'
-        | 'picker-pick-install'
-        | 'picker-install-action'
-        | 'picker-show-progress'
+      | 'install-update'
+      | 'app-update-restart-prompt'
+      | 'app-update-download-prompt'
+      | 'open-settings'
+      | 'picker-pick-install'
+      | 'picker-install-action'
+      | 'picker-show-progress'
       installationId?: string
       actionId?: string
       actionData?: Record<string, unknown>
@@ -1498,5 +1505,7 @@ export const PICKER_SETTINGS_CHANNELS = {
   previewDesktopMigration: 'comfy-titlepopup:picker-settings-preview-desktop-migration',
   previewLocalMigration: 'comfy-titlepopup:picker-settings-preview-local-migration',
   relaunchApp: 'comfy-titlepopup:picker-settings-relaunch-app',
-  getLocaleMessages: 'comfy-titlepopup:picker-settings-get-locale-messages'
+  getLocaleMessages: 'comfy-titlepopup:picker-settings-get-locale-messages',
+  getLocale: 'comfy-titlepopup:picker-settings-get-locale',
+  getStableTags: 'comfy-titlepopup:picker-settings-get-stable-tags'
 } as const

@@ -63,7 +63,7 @@ const emit = defineEmits<{ close: []; cancel: []; secondary: [] }>()
 
 const TITLE_ID = 'base-alert-title'
 
-const actionBtnRef = ref<HTMLButtonElement | null>(null)
+const dialogRef = ref<HTMLElement | null>(null)
 let returnFocusTo: HTMLElement | null = null
 let previousBodyOverflow: string | null = null
 
@@ -128,7 +128,9 @@ function unlockBodyScroll(): void {
 
 function captureAndFocus(): void {
   returnFocusTo = document.activeElement instanceof HTMLElement ? document.activeElement : null
-  void nextTick(() => actionBtnRef.value?.focus())
+  // Focus the dialog container, not the action button — keeps focus trapped for
+  // keyboard/AT without painting a focus-visible ring on open.
+  void nextTick(() => dialogRef.value?.focus())
 }
 
 function restoreFocus(): void {
@@ -165,12 +167,14 @@ onBeforeUnmount(() => {
     <Transition name="modal-fade" appear>
       <div
         v-if="open"
+        ref="dialogRef"
         class="base-alert-overlay"
         role="alertdialog"
         aria-modal="true"
         :aria-label="dialogAriaLabel"
         :aria-labelledby="dialogAriaLabelledby"
         :data-testid="testIdRoot"
+        tabindex="-1"
         @mousedown="onOverlayMouseDown"
         @click="onOverlayClick"
       >
@@ -254,7 +258,6 @@ onBeforeUnmount(() => {
                 {{ secondaryLabel }}
               </button>
               <button
-                ref="actionBtnRef"
                 type="button"
                 :class="tone === 'danger' ? 'danger-solid' : 'primary'"
                 :data-testid="testIdAction ?? 'base-alert-action'"

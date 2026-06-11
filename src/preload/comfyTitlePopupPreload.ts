@@ -278,6 +278,7 @@ export interface ComfyTitlePopupBridge {
     fieldId: string,
     selections: Record<string, unknown>,
   ): Promise<Record<string, unknown>[]>
+  pickerSettingsGetStableTags(): Promise<string[]>
   pickerSettingsGetInstallations(): Promise<Record<string, unknown>[]>
   pickerSettingsGetInstallationSize(installationId: string): Promise<{ sizeBytes: number }>
   pickerSettingsStopComfyUI(installationId: string): Promise<void>
@@ -345,6 +346,14 @@ export interface ComfyTitlePopupBridge {
   /** Pull the panel-side i18n catalog; the popup boots with a minimal static
    *  one and merges this on top once the expanded settings UI opens. */
   pickerSettingsGetLocaleMessages(): Promise<Record<string, unknown>>
+  /** Active locale resolved by main, so the merged catalog lands under the
+   *  right vue-i18n locale key (not always 'en'). */
+  pickerSettingsGetLocale(): Promise<string>
+  /** Fires when main switches locale (e.g. the language picker in this very
+   *  popup), so the open popup re-renders instead of needing a reopen. */
+  pickerSettingsOnLocaleChanged(
+    cb: (payload: { locale: string; messages: Record<string, unknown> }) => void
+  ): () => void
   /** Fires when `enrichCommitsAhead` writes a new `commitsAhead`, so the open
    *  pane upgrades the "Latest from GitHub" card in place. */
   pickerSettingsOnReleaseCacheEnriched(
@@ -632,6 +641,7 @@ const bridge: ComfyTitlePopupBridge = {
   pickerSettingsGetFieldOptions: (sourceId, fieldId, selections) =>
     ipcRenderer.invoke(CH.getFieldOptions, { sourceId, fieldId, selections }),
   pickerSettingsGetInstallations: () => ipcRenderer.invoke(CH.getInstallations),
+  pickerSettingsGetStableTags: () => ipcRenderer.invoke(CH.getStableTags),
   pickerSettingsGetInstallationSize: (installationId) =>
     ipcRenderer.invoke(CH.getInstallationSize, { installationId }),
   pickerSettingsStopComfyUI: (installationId) =>
@@ -688,6 +698,13 @@ const bridge: ComfyTitlePopupBridge = {
     ipcRenderer.send(CH.relaunchApp)
   },
   pickerSettingsGetLocaleMessages: () => ipcRenderer.invoke(CH.getLocaleMessages),
+  pickerSettingsGetLocale: () => ipcRenderer.invoke(CH.getLocale),
+  pickerSettingsOnLocaleChanged: (cb) => {
+    const handler = (_event: IpcRendererEvent, payload: unknown): void =>
+      cb(payload as { locale: string; messages: Record<string, unknown> })
+    ipcRenderer.on('locale-changed', handler)
+    return () => ipcRenderer.removeListener('locale-changed', handler)
+  },
   pickerSettingsOnReleaseCacheEnriched: (callback) => {
     const handler = (_event: IpcRendererEvent, data: unknown) =>
       callback(data as { repo: string })
