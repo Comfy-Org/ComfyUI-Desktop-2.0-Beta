@@ -303,6 +303,7 @@ describe('startup update install + session-end guard (issue #1065)', () => {
     restartAndInstall: ReturnType<typeof vi.fn>
   }
   let electronUpdaterMock: { autoInstallOnAppQuit: boolean }
+  let emitMock: ReturnType<typeof vi.fn>
   let sessionEnding: boolean
   let readyVersion: string | null
 
@@ -311,11 +312,15 @@ describe('startup update install + session-end guard (issue #1065)', () => {
   beforeEach(() => {
     vi.resetModules()
     settingsStore = {}
+    // These tests exercise the gated "Option C" startup-install path, so enable
+    // the local flag. Individual default-mode tests delete it.
+    settingsStore['installUpdatesOnStartup'] = true
     listeners = {}
     sessionEnding = false
     readyVersion = null
     mockAppVersion = '1.0.0'
     delete process.env.E2E
+    delete process.env.COMFY_STARTUP_UPDATE_INSTALL
     // Non-system, non-darwin platform so isSystemPackageInstall() is false and
     // installUpdate() skips the darwin single-instance-lock dance.
     Object.defineProperty(process, 'platform', { value: 'win32', configurable: true })
@@ -337,10 +342,11 @@ describe('startup update install + session-end guard (issue #1065)', () => {
       restartAndInstall: vi.fn()
     }
     electronUpdaterMock = { autoInstallOnAppQuit: true }
+    emitMock = vi.fn()
 
     vi.doMock('@todesktop/runtime', () => ({ default: { autoUpdater: fakeUpdater } }))
     vi.doMock('electron-updater', () => ({ autoUpdater: electronUpdaterMock }))
-    vi.doMock('./telemetry', () => ({ emit: vi.fn(), bucketError: (s: string) => s }))
+    vi.doMock('./telemetry', () => ({ emit: emitMock, bucketError: (s: string) => s }))
     vi.doMock('./quit-state', () => ({
       clearQuitReason: vi.fn(),
       setQuitReason: vi.fn(),
@@ -359,10 +365,47 @@ describe('startup update install + session-end guard (issue #1065)', () => {
     Object.defineProperty(process, 'platform', originalPlat)
   })
 
-  it('register() disables electron-updater autoInstallOnAppQuit', async () => {
+  it('register() leaves install-on-quit enabled by default (Option B)', async () => {
+    delete settingsStore['installUpdatesOnStartup']
+    const updater = await import('./updater')
+    updater.register()
+    // Default mode keeps electron-updater's install-on-quit; it's only suppressed
+    // when the OS session ends (see suppressInstallOnQuit).
+    expect(electronUpdaterMock.autoInstallOnAppQuit).toBe(true)
+  })
+
+  it('register() disables install-on-quit when the startup-install flag is on (Option C)', async () => {
     const updater = await import('./updater')
     updater.register()
     expect(electronUpdaterMock.autoInstallOnAppQuit).toBe(false)
+  })
+
+  it('register() honors the COMFY_STARTUP_UPDATE_INSTALL env override', async () => {
+    delete settingsStore['installUpdatesOnStartup']
+    process.env.COMFY_STARTUP_UPDATE_INSTALL = '1'
+    const updater = await import('./updater')
+    updater.register()
+    expect(electronUpdaterMock.autoInstallOnAppQuit).toBe(false)
+  })
+
+  it('suppressInstallOnQuit() disables install-on-quit (Option B session-end guard)', async () => {
+    delete settingsStore['installUpdatesOnStartup']
+    const updater = await import('./updater')
+    updater.register()
+    expect(electronUpdaterMock.autoInstallOnAppQuit).toBe(true)
+    updater.suppressInstallOnQuit()
+    expect(electronUpdaterMock.autoInstallOnAppQuit).toBe(false)
+  })
+
+  it('startup install is inert when the flag is off, even with a staged update', async () => {
+    delete settingsStore['installUpdatesOnStartup']
+    settingsStore['pendingDownloadedUpdateVersion'] = '1.0.1'
+    readyVersion = '1.0.1'
+    const updater = await import('./updater')
+    updater.register()
+    expect(updater.hasPendingStartupUpdate()).toBe(false)
+    expect(await updater.applyPendingUpdateOnStartup()).toBe(false)
+    expect(fakeUpdater.restartAndInstall).not.toHaveBeenCalled()
   })
 
   it('installUpdate() is a no-op while the OS session is ending', async () => {
@@ -437,6 +480,40 @@ describe('startup update install + session-end guard (issue #1065)', () => {
     updater.register()
     expect(await updater.applyPendingUpdateOnStartup()).toBe(false)
     expect(fakeUpdater.restartAndInstall).not.toHaveBeenCalled()
+  })
+
+  it('emits startup_install_skipped with the loop_breaker reason', async () => {
+    settingsStore['pendingDownloadedUpdateVersion'] = '1.0.1'
+    settingsStore['lastStartupUpdateAttemptVersion'] = '1.0.1'
+    readyVersion = '1.0.1'
+    const updater = await import('./updater')
+    updater.register()
+    await updater.applyPendingUpdateOnStartup()
+    const skipped = emitMock.mock.calls.filter(
+      (c) => c[0] === 'comfy.desktop.app_update.startup_install_skipped'
+    )
+    expect(skipped).toHaveLength(1)
+    expect(skipped[0]?.[1]).toMatchObject({ reason: 'loop_breaker', version: '1.0.1' })
+  })
+
+  it('emits startup_install_skipped with not_ready when the check cannot confirm a ready update', async () => {
+    vi.useFakeTimers()
+    try {
+      settingsStore['pendingDownloadedUpdateVersion'] = '1.0.1'
+      readyVersion = null
+      const updater = await import('./updater')
+      updater.register()
+      const pending = updater.applyPendingUpdateOnStartup()
+      await vi.advanceTimersByTimeAsync(5000)
+      await pending
+      const skipped = emitMock.mock.calls.filter(
+        (c) => c[0] === 'comfy.desktop.app_update.startup_install_skipped'
+      )
+      expect(skipped).toHaveLength(1)
+      expect(skipped[0]?.[1]).toMatchObject({ reason: 'not_ready', version: '1.0.1' })
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('clears stale markers once the staged version is actually running', async () => {

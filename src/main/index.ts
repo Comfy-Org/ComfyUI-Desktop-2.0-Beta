@@ -1247,6 +1247,10 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
   app.on('browser-window-created', (_event, window) => {
     window.on('session-end', () => {
       setSessionEnding()
+      // Default mode keeps electron-updater's install-on-quit armed; flip it off
+      // now so the quit handler it registered after a download won't spawn the
+      // installer the OS is about to kill mid-write.
+      updater.suppressInstallOnQuit()
     })
   })
 
@@ -2025,6 +2029,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
         app.removeListener('before-quit', onUpdateInstallQuit)
         clearQuitReason()
         if (updateSplash && !updateSplash.isDestroyed()) updateSplash.destroy()
+        mainTelemetry.emit('comfy.desktop.app_update.startup_install_backstop_recovered', {})
         void openStartupSurface()
       }, STARTUP_INSTALL_QUIT_BACKSTOP_MS)
     } else {

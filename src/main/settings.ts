@@ -61,6 +61,13 @@ export interface KnownSettings {
    *  the same version on the next boot — the user can still install it manually
    *  via the update pill. Cleared once that version is actually running. */
   lastStartupUpdateAttemptVersion?: string
+  /** Hidden, local-only gate (default false / off) for applying a staged Desktop
+   *  update on the next launch instead of letting electron-updater install it on
+   *  quit. Off: install-on-quit stays armed and is only suppressed while the OS
+   *  is shutting down. On: install-on-quit is disabled and the update applies at
+   *  startup. Not remote yet — flipped by hand (or the
+   *  `COMFY_STARTUP_UPDATE_INSTALL` env var) to canary the startup-install path. */
+  installUpdatesOnStartup?: boolean
 }
 
 export type Settings = KnownSettings & Record<string, unknown>
@@ -104,6 +111,7 @@ const SETTINGS_SCHEMA = {
   lastSaveDialogDir: { nullable: true },
   pendingDownloadedUpdateVersion: { nullable: true },
   lastStartupUpdateAttemptVersion: { nullable: true },
+  installUpdatesOnStartup: { nullable: false },
 } as const satisfies Record<keyof KnownSettings, { nullable: boolean }>
 
 export type KnownSettingKey = keyof typeof SETTINGS_SCHEMA
