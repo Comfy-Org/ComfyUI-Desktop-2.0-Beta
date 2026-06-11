@@ -42,6 +42,7 @@ interface GlobalSettingsBridge {
   ): Promise<{ ok: boolean; message?: string }>
   globalSettingsBrowseFolder(defaultPath?: string): Promise<string | null>
   globalSettingsOpenPath(path: string): void
+  globalSettingsRevealPath(path: string): void
   globalSettingsSetModelsDirs(dirs: string[]): Promise<{ ok: boolean }>
   platform?: string
 }
@@ -349,6 +350,9 @@ function handleResetOutputDir(): void {
 function handleOpenPath(path: string): void {
   if (path) bridge?.globalSettingsOpenPath(path)
 }
+function handleRevealPath(path: string): void {
+  if (path) bridge?.globalSettingsRevealPath(path)
+}
 
 // --- Global shared models (shared models on) ------------------------------
 
@@ -594,6 +598,7 @@ function handleBrowseSharedOutput(): void {
       :yaml-path="extraModelPaths.yamlPath"
       @close="closeExtraModal"
       @open-path="handleOpenPath"
+      @reveal-path="handleRevealPath"
       @refresh="handleRefreshExtraPaths"
     />
   </div>

@@ -106,7 +106,7 @@
     "extraModelPathsModalTitle": "自定义模型路径",
     "extraModelPathsModalNote": "只读 —— ComfyUI 会搜索这些目录，但启动器不会管理它们。请编辑 extra_model_paths.yaml 以更改它们。",
     "openBaseFolder": "打开基础文件夹",
-    "openYaml": "打开 extra_model_paths.yaml",
+    "revealYaml": "在文件夹中显示 extra_model_paths.yaml",
     "useSharedModelsOffWarning": "此实例已关闭共享模型。它只能看到自己文件夹中的模型，以及你在下方添加的任何自定义目录——在重新开启之前，你的共享库会保持隐藏。"
   },
   "comfyLifecycle": {

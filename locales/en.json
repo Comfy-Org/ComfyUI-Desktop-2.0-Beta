@@ -106,7 +106,7 @@
     "extraModelPathsModalTitle": "Custom model paths",
     "extraModelPathsModalNote": "Read-only — ComfyUI searches these directories, but the launcher does not manage them. Edit extra_model_paths.yaml to change them.",
     "openBaseFolder": "Open base folder",
-    "openYaml": "Open extra_model_paths.yaml",
+    "revealYaml": "Show extra_model_paths.yaml",
     "useSharedModelsOffWarning": "Shared models is OFF for this instance. It can only see models in its own folder plus any custom directories you add below — your shared library stays hidden until you turn this back on."
   },
   "comfyLifecycle": {

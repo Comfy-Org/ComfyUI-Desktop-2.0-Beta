@@ -36,6 +36,8 @@ const emit = defineEmits<{
   close: []
   /** Open a folder (base_path or a per-type dir) in the OS file manager. */
   'open-path': [path: string]
+  /** Reveal a file (the .yaml) in the OS file manager, highlighting it. */
+  'reveal-path': [path: string]
   /** Re-fetch on-disk status (the main process resolves existence per fetch). */
   refresh: []
 }>()
@@ -113,10 +115,10 @@ const title = computed(() =>
         type="button"
         class="empm-action"
         :disabled="!yamlPath"
-        @click="emit('open-path', yamlPath)"
+        @click="emit('reveal-path', yamlPath)"
       >
         <FileText :size="14" aria-hidden="true" />
-        <span>{{ t('comfyUISettings.openYaml', 'Open extra_model_paths.yaml') }}</span>
+        <span>{{ t('comfyUISettings.revealYaml', 'Show extra_model_paths.yaml') }}</span>
       </button>
     </template>
   </BaseModal>

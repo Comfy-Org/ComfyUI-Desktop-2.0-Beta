@@ -249,6 +249,8 @@ export interface ComfyTitlePopupBridge {
   globalSettingsSetModelsDirs(dirs: string[]): Promise<{ ok: boolean }>
   globalSettingsBrowseFolder(defaultPath?: string): Promise<string | null>
   globalSettingsOpenPath(path: string): void
+  /** Reveal a file in the OS file manager (highlights it in its parent folder). */
+  globalSettingsRevealPath(path: string): void
   /** http/https only (enforced main-side). */
   globalSettingsOpenExternal(url: string): void
   globalSettingsCheckForUpdate(): Promise<{ available: boolean; version?: string; error?: string }>
@@ -615,6 +617,9 @@ const bridge: ComfyTitlePopupBridge = {
     ipcRenderer.invoke('comfy-titlepopup:global-settings-browse-folder', { defaultPath }),
   globalSettingsOpenPath: (path) => {
     ipcRenderer.send('comfy-titlepopup:global-settings-open-path', { path })
+  },
+  globalSettingsRevealPath: (path) => {
+    ipcRenderer.send('comfy-titlepopup:global-settings-reveal-path', { path })
   },
   globalSettingsOpenExternal: (url) => {
     ipcRenderer.send('comfy-titlepopup:global-settings-open-external', { url })

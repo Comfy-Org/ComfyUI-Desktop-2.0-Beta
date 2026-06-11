@@ -10,6 +10,7 @@ interface BridgeState {
   updateFieldCalls: Array<{ id: string; value: unknown }>
   setModelsDirsCalls: string[][]
   openPathCalls: string[]
+  revealPathCalls: string[]
   browseFolderReturn: string | null
 }
 
@@ -18,6 +19,7 @@ function installMockBridge(): BridgeState {
     updateFieldCalls: [],
     setModelsDirsCalls: [],
     openPathCalls: [],
+    revealPathCalls: [],
     browseFolderReturn: null,
   }
   const bridge = {
@@ -28,6 +30,9 @@ function installMockBridge(): BridgeState {
     globalSettingsBrowseFolder: async () => state.browseFolderReturn,
     globalSettingsOpenPath: (path: string) => {
       state.openPathCalls.push(path)
+    },
+    globalSettingsRevealPath: (path: string) => {
+      state.revealPathCalls.push(path)
     },
     globalSettingsSetModelsDirs: async (dirs: string[]) => {
       state.setModelsDirsCalls.push([...dirs])
@@ -542,7 +547,7 @@ describe('StoragePane', () => {
       expect(document.body.textContent).toContain('/ext/base/t2i_adapter')
     })
 
-    it('opens the yaml file path from the modal footer', async () => {
+    it('reveals the yaml file in its folder from the modal footer', async () => {
       const bridge = installMockBridge()
       const wrapper = mountPaneWithSections(sectionsWithExtra(extraView()))
       await nextTick()
@@ -551,7 +556,9 @@ describe('StoragePane', () => {
       const actions = Array.from(document.querySelectorAll('.empm-action')) as HTMLButtonElement[]
       const yamlBtn = actions.find((b) => b.textContent?.includes('.yaml'))!
       yamlBtn.click()
-      expect(bridge.openPathCalls).toContain('/own/extra_model_paths.yaml')
+      // Reveal-in-folder, not open-in-default-app.
+      expect(bridge.revealPathCalls).toContain('/own/extra_model_paths.yaml')
+      expect(bridge.openPathCalls).not.toContain('/own/extra_model_paths.yaml')
     })
 
     it('opens a per-type dir from the modal when its path is clicked', async () => {
