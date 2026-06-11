@@ -708,17 +708,30 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
   // so without this the child views keep whatever (collapsed) bounds they were
   // left with while minimized — a grey window with no title bar or content until
   // the user maximizes. A WebContentsView also won't repaint after restore on
-  // Windows unless its bounds are reapplied. Defer one tick: on 'restore' the OS
-  // still reports the stale minimized content size for a moment, so reading it
-  // synchronously would lay out against the wrong size.
+  // Windows unless its bounds are reapplied.
+  //
+  // Two passes: one next tick, one after a short delay. Right after restore()
+  // the OS can briefly still report the stale minimized content size even though
+  // isMinimized() is already false, so a single tick isn't a safe assumption.
+  // layoutViews() is idempotent, so the second pass is a cheap self-heal.
+  let delayedRelayoutTimer: ReturnType<typeof setTimeout> | null = null
   const relayoutWhenVisible = (): void => {
     setImmediate(() => {
       if (!isWindowLayoutable(comfyWindow)) return
       layoutViews()
     })
+    if (delayedRelayoutTimer) clearTimeout(delayedRelayoutTimer)
+    delayedRelayoutTimer = setTimeout(() => {
+      delayedRelayoutTimer = null
+      if (!isWindowLayoutable(comfyWindow)) return
+      layoutViews()
+    }, 50)
   }
   comfyWindow.on('restore', relayoutWhenVisible)
   comfyWindow.on('show', relayoutWhenVisible)
+  comfyWindow.on('closed', () => {
+    if (delayedRelayoutTimer) clearTimeout(delayedRelayoutTimer)
+  })
 
   if (saved?.maximized) comfyWindow.maximize()
 
@@ -745,6 +758,10 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
   const persistBounds = (): void => {
     const live = comfyWindows.get(windowKey)
     if (!live || isChooserHost(live)) return
+    // Don't persist bounds read from a minimized window — Windows reports a
+    // bogus content size while minimized, which would poison the saved size
+    // for the next launch.
+    if (!isWindowLayoutable(comfyWindow)) return
     saveWindowBounds(liveBoundsKeyFor(live), comfyWindow)
   }
   comfyWindow.on('resize', persistBounds)
