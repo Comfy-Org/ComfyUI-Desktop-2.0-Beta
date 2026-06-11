@@ -25,7 +25,7 @@ import {
 import { registerProcessErrorHandlers } from './lib/processErrorHandlers'
 import { registerTitleTooltipIpc } from './popups/titleTooltip'
 import { registerTitleCoachmarkIpc } from './popups/titleCoachmark'
-import { openSystemModal, openSystemModalAsync, registerSystemModalIpc } from './popups/systemModal'
+import { openSystemModal, openSystemModalAsync, openSystemModalChoiceAsync, registerSystemModalIpc } from './popups/systemModal'
 import {
   registerTitlePopupIpc,
   triggerPickerSnapshotBroadcast,
@@ -98,6 +98,7 @@ import {
   setHostFactories,
   shouldConfirmKillForEntry
 } from './host/registry'
+import type { ComfyWindowEntry } from './host/registry'
 import {
   applyChooserHostThemeToAll,
   createHostWindow,
@@ -1388,32 +1389,78 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
         findEntryByHostWindow(parent)?.titleBarView.webContents ?? null
     })
     registerSystemModalIpc()
-    // Swap-in-place contract: when the user picks a different install
-    // from a Comfy-instance window, the picked install replaces the
-    // current install IN THE SAME WINDOW (workflow continuity from the
-    // user's perspective — they stay in the window they were in). The
-    // current install's session is stopped first; on confirm the
-    // window detaches (flips to chooser-shape briefly) and then
-    // re-attaches the picked install via the same in-place attach
-    // claim path the dashboard chooser uses.
-    //
-    // Three exits short-circuit the swap:
-    // - Target already running in another window → focus that
-    // window. Avoids spawning a duplicate session of the same
-    // install and keeps the user's other window intact.
-    // - Target equals the host's own install → no-op. Picker already
-    // dismissed at the IPC boundary; refocusing the window would
-    // be redundant.
-    // - User cancels the swap-confirm dialog → no-op.
-    //
-    // The renderer-side `useLocalInstanceGuard` handles cross-window
-    // local-instance conflicts (port collision on the same port) via
-    // a modal that renders inside the panel — naturally visible after
-    // the detach since the host is now chooser-shape with the panel
-    // on top.
+
+    /**
+     * Land `installationId` into `entry` (which must be chooser-shaped): ensure
+     * the panelView, then defer a `picker-pick-install` overlay until the panel
+     * renderer acks `did-finish-load`. PanelApp's `useDeepLinkRouter` stakes an
+     * attach claim; `onLaunch` consumes it and attaches in place. Shared by the
+     * in-place swap and the new-window paths.
+     */
+    const deliverPickToEntry = (entry: ComfyWindowEntry, installationId: string): void => {
+      if (entry.window.isDestroyed()) return
+      const panelView =
+        entry.panelView ?? ensurePanelView(entry.windowKey, entry, computeBodyMode(entry))
+      if (panelView.webContents.isDestroyed()) return
+      sendToPanelDeferred(panelView, 'panel-trigger-overlay', {
+        kind: 'picker-pick-install',
+        installationId
+      })
+    }
+
+    /**
+     * Open `installationId` in its OWN window without disturbing the host that
+     * opened the picker: focus its existing window, else spawn a fresh chooser
+     * host and launch into it. `allowDuplicate` permits a second window for an
+     * install that already owns one (cloud-self: two views of one remote
+     * session). Fails closed — a window-construction throw is logged, never
+     * propagated to the IPC listener.
+     */
+    const openInstallInNewWindow = (
+      installationId: string,
+      opts?: { allowDuplicate?: boolean }
+    ): void => {
+      const existing = getEntryByInstallationId(installationId)
+      const willFocusExisting = !!existing && !existing.window.isDestroyed() && !opts?.allowDuplicate
+      recordIpcInvocation('open-install-new-window', {
+        installationId,
+        allowDuplicate: opts?.allowDuplicate === true,
+        focusedExisting: willFocusExisting
+      })
+      if (willFocusExisting) {
+        existing.window.show()
+        existing.window.focus()
+        return
+      }
+      try {
+        const target = findEntryByHostWindow(openChooserHostWindow())
+        if (!target) {
+          console.error('openInstallInNewWindow: spawned chooser host not in registry', { installationId })
+          return
+        }
+        mainTelemetry.emit('comfy.desktop.instance.opened_new_window', {
+          to_installation_id: installationId,
+          method: 'picker'
+        })
+        deliverPickToEntry(target, installationId)
+      } catch (err) {
+        console.error('openInstallInNewWindow failed:', err)
+      }
+    }
+
+    /**
+     * Swap-in-place: picking a different install from a Comfy-instance window
+     * replaces the current install IN THE SAME WINDOW (workflow continuity). The
+     * current session is stopped, the window detaches to chooser-shape, then
+     * re-attaches the picked install via the dashboard chooser's attach-claim
+     * path. Short-circuits: target running elsewhere → focus it; target is the
+     * host's own install → no-op; user cancels the confirm → no-op. Cross-window
+     * port collisions are handled by the renderer's `useLocalInstanceGuard`.
+     */
     const pickInstallFromPicker = async (
       installationId: string,
-      parentEntryId: number
+      parentEntryId: number,
+      opts?: { confirmed?: boolean }
     ): Promise<void> => {
       const existing = getEntryByInstallationId(installationId)
       if (existing && !existing.window.isDestroyed()) {
@@ -1432,10 +1479,11 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
       // through the chooser-pick path. Confirm only when the swap will
       // kill a *local* ComfyUI process (issue #654): chooser hosts have
       // nothing to detach and cloud/remote hosts have no local process
-      // at risk, so both skip the modal. The detach itself still runs
-      // for cloud parents so the window is free to re-attach.
+      // at risk, so both skip the modal. `opts.confirmed` means the picker
+      // already prompted in-drawer (and routed any "open in new window"
+      // choice itself), so skip the system modal here.
       if (parentEntry.installationId != null) {
-        if (shouldConfirmKillForEntry(parentEntry)) {
+        if (!opts?.confirmed && shouldConfirmKillForEntry(parentEntry)) {
           let targetName = installationId
           try {
             const target = await getInstallation(installationId)
@@ -1443,7 +1491,12 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
           } catch {
             // Name lookup is cosmetic — fall through with the id as the label.
           }
-          const confirmed = await openSystemModalAsync({
+          // Three-way choice (issue #926, matrix row 9): the current local
+          // instance is running, so offer to keep it alive in a separate window
+          // instead of only "stop it and switch". `secondary` routes to
+          // `openInstallInNewWindow` (parent untouched); `confirm` falls through
+          // to the in-place swap below.
+          const choice = await openSystemModalChoiceAsync({
             parent: parentEntry.window,
             spec: {
               title: 'Switch instance?',
@@ -1452,18 +1505,23 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
                 {
                   label: 'Heads up',
                   items: [
-                    'The current instance will be stopped and replaced in this window.',
-                    'Any unsaved work in the workflow will be lost.'
+                    'Switch stops the current instance and replaces it in this window.',
+                    'Open in new window keeps the current instance running.'
                   ]
                 }
               ],
               confirmLabel: 'Switch',
+              secondaryLabel: 'Open in new window',
               cancelLabel: 'Cancel',
               confirmStyle: 'primary',
               theme: parentEntry.lastTheme
             }
           })
-          if (!confirmed) return
+          if (choice === 'cancel') return
+          if (choice === 'secondary') {
+            openInstallInNewWindow(installationId)
+            return
+          }
         }
         // Multi-instance validation signal. Fired once per picker swap
         // (with or without a confirm); other paths (fresh chooser pick,
@@ -1482,27 +1540,11 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
         parentEntry.detachInstall()
       }
 
-      // Route through the chooser-pick path. After the detach (or for
-      // a parent that was already chooser-shape), the host is
-      // chooser-shape; PanelApp's `useDeepLinkRouter` branches the
-      // picker-pick-install payload to `handleChooserPick`, which
-      // stakes an attach claim against this same window. `onLaunch`
-      // consumes the claim and runs `attachInstall` against the
-      // existing host — the user perceives one in-place swap, not a
-      // detach + relaunch.
-      //
-      // The newly-remounted panel renderer takes a beat to load + ack
-      // `did-finish-load`. `sendToPanelDeferred` queues the IPC until
-      // that ack arrives so the listener has been registered by the
-      // time the payload fires.
-      const panelView =
-        parentEntry.panelView ??
-        ensurePanelView(parentEntryId, parentEntry, computeBodyMode(parentEntry))
-      if (panelView.webContents.isDestroyed()) return
-      sendToPanelDeferred(panelView, 'panel-trigger-overlay', {
-        kind: 'picker-pick-install',
-        installationId
-      })
+      // Route through the chooser-pick path. After the detach (or for a parent
+      // that was already chooser-shape), the host is chooser-shape and
+      // `deliverPickToEntry` stakes the in-place attach claim — the user
+      // perceives one swap, not a detach + relaunch.
+      deliverPickToEntry(parentEntry, installationId)
     }
 
     registerTitlePopupIpc({
@@ -1863,6 +1905,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
         }
       },
       pickInstallFromPicker,
+      openInstallInNewWindow,
       restartInstallFromPicker: async (installationId, parentEntryId, opts) => {
         // Restart: same install, same window. The session is stopped
         // and a fresh launch is triggered; `onLaunch`'s existing-

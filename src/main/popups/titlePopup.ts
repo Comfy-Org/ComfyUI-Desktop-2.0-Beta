@@ -42,6 +42,8 @@ import {
   isChooserHost
 } from '../host/registry'
 import type { ComfyPanelKey, ComfyWindowEntry } from '../host/registry'
+import { normaliseCategory, viewKindFor } from '../../shared/viewKind'
+import type { Category, ViewKind } from '../../shared/viewKind'
 import { getTitleTooltipForParent, hideTitleTooltipPopup } from './titleTooltip'
 import { EmbeddedPopupView } from './embeddedPopupView'
 import { recordIpcInvocation } from '../lib/e2eOverrides'
@@ -126,6 +128,13 @@ export interface PickerStorageSlice {
 export interface InstancePickerSnapshot {
   installs: InstancePickerInstall[]
   activeInstallationId: string | null
+  /** Navigation view-kind of the host that owns this picker. Derived from
+   *  `activeInstallationId` against `installs`; feeds the state-driven
+   *  navigation matrix (`decideNavigation`). `'cloud'` covers cloud AND remote. */
+  currentView: ViewKind
+  /** Raw `sourceCategory` of the active install (`null` on a dashboard host).
+   *  Carried verbatim for copy/telemetry; navigation collapses it via `navClass`. */
+  currentCategory: Category | null
   runningInstallationIds: string[]
   /** Installs mid-launch — `instance-launching` fired, `instance-started`
    *  has not. Mirrors `_launchingInstances` in main so the picker
@@ -309,14 +318,23 @@ export function buildInstancePickerSnapshot(
   const installs = hideCloud
     ? args.installs.filter((i) => i.sourceCategory !== 'cloud')
     : args.installs
+  // Use the real attached install when available; fall back to the chooser's
+  // preview claim (set by `applyAttachHostPreview` when the chooser stakes an
+  // in-place attach claim ahead of a launch). Either case represents "this host
+  // is the one acting on the install" from the picker's perspective.
+  const activeInstallationId = args.hostInstallationId ?? args.previewInstallationId ?? null
+  // View-kind / category are derived from the active install so the navigation
+  // matrix reads them off the snapshot: no active install → 'dashboard';
+  // otherwise local → 'instance', cloud|remote → 'cloud'.
+  const currentCategory: Category | null = activeInstallationId
+    ? normaliseCategory(args.installs.find((i) => i.id === activeInstallationId)?.sourceCategory)
+    : null
+  const currentView: ViewKind = viewKindFor(activeInstallationId, currentCategory)
   return {
     installs,
-    // Use the real attached install when available; fall back to the
-    // chooser's preview claim (set by `applyAttachHostPreview` when
-    // the chooser stakes an in-place attach claim ahead of a launch).
-    // Either case represents "this host is the one acting on the
-    // install" from the picker's perspective.
-    activeInstallationId: args.hostInstallationId ?? args.previewInstallationId ?? null,
+    activeInstallationId,
+    currentView,
+    currentCategory,
     runningInstallationIds: args.runningInstallationIds,
     launchingInstallationIds: args.launchingInstallationIds,
     selectedInstallationId: args.selectedInstallationId ?? null,
@@ -1554,7 +1572,17 @@ export interface TitlePopupHostBindings {
    *  need to route through a panel renderer land on the picker's own
    *  parent (not just any open Comfy window). Important when multiple
    *  Comfy windows are open. */
-  pickInstallFromPicker: (installationId: string, parentEntryId: number) => Promise<void> | void
+  pickInstallFromPicker: (
+    installationId: string,
+    parentEntryId: number,
+    opts?: { confirmed?: boolean }
+  ) => Promise<void> | void
+  /** Picker → "Open in new window". Opens `installationId` in its OWN window
+   *  (focus-existing else spawn a fresh chooser host + launch into it), leaving
+   *  the picker's host untouched so the current instance keeps running.
+   *  `allowDuplicate` opens a second window for an install that already owns one
+   *  (cloud-self; no local process to collide). */
+  openInstallInNewWindow: (installationId: string, opts?: { allowDuplicate?: boolean }) => void
   /** Picker → Restart on a running install. Gracefully stops the running
    *  session and re-launches via the same focus-or-launch path the picker
    *  normally uses. `parentEntryId` threads the picker's host through so
@@ -2573,14 +2601,34 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
   // `parentEntryId` lets main route the launch through the picker's
   // own parent host (not just any open Comfy window) so launches
   // initiated from window A don't accidentally route through window B.
-  ipcMain.on('comfy-titlepopup:pick-install', (event, payload: { installationId?: unknown }) => {
-    const entry = titlePopupsByWebContents.get(event.sender.id)
-    if (!entry) return
-    const installationId = payload?.installationId
-    if (typeof installationId !== 'string' || installationId.length === 0) return
-    hideTitlePopup(entry, { releaseFocusToParent: false })
-    void bindings.pickInstallFromPicker(installationId, entry.parentEntryId)
-  })
+  ipcMain.on(
+    'comfy-titlepopup:pick-install',
+    (event, payload: { installationId?: unknown; confirmed?: unknown }) => {
+      const entry = titlePopupsByWebContents.get(event.sender.id)
+      if (!entry) return
+      const installationId = payload?.installationId
+      if (typeof installationId !== 'string' || installationId.length === 0) return
+      const confirmed = payload?.confirmed === true
+      hideTitlePopup(entry, { releaseFocusToParent: false })
+      Promise.resolve(
+        bindings.pickInstallFromPicker(installationId, entry.parentEntryId, { confirmed }),
+      ).catch((err) => console.error('pickInstallFromPicker failed:', err))
+    }
+  )
+
+  // Picker → "Open in new window". Opens the install in its OWN window without
+  // touching the picker's host, so the current instance keeps running.
+  ipcMain.on(
+    'comfy-titlepopup:open-install-new-window',
+    (event, payload: { installationId?: unknown; allowDuplicate?: unknown }) => {
+      const entry = titlePopupsByWebContents.get(event.sender.id)
+      if (!entry) return
+      const installationId = payload?.installationId
+      if (typeof installationId !== 'string' || installationId.length === 0) return
+      hideTitlePopup(entry, { releaseFocusToParent: false })
+      bindings.openInstallInNewWindow(installationId, { allowDuplicate: payload?.allowDuplicate === true })
+    }
+  )
 
   // Picker → restart a running install. Same contract as
   // `pick-install` but routed through `restartInstallFromPicker`, which
@@ -2599,7 +2647,9 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
       if (typeof installationId !== 'string' || installationId.length === 0) return
       const confirmed = payload?.confirmed === true
       hideTitlePopup(entry, { releaseFocusToParent: false })
-      void bindings.restartInstallFromPicker(installationId, entry.parentEntryId, { confirmed })
+      Promise.resolve(
+        bindings.restartInstallFromPicker(installationId, entry.parentEntryId, { confirmed }),
+      ).catch((err) => console.error('restartInstallFromPicker failed:', err))
     }
   )
 

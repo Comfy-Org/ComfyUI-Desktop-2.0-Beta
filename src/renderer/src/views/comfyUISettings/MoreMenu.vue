@@ -1,23 +1,32 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, useTemplateRef, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, useTemplateRef, watch, type Component } from 'vue'
 import { TID } from '../../../../shared/testIds'
 import type { ActionDef } from '../../types/ipc'
 
 /**
- * Footer "More" dropdown for the Settings drawer, rendering the `pinBottom` install-level actions.
- * Clicking an item emits `'pick'` with the `ActionDef`; the parent runs it through `runAction`. Keyboard-navigable, ESC / click-outside dismiss.
+ * Footer dropdown for the Settings drawer. Renders either the `pinBottom`
+ * install-level actions ("More") or the navigation alternatives off the CTA
+ * caret. Clicking an item emits `'pick'`; the parent runs it. Keyboard-navigable,
+ * ESC / click-outside dismiss. An optional `heading` + per-item `icon` give the
+ * caret variant a titled, icon-aligned look; the plain "More" menu passes
+ * neither and renders unchanged.
  */
+
+/** `ActionDef` plus an optional leading icon component (caret variant only). */
+export type MenuAction = ActionDef & { icon?: Component }
 
 interface Props {
   open: boolean
-  actions: ActionDef[]
+  actions: MenuAction[]
+  /** Optional section title shown above a divider (caret variant). */
+  heading?: string
 }
 
 const props = defineProps<Props>()
 
 const emit = defineEmits<{
   close: []
-  pick: [action: ActionDef]
+  pick: [action: MenuAction]
 }>()
 
 const menuRef = useTemplateRef<HTMLElement>('menu')
@@ -34,7 +43,7 @@ watch(
   },
 )
 
-function handlePick(action: ActionDef): void {
+function handlePick(action: MenuAction): void {
   if (action.enabled === false) return
   emit('pick', action)
   emit('close')
@@ -80,6 +89,9 @@ onUnmounted(() => {
 })
 
 const visibleActions = computed(() => props.actions)
+// Reserve the icon column when ANY item has an icon, so labels stay aligned
+// whether or not a given row carries one.
+const hasIcons = computed(() => props.actions.some((a) => !!a.icon))
 </script>
 
 <template>
@@ -88,9 +100,12 @@ const visibleActions = computed(() => props.actions)
       v-if="open && visibleActions.length > 0"
       ref="menu"
       class="more-menu"
+      :class="{ 'has-heading': !!heading, 'has-icons': hasIcons }"
       role="menu"
+      :aria-label="heading"
       aria-orientation="vertical"
     >
+      <li v-if="heading" class="more-menu-heading" role="presentation">{{ heading }}</li>
       <li
         v-for="(action, i) in visibleActions"
         :key="action.id"
@@ -110,7 +125,10 @@ const visibleActions = computed(() => props.actions)
           :data-testid="TID.pinBottomAction(action.id)"
           @click="handlePick(action)"
         >
-          {{ action.label }}
+          <span v-if="hasIcons" class="more-menu-item-icon" aria-hidden="true">
+            <component :is="action.icon" v-if="action.icon" :size="15" />
+          </span>
+          <span class="more-menu-item-label">{{ action.label }}</span>
         </button>
       </li>
     </ul>
@@ -134,10 +152,34 @@ const visibleActions = computed(() => props.actions)
   z-index: 62;
 }
 
+/* Caret variant (titled / icon'd): hug the content instead of the fixed 200px
+ * "More"-menu width, so a short single item doesn't float in a wide box. */
+.more-menu.has-heading,
+.more-menu.has-icons {
+  min-width: 168px;
+  width: max-content;
+  max-width: 280px;
+}
+
+/* Section title above a hairline divider — turns a bare list into a deliberate menu. */
+.more-menu-heading {
+  padding: 4px 12px 6px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--chooser-surface-border);
+  color: var(--text-muted);
+  opacity: 0.7;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 /* Override global `button` chrome: transparent full-row popover items matching `.context-menu-item`. */
 .more-menu-item {
   width: 100%;
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 9px;
   padding: 8px 14px;
   background: transparent;
   border: none;
@@ -146,6 +188,24 @@ const visibleActions = computed(() => props.actions)
   font-size: 13px;
   text-align: left;
   transition: background-color 100ms ease, color 100ms ease;
+}
+
+/* Fixed icon column so labels align whether or not a row carries an icon. */
+.more-menu-item-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  color: var(--text-muted);
+}
+.more-menu-item:hover:not(:disabled) .more-menu-item-icon,
+.more-menu-item:focus-visible .more-menu-item-icon {
+  color: inherit;
+}
+.more-menu-item-label {
+  flex: 1 1 auto;
 }
 
 .more-menu-item:hover:not(:disabled) {

@@ -524,37 +524,46 @@ describe('ComfyUISettingsContent', () => {
       })
     }
 
-    it('labels "Start" and emits restartInPlace=false when not running', async () => {
-      const w = await mountContent({ activeInstallationId: 'inst-1' })
+    // The footer label still follows run-state (Start/Restart/Switch); the emit
+    // now carries the resolved NavDecision instead of a bare boolean.
+    function emittedDecision(wrapper: VueWrapper) {
+      const calls = wrapper.emitted('primary-action') as unknown[][] | undefined
+      return calls?.[0]?.[0] as { window: string; verb: string } | undefined
+    }
+
+    it('labels "Start" and emits a same-window switch decision when not running', async () => {
+      // Dashboard host (no active install) selecting a stopped local install.
+      const w = await mountContent({ currentView: 'dashboard', currentCategory: null, activeInstallationId: null })
       expect(w.find('.settings-v2-relaunch').text()).toBe('Start')
       await w.find('.settings-v2-relaunch').trigger('click')
-      expect(w.emitted('primary-action')).toEqual([[false]])
+      expect(emittedDecision(w)).toMatchObject({ window: 'same', verb: 'switch' })
     })
 
-    it('labels "Restart" and emits restartInPlace=true when running in THIS window', async () => {
+    it('labels "Restart" and emits a restart decision when running in THIS window', async () => {
+      // An install running in this window IS an instance host (computeViewKind).
       markRunning('inst-1')
-      const w = await mountContent({ activeInstallationId: 'inst-1' })
+      const w = await mountContent({ currentView: 'instance', currentCategory: 'local', activeInstallationId: 'inst-1' })
       expect(w.find('.settings-v2-relaunch').text()).toBe('Restart')
       await w.find('.settings-v2-relaunch').trigger('click')
-      expect(w.emitted('primary-action')).toEqual([[true]])
+      expect(emittedDecision(w)).toMatchObject({ window: 'same', verb: 'restart' })
     })
 
-    it('labels "Switch" and emits restartInPlace=false when running in ANOTHER window', async () => {
-      // Host attached to 'other'; selected 'inst-1' runs elsewhere.
+    it('labels "Switch" and emits a focus decision when running in ANOTHER window', async () => {
+      // Host attached to 'other'; selected 'inst-1' runs elsewhere → focus it.
       markRunning('inst-1')
-      const w = await mountContent({ activeInstallationId: 'other' })
+      const w = await mountContent({ currentView: 'instance', currentCategory: 'local', activeInstallationId: 'other' })
       expect(w.find('.settings-v2-relaunch').text()).toBe('Switch')
       await w.find('.settings-v2-relaunch').trigger('click')
-      expect(w.emitted('primary-action')).toEqual([[false]])
+      expect(emittedDecision(w)).toMatchObject({ verb: 'focus' })
     })
 
     it('treats a running install as "Switch" on an install-less (dashboard) host', async () => {
-      // No activeInstallationId → no in-place session to restart, so always Switch.
+      // No activeInstallationId → no in-place session to restart, so Switch/focus.
       markRunning('inst-1')
-      const w = await mountContent({ activeInstallationId: null })
+      const w = await mountContent({ currentView: 'dashboard', currentCategory: null, activeInstallationId: null })
       expect(w.find('.settings-v2-relaunch').text()).toBe('Switch')
       await w.find('.settings-v2-relaunch').trigger('click')
-      expect(w.emitted('primary-action')).toEqual([[false]])
+      expect(emittedDecision(w)).toMatchObject({ verb: 'focus' })
     })
   })
 

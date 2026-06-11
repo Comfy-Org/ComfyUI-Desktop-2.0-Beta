@@ -174,6 +174,26 @@ export function openSystemModalAsync(opts: OpenSystemModalOpts): Promise<boolean
   })
 }
 
+/** Three-way variant of `openSystemModalAsync`. Resolves the raw action so a
+ *  caller offering a middle option (`secondaryLabel`) can branch on it. Cancel
+ *  / superseded / parent-destroyed all resolve `'cancel'`. */
+export function openSystemModalChoiceAsync(
+  opts: OpenSystemModalOpts,
+): Promise<'confirm' | 'cancel' | 'secondary'> {
+  return new Promise((resolve) => {
+    openSystemModal({
+      parent: opts.parent,
+      spec: opts.spec,
+      callback: (action) => {
+        if (opts.callback) {
+          try { opts.callback(action) } catch {}
+        }
+        resolve(action)
+      },
+    })
+  })
+}
+
 /** Wire the IPC handlers that drive the system-modal popup. Called once at app ready. */
 export function registerSystemModalIpc(): void {
   ipcMain.on('comfy-systemmodal:ready', (event) => {

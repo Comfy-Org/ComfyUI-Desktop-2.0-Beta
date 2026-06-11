@@ -21,6 +21,7 @@ import {
   claimAttachHost,
   comfyWindows,
   computeBodyMode,
+  computeViewKind,
   consumeAttachClaim,
   dropAttachClaimsForWindow,
   dropInstallationIndex,
@@ -186,6 +187,43 @@ describe('computeBodyMode', () => {
   it('returns `progress` for install-less hosts in progress mode (cold-spawn chooser case)', () => {
     const entry = makeEntry({ installationId: null, activePanel: 'progress' })
     expect(computeBodyMode(entry)).toBe('progress')
+  })
+})
+
+describe('computeViewKind', () => {
+  // Rule: install-less host → dashboard; local install → instance; cloud OR
+  // remote install → cloud (the two share navigation behavior).
+  it('returns dashboard for an install-less (chooser) host', () => {
+    expect(computeViewKind(makeEntry({ installationId: null }))).toBe('dashboard')
+  })
+
+  it('returns instance for a local install-backed host', () => {
+    expect(
+      computeViewKind(makeEntry({ installationId: 'inst-A', sourceCategory: 'local' })),
+    ).toBe('instance')
+  })
+
+  it('folds cloud and remote into the cloud view', () => {
+    expect(
+      computeViewKind(makeEntry({ installationId: 'inst-cloud', sourceCategory: 'cloud' })),
+    ).toBe('cloud')
+    expect(
+      computeViewKind(makeEntry({ installationId: 'inst-remote', sourceCategory: 'remote' })),
+    ).toBe('cloud')
+  })
+
+  // A preview/launching host can be install-backed before its category is
+  // pushed; treat an unknown category as non-local (cloud) rather than instance.
+  it('treats an install-backed host with no category as cloud', () => {
+    expect(
+      computeViewKind(makeEntry({ installationId: 'inst-A', sourceCategory: null })),
+    ).toBe('cloud')
+  })
+
+  it('treats an unrecognised category string as cloud (does not throw)', () => {
+    expect(
+      computeViewKind(makeEntry({ installationId: 'inst-A', sourceCategory: 'future-value' })),
+    ).toBe('cloud')
   })
 })
 
