@@ -522,6 +522,36 @@ export function hasPendingStartupUpdate(): boolean {
 }
 
 /**
+ * Kick off a startup update check and resolve once the update reaches the
+ * `'ready'` state or the deadline passes. Don't rely on `runCheck` resolving to
+ * imply readiness — the `'ready'` transition happens in the `update-downloaded`
+ * handler, which (depending on the updater) can fire slightly after the check
+ * promise settles. Subscribing first closes that race.
+ */
+function waitForReadyState(timeoutMs: number): Promise<void> {
+  if (getCurrentUpdateState().kind === 'ready') return Promise.resolve()
+  return new Promise<void>((resolve) => {
+    let done = false
+    const finish = (): void => {
+      if (done) return
+      done = true
+      unsub()
+      clearTimeout(timer)
+      resolve()
+    }
+    const unsub = onUpdateStateChanged((s) => {
+      if (s.kind === 'ready') finish()
+    })
+    const timer = setTimeout(finish, timeoutMs)
+    runCheck('startup-install')
+      .then(() => {
+        if (getCurrentUpdateState().kind === 'ready') finish()
+      })
+      .catch(() => {})
+  })
+}
+
+/**
  * Apply a previously-downloaded Desktop update at startup instead of on quit.
  * Installing on quit is what gets interrupted by a Windows shutdown and leaves
  * a corrupted install; doing it at launch decouples the install from the
@@ -548,10 +578,7 @@ export async function applyPendingUpdateOnStartup(): Promise<boolean> {
   // re-validates it (no re-download) and populates the updater's ready state.
   // Bounded so a slow/offline network can't hang boot — if it doesn't resolve
   // to a ready update in time, we open the UI and try again next launch.
-  await Promise.race([
-    runCheck('startup-install').catch(() => {}),
-    new Promise((resolve) => setTimeout(resolve, STARTUP_UPDATE_CHECK_TIMEOUT_MS))
-  ])
+  await waitForReadyState(STARTUP_UPDATE_CHECK_TIMEOUT_MS)
 
   const state = getCurrentUpdateState()
   if (state.kind !== 'ready' || !state.version) return false

@@ -34,8 +34,8 @@ import {
 import { registerPickerSettingsIpc } from './popups/pickerSettingsHandlers'
 import { waitForPort, COMFY_BOOT_TIMEOUT_MS } from './lib/process'
 import {
+  clearQuitReason,
   isQuitInProgress,
-  isUpdateInstallQuit,
   setQuitReason,
   setSessionEnding
 } from './lib/quit-state'
@@ -2004,17 +2004,31 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     // while the bounded check runs; if it commits to installing, the app quits
     // here and the installer relaunches it — so we skip opening the normal UI.
     const updateSplash = updater.hasPendingStartupUpdate() ? showUpdateInstallSplash() : undefined
+    // Track whether the install actually started quitting the app. Quit intent
+    // (`quitReason`) alone isn't proof — `restartAndInstall` can return without
+    // quitting if the staged installer is gone — so key the backstop off a real
+    // `before-quit`.
+    let updateInstallQuitStarted = false
+    const onUpdateInstallQuit = (): void => {
+      updateInstallQuitStarted = true
+    }
+    app.once('before-quit', onUpdateInstallQuit)
     const installingUpdate = await updater.applyPendingUpdateOnStartup()
     if (installingUpdate) {
-      // Safety net: a successful install quits the app within a tick. If it
-      // didn't (e.g. the staged installer was gone), don't strand the user on
-      // the splash — fall back to the normal surface.
+      // Safety net: a successful install quits the app within a tick (firing
+      // before-quit). If that didn't happen the install didn't proceed — recover
+      // into the normal surface instead of stranding the user on the splash, and
+      // clear the now-stale 'update-install' quit intent so the next real quit
+      // still runs its cleanup.
       setTimeout(() => {
-        if (isUpdateInstallQuit()) return
+        if (updateInstallQuitStarted) return
+        app.removeListener('before-quit', onUpdateInstallQuit)
+        clearQuitReason()
         if (updateSplash && !updateSplash.isDestroyed()) updateSplash.destroy()
         void openStartupSurface()
       }, STARTUP_INSTALL_QUIT_BACKSTOP_MS)
     } else {
+      app.removeListener('before-quit', onUpdateInstallQuit)
       if (updateSplash && !updateSplash.isDestroyed()) updateSplash.destroy()
       // The install-less chooser host is the primary surface. Each
       // install gets its own ComfyUI window via openComfyWindow()

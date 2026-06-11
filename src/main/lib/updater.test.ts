@@ -412,12 +412,21 @@ describe('startup update install + session-end guard (issue #1065)', () => {
   })
 
   it('applyPendingUpdateOnStartup() does not install when the check cannot confirm a ready update', async () => {
-    settingsStore['pendingDownloadedUpdateVersion'] = '1.0.1'
-    readyVersion = null // e.g. cached installer invalid / offline
-    const updater = await import('./updater')
-    updater.register()
-    expect(await updater.applyPendingUpdateOnStartup()).toBe(false)
-    expect(fakeUpdater.restartAndInstall).not.toHaveBeenCalled()
+    vi.useFakeTimers()
+    try {
+      settingsStore['pendingDownloadedUpdateVersion'] = '1.0.1'
+      readyVersion = null // e.g. cached installer invalid / offline
+      const updater = await import('./updater')
+      updater.register()
+      const pending = updater.applyPendingUpdateOnStartup()
+      // No 'ready' transition arrives, so the bounded wait falls through on its
+      // timeout rather than hanging boot forever.
+      await vi.advanceTimersByTimeAsync(5000)
+      expect(await pending).toBe(false)
+      expect(fakeUpdater.restartAndInstall).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('loop-breaker: a previously-attempted version is not auto-retried', async () => {
