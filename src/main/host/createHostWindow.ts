@@ -540,11 +540,9 @@ function findLiveSiblingOrigin(boundsKey: string): { x: number; y: number } | nu
   return null
 }
 
-/** A host window can be laid out only while it's alive AND not minimized.
- *  Minimized windows report a bogus content size on Windows, so reading their
- *  bounds to position the child views collapses them (the grey-screen bug).
- *  Shared by the `layoutViews` guard and the deferred `restore`/`show` relayout
- *  so the two can't drift. */
+/** Layout is safe only while the window is alive and not minimized — a
+ *  minimized window reports a bogus content size on Windows, collapsing the
+ *  child views (the grey-screen bug). */
 export function isWindowLayoutable(
   win: Pick<BrowserWindow, 'isDestroyed' | 'isMinimized'>,
 ): boolean {
@@ -649,11 +647,8 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
   // comfyTitleBar.html sits below the native buttons.
   const titleBarTotal = TITLEBAR_HEIGHT + 1
   const layoutViews = (): void => {
-    // While minimized, Windows reports a bogus (minimum/zero) content size, so
-    // laying out here would collapse both child views — and since restoring at
-    // the same size emits no 'resize', they'd stay collapsed (grey window) until
-    // a maximize. Skip; the 'restore'/'show' handlers re-run a real layout once
-    // the window is visible again.
+    // Skip while minimized (bogus content size would collapse the views); the
+    // 'restore'/'show' handlers re-run this once the window is visible again.
     if (!isWindowLayoutable(comfyWindow)) return
     const entry = comfyWindows.get(windowKey)
     const [width, height] = comfyWindow.getContentSize() as [number, number]
@@ -703,17 +698,11 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
   }
   comfyWindow.on('resize', layoutViews)
 
-  // Re-lay-out when the window becomes visible again after being minimized or
-  // hidden. Restoring at the previous (non-maximized) size emits no 'resize',
-  // so without this the child views keep whatever (collapsed) bounds they were
-  // left with while minimized — a grey window with no title bar or content until
-  // the user maximizes. A WebContentsView also won't repaint after restore on
-  // Windows unless its bounds are reapplied.
-  //
-  // Two passes: one next tick, one after a short delay. Right after restore()
-  // the OS can briefly still report the stale minimized content size even though
-  // isMinimized() is already false, so a single tick isn't a safe assumption.
-  // layoutViews() is idempotent, so the second pass is a cheap self-heal.
+  // Re-lay-out when the window becomes visible again: restoring at the same size
+  // emits no 'resize', and a WebContentsView won't repaint after restore on
+  // Windows unless its bounds are reapplied. Two passes (next tick + short
+  // delay) because right after restore() the OS can still report the stale
+  // minimized size for a moment; layoutViews() is idempotent so it self-heals.
   let delayedRelayoutTimer: ReturnType<typeof setTimeout> | null = null
   const relayoutWhenVisible = (): void => {
     setImmediate(() => {
@@ -758,9 +747,7 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
   const persistBounds = (): void => {
     const live = comfyWindows.get(windowKey)
     if (!live || isChooserHost(live)) return
-    // Don't persist bounds read from a minimized window — Windows reports a
-    // bogus content size while minimized, which would poison the saved size
-    // for the next launch.
+    // Don't persist a minimized window's bogus bounds (would poison next launch).
     if (!isWindowLayoutable(comfyWindow)) return
     saveWindowBounds(liveBoundsKeyFor(live), comfyWindow)
   }
