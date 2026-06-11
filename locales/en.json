@@ -1095,6 +1095,7 @@
     "modelsPrimary": "The primary directory is where ComfyUI saves newly downloaded models by default.",
     "instanceOwnModelsDir": "This instance's own models folder. It's always used and is never shared with other instances.",
     "extraModelPathsInstance": "A custom model path from this instance's extra_model_paths.yaml. ComfyUI searches it; the launcher shows it read-only. Click for details.",
+    "extraModelPathsDefault": "This base path is marked is_default in extra_model_paths.yaml, so ComfyUI prefers it for those model types. For shared model types the launcher's Primary directory is loaded later and takes precedence.",
     "modelsDefault": "The system default directory. This path is created automatically and cannot be removed.",
     "useSharedModels": "When enabled, this instance can see every model in your global shared model folders. Disabling hides those models — most users want this on.",
     "useSharedInputOutput": "When enabled, this instance reads and writes input and output files from the global shared folders. Disable to point this instance at its own folders below.",

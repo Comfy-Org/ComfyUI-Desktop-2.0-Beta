@@ -175,6 +175,7 @@ const rows = computed(() =>
       </div>
       <span v-if="row.isDefault" class="models-dir-tag tag-local">
         {{ t('common.default', 'default') }}
+        <InfoTooltip :text="t('tooltips.extraModelPathsDefault')" />
       </span>
       <span v-if="row.isPrimary" class="models-dir-tag tag-primary">
         {{ t('models.primary', 'Primary') }}
