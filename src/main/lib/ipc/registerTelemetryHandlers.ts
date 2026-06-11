@@ -34,17 +34,31 @@ function isTelemetryValue(v: unknown): v is mainTelemetry.TelemetryValue {
   )
 }
 
-// Per-key filter to the TelemetryValue contract; renderer payloads cross a
-// trust boundary, so non-primitives (incl. arrays) are dropped per-key.
-function asProps(value: unknown): Record<string, mainTelemetry.TelemetryValue> {
+function isTelemetryValueArray(v: unknown): v is mainTelemetry.TelemetryValue[] {
+  return Array.isArray(v) && v.every(isTelemetryValue)
+}
+
+// Per-key filter to the TelemetryContext contract.
+function asProps(value: unknown): mainTelemetry.TelemetryContext {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
-  const out: Record<string, mainTelemetry.TelemetryValue> = {}
+  const out: mainTelemetry.TelemetryContext = {}
   for (const [key, raw] of Object.entries(value)) {
     if (typeof key !== 'string') continue
     if (isTelemetryValue(raw)) {
       out[key] = raw
+    } else if (isTelemetryValueArray(raw)) {
+      out[key] = raw
     }
-    // Drop anything else (objects, arrays, functions, symbols, etc.) silently.
+  }
+  return out
+}
+
+function asPersonProps(value: unknown): Record<string, mainTelemetry.TelemetryValue> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const out: Record<string, mainTelemetry.TelemetryValue> = {}
+  for (const [key, raw] of Object.entries(value)) {
+    if (typeof key !== 'string') continue
+    if (isTelemetryValue(raw)) out[key] = raw
   }
   return out
 }
@@ -65,7 +79,7 @@ export function registerTelemetryHandlers(): void {
   })
 
   ipcMain.on('telemetry:registerProperties', (_event, properties: unknown) => {
-    const props = asProps(properties)
+    const props = asPersonProps(properties)
     if (Object.keys(props).length === 0) return
     mainTelemetry.registerPersonProperties(props)
   })
@@ -76,7 +90,7 @@ export function registerTelemetryHandlers(): void {
     if (!payload || typeof payload !== 'object') return
     const userId = asString((payload as Record<string, unknown>).userId)
     if (!userId) return
-    const properties = asProps((payload as Record<string, unknown>).properties)
+    const properties = asPersonProps((payload as Record<string, unknown>).properties)
     mainTelemetry.bindUserId(userId, properties)
   })
 

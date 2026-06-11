@@ -366,6 +366,18 @@ describe('telemetry SDK-level privacy safety nets', () => {
     expect(msg).not.toContain('64911')
   })
 
+  it('scrubs string array entries as a last-resort safety net', () => {
+    captured.length = 0
+    telemetry.capture('comfy.desktop.execution.error', {
+      model_paths: ['C:\\Users\\64911\\Documents\\model.safetensors', 'LoadImage']
+    })
+    expect(captured).toHaveLength(1)
+    const paths = captured[0]!.properties?.model_paths as string[]
+    expect(paths[0]).toContain('[REDACTED]')
+    expect(paths[0]).not.toContain('64911')
+    expect(paths[1]).toBe('LoadImage')
+  })
+
   it('leaves non-string property types untouched', () => {
     captured.length = 0
     telemetry.capture('comfy.desktop.execution.completed', {
