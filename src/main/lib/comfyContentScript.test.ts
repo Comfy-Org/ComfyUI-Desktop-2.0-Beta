@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest'
+/// <reference lib="dom" />
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { getModelDownloadContentScript } from './comfyContentScript'
 
 describe('getModelDownloadContentScript', () => {
@@ -42,7 +43,13 @@ describe('getModelDownloadContentScript', () => {
     expect(script).toContain('scrapeErrorsTab')
   })
 
-  it('detects the properties panel via data-testid', () => {
+  it('scrapes the missing-model error group via stable data-testid hooks', () => {
+    expect(script).toContain('scrapeMissingModelErrorGroup')
+    expect(script).toContain('[data-testid="error-group-missing-model"]')
+    expect(script).toContain('[data-testid="missing-model-actions"]')
+  })
+
+  it('detects the legacy properties panel via data-testid as a fallback', () => {
     expect(script).toContain('[data-testid="properties-panel"]')
   })
 
@@ -81,5 +88,73 @@ describe('getModelDownloadContentScript', () => {
     // iterates a fixed key list, so "3d" must be present or .glb files silently
     // fail to download from cloud/remote sessions.
     expect(script).toContain(`['images', 'gifs', 'audio', 'video', '3d']`)
+  })
+})
+
+describe('missing-model error group interception (behavioral)', () => {
+  const origCreateElement = document.createElement.bind(document)
+
+  afterEach(() => {
+    document.createElement = origCreateElement
+    document.body.innerHTML = ''
+    delete (window as unknown as Record<string, unknown>).__comfyDesktop2Injected
+    delete (window as unknown as Record<string, unknown>).__comfyDesktop2
+  })
+
+  function flushObserver() {
+    return new Promise((resolve) => setTimeout(resolve, 0))
+  }
+
+  // Build the right-side-panel missing-model group the way the frontend renders
+  // it, but wrap every translatable label in a non-English string. Only the raw
+  // directory ("loras") and the model filename (the `title` attr) are read, so a
+  // correct mapping here proves the scrape survives i18n.
+  function buildLocalizedErrorGroup(directory: string, modelName: string) {
+    document.body.innerHTML = `
+      <div data-testid="error-group-missing-model">
+        <div class="card">
+          <div data-testid="missing-model-actions">
+            <button data-testid="missing-model-download-all">Alles herunterladen</button>
+          </div>
+          <div class="category">
+            <div class="header"><p><span>${directory} (1)</span></p></div>
+            <div class="rows">
+              <div class="row">
+                <p title="${modelName}">${modelName} (1)</p>
+                <button data-testid="missing-model-download" aria-label="Herunterladen ${modelName}">
+                  Herunterladen
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `
+  }
+
+  it('routes a localized missing-model download with the raw directory', async () => {
+    const downloadModel = vi.fn().mockResolvedValue(true)
+    ;(window as unknown as Record<string, unknown>).__comfyDesktop2 = {
+      downloadModel
+    }
+
+    buildLocalizedErrorGroup('loras', 'my_lora.safetensors')
+
+    new Function(getModelDownloadContentScript())()
+
+    // The script only scrapes on mutation; nudge the observer, then let it run.
+    document.body.appendChild(document.createElement('div'))
+    await flushObserver()
+
+    const link = document.createElement('a')
+    link.href = 'https://huggingface.co/repo/resolve/main/my_lora.safetensors'
+    link.download = 'my_lora.safetensors'
+    link.click()
+
+    expect(downloadModel).toHaveBeenCalledWith(
+      'https://huggingface.co/repo/resolve/main/my_lora.safetensors',
+      'my_lora.safetensors',
+      'loras'
+    )
   })
 })
