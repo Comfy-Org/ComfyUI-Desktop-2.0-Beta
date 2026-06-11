@@ -23,8 +23,6 @@ interface ModelsDir {
   detailIndex?: number
   /** `is_default: true` on the YAML section → shows a `default` tag. */
   isDefault?: boolean
-  /** Number of the section's per-type dirs that don't exist on disk yet. */
-  missingCount?: number
 }
 
 interface Props {
@@ -146,7 +144,6 @@ const rows = computed(() =>
     index,
     locked: dir.locked === true,
     isExtra: dir.kind === 'extra',
-    missingCount: dir.missingCount ?? 0,
     showMenu: hasMenuActions(dir),
     canPromote: canPromote(dir),
     canRemove: canRemove(dir)
@@ -176,9 +173,6 @@ const rows = computed(() =>
           @click.stop="row.isExtra ? emit('details', row.index) : emit('open', row.index)"
         >{{ row.path }}</button>
       </div>
-      <span v-if="row.missingCount > 0" class="models-dir-tag tag-missing">
-        {{ t('comfyUISettings.nMissing', { n: row.missingCount }) }}
-      </span>
       <span v-if="row.isDefault" class="models-dir-tag tag-local">
         {{ t('common.default', 'default') }}
       </span>
@@ -366,13 +360,6 @@ const rows = computed(() =>
   color: var(--text-muted);
   border: 1px solid var(--chooser-surface-border);
   background: color-mix(in srgb, var(--text) 6%, transparent);
-}
-
-/* Flags an extra-paths row whose section has one or more missing directories. */
-.models-dir-tag.tag-missing {
-  color: var(--danger);
-  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
-  background: color-mix(in srgb, var(--danger) 10%, transparent);
 }
 
 .models-dir-actions {

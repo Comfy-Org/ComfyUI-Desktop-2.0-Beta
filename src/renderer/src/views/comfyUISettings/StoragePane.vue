@@ -27,7 +27,6 @@ interface ModelsDir {
   /** Index into `extraSections` for the detail modal (extra rows only). */
   detailIndex?: number
   isDefault?: boolean
-  missingCount?: number
 }
 
 export interface StorageSnapshot {
@@ -157,7 +156,6 @@ const extraModelRows = computed<ModelsDir[]>(() =>
     kind: 'extra',
     detailIndex: i,
     isDefault: s.isDefault,
-    missingCount: s.dirs.filter((d) => !d.dirExists).length,
   }))
 )
 

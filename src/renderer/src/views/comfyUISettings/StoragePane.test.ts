@@ -519,14 +519,15 @@ describe('StoragePane', () => {
       return wrapper.findAll('.models-dir-row').find((r) => r.text().includes('/ext/base'))!
     }
 
-    it('renders each YAML section as a read-only row with the Instance pill and missing count', async () => {
+    it('renders each YAML section as a read-only row with the Instance pill', async () => {
       installMockBridge()
       const wrapper = mountPaneWithSections(sectionsWithExtra(extraView()))
       await nextTick()
       const extraRow = findExtraRow(wrapper)
       expect(extraRow).toBeTruthy()
       expect(extraRow.find('.tag-local').exists()).toBe(true) // Instance pill
-      expect(extraRow.find('.tag-missing').text()).toContain('1') // one missing dir
+      // The missing-dir count is intentionally not surfaced in the list.
+      expect(extraRow.find('.tag-missing').exists()).toBe(false)
       // Read-only: no browse / make-primary affordance on extra rows.
       expect(extraRow.find('.tag-primary').exists()).toBe(false)
     })

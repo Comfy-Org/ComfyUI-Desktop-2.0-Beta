@@ -103,7 +103,6 @@
     "dirMissingTitle": "找不到文件夹 —— {dir}",
     "viewCustomPathDetails": "查看自定义路径详情",
     "refreshCustomPaths": "刷新状态",
-    "nMissing": "{n} 个缺失",
     "extraModelPathsModalTitle": "自定义模型路径",
     "extraModelPathsModalNote": "只读 —— ComfyUI 会搜索这些目录，但启动器不会管理它们。请编辑 extra_model_paths.yaml 以更改它们。",
     "openBaseFolder": "打开基础文件夹",

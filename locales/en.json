@@ -103,7 +103,6 @@
     "dirMissingTitle": "Folder not found — {dir}",
     "viewCustomPathDetails": "View custom path details",
     "refreshCustomPaths": "Refresh status",
-    "nMissing": "{n} missing",
     "extraModelPathsModalTitle": "Custom model paths",
     "extraModelPathsModalNote": "Read-only — ComfyUI searches these directories, but the launcher does not manage them. Edit extra_model_paths.yaml to change them.",
     "openBaseFolder": "Open base folder",
