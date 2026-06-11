@@ -60,6 +60,10 @@ const props = defineProps<Props>()
 
 const emit = defineEmits<{
   'update-field': [field: DetailField, value: unknown]
+  /** Ask the parent to re-fetch the install's detail sections (refreshes the
+   *  custom-model-paths on-disk status, which the main process computes once
+   *  per fetch). */
+  refresh: []
 }>()
 
 const { t } = useI18n()
@@ -159,15 +163,20 @@ const extraModelRows = computed<ModelsDir[]>(() =>
 
 // --- Custom model paths detail modal --------------------------------------
 
-const extraModalSection = ref<ExtraModelPathSection | null>(null)
-const extraModalOpen = ref(false)
+// Track the open section by name (unique per YAML), not by object, so a refresh
+// (which rebuilds `extraSections`) re-resolves to the fresh section and the open
+// modal updates in place.
+const extraModalSectionName = ref<string | null>(null)
+const extraModalSection = computed<ExtraModelPathSection | null>(
+  () => extraSections.value.find((s) => s.name === extraModalSectionName.value) ?? null
+)
+const extraModalOpen = computed(() => extraModalSection.value !== null)
 
 function openExtraDetails(row: ModelsDir | undefined): void {
   if (!row || row.kind !== 'extra' || row.detailIndex == null) return
   const section = extraSections.value[row.detailIndex]
   if (!section) return
-  extraModalSection.value = section
-  extraModalOpen.value = true
+  extraModalSectionName.value = section.name
 }
 
 function handleSharedModelDetails(index: number): void {
@@ -177,7 +186,10 @@ function handleInstanceModelDetails(index: number): void {
   openExtraDetails(instanceModelDirs.value[index])
 }
 function closeExtraModal(): void {
-  extraModalOpen.value = false
+  extraModalSectionName.value = null
+}
+function handleRefreshExtraPaths(): void {
+  emit('refresh')
 }
 
 function persistField(id: string, value: unknown): void {
@@ -584,6 +596,7 @@ function handleBrowseSharedOutput(): void {
       :yaml-path="extraModelPaths.yamlPath"
       @close="closeExtraModal"
       @open-path="handleOpenPath"
+      @refresh="handleRefreshExtraPaths"
     />
   </div>
 </template>

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { FileText, FolderOpen } from 'lucide-vue-next'
+import { FileText, FolderOpen, RefreshCw } from 'lucide-vue-next'
 import BaseModal from '../../components/ui/BaseModal.vue'
 
 /** One resolved per-type directory inside a section (mirrors the main-process
@@ -36,6 +36,8 @@ const emit = defineEmits<{
   close: []
   /** Open a folder (base_path or a per-type dir) in the OS file manager. */
   'open-path': [path: string]
+  /** Re-fetch on-disk status (the main process resolves existence per fetch). */
+  refresh: []
 }>()
 
 const { t } = useI18n()
@@ -56,6 +58,15 @@ const title = computed(() =>
       <div class="empm-header">
         <h2 class="empm-title">{{ title }}</h2>
         <span v-if="section.isDefault" class="empm-tag">{{ t('common.default', 'default') }}</span>
+        <button
+          type="button"
+          class="empm-refresh"
+          :aria-label="t('comfyUISettings.refreshCustomPaths', 'Refresh status')"
+          :title="t('comfyUISettings.refreshCustomPaths', 'Refresh status')"
+          @click="emit('refresh')"
+        >
+          <RefreshCw :size="14" aria-hidden="true" />
+        </button>
       </div>
       <p class="empm-section-name">{{ section.name }}</p>
     </template>
@@ -76,12 +87,14 @@ const title = computed(() =>
           <button
             type="button"
             class="empm-dir-path"
-            :title="t('models.openDir', 'Open folder')"
+            :class="{ 'is-missing': !d.dirExists }"
+            :title="
+              d.dirExists
+                ? t('models.openDir', 'Open folder')
+                : t('comfyUISettings.dirMissingTitle', { dir: d.dir })
+            "
             @click="emit('open-path', d.dir)"
           >{{ d.dir }}</button>
-          <span v-if="!d.dirExists" class="empm-dir-missing">{{
-            t('comfyUISettings.dirMissing', 'missing')
-          }}</span>
         </li>
       </ul>
     </template>
@@ -204,10 +217,40 @@ const title = computed(() =>
   outline: none;
 }
 
-.empm-dir-missing {
-  flex: 0 0 auto;
-  font-size: 11px;
-  color: #d9822b;
+/* Missing directory: color the path red instead of a separate badge, keeping
+   the row's right side free for future per-dir controls. */
+.empm-dir-path.is-missing {
+  color: var(--danger);
+}
+
+.empm-dir-path.is-missing:hover,
+.empm-dir-path.is-missing:focus-visible {
+  color: var(--danger);
+}
+
+.empm-refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin-left: auto;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition:
+    background-color 100ms ease,
+    color 100ms ease;
+}
+
+.empm-refresh:hover,
+.empm-refresh:focus-visible {
+  background: var(--brand-surface-bg-hover);
+  color: var(--neutral-100);
+  outline: none;
 }
 
 .empm-action {

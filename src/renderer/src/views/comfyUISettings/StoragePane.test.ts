@@ -563,5 +563,28 @@ describe('StoragePane', () => {
       dirBtns.find((b) => b.textContent === '/ext/base/checkpoints')!.click()
       expect(bridge.openPathCalls).toContain('/ext/base/checkpoints')
     })
+
+    it('marks a missing per-type dir red (is-missing) instead of a badge', async () => {
+      installMockBridge()
+      const wrapper = mountPaneWithSections(sectionsWithExtra(extraView()))
+      await nextTick()
+      await findExtraRow(wrapper).find('.models-dir-name').trigger('click')
+      await nextTick()
+      const dirBtns = Array.from(document.querySelectorAll('.empm-dir-path')) as HTMLButtonElement[]
+      const present = dirBtns.find((b) => b.textContent === '/ext/base/checkpoints')!
+      const missing = dirBtns.find((b) => b.textContent === '/ext/base/t2i_adapter')!
+      expect(present.classList.contains('is-missing')).toBe(false)
+      expect(missing.classList.contains('is-missing')).toBe(true)
+    })
+
+    it('emits refresh when the modal refresh button is clicked', async () => {
+      installMockBridge()
+      const wrapper = mountPaneWithSections(sectionsWithExtra(extraView()))
+      await nextTick()
+      await findExtraRow(wrapper).find('.models-dir-name').trigger('click')
+      await nextTick()
+      ;(document.querySelector('.empm-refresh') as HTMLButtonElement).click()
+      expect(wrapper.emitted('refresh')).toHaveLength(1)
+    })
   })
 })

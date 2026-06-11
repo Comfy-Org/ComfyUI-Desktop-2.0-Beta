@@ -370,9 +370,9 @@ const rows = computed(() =>
 
 /* Flags an extra-paths row whose section has one or more missing directories. */
 .models-dir-tag.tag-missing {
-  color: #d9822b;
-  border: 1px solid color-mix(in srgb, #d9822b 35%, transparent);
-  background: color-mix(in srgb, #d9822b 10%, transparent);
+  color: var(--danger);
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
 }
 
 .models-dir-actions {
