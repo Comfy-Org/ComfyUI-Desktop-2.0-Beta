@@ -198,8 +198,12 @@ const title = computed(() =>
 }
 
 .empm-dir-path {
-  flex: 1 1 auto;
+  /* Don't grow: the clickable area must hug the text (matching the storage
+     list's row links), leaving the rest of the row unclickable. Still shrinks
+     with an ellipsis for long paths. */
+  flex: 0 1 auto;
   min-width: 0;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
