@@ -100,7 +100,18 @@ const Logs = {
 
 const Telemetry = {
   capture: (event: string, properties?: TelemetryProperties): void => {
-    ipcRenderer.send('telemetry:capture', { event, properties })
+    // Telemetry must never break the caller. `ipcRenderer.send` throws
+    // synchronously on non-structured-cloneable values (functions, DOM
+    // nodes, symbols, circular refs); since this surface is exposed to
+    // the hosted ComfyUI frontend, a stray bad payload would otherwise
+    // propagate into unrelated frontend code. Mirrors the same
+    // try/catch contract as `window.api.captureTelemetry` in
+    // `src/preload/api.ts`.
+    try {
+      ipcRenderer.send('telemetry:capture', { event, properties })
+    } catch {
+      // ignore: telemetry must never break the renderer
+    }
   }
 }
 
