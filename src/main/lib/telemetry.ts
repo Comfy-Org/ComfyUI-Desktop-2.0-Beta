@@ -162,7 +162,9 @@ export function _resetForTest(): void {
   installationDeviceId = null
   consentState = 'undecided'
   pendingSessionStart = null
+  pendingFirstLaunch = null
   pendingIdentifyProperties = null
+  pendingIdentifyPropertiesOnce = null
   pendingMigrationAlias = null
   defaultEventProperties = {}
   initialized = false
@@ -509,7 +511,25 @@ export function initTelemetry(opts: InitOptions): void {
 }
 
 let pendingSessionStart: Record<string, TelemetryValue> | null = null
+/**
+ * Deferred once-ever first-launch event payload. The guard file in
+ * `deviceId.ts` is consumed at boot (so it can never re-fire on a later
+ * launch), but on a fresh install consent is still `'undecided'` at that
+ * moment — the event would be dropped by `isAllowedToFire` and the guard
+ * would be burned for nothing. Holding the payload here lets it ship on the
+ * `undecided → granted` transition via `tryFlushDeferred()`, exactly like
+ * `pendingSessionStart`. A `'denied'` choice never flushes it, which is the
+ * intended consent outcome.
+ */
+let pendingFirstLaunch: TelemetryContext | null = null
 let pendingIdentifyProperties: Record<string, TelemetryValue> | null = null
+/**
+ * Deferred `$set_once` person properties — write-once activation markers
+ * (e.g. `first_generation_at`) that PostHog ignores on every call after the
+ * first. Kept separate from `pendingIdentifyProperties` (`$set`) so the two
+ * merge semantics don't collide in the same identify payload.
+ */
+let pendingIdentifyPropertiesOnce: Record<string, TelemetryValue> | null = null
 
 /**
  * Deferred legacy-id alias. Set by `deferMigrationAlias()` at boot if
@@ -541,13 +561,17 @@ let installationDeviceId: string | null = null
 function tryFlushDeferred(): void {
   if (!canEmit() || !distinctId) return
   if (consentState !== 'granted') return
-  if (pendingIdentifyProperties) {
+  if (pendingIdentifyProperties || pendingIdentifyPropertiesOnce) {
+    const properties: Record<string, Record<string, TelemetryValue>> = {}
+    if (pendingIdentifyProperties) properties.$set = pendingIdentifyProperties
+    if (pendingIdentifyPropertiesOnce) properties.$set_once = pendingIdentifyPropertiesOnce
     try {
-      client!.identify({ distinctId, properties: { $set: pendingIdentifyProperties } })
+      client!.identify({ distinctId, properties })
     } catch {
       // ignore
     }
     pendingIdentifyProperties = null
+    pendingIdentifyPropertiesOnce = null
   }
   if (pendingMigrationAlias) {
     // Snapshot + clear before await so a re-entrant flush doesn't double-fire.
@@ -577,6 +601,10 @@ function tryFlushDeferred(): void {
   if (pendingSessionStart) {
     capture('comfy.desktop.session.started', pendingSessionStart)
     pendingSessionStart = null
+  }
+  if (pendingFirstLaunch) {
+    capture('comfy.desktop.app.first_launch', pendingFirstLaunch)
+    pendingFirstLaunch = null
   }
 }
 
@@ -733,6 +761,32 @@ export function capture(event: string, properties: TelemetryContext = {}): void 
 }
 
 /**
+ * Capture the once-ever `comfy.desktop.app.first_launch` event with the same
+ * deferral semantics as the boot session-start event.
+ *
+ * The caller's on-disk guard (in `deviceId.ts`) is consumed at boot, so this
+ * fires for at most one launch in the installation's lifetime. But that launch
+ * is, by definition, a fresh install whose consent is still `'undecided'` —
+ * routing it through plain `capture()` would drop it on the consent gate while
+ * the guard stays burned, so the event would never reach PostHog. Instead we
+ * queue the payload and let `tryFlushDeferred()` ship it on the
+ * `undecided → granted` transition (and never on a `'denied'` choice). If
+ * consent is already `'granted'` (returning user who reinstalled after opting
+ * in, or the rare migrator), it captures immediately.
+ */
+export function captureFirstLaunch(properties: TelemetryContext = {}): void {
+  if (!canEmit() || !distinctId) {
+    pendingFirstLaunch = { ...(pendingFirstLaunch || {}), ...properties }
+    return
+  }
+  if (consentState !== 'granted') {
+    pendingFirstLaunch = { ...(pendingFirstLaunch || {}), ...properties }
+    return
+  }
+  capture('comfy.desktop.app.first_launch', properties)
+}
+
+/**
  * Update PostHog person properties for the current distinct id (`$set`).
  *
  * Used by the renderer's cohort-context register pass and any other
@@ -751,6 +805,32 @@ export function registerPersonProperties(properties: Record<string, TelemetryVal
   }
   try {
     client!.identify({ distinctId, properties: { $set: properties } })
+  } catch {
+    // ignore – telemetry must never break the app
+  }
+}
+
+/**
+ * Update PostHog person properties using `$set_once` semantics: the value is
+ * written only if the property is currently absent on the person, and ignored
+ * on every subsequent call. For durable activation markers (first-ever
+ * timestamps) that must reflect the first occurrence across a person's
+ * lifetime, even when the per-installation event that fires them can recur on
+ * a reinstall or a second machine.
+ *
+ * Honors the same three-state consent gate as `registerPersonProperties`:
+ * queued in `pendingIdentifyPropertiesOnce` until consent grants, at which
+ * point `tryFlushDeferred()` ships it. Repeated queued calls merge per key;
+ * `$set_once` makes the server-side write idempotent regardless.
+ */
+export function registerPersonPropertiesOnce(properties: Record<string, TelemetryValue>): void {
+  if (!canEmit()) return
+  if (consentState !== 'granted' || !distinctId) {
+    pendingIdentifyPropertiesOnce = { ...(pendingIdentifyPropertiesOnce || {}), ...properties }
+    return
+  }
+  try {
+    client!.identify({ distinctId, properties: { $set_once: properties } })
   } catch {
     // ignore – telemetry must never break the app
   }

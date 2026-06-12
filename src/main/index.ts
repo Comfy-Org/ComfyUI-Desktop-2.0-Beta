@@ -77,6 +77,7 @@ import { lookupInstallUpdateOverride, recordIpcInvocation } from './lib/e2eOverr
 import * as mainTelemetry from './lib/telemetry'
 import {
   clearPendingAlias,
+  consumeFirstLaunch,
   getDeviceId,
   getIdClass,
   initDeviceId,
@@ -1410,6 +1411,23 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
 
     const locale = (settings.get('language') as string | undefined) || app.getLocale().split('-')[0]
     i18n.init(locale)
+
+    // Desktop-side anchor of the website → download → first-launch acquisition
+    // funnel. Fires exactly once per installation, ever (guard file alongside
+    // device-id.txt). app_version / app_channel / platform / arch ride in as
+    // default event properties; id_class + locale are added here.
+    //
+    // `captureFirstLaunch` (not plain `capture`) because this fires on a fresh
+    // install, when consent is still `'undecided'` — a plain capture would be
+    // dropped on the consent gate while the once-ever guard stays burned,
+    // losing the event forever. The deferred path ships it on the first
+    // `undecided → granted` transition and never on a decline.
+    if (consumeFirstLaunch()) {
+      mainTelemetry.captureFirstLaunch({
+        id_class: getIdClass(),
+        locale
+      })
+    }
     registerTitleTooltipIpc({
       findParentByTitleBarSender: (wc) => findEntryByTitleBarSender(wc)?.entry.window ?? null
     })
