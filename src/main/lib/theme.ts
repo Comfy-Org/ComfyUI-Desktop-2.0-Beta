@@ -24,3 +24,8 @@ export interface SplashTheme {
 
 export const SPLASH_DARK: SplashTheme = { bg: COMFY_BG_DARK, fg: '#ffffff', isDark: true }
 export const SPLASH_LIGHT: SplashTheme = { bg: COMFY_BG_LIGHT, fg: '#000000', isDark: false }
+
+/** Brand-purple splash — matches the app's `--titlebar-bg` / `--neutral-800`
+ *  chrome color so the update splash reads as part of the desktop app rather
+ *  than a generic grey window. */
+export const SPLASH_PURPLE: SplashTheme = { bg: TITLEBAR_BG, fg: '#ffffff', isDark: true }

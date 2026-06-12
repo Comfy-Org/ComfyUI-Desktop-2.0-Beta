@@ -1,5 +1,5 @@
 import { BrowserWindow } from 'electron'
-import { COMFY_BG_DARK, SPLASH_DARK } from './theme'
+import { SPLASH_PURPLE } from './theme'
 import { showSplashPage } from './relaunchPage'
 import * as i18n from './i18n'
 
@@ -22,7 +22,7 @@ export function showUpdateInstallSplash(): BrowserWindow {
     resizable: false,
     center: true,
     show: false,
-    backgroundColor: COMFY_BG_DARK,
+    backgroundColor: SPLASH_PURPLE.bg,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true
@@ -30,10 +30,14 @@ export function showUpdateInstallSplash(): BrowserWindow {
   })
 
   win.once('ready-to-show', () => {
-    if (!win.isDestroyed()) win.show()
+    if (win.isDestroyed()) return
+    // Show + focus so the splash comes up frontmost like any normal app window
+    // (a window spawned this early can otherwise open without taking focus).
+    win.show()
+    win.focus()
   })
 
-  void showSplashPage(win.webContents, SPLASH_DARK, {
+  void showSplashPage(win.webContents, SPLASH_PURPLE, {
     title: i18n.t('launch.updateInstallTitle'),
     desc: i18n.t('launch.updateInstallDesc')
   })
