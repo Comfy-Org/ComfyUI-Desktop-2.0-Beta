@@ -115,6 +115,10 @@ export function createExecutionTap(opts: {
           ...baseContext,
           first_run_at: firstRunAt
         })
+        // Per-PERSON activation marker. The event above is per-installation
+        // and over-counts users with multiple installs; `$set_once` keeps
+        // the earliest first-completion timestamp on the person profile.
+        telemetry.registerPersonPropertiesOnce({ first_generation_at: firstRunAt })
       } catch {
         // ignore – telemetry side effect, not user-visible
       }

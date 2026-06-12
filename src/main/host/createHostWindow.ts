@@ -27,6 +27,7 @@ import {
   resolveTheme,
 } from '../lib/ipc/shared'
 import * as mainTelemetry from '../lib/telemetry'
+import { getUserTier } from '../lib/userTier'
 import { forwardDatadogError } from '../lib/processErrorHandlers'
 import { recordDashboardSurface, recordInstanceSurface } from '../lib/lastSession'
 import * as settings from '../settings'
@@ -296,6 +297,7 @@ function wireCheckoutPopup(
   childWindow: BrowserWindow,
   parent: BrowserWindow,
   hostContents: Electron.WebContents,
+  openedAt: number,
 ): void {
   const close = (): void => {
     if (!childWindow.isDestroyed()) childWindow.close()
@@ -317,6 +319,15 @@ function wireCheckoutPopup(
   const closeOnReturn = (_e: Electron.Event, targetUrl: string): void => {
     if (returning || childWindow.isDestroyed() || !isCheckoutReturnUrl(targetUrl)) return
     returning = true
+    // Fires when the checkout flow ENDS, including cancel — the return URL is
+    // the same first-party comfy.org page whether the user paid or backed out.
+    // `duration_ms` is measured from popup open. Purchase truth is server-side
+    // (billing:topup_completed / billing:subscription_created); do not read a
+    // conversion off this event.
+    mainTelemetry.capture('comfy.desktop.billing.checkout_returned', {
+      duration_ms: Date.now() - openedAt,
+      user_tier: getUserTier(),
+    })
     if (hostContents.isDestroyed()) {
       close()
       return
@@ -1135,16 +1146,21 @@ export function buildComfyView(
 
   // Set by the window-open handler immediately before the matching
   // `did-create-window` fires (synchronous pairing), then reset there so
-  // it can never leak to a later non-checkout popup.
+  // it can never leak to a later non-checkout popup. `nextCheckoutOpenedAt`
+  // carries the popup-open timestamp through to `wireCheckoutPopup` so the
+  // return event can report how long the checkout flow took.
   let nextPopupIsCheckout = false
+  let nextCheckoutOpenedAt = 0
 
   comfyContents.on('did-create-window', (childWindow) => {
     const isCheckout = nextPopupIsCheckout
+    const openedAt = nextCheckoutOpenedAt
     nextPopupIsCheckout = false
+    nextCheckoutOpenedAt = 0
     childWindow.setIcon(APP_ICON)
     if (process.platform !== 'darwin') childWindow.removeMenu()
     injectMacPasskeyWarning(childWindow)
-    if (isCheckout) wireCheckoutPopup(childWindow, comfyWindow, comfyContents)
+    if (isCheckout) wireCheckoutPopup(childWindow, comfyWindow, comfyContents, openedAt)
   })
   comfyContents.setWindowOpenHandler(({ url: childUrl }) => {
     // Intercept Firebase auth popups (`<authDomain>/__/auth/handler?...`)
@@ -1176,6 +1192,11 @@ export function buildComfyView(
       // dragged/closed reliably, so it keeps its frame. preload:
       // undefined strips our title-bar bridge.
       nextPopupIsCheckout = true
+      nextCheckoutOpenedAt = Date.now()
+      mainTelemetry.capture('comfy.desktop.billing.checkout_opened', {
+        source: 'cloud_webview',
+        user_tier: getUserTier(),
+      })
       const bounds = checkoutPopupBounds(comfyWindow)
       return {
         action: 'allow',
