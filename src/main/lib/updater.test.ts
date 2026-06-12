@@ -454,6 +454,30 @@ describe('startup update install + session-end guard (issue #1065)', () => {
     expect(settingsStore['lastStartupUpdateAttemptVersion']).toBe('1.0.1')
   })
 
+  it('applyPendingUpdateOnStartup() holds the install until the splash minimum elapses', async () => {
+    vi.useFakeTimers()
+    try {
+      settingsStore['pendingDownloadedUpdateVersion'] = '1.0.1'
+      readyVersion = '1.0.1' // check resolves instantly (cached installer)
+      const updater = await import('./updater')
+      updater.register()
+
+      // Splash just went up, so the full minimum (2000ms) must elapse first.
+      const pending = updater.applyPendingUpdateOnStartup(Date.now())
+
+      // Let the (instant) ready check settle, but stay short of the floor.
+      await vi.advanceTimersByTimeAsync(1500)
+      expect(fakeUpdater.restartAndInstall).not.toHaveBeenCalled()
+
+      // Cross the floor — the install now fires.
+      await vi.advanceTimersByTimeAsync(600)
+      expect(await pending).toBe(true)
+      expect(fakeUpdater.restartAndInstall).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('applyPendingUpdateOnStartup() does nothing when no update is staged', async () => {
     const updater = await import('./updater')
     updater.register()

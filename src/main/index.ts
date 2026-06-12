@@ -2012,6 +2012,10 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     // while the bounded check runs; if it commits to installing, the app quits
     // here and the installer relaunches it — so we skip opening the normal UI.
     const updateSplash = updater.hasPendingStartupUpdate() ? showUpdateInstallSplash() : undefined
+    // Timestamp the splash so the install can keep it up for a readable minimum
+    // (the bounded check usually resolves instantly, which would otherwise flash
+    // the splash by before the app quits to install).
+    const updateSplashShownAt = updateSplash ? Date.now() : undefined
     // Track whether the install actually started quitting the app. Quit intent
     // (`quitReason`) alone isn't proof — `restartAndInstall` can return without
     // quitting if the staged installer is gone — so key the backstop off a real
@@ -2021,7 +2025,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
       updateInstallQuitStarted = true
     }
     app.once('before-quit', onUpdateInstallQuit)
-    const installingUpdate = await updater.applyPendingUpdateOnStartup()
+    const installingUpdate = await updater.applyPendingUpdateOnStartup(updateSplashShownAt)
     if (installingUpdate) {
       // Safety net: a successful install quits the app within a tick (firing
       // before-quit). If that didn't happen the install didn't proceed — recover
