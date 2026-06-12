@@ -643,13 +643,32 @@ export function initializeRendererBootstrap(role: RendererRole = 'panel'): void 
         .then((ctx) => {
           if (!ctx) return
           const { snapshot_diffs, ...metadata } = ctx
-          trackTelemetryAction('comfy.desktop.session.installation_started', {
+          // Fires on EVERY ComfyUI instance boot (fresh install, restart, port
+          // realloc) — not on new-install completion. Despite its previous name
+          // (`session.installation_started`) it tracks per-instance boots, so
+          // dashboards built off the old name were over-counting new installs by
+          // ~2.3x (median fires/user/week, 656 max). Use `install.flow.opened`
+          // or `op.result` with `op_kind='install'` for actual install activity.
+          // The old name is also emitted below for one release cycle so existing
+          // PostHog dashboards stay alive while migration happens.
+          const instanceStartedProps = {
             ...(metadata as unknown as Record<
               string,
               string | number | boolean | null | undefined
             >),
             boot_time_ms: bootTimeMs ?? null
-          })
+          }
+          trackTelemetryAction(
+            'comfy.desktop.session.instance_started',
+            instanceStartedProps
+          )
+          // DEPRECATED 2026-06-12: misleadingly named — remove after 2026-07-01
+          // once any consumers have migrated to `session.instance_started`.
+          // Tracked in issue #1054.
+          trackTelemetryAction(
+            'comfy.desktop.session.installation_started',
+            instanceStartedProps
+          )
           if (snapshot_diffs.length > 0) {
             // snapshot_diffs is an array of objects, which Datadog/PostHog handle
             // natively; bypass the typed bridge via a fresh call.
