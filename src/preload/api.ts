@@ -31,6 +31,10 @@ export function buildElectronApi(): ElectronApi {
     openPath: (targetPath) => ipcRenderer.invoke('open-path', targetPath),
     openExternal: (url) => ipcRenderer.invoke('open-external', url),
     getDiskSpace: (targetPath) => ipcRenderer.invoke('get-disk-space', targetPath),
+    /** Read-only snapshot of an install's durable log buffer, as one joined
+     *  string. Seeds a chained launch op's terminal with install-leg lines. */
+    logsSnapshot: (installationId: string): Promise<string> =>
+      ipcRenderer.invoke('logs-snapshot', installationId),
     validateInstallPath: (targetPath) => ipcRenderer.invoke('validate-install-path', targetPath),
     getInstallationSize: (installationId) =>
       ipcRenderer.invoke('get-installation-size', installationId),

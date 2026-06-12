@@ -234,6 +234,20 @@ export const useProgressStore = defineStore('progress', () => {
     operations.set(installationId, op)
     const rop = operations.get(installationId)!
 
+    // Log continuity across a chain: the launch leg's `terminalOutput` starts
+    // empty, but a background template-model download may have logged lines
+    // during the install leg. Seed from the durable ring buffer so "View logs"
+    // shows the full history. Async + guarded against a newer op replacing this
+    // one mid-fetch. Prepended so any lines that streamed in before the snapshot
+    // resolved aren't clobbered.
+    if (chainSpan === 'launch' && typeof window.api.logsSnapshot === 'function') {
+      void window.api.logsSnapshot(installationId).then((snapshot) => {
+        if (!snapshot) return
+        if (operations.get(installationId) !== rop) return
+        rop.terminalOutput = snapshot + rop.terminalOutput
+      }).catch(() => {})
+    }
+
     rop.unsubProgress = window.api.onInstallProgress((data: ProgressData) => {
       if (data.installationId !== installationId) return
 

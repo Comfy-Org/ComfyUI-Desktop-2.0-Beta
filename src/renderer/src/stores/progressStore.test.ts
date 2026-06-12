@@ -32,6 +32,7 @@ vi.stubGlobal('window', {
     onInstallationsVersionsUpdated: vi.fn(),
     onInstallProgress: vi.fn(() => vi.fn()),
     onComfyOutput: vi.fn(() => vi.fn()),
+    logsSnapshot: vi.fn().mockResolvedValue(''),
     cancelOperation: vi.fn(),
     stopComfyUI: vi.fn(),
     getRunningInstances: vi.fn().mockResolvedValue([]),

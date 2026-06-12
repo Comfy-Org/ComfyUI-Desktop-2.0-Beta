@@ -28,6 +28,11 @@ import { rotateLogFiles, getLogDir } from '../../logRotation'
 import { createExecutionTap } from '../../executionTap'
 import { createLaunchProgressTracker } from '../../launchProgress'
 import { buildLaunchPhases } from '../../launchPhases'
+import {
+  getTemplateDownloadState,
+  summarizeTemplateState,
+  formatTemplateSubStatus,
+} from '../../../sources/standalone/templateDownloadTask'
 import type { PreLaunchPhase } from '../../launchPhases'
 import { scanCustomNodes } from '../../nodes'
 import type { LaunchProgressTracker } from '../../launchProgress'
@@ -86,6 +91,17 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
   const sender = event.sender
   const sendProgress = makeSendProgress(sender, installationId)
 
+  // Show the starter-template model-download phase in THIS launch only on the
+  // first launch after install (one-shot `pendingTemplateOpen`), and only when a
+  // background download task actually exists for it. Covers the skip cases
+  // (no template / consent off / zero-model / relaunch).
+  const showTemplatePhase =
+    inst.sourceId === 'standalone' &&
+    !!inst.bundledTemplateId &&
+    inst.downloadTemplateModels === true &&
+    !!inst.pendingTemplateOpen &&
+    getTemplateDownloadState(installationId) !== undefined
+
   /** Enabled custom-node count for the "X of Y" launch detail. Best-effort
    *  one-shot scan; 0 (scan failed/none) → the tracker shows a streaming line
    *  instead. */
@@ -108,7 +124,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     if (launchTracker) return launchTracker
     await scanLaunchNodeCount()
     launchTracker = createLaunchProgressTracker({
-      phases: buildLaunchPhases(inst, { preLaunchPhases }),
+      phases: buildLaunchPhases(inst, { preLaunchPhases, templateModels: showTemplatePhase }),
       nodeCount: launchNodeCount,
       sendProgress,
     })
@@ -340,6 +356,59 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
 
   const abort = new AbortController()
   _operationAborts.set(installationId, abort)
+
+  // Single 500 ms reader for the `template-models` launch phase. The bytes have
+  // been downloading in the background since install-begin; this only PACES the
+  // display — it reads the shared state, formats the rich substatus, and emits
+  // one `sendProgress` per tick until the download is terminal. Non-blocking:
+  // launch completes on port readiness regardless. (Logs are emitted by the
+  // background task itself, not here.)
+  if (showTemplatePhase) {
+    void (async (): Promise<void> => {
+      // Track whether this phase was ALREADY complete on the very first tick
+      // (models pre-downloaded during install — the common case). If so we never
+      // drive a determinate percent: emitting 100 into its slot would fill it in
+      // one frame and, via the monotonic floor + the heavy `gpu` baseline that
+      // follows, make the bar leap. A still-running download instead fills the
+      // slot smoothly by real percent so the bar advances WITH the download.
+      let firstTick = true
+      let preCompleted = false
+      const tick = (): boolean => {
+        const state = getTemplateDownloadState(installationId)
+        if (!state) return true
+        const summary = summarizeTemplateState(state)
+        const terminal =
+          summary.status === 'done' ||
+          summary.status === 'error' ||
+          summary.status === 'cancelled'
+        if (firstTick) {
+          firstTick = false
+          preCompleted = terminal
+        }
+        // Pre-completed → indeterminate (no slot fill, no leap). Live download →
+        // real percent so the bar rides the download; clamp at 99 so only the
+        // tracker's real milestones own completion.
+        const percent = preCompleted ? -1 : terminal ? -1 : Math.min(99, Math.max(0, summary.percent))
+        sendProgress('template-models', {
+          percent,
+          status: formatTemplateSubStatus(summary),
+        })
+        return terminal
+      }
+      while (!abort.signal.aborted) {
+        if (tick()) return
+        const done = await new Promise<boolean>((resolve) => {
+          const timer = setTimeout(() => {
+            abort.signal.removeEventListener('abort', onAbort)
+            resolve(false)
+          }, 500)
+          const onAbort = (): void => { clearTimeout(timer); resolve(true) }
+          abort.signal.addEventListener('abort', onAbort, { once: true })
+        })
+        if (done) return
+      }
+    })()
+  }
 
   // Remote connection
   if (launchCmd.remote) {

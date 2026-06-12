@@ -895,6 +895,8 @@ export interface ElectronApi {
   openPath(targetPath: string): Promise<void>
   openExternal(url: string): Promise<void>
   getDiskSpace(targetPath: string): Promise<DiskSpaceInfo>
+  /** Read-only snapshot of an install's durable log buffer (joined string). */
+  logsSnapshot(installationId: string): Promise<string>
   validateInstallPath(targetPath: string): Promise<PathIssue[]>
   getInstallationSize(installationId: string): Promise<{ sizeBytes: number }>
   cancelInstallationSize(): Promise<void>

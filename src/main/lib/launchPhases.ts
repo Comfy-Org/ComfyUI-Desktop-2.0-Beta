@@ -99,10 +99,30 @@ const PRE_LAUNCH_PHASES: Record<PreLaunchPhase, LaunchPhaseDef> = {
   torchRepair: { phase: 'torchRepair', match: NEVER, weight: 0.1, streaming: true },
 }
 
+/** Starter-template model download, shown AFTER `securityScan`. Synthetic +
+ *  streaming: its bytes downloaded in the background since install-begin, and a
+ *  500 ms reader in `handleLaunch` feeds the rich substatus from the shared
+ *  download state.
+ *
+ *  Weight matches the other light launch phases so a STILL-RUNNING download
+ *  fills its slot smoothly (the bar advances with the bytes). When the models
+ *  were already fetched in the background by launch time (the common case), the
+ *  reader in `handleLaunch` reports it INDETERMINATE so the slot isn't filled in
+ *  one frame — which, via the monotonic floor and the heavy `gpu` baseline that
+ *  follows, would otherwise make the bar leap. */
+const TEMPLATE_MODELS_PHASE: LaunchPhaseDef = {
+  phase: 'template-models',
+  match: NEVER,
+  weight: 0.05,
+  streaming: true,
+}
+
 export interface BuildLaunchPhasesOpts {
   /** Synthetic repair steps to prepend, in display order (e.g. a source
    *  rollback then a PyTorch restore). Omitted/empty for an unaffected launch. */
   preLaunchPhases?: PreLaunchPhase[]
+  /** When true, splice the `template-models` phase in after `securityScan`. */
+  templateModels?: boolean
 }
 
 /**
@@ -118,5 +138,11 @@ export interface BuildLaunchPhasesOpts {
  */
 export function buildLaunchPhases(_inst: unknown, opts: BuildLaunchPhasesOpts = {}): LaunchPhaseDef[] {
   const pre = (opts.preLaunchPhases ?? []).map((id) => ({ ...PRE_LAUNCH_PHASES[id] }))
-  return [...pre, ...DEFAULT_LAUNCH_PHASES.map((p) => ({ ...p }))]
+  const phases = [...pre, ...DEFAULT_LAUNCH_PHASES.map((p) => ({ ...p }))]
+  if (opts.templateModels) {
+    const after = phases.findIndex((p) => p.phase === 'securityScan')
+    const at = after >= 0 ? after + 1 : phases.length
+    phases.splice(at, 0, { ...TEMPLATE_MODELS_PHASE })
+  }
+  return phases
 }
