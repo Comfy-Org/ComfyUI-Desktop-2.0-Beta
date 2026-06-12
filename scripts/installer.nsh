@@ -99,6 +99,10 @@
 ;
 ; This keeps us on a single ToDesktop Windows build while still allowing
 ; OEM / IT provisioning flows to request machine installs explicitly.
+;
+; customInstallMode runs inside the install-mode page's PRE callback. Setting
+; $isForceMachineInstall / $isForceCurrentInstall makes that PRE re-apply the
+; mode and Abort (skip) the page.
 !macro customInstallMode
   ${GetParameters} $R0
 
@@ -111,6 +115,22 @@
     ${GetOptions} $R0 "/CURRENTUSER" $R1
     ${IfNot} ${Errors}
       StrCpy $isForceCurrentInstall 1
+    ${Else}
+      ; A non-silent update (electron-updater passes --updated but no install-
+      ; mode flag) would otherwise stop on the install-mode page — the one
+      ; pre-progress page electron-builder does NOT auto-skip on update — making
+      ; the user confirm before the progress bar. Re-use the mode initMultiUser
+      ; already detected in .onInit (so we never switch an install's scope) to
+      ; force-skip the page. Ambiguous (both/neither detected): let it show.
+      ${If} ${isUpdated}
+        ${If} $hasPerMachineInstallation == "1"
+        ${AndIf} $hasPerUserInstallation == "0"
+          StrCpy $isForceMachineInstall 1
+        ${ElseIf} $hasPerUserInstallation == "1"
+        ${AndIf} $hasPerMachineInstallation == "0"
+          StrCpy $isForceCurrentInstall 1
+        ${EndIf}
+      ${EndIf}
     ${EndIf}
   ${EndIf}
 !macroend
