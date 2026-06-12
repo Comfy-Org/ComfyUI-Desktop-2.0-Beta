@@ -3,7 +3,6 @@ import os from 'os'
 import path from 'path'
 import { execFile } from 'child_process'
 
-import { parse as parseYaml } from 'yaml'
 
 import {
   detectDesktopInstall,
@@ -30,7 +29,16 @@ import * as settings from '../settings'
 import * as telemetry from './telemetry'
 import { scrubAll } from '../../shared/piiScrub'
 import * as i18n from './i18n'
-import { KNOWN_MODEL_FOLDERS } from './models'
+import {
+  KNOWN_MODEL_FOLDERS,
+  parseExtraModelsSections,
+  parseExtraModelsYaml,
+  type ExtraModelsSection,
+} from './models'
+
+// Re-exported from ./models for back-compat with existing importers and tests.
+export { parseExtraModelsSections, parseExtraModelsYaml }
+export type { ExtraModelsSection }
 
 const MARKER_FILE = ADOPT_MARKER_FILE
 const STAGED_SOURCE_REL = path.join('legacy-staging', 'comfyui')
@@ -203,86 +211,6 @@ export async function cloneSourceFromGitDefault(
   return { ok: true }
 }
 
-/**
- * Keys under a section that are NOT per-type model-folder overrides and must
- * never be treated as model dirs. `custom_nodes` is excluded because pointing
- * the model scanner at a custom-nodes tree would register Python packages as
- * "models"; the other three are metadata legacy desktop wrote per section.
- */
-const NON_MODEL_SECTION_KEYS: ReadonlySet<string> = new Set([
-  'base_path',
-  'is_default',
-  'custom_nodes',
-  'download_model_base'
-])
-
-/** One config group from `extra_models_config.yaml`. */
-export interface ExtraModelsSection {
-  /** Section name (e.g. `comfyui_desktop`, `my_external`). */
-  name: string
-  /** `base_path:` value when present (raw, may be relative). */
-  basePath?: string
-  /** Per-type override key (`checkpoints`, `loras`, …) → path. A value may
-   *  carry multiple newline/pipe-delimited paths in the legacy format; each
-   *  becomes its own entry keyed by the same type. */
-  overrides: Array<{ type: string; path: string }>
-}
-
-/** Coerce a YAML scalar into one or more trimmed, non-empty path strings.
- *  Legacy desktop allows `|`-block and pipe-delimited multi-path values
- *  (e.g. ComfyUI's `text_encoders: models/text_encoders/\nmodels/clip/`). */
-function splitYamlPaths(value: unknown): string[] {
-  if (value == null) return []
-  return String(value)
-    .split(/[\r\n|]+/)
-    .map((s) => s.replace(/#.*$/, '').trim())
-    .filter((s) => s.length > 0)
-}
-
-/**
- * Parse `extra_models_config.yaml` into structured sections, each with its
- * optional `base_path` and every per-type model-folder override. Uses a real
- * YAML parser so `|`-block scalars and pipe-delimited multi-path values (both
- * valid in the legacy format) are handled correctly. Returns `[]` on any parse
- * failure so a malformed legacy file never aborts adoption.
- */
-export function parseExtraModelsSections(content: string): ExtraModelsSection[] {
-  let doc: unknown
-  try {
-    doc = parseYaml(content)
-  } catch {
-    return []
-  }
-  if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return []
-
-  const sections: ExtraModelsSection[] = []
-  for (const [name, raw] of Object.entries(doc as Record<string, unknown>)) {
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
-    const group = raw as Record<string, unknown>
-    const section: ExtraModelsSection = { name, overrides: [] }
-    const basePathVals = splitYamlPaths(group['base_path'])
-    if (basePathVals.length > 0) section.basePath = basePathVals[0]
-    for (const [key, value] of Object.entries(group)) {
-      if (NON_MODEL_SECTION_KEYS.has(key)) continue
-      for (const p of splitYamlPaths(value)) {
-        section.overrides.push({ type: key, path: p })
-      }
-    }
-    sections.push(section)
-  }
-  return sections
-}
-
-/**
- * Back-compat: pull out every `base_path:` string value across sections.
- * Retained for callers that only need the bare base paths. Prefer
- * `parseExtraModelsSections` for the full structured view.
- */
-export function parseExtraModelsYaml(content: string): string[] {
-  return parseExtraModelsSections(content)
-    .map((s) => s.basePath)
-    .filter((b): b is string => typeof b === 'string' && b.length > 0)
-}
 
 /**
  * Keys legacy desktop wrote into `Comfy.Server.LaunchArgs` that v2 owns

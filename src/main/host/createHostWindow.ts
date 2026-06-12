@@ -27,6 +27,7 @@ import {
   resolveTheme,
 } from '../lib/ipc/shared'
 import * as mainTelemetry from '../lib/telemetry'
+import { getUserTier } from '../lib/userTier'
 import { forwardDatadogError } from '../lib/processErrorHandlers'
 import { recordDashboardSurface, recordInstanceSurface } from '../lib/lastSession'
 import * as settings from '../settings'
@@ -296,6 +297,7 @@ function wireCheckoutPopup(
   childWindow: BrowserWindow,
   parent: BrowserWindow,
   hostContents: Electron.WebContents,
+  openedAt: number,
 ): void {
   const close = (): void => {
     if (!childWindow.isDestroyed()) childWindow.close()
@@ -317,6 +319,15 @@ function wireCheckoutPopup(
   const closeOnReturn = (_e: Electron.Event, targetUrl: string): void => {
     if (returning || childWindow.isDestroyed() || !isCheckoutReturnUrl(targetUrl)) return
     returning = true
+    // Fires when the checkout flow ENDS, including cancel — the return URL is
+    // the same first-party comfy.org page whether the user paid or backed out.
+    // `duration_ms` is measured from popup open. Purchase truth is server-side
+    // (billing:topup_completed / billing:subscription_created); do not read a
+    // conversion off this event.
+    mainTelemetry.capture('comfy.desktop.billing.checkout_returned', {
+      duration_ms: Date.now() - openedAt,
+      user_tier: getUserTier(),
+    })
     if (hostContents.isDestroyed()) {
       close()
       return
@@ -540,6 +551,15 @@ function findLiveSiblingOrigin(boundsKey: string): { x: number; y: number } | nu
   return null
 }
 
+/** Layout is safe only while the window is alive and not minimized — a
+ *  minimized window reports a bogus content size on Windows, collapsing the
+ *  child views (the grey-screen bug). */
+export function isWindowLayoutable(
+  win: Pick<BrowserWindow, 'isDestroyed' | 'isMinimized'>,
+): boolean {
+  return !win.isDestroyed() && !win.isMinimized()
+}
+
 export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
   const fx = getFactories()
   const windowKey = nextWindowKey()
@@ -638,7 +658,9 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
   // comfyTitleBar.html sits below the native buttons.
   const titleBarTotal = TITLEBAR_HEIGHT + 1
   const layoutViews = (): void => {
-    if (comfyWindow.isDestroyed()) return
+    // Skip while minimized (bogus content size would collapse the views); the
+    // 'restore'/'show' handlers re-run this once the window is visible again.
+    if (!isWindowLayoutable(comfyWindow)) return
     const entry = comfyWindows.get(windowKey)
     const [width, height] = comfyWindow.getContentSize() as [number, number]
     const bodyHeight = Math.max(0, height - titleBarTotal)
@@ -687,6 +709,30 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
   }
   comfyWindow.on('resize', layoutViews)
 
+  // Re-lay-out when the window becomes visible again: restoring at the same size
+  // emits no 'resize', and a WebContentsView won't repaint after restore on
+  // Windows unless its bounds are reapplied. Two passes (next tick + short
+  // delay) because right after restore() the OS can still report the stale
+  // minimized size for a moment; layoutViews() is idempotent so it self-heals.
+  let delayedRelayoutTimer: ReturnType<typeof setTimeout> | null = null
+  const relayoutWhenVisible = (): void => {
+    setImmediate(() => {
+      if (!isWindowLayoutable(comfyWindow)) return
+      layoutViews()
+    })
+    if (delayedRelayoutTimer) clearTimeout(delayedRelayoutTimer)
+    delayedRelayoutTimer = setTimeout(() => {
+      delayedRelayoutTimer = null
+      if (!isWindowLayoutable(comfyWindow)) return
+      layoutViews()
+    }, 50)
+  }
+  comfyWindow.on('restore', relayoutWhenVisible)
+  comfyWindow.on('show', relayoutWhenVisible)
+  comfyWindow.on('closed', () => {
+    if (delayedRelayoutTimer) clearTimeout(delayedRelayoutTimer)
+  })
+
   if (saved?.maximized) comfyWindow.maximize()
 
   // On macOS fullscreen the traffic-light buttons disappear, so the title bar
@@ -712,6 +758,8 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
   const persistBounds = (): void => {
     const live = comfyWindows.get(windowKey)
     if (!live || isChooserHost(live)) return
+    // Don't persist a minimized window's bogus bounds (would poison next launch).
+    if (!isWindowLayoutable(comfyWindow)) return
     saveWindowBounds(liveBoundsKeyFor(live), comfyWindow)
   }
   comfyWindow.on('resize', persistBounds)
@@ -1098,16 +1146,21 @@ export function buildComfyView(
 
   // Set by the window-open handler immediately before the matching
   // `did-create-window` fires (synchronous pairing), then reset there so
-  // it can never leak to a later non-checkout popup.
+  // it can never leak to a later non-checkout popup. `nextCheckoutOpenedAt`
+  // carries the popup-open timestamp through to `wireCheckoutPopup` so the
+  // return event can report how long the checkout flow took.
   let nextPopupIsCheckout = false
+  let nextCheckoutOpenedAt = 0
 
   comfyContents.on('did-create-window', (childWindow) => {
     const isCheckout = nextPopupIsCheckout
+    const openedAt = nextCheckoutOpenedAt
     nextPopupIsCheckout = false
+    nextCheckoutOpenedAt = 0
     childWindow.setIcon(APP_ICON)
     if (process.platform !== 'darwin') childWindow.removeMenu()
     injectMacPasskeyWarning(childWindow)
-    if (isCheckout) wireCheckoutPopup(childWindow, comfyWindow, comfyContents)
+    if (isCheckout) wireCheckoutPopup(childWindow, comfyWindow, comfyContents, openedAt)
   })
   comfyContents.setWindowOpenHandler(({ url: childUrl }) => {
     // Intercept Firebase auth popups (`<authDomain>/__/auth/handler?...`)
@@ -1139,6 +1192,11 @@ export function buildComfyView(
       // dragged/closed reliably, so it keeps its frame. preload:
       // undefined strips our title-bar bridge.
       nextPopupIsCheckout = true
+      nextCheckoutOpenedAt = Date.now()
+      mainTelemetry.capture('comfy.desktop.billing.checkout_opened', {
+        source: 'cloud_webview',
+        user_tier: getUserTier(),
+      })
       const bounds = checkoutPopupBounds(comfyWindow)
       return {
         action: 'allow',

@@ -13,7 +13,7 @@ export interface ComfyArgDef {
   /** The full flag string, e.g. "--port" */
   flag: string
   help: string
-  type: 'boolean' | 'value' | 'optional-value'
+  type: 'boolean' | 'value' | 'optional-value' | 'multi-value'
   /** Metavar from argparse (e.g. "PORT", "IP") */
   metavar?: string
   choices?: string[]
@@ -68,6 +68,7 @@ const CATEGORY_MAP: Record<string, string> = {
   'disable-async-offload': 'GPU & VRAM',
   'disable-dynamic-vram': 'GPU & VRAM',
   'enable-dynamic-vram': 'GPU & VRAM',
+  'fast-disk': 'GPU & VRAM',
   'force-non-blocking': 'GPU & VRAM',
   'disable-smart-memory': 'GPU & VRAM',
   'disable-pinned-memory': 'GPU & VRAM',
@@ -98,6 +99,7 @@ const CATEGORY_MAP: Record<string, string> = {
   'use-pytorch-cross-attention': 'Performance',
   'use-sage-attention': 'Performance',
   'use-flash-attention': 'Performance',
+  'enable-triton-backend': 'Performance',
   'disable-xformers': 'Performance',
   'force-upcast-attention': 'Performance',
   'dont-upcast-attention': 'Performance',
@@ -152,22 +154,35 @@ function getCategory(flagName: string): string {
   return CATEGORY_MAP[flagName] || 'Other'
 }
 
-/** Parse the usage line's mutually exclusive groups: `[--flag1 | --flag2 | --flag3]`. */
+/** Parse the usage line's mutually exclusive groups: `[--flag1 | --flag2 | --flag3]`.
+ *  Walks brackets depth-first so nested optional metavars (e.g. `--cache-ram [GB ...]`)
+ *  don't prematurely close the surrounding group and drop later members. */
 function parseExclusiveGroups(usageLine: string): Map<string, string> {
   const flagToGroup = new Map<string, string>()
-  // Match bracketed/parenthesized groups with pipes: [--a | --b] or (--a | --b)
-  const groupRegex = /[[(]([^\])]*\|[^\])]*)[)\]]/g
-  let match: RegExpExecArray | null
   let groupId = 0
-  while ((match = groupRegex.exec(usageLine)) !== null) {
-    const content = match[1]!
-    const flags = content.match(/--[\w_-]+/g)
-    if (flags && flags.length > 1) {
-      const gid = `group_${groupId++}`
-      for (const flag of flags) {
-        flagToGroup.set(flag.slice(2), gid)
+  for (let i = 0; i < usageLine.length; i++) {
+    const open = usageLine[i]
+    if (open !== '[' && open !== '(') continue
+    // Find the matching close bracket, tracking nesting of both [] and ().
+    let depth = 0
+    let j = i
+    for (; j < usageLine.length; j++) {
+      const c = usageLine[j]
+      if (c === '[' || c === '(') depth++
+      else if ((c === ']' || c === ')') && --depth === 0) break
+    }
+    const content = usageLine.slice(i + 1, j)
+    // A mutually exclusive group is a bracket containing `|`-separated alternatives.
+    if (content.includes('|')) {
+      const flags = content.match(/--[\w_-]+/g)
+      if (flags && flags.length > 1) {
+        const gid = `group_${groupId++}`
+        for (const flag of flags) {
+          flagToGroup.set(flag.slice(2), gid)
+        }
       }
     }
+    i = j // skip the whole group; nested brackets are part of it
   }
   return flagToGroup
 }
@@ -175,7 +190,7 @@ function parseExclusiveGroups(usageLine: string): Map<string, string> {
 interface ParsedOption {
   name: string
   flag: string
-  type: 'boolean' | 'value' | 'optional-value'
+  type: 'boolean' | 'value' | 'optional-value' | 'multi-value'
   metavar?: string
   choices?: string[]
   help: string
@@ -242,6 +257,10 @@ function parseOptionBlock(flagLine: string, helpText: string): ParsedOption {
   const flag = `--${name}`
   const afterFlag = flagLine.slice(flagLine.indexOf(flag) + flag.length).trim()
 
+  // A `...` marks a variadic flag (argparse nargs `*`/`+`), e.g. `--cache-ram [GB ...]`
+  // or `--whitelist-custom-nodes WL [WL ...]`, which accept several space-separated values.
+  const isMulti = afterFlag.includes('...')
+
   // Choices: {a,b,c} or [a,b,c] or [{a,b,c}]
   const choicesMatch = afterFlag.match(/\[?\{([^}]+)\}\]?/) || afterFlag.match(/\[([\w,]+)\]/)
   if (choicesMatch) {
@@ -250,7 +269,7 @@ function parseOptionBlock(flagLine: string, helpText: string): ParsedOption {
     const isOptional = afterFlag.startsWith('[')
     return {
       name, flag, help: helpText, choices,
-      type: isOptional ? 'optional-value' : 'value',
+      type: isMulti ? 'multi-value' : isOptional ? 'optional-value' : 'value',
       metavar: undefined,
     }
   }
@@ -261,7 +280,7 @@ function parseOptionBlock(flagLine: string, helpText: string): ParsedOption {
     const isOptional = afterFlag.startsWith('[')
     return {
       name, flag, help: helpText,
-      type: isOptional ? 'optional-value' : 'value',
+      type: isMulti ? 'multi-value' : isOptional ? 'optional-value' : 'value',
       metavar: metaMatch[1]!.replace(/\s+\.\.\./, ''),
     }
   }

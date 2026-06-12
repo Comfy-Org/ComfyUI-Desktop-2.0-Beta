@@ -104,6 +104,15 @@ export function getModelDownloadContentScript(): string {
     }
   }
 
+  // Strip the trailing reference count from a category header, e.g.
+  // "clip_vision (1)" → "clip_vision". Returns the raw (untranslated) folder
+  // name; collapses internal whitespace first so multi-line headers normalize.
+  function parseDirectoryName(text) {
+    var normalized = text.replace(/\\s+/g, ' ').trim();
+    var match = normalized.match(/^(.*?)\\s*\\(\\d+\\)\\s*$/);
+    return match ? match[1].trim() : normalized;
+  }
+
   // ---- Scrape the right side panel Errors tab (Missing Models section) ----
   function scrapeErrorsTab() {
     var panel = document.querySelector('[data-testid="properties-panel"]');
@@ -128,10 +137,7 @@ export function getModelDownloadContentScript(): string {
       // e.g. "clip_vision (1)" → "clip_vision"
       var headerSpan = cat.querySelector('p[class*="text-destructive-background-hover"] span');
       if (!headerSpan) continue;
-      var headerText = headerSpan.textContent.trim();
-      // Strip the trailing count e.g. " (1)" or " (3)"
-      var dirMatch = headerText.match(/^(.+?)\\s*\\(\\d+\\)\\s*$/);
-      var directory = dirMatch ? dirMatch[1].trim() : headerText;
+      var directory = parseDirectoryName(headerSpan.textContent);
       if (!directory) continue;
 
       // Find all model name elements within this category
@@ -145,6 +151,48 @@ export function getModelDownloadContentScript(): string {
     }
   }
 
+  // ---- Scrape the right side panel missing-model error group ----
+  // The current frontend renders missing models inside the Errors tab as an
+  // accordion group with a stable data-testid, grouped by directory. We read
+  // only language-independent signals so the mapping survives i18n:
+  //   - the section anchor data-testid="error-group-missing-model"
+  //   - the per-category header text, whose directory portion is the raw
+  //     model folder name (e.g. "checkpoints", "clip_vision"); only the
+  //     trailing " (N)" reference count is stripped
+  //   - each model name from its <p title="..."> (the actual filename)
+  // No badge labels, Download aria-labels, or presentation classes are read.
+  function scrapeMissingModelErrorGroup() {
+    var section = document.querySelector('[data-testid="error-group-missing-model"]');
+    if (!section) return;
+
+    // The download-all actions bar is a sibling of the per-directory category
+    // groups inside the card; it only renders when downloadable models exist,
+    // which is exactly when we need a directory mapping.
+    var actions = section.querySelector('[data-testid="missing-model-actions"]');
+    if (!actions || !actions.parentElement) return;
+    var card = actions.parentElement;
+
+    var groups = card.children;
+    for (var g = 0; g < groups.length; g++) {
+      var group = groups[g];
+      if (group === actions) continue;
+
+      // The category header is the first <p> without a title attribute; model
+      // name <p> elements always carry a title, so this disambiguates them.
+      var header = group.querySelector('p:not([title])');
+      if (!header) continue;
+
+      var directory = parseDirectoryName(header.textContent);
+      if (!directory) continue;
+
+      var nameEls = group.querySelectorAll('p[title]');
+      for (var n = 0; n < nameEls.length; n++) {
+        var name = nameEls[n].getAttribute('title');
+        if (name) modelNameCache[name] = directory;
+      }
+    }
+  }
+
   var dialogWasOpen = false;
   var errorsTabWasOpen = false;
 
@@ -153,16 +201,17 @@ export function getModelDownloadContentScript(): string {
     var newOpen = !!document.querySelector('[aria-labelledby="global-missing-models-warning"]');
     var isOpen = legacyOpen || newOpen;
 
-    // Check if the right side panel Errors tab has missing models
-    var panel = document.querySelector('[data-testid="properties-panel"]');
+    // Check if the right side panel Errors tab has missing models. The current
+    // frontend exposes a stable data-testid on the missing-model error group;
+    // older builds rendered a properties-panel whose only signal was a
+    // translated "Download " aria-label (kept as a backward-compat fallback).
+    var errorGroup = document.querySelector('[data-testid="error-group-missing-model"]');
+    var legacyPanel = document.querySelector('[data-testid="properties-panel"]');
     var errorsTabOpen = false;
-    if (panel) {
-      // The Missing Models section title contains "Missing Models" in a
-      // span with the destructive-background-hover style, but we need a
-      // more specific check: look for a download button with aria-label
-      // starting with "Download " inside the panel, which only appears in
-      // the missing models section.
-      var downloadBtns = panel.querySelectorAll('button[aria-label^="Download "]');
+    if (errorGroup) {
+      errorsTabOpen = true;
+    } else if (legacyPanel) {
+      var downloadBtns = legacyPanel.querySelectorAll('button[aria-label^="Download "]');
       errorsTabOpen = downloadBtns.length > 0;
     }
 
@@ -182,7 +231,8 @@ export function getModelDownloadContentScript(): string {
 
     if (errorsTabOpen) {
       errorsTabWasOpen = true;
-      scrapeErrorsTab();
+      if (errorGroup) scrapeMissingModelErrorGroup();
+      else scrapeErrorsTab();
     } else if (errorsTabWasOpen) {
       errorsTabWasOpen = false;
       // Only clear modelNameCache if dialog is also not providing data

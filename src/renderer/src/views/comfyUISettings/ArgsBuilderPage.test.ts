@@ -152,6 +152,18 @@ describe('ArgsBuilderPage — exclusive group dropdown', () => {
     expect(trigger?.text()).toContain('--lowvram')
   })
 
+  it('shows the selected member full help below the dropdown (no reopen needed)', async () => {
+    const wrapper = await mountPage('--lowvram')
+    const help = wrapper.findAll('.args-page-cluster-help')
+    expect(help.length).toBeGreaterThan(0)
+    expect(help[0]!.text()).toBe('Reduce VRAM usage.')
+  })
+
+  it('shows no cluster help until a member is selected', async () => {
+    const wrapper = await mountPage()
+    expect(wrapper.find('.args-page-cluster-help').exists()).toBe(false)
+  })
+
   it('promotes an active exclusive group to the Active section as the same dropdown', async () => {
     const wrapper = await mountPage('--lowvram')
     const section = activeSection(wrapper)

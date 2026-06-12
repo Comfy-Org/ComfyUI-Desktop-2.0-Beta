@@ -16,6 +16,21 @@ const SCHEMA: ComfyArgDef[] = [
     metavar: '[HOST]',
     category: 'Network',
   },
+  {
+    name: 'cache-ram',
+    flag: '--cache-ram',
+    help: 'RAM caching thresholds.',
+    type: 'multi-value',
+    metavar: 'GB',
+    category: 'Cache',
+  },
+  {
+    name: 'fp8_e8m0fnu-unet',
+    flag: '--fp8_e8m0fnu-unet',
+    help: 'Use fp8 e8m0 for the diffusion model.',
+    type: 'boolean',
+    category: 'Precision',
+  },
 ]
 
 function setup(initial = '', initialFocus = true) {
@@ -72,6 +87,24 @@ describe('useArgsAutocomplete — searchQuery', () => {
     // either a host OR a new flag — keep the dropdown alive.
     const { ac } = setup('--listen lo')
     expect(ac.searchQuery.value).toBe('lo')
+  })
+
+  it('suppresses while filling a multi-value flag (first value)', () => {
+    // `--cache-ram 0`: `0` is a threshold value, not the start of a flag, so it
+    // must not surface flags whose name contains "0" (e.g. fp8_e8m0fnu-unet).
+    const { ac } = setup('--cache-ram 0')
+    expect(ac.searchQuery.value).toBe('')
+  })
+
+  it('suppresses on later values of a multi-value flag', () => {
+    // The flag owns every following value, so the 2nd value is suppressed too.
+    const { ac } = setup('--cache-ram 4 8')
+    expect(ac.searchQuery.value).toBe('')
+  })
+
+  it('does not suggest flag names while typing a multi-value value', () => {
+    const { ac } = setup('--cache-ram 0')
+    expect(ac.matches.value).toEqual([])
   })
 
   it('suppresses when the trailing token is an exact known flag with --', () => {

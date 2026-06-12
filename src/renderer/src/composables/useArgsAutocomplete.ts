@@ -35,14 +35,23 @@ export function useArgsAutocomplete(opts: UseArgsAutocompleteOptions) {
     const allTokens = val.split(/\s+/)
     const lastToken = allTokens.pop() ?? ''
     if (!lastToken) return ''
-    // Suppress while filling a `value`-type flag's required value, so
-    // `--port 81` doesn't surface flags starting with "81".
+    // Suppress while filling in a flag's value(s), so `--port 81` or
+    // `--cache-ram 0` don't surface flags whose name contains "81"/"0".
     if (!lastToken.startsWith('-') && allTokens.length > 0) {
-      const prev = allTokens[allTokens.length - 1]!
-      if (prev.startsWith('--') && !prev.includes('=')) {
-        const prevName = prev.slice(2)
-        const prevDef = schema.value.find((a) => a.name === prevName)
-        if (prevDef && prevDef.type === 'value') return ''
+      // Walk back over the run of value tokens to the flag that governs them.
+      let k = allTokens.length - 1
+      while (k >= 0 && !allTokens[k]!.startsWith('-')) k--
+      const flagTok = k >= 0 ? allTokens[k]! : undefined
+      if (flagTok && flagTok.startsWith('--') && !flagTok.includes('=')) {
+        const def = schema.value.find((a) => a.name === flagTok.slice(2))
+        if (def) {
+          const valuesBefore = allTokens.length - 1 - k
+          // A variadic flag owns every following value; a required `value` flag
+          // owns only the first. `optional-value` is left alone: its next token
+          // is ambiguous (a value or a new flag the user is starting to type).
+          if (def.type === 'multi-value') return ''
+          if (def.type === 'value' && valuesBefore === 0) return ''
+        }
       }
     }
     if (lastToken === '-' || lastToken === '--') return '--'

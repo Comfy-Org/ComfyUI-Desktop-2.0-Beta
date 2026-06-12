@@ -773,6 +773,7 @@ defineExpose({
                 :sections="storageSections"
                 :pending-restart-field-ids="pendingRestartFieldIds"
                 @update-field="updateField"
+                @refresh="reload"
               />
             </div>
             <div

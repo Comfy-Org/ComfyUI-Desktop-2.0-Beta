@@ -2899,6 +2899,15 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
     void openPathHelper(targetPath)
   })
 
+  // Reveal a file in the OS file manager (highlights it in its parent folder),
+  // e.g. extra_model_paths.yaml, which shouldn't open in its default app.
+  ipcMain.on('comfy-titlepopup:global-settings-reveal-path', (event, payload: { path?: unknown }) => {
+    if (!settingsEntryFor(event.sender.id)) return
+    const targetPath = payload?.path
+    if (typeof targetPath !== 'string' || targetPath.length === 0) return
+    shell.showItemInFolder(targetPath)
+  })
+
   // External URL — restricted to http/https.
   ipcMain.on(
     'comfy-titlepopup:global-settings-open-external',

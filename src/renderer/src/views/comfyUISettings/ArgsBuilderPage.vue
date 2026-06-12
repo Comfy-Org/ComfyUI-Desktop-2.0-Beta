@@ -104,7 +104,7 @@ function getValue(name: string): string {
 }
 
 function commit(known: Map<string, string>): void {
-  const next = serialize(known, parsed.value.extra)
+  const next = serialize(known, parsed.value.extra, schema.value)
   localValue.value = next
   emit('update', next)
 }
@@ -163,6 +163,22 @@ function activeInGroup(group: string): string {
     if (a.exclusiveGroup === group && parsed.value.known.has(a.name)) return a.name
   }
   return ''
+}
+
+// The currently-selected member of an exclusive group, so the cluster can show
+// its full help text below the dropdown (the dropdown options are collapsed
+// once one is chosen).
+function activeDefInGroup(group: string): ComfyArgDef | null {
+  const name = activeInGroup(group)
+  if (!name) return null
+  return schema.value.find((a) => a.name === name) ?? null
+}
+
+// The active member of an exclusive group, when it takes a value — lets the
+// cluster show a value input (e.g. `--cache-ram 4 8`, `--cache-lru 10`).
+function activeValueDefInGroup(group: string): ComfyArgDef | null {
+  const def = activeDefInGroup(group)
+  return def && def.type !== 'boolean' ? def : null
 }
 
 // Dropdown options for an exclusive cluster: a synthetic "None" entry that
@@ -418,6 +434,21 @@ function onRawChange(value: string): void {
                 :placeholder="t('comfyUISettings.argsExclusiveNone', 'None (default)')"
                 @update:model-value="(v) => onExclusivePick(item.group!, v)"
               />
+              <BaseInput
+                v-if="activeValueDefInGroup(item.group)"
+                class="args-page-value-input"
+                :model-value="getValue(activeValueDefInGroup(item.group)!.name)"
+                :placeholder="
+                  activeValueDefInGroup(item.group)!.type === 'multi-value'
+                    ? t('comfyUISettings.argsMultiPlaceholder', 'space-separated values')
+                    : (activeValueDefInGroup(item.group)!.metavar ??
+                      t('comfyUISettings.argsValuePlaceholder', 'value'))
+                "
+                @change="(v) => setValue(activeValueDefInGroup(item.group!)!, v)"
+              />
+              <p v-if="activeDefInGroup(item.group)?.help" class="args-page-cluster-help">
+                {{ activeDefInGroup(item.group)!.help }}
+              </p>
             </div>
           </template>
 
@@ -441,15 +472,19 @@ function onRawChange(value: string): void {
                 <BaseInput
                   v-if="
                     isActive(item.arg.name) &&
-                    (item.arg.type === 'value' || item.arg.type === 'optional-value')
+                    (item.arg.type === 'value' ||
+                      item.arg.type === 'optional-value' ||
+                      item.arg.type === 'multi-value')
                   "
                   class="args-page-value-input"
                   :model-value="getValue(item.arg.name)"
                   :placeholder="
-                    item.arg.metavar ??
-                    (item.arg.type === 'optional-value'
-                      ? t('comfyUISettings.argsOptionalPlaceholder', 'optional')
-                      : t('comfyUISettings.argsValuePlaceholder', 'value'))
+                    item.arg.type === 'multi-value'
+                      ? t('comfyUISettings.argsMultiPlaceholder', 'space-separated values')
+                      : (item.arg.metavar ??
+                        (item.arg.type === 'optional-value'
+                          ? t('comfyUISettings.argsOptionalPlaceholder', 'optional')
+                          : t('comfyUISettings.argsValuePlaceholder', 'value')))
                   "
                   @change="(v) => setValue(item.arg!, v)"
                 />
@@ -799,5 +834,14 @@ function onRawChange(value: string): void {
   text-transform: none;
   letter-spacing: 0;
   color: color-mix(in srgb, var(--text-muted) 85%, transparent);
+}
+
+/* Full help text for the selected cluster member; wraps freely (no clamping). */
+.args-page-cluster-help {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
 }
 </style>

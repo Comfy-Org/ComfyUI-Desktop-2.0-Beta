@@ -129,6 +129,16 @@ function parseArgs(raw: string): ParsedArgs {
         } else if (eqValue !== undefined) {
           known.set(name, eqValue)
           i++
+        } else if (def.type === 'multi-value') {
+          // Variadic flag: consume all following non-flag tokens, space-joined.
+          const values: string[] = []
+          let j = i + 1
+          while (j < tokens.length && !tokens[j]!.startsWith('--')) {
+            values.push(tokens[j]!)
+            j++
+          }
+          known.set(name, values.join(' '))
+          i = j
         } else {
           const next = tokens[i + 1]
           if (next !== undefined && !next.startsWith('--')) {
@@ -158,11 +168,16 @@ function parseArgs(raw: string): ParsedArgs {
 }
 
 function serialize(known: Map<string, string>, extra: string[]): string {
+  const multiValue = new Set(
+    schema.value.filter((a) => a.type === 'multi-value').map((a) => a.name)
+  )
   const parts: string[] = []
   for (const [name, value] of known) {
     parts.push(`--${name}`)
     if (value !== '') {
-      parts.push(value.includes(' ') ? `"${value}"` : value)
+      // Multi-value flags hold already space-separated tokens; emit them raw so
+      // they re-tokenize into distinct args instead of one quoted blob.
+      parts.push(multiValue.has(name) || !value.includes(' ') ? value : `"${value}"`)
     }
   }
   parts.push(...extra.map((e) => (e.includes(' ') ? `"${e}"` : e)))
@@ -205,11 +220,20 @@ const searchQuery = computed(() => {
   if (!lastToken) return ''
   // Suppress autocomplete while filling in a value for a value-expecting flag.
   if (!lastToken.startsWith('-') && allTokens.length > 0) {
-    const prev = allTokens[allTokens.length - 1]!
-    if (prev.startsWith('--') && !prev.includes('=')) {
-      const prevName = prev.slice(2)
-      const prevDef = schema.value.find((a) => a.name === prevName)
-      if (prevDef && prevDef.type === 'value') return ''
+    // Walk back over the run of value tokens to the flag that governs them.
+    let k = allTokens.length - 1
+    while (k >= 0 && !allTokens[k]!.startsWith('-')) k--
+    const flagTok = k >= 0 ? allTokens[k]! : undefined
+    if (flagTok && flagTok.startsWith('--') && !flagTok.includes('=')) {
+      const def = schema.value.find((a) => a.name === flagTok.slice(2))
+      if (def) {
+        const valuesBefore = allTokens.length - 1 - k
+        // A variadic flag owns every following value; a required `value` flag
+        // owns only the first. `optional-value` is left alone: its next token
+        // is ambiguous (a value or a new flag the user is starting to type).
+        if (def.type === 'multi-value') return ''
+        if (def.type === 'value' && valuesBefore === 0) return ''
+      }
     }
   }
   if (lastToken === '-' || lastToken === '--') return '--' // bare - or -- triggers full list
@@ -429,12 +453,20 @@ const textTokens = computed<TextToken[]>(() => {
           i++
         }
       } else if (eqValue !== undefined) {
-        if (eqValue === '' && def.type === 'value') {
+        if (eqValue === '' && (def.type === 'value' || def.type === 'multi-value')) {
           result.push({ text: token, status: 'missing-value', tooltip: `Requires a value: ${def.metavar || 'VALUE'}` })
         } else {
           result.push({ text: token, status: 'ok' })
         }
         i++
+      } else if (def.type === 'multi-value') {
+        // Variadic flag: the flag and every following non-flag value are valid.
+        result.push({ text: token, status: 'ok' })
+        i++
+        while (i < tokens.length && !tokens[i]!.startsWith('--')) {
+          result.push({ text: tokens[i]!, status: 'ok' })
+          i++
+        }
       } else if (def.type === 'value') {
         const next = tokens[i + 1]
         if (next !== undefined && !next.startsWith('--')) {

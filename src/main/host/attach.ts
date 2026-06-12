@@ -8,6 +8,7 @@ import { _operationAborts, sourceMap } from '../lib/ipc/shared'
 import { TITLEBAR_BG } from '../lib/theme'
 import * as mainTelemetry from '../lib/telemetry'
 import { refreshCloudUserTier } from '../lib/userTier'
+import { noteCloudEntered } from '../lib/cloudEntry'
 import { forwardDatadogError } from '../lib/processErrorHandlers'
 import { recordInstanceSurface } from '../lib/lastSession'
 import { clearPendingTemplateOpen, installationEvents, type InstallationRecord } from '../installations'
@@ -413,6 +414,9 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
       // kill-switch to let paying users through `disabled`. Fire-and-
       // forget — failures leave the tier cache as-is.
       void refreshCloudUserTier(comfyContents)
+      // Mark cloud entry for the acquisition funnel. Deduped per session
+      // and carries `first_time` for the first-ever cloud entry.
+      noteCloudEntered()
     }
   }
   comfyContents.on('dom-ready', onDomReady)
