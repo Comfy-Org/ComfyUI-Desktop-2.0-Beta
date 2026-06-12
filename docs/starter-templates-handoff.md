@@ -176,8 +176,8 @@ First `pnpm dev` run showed the model step **starting at 0** and logs **stuck at
 - [x] **VRAM warn-but-allow** in the picker — `TemplatePickerStep` warns (never blocks) when `detectedVramBytes < recommendedVramBytes`; silent when VRAM unknown. VRAM fetched via `detectGPU()` on wizard open.
 
 **F. Failure UX**
-- [ ] Whole-task failure: message + proceed (substatus error is the surface)
-- [ ] App-quit-mid-download → alert dialog on close
+- [x] Whole-task failure: message + proceed — substatus error (red/bold/X) is the surface; launch never fails on it (already true via the non-fatal task)
+- [x] App-quit-mid-download → confirm dialog on `before-quit` (`hasActiveTemplateDownloads()` + synchronous `showMessageBoxSync`; "Quit Anyway" / "Keep Downloading", default = keep). No resume.
 
 **G. Verification / tests**
 - [ ] Unit tests: retry wrapper, tray-mirror mapping, disk-block + VRAM-warn decisions (pure fns)

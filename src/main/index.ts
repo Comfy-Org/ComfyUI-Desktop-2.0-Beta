@@ -1,4 +1,4 @@
-import { app, Menu, ipcMain, net } from 'electron'
+import { app, Menu, ipcMain, net, dialog } from 'electron'
 import type { BrowserWindow, WebContentsView } from 'electron'
 import type { Tray } from 'electron'
 import path from 'path'
@@ -40,6 +40,7 @@ import {
   downloadEvents,
   getDownloadsTrayState
 } from './lib/comfyDownloadManager'
+import { hasActiveTemplateDownloads } from './sources/standalone/templateDownloadTask'
 import { registerAssetDownloadHandlers } from './lib/ipc/registerAssetDownloadHandlers'
 import { registerDownloadHandlers } from './lib/ipc/registerDownloadHandlers'
 import {
@@ -2041,7 +2042,25 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     }
   })
 
-  app.on('before-quit', () => {
+  app.on('before-quit', (event) => {
+    // Template models are still downloading in the background: quitting drops
+    // them (no resume). Warn once and let the user back out. Synchronous dialog
+    // fits before-quit's sync teardown; only gate a real user quit (not an
+    // in-progress relaunch/update quit) and skip once already confirmed.
+    if (!isQuitInProgress() && hasActiveTemplateDownloads()) {
+      const choice = dialog.showMessageBoxSync({
+        type: 'warning',
+        buttons: [i18n.t('templateQuit.quit'), i18n.t('templateQuit.cancel')],
+        defaultId: 1,
+        cancelId: 1,
+        title: i18n.t('templateQuit.title'),
+        message: i18n.t('templateQuit.message'),
+      })
+      if (choice === 1) {
+        event.preventDefault()
+        return
+      }
+    }
     if (!isQuitInProgress()) {
       setQuitReason('user-quit')
       ipc.cancelAll()

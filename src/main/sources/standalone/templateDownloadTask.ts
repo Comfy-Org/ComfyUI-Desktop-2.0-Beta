@@ -50,6 +50,15 @@ const MODEL_DOWNLOAD_RETRIES = 2
 const _templateDownloads = new Map<string, TemplateDownloadState>()
 const _templateAborts = new Map<string, AbortController>()
 
+/** True when any template-model download is still in flight (not terminal).
+ *  Drives the "downloads still running" confirm on app quit. */
+export function hasActiveTemplateDownloads(): boolean {
+  for (const state of _templateDownloads.values()) {
+    if (!isTerminal(state.status)) return true
+  }
+  return false
+}
+
 export function getTemplateDownloadState(
   installationId: string,
 ): TemplateDownloadState | undefined {

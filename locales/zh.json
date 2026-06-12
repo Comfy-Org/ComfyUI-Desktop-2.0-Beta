@@ -279,6 +279,12 @@
     "nameWhitespace": "输入名称，或留空使用建议名称。",
     "urlInvalid": "请输入有效 URL（例如 http://localhost:8188）。"
   },
+  "templateQuit": {
+    "title": "模板模型仍在下载",
+    "message": "现在退出将停止下载，且无法续传。你可以等其完成后再退出。",
+    "quit": "仍然退出",
+    "cancel": "继续下载"
+  },
   "diskSpace": {
     "free": "可用 {size}",
     "checking": "正在检查磁盘空间…",

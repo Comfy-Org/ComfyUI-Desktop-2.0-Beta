@@ -279,6 +279,12 @@
     "nameWhitespace": "Enter a name, or leave blank to use the suggested one.",
     "urlInvalid": "Enter a valid URL (e.g. http://localhost:8188)."
   },
+  "templateQuit": {
+    "title": "Template models are still downloading",
+    "message": "Quitting now will stop the download — it won't resume. You can let it finish, then quit.",
+    "quit": "Quit Anyway",
+    "cancel": "Keep Downloading"
+  },
   "diskSpace": {
     "free": "{size} free",
     "checking": "Checking disk space…",
