@@ -775,6 +775,7 @@
     "templateModelsDownloading": "{file} ({index} of {count}) — {doneGb} / {totalGb} GB at {speed} MB/s · {eta} remaining",
     "templateModelsDone": "Template models ready",
     "templateModelsError": "Couldn't download some models — you can grab them in‑app",
+    "templateModelsNoSpace": "Not enough disk space for the template models — free up space and grab them in‑app",
     "templateModelsCancelled": "Model download cancelled",
     "python": "Python",
     "pytorch": "PyTorch",

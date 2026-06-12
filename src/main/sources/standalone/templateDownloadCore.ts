@@ -54,10 +54,69 @@ export interface TemplateDownloadSummary {
   etaSecs: number
   /** 0–100, clamped; -1 when no denominator is known yet. */
   percent: number
+  /** Carried through from the state so the formatter can pick error-specific
+   *  copy (e.g. the disk-space message) without re-reading the state. */
+  error?: string
 }
 
 export function isTerminal(status: TemplateDownloadStatus): boolean {
   return status === 'done' || status === 'error' || status === 'cancelled'
+}
+
+/**
+ * Run `attempt` up to `1 + retries` times, returning the first success. Rethrows
+ * the last error once all tries are exhausted. Stops early (no retry) when
+ * `isFatal` returns true — used so a user cancel isn't retried. `onRetry(next,
+ * err)` fires before each re-attempt for logging. Pure (no module state) so the
+ * retry policy is unit-testable without a real download.
+ */
+export async function withRetry<T>(
+  attempt: () => Promise<T>,
+  retries: number,
+  opts?: {
+    isFatal?: (err: unknown) => boolean
+    onRetry?: (nextAttempt: number, err: unknown) => void
+  },
+): Promise<T> {
+  let lastErr: unknown
+  for (let i = 0; i <= retries; i++) {
+    try {
+      return await attempt()
+    } catch (err) {
+      lastErr = err
+      if (opts?.isFatal?.(err)) throw err
+      if (i < retries) opts?.onRetry?.(i + 2, err)
+    }
+  }
+  throw lastErr
+}
+
+/** Windows MAX_PATH is 260 chars (259 usable + null terminator). */
+const WIN_MAX_PATH = 259
+
+/**
+ * Defensively shorten a model filename so `<dir>/<stem><ext>` stays within the
+ * Windows MAX_PATH limit (no-op on other platforms / short paths). Mirrors the
+ * truncation `startModelDownload` applies, so our `download()` write can't fail
+ * on a long upstream filename. Returns the (possibly shortened) filename, or
+ * null when even an empty stem wouldn't fit. Pure — `platform` is injected so it
+ * can be unit-tested off Windows.
+ */
+export function truncateForMaxPath(
+  destDir: string,
+  filename: string,
+  platform: NodeJS.Platform = process.platform,
+): string | null {
+  if (platform !== 'win32') return filename
+  const sep = '\\'
+  const fullLen = destDir.length + sep.length + filename.length
+  if (fullLen <= WIN_MAX_PATH) return filename
+  const dot = filename.lastIndexOf('.')
+  const ext = dot > 0 ? filename.slice(dot) : ''
+  const stem = dot > 0 ? filename.slice(0, dot) : filename
+  const available = WIN_MAX_PATH - destDir.length - sep.length - ext.length
+  if (available <= 0) return null
+  return stem.slice(0, available) + ext
 }
 
 /**
@@ -125,6 +184,7 @@ export function summarizeTemplateState(
     speedMBs: state.speedMBs,
     etaSecs: state.etaSecs,
     percent,
+    error: state.error,
   }
 }
 
@@ -132,23 +192,43 @@ export function gbStr(bytes: number): string {
   return (bytes / (1024 * 1024 * 1024)).toFixed(bytes >= 10 * 1024 * 1024 * 1024 ? 0 : 1)
 }
 
+/** Internal task error codes that map to a dedicated substatus message. */
+export const DISK_SPACE_ERROR = 'insufficient-disk'
+
+/** i18n key for each non-downloading status (the `downloading` line is built
+ *  separately since it interpolates per-file figures). */
+const STATUS_MESSAGE_KEY: Record<
+  Exclude<TemplateDownloadStatus, 'downloading'>,
+  string
+> = {
+  resolving: 'standalone.templateModelsResolving',
+  done: 'standalone.templateModelsDone',
+  error: 'standalone.templateModelsError',
+  cancelled: 'standalone.templateModelsCancelled',
+}
+
 /**
  * Build the rich, localized substatus line shown under the active step. Pure
  * (state → string); called only by the 500 ms reader, never the hot path.
  */
-export function formatTemplateSubStatus(s: TemplateDownloadSummary): string {
-  if (s.status === 'resolving') return t('standalone.templateModelsResolving')
-  if (s.status === 'done') return t('standalone.templateModelsDone')
-  if (s.status === 'error') return t('standalone.templateModelsError')
-  if (s.status === 'cancelled') return t('standalone.templateModelsCancelled')
-  const speed = s.speedMBs > 0 ? s.speedMBs.toFixed(1) : '0.0'
-  const eta = s.etaSecs >= 0 ? formatTime(s.etaSecs) : '—'
+export function formatTemplateSubStatus(summary: TemplateDownloadSummary): string {
+  const { status } = summary
+
+  if (status === 'error' && summary.error === DISK_SPACE_ERROR) {
+    return t('standalone.templateModelsNoSpace')
+  }
+  if (status !== 'downloading') {
+    return t(STATUS_MESSAGE_KEY[status])
+  }
+
+  const speed = summary.speedMBs > 0 ? summary.speedMBs.toFixed(1) : '0.0'
+  const eta = summary.etaSecs >= 0 ? formatTime(summary.etaSecs) : '—'
   return t('standalone.templateModelsDownloading', {
-    file: s.currentFile,
-    index: s.fileIndex,
-    count: s.fileCount,
-    doneGb: gbStr(s.receivedBytes),
-    totalGb: gbStr(s.totalBytes),
+    file: summary.currentFile,
+    index: summary.fileIndex,
+    count: summary.fileCount,
+    doneGb: gbStr(summary.receivedBytes),
+    totalGb: gbStr(summary.totalBytes),
     speed,
     eta,
   })

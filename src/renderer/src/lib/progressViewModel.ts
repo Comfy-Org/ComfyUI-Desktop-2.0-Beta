@@ -15,4 +15,7 @@ export interface ProgressStepVM {
   /** Determinate fill for the active row's mini-bar, or null for a spinner
    *  (unbounded phase). */
   subPercent: number | null
+  /** Non-fatal failure on the active row — renders the detail line in an error
+   *  style (red/bold + X) without failing the op. Only ever true for `active`. */
+  isError: boolean
 }

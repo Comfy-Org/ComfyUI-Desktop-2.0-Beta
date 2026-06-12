@@ -184,7 +184,8 @@ const progressSteps = computed<ProgressStepVM[]>(() => {
     label: stepLabel(step.phase, step.label),
     status: 'done' as const,
     detail: null,
-    subPercent: null
+    subPercent: null,
+    isError: false
   }))
 
   // Launch leg's steps haven't arrived yet (IPC in flight) but the prior leg
@@ -199,7 +200,8 @@ const progressSteps = computed<ProgressStepVM[]>(() => {
         label: stepLabel('launchStart'),
         status: 'active' as const,
         detail: null,
-        subPercent: null
+        subPercent: null,
+        isError: false
       }
     ]
   }
@@ -223,7 +225,8 @@ const progressSteps = computed<ProgressStepVM[]>(() => {
       status,
       detail: status === 'active' ? formattedSubStatus.value : null,
       subPercent:
-        status === 'active' && !globalProgress.value.indeterminate ? op.activePercent : null
+        status === 'active' && !globalProgress.value.indeterminate ? op.activePercent : null,
+      isError: status === 'active' && op.phaseErrors[step.phase] === true
     }
   })
 

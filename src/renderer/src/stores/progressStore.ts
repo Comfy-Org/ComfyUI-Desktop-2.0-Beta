@@ -47,6 +47,9 @@ export interface Operation {
   activePhase: string | null
   activePercent: number
   lastStatus: Record<string, string>
+  /** Phases the producer flagged as non-fatally failed — drives the active
+   *  row's error styling without failing the op. Keyed by phase id. */
+  phaseErrors: Record<string, boolean>
   flatStatus: string
   flatPercent: number
   terminalOutput: string
@@ -215,6 +218,7 @@ export const useProgressStore = defineStore('progress', () => {
       activePhase: null,
       activePercent: -1,
       lastStatus: {},
+      phaseErrors: {},
       flatStatus: t('progress.starting'),
       flatPercent: -1,
       terminalOutput: '',
@@ -268,6 +272,7 @@ export const useProgressStore = defineStore('progress', () => {
         if (stepIndex === -1) return
         rop.activePhase = data.phase
         rop.lastStatus[data.phase] = data.status || data.phase
+        rop.phaseErrors[data.phase] = data.error === true
         rop.activePercent = data.percent ?? -1
         return
       }

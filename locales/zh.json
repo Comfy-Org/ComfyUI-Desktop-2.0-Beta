@@ -775,6 +775,7 @@
     "templateModelsDownloading": "{file}（第 {index} / {count} 个）— {doneGb} / {totalGb} GB，{speed} MB/s · 剩余 {eta}",
     "templateModelsDone": "模板模型已就绪",
     "templateModelsError": "部分模型下载失败 — 你可以在应用内获取",
+    "templateModelsNoSpace": "磁盘空间不足，无法下载模板模型 — 请释放空间后在应用内获取",
     "templateModelsCancelled": "模型下载已取消",
     "python": "Python",
     "pytorch": "PyTorch",

@@ -392,6 +392,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
         sendProgress('template-models', {
           percent,
           status: formatTemplateSubStatus(summary),
+          error: summary.status === 'error',
         })
         return terminal
       }

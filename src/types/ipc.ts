@@ -423,6 +423,7 @@ export interface ProgressData {
   status?: string
   percent?: number
   steps?: ProgressStep[]
+  error?: boolean
 }
 
 export interface ProgressStep {

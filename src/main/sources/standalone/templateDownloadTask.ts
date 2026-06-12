@@ -7,7 +7,10 @@ import { resolveTemplateModels } from './templateModels'
 import {
   isTerminal,
   runPool,
+  withRetry,
+  truncateForMaxPath,
   gbStr,
+  DISK_SPACE_ERROR,
   type TemplateDownloadState,
 } from './templateDownloadCore'
 import type { InstallationRecord } from '../../installations'
@@ -32,6 +35,11 @@ import type { InstallationRecord } from '../../installations'
 
 const MODEL_POOL_CONCURRENCY = 3
 const DISK_HEADROOM = 1.05
+/** Per-file auto-retry budget — `download()` is single-shot, so we wrap it. A
+ *  transient network drop / gated-repo blip gets up to this many extra tries
+ *  before the file is marked failed (non-fatal — ComfyUI's missing-model prompt
+ *  is the final safety net). */
+const MODEL_DOWNLOAD_RETRIES = 2
 
 // --- Process-global state (mirrors _operationAborts). Task = sole writer. ---
 const _templateDownloads = new Map<string, TemplateDownloadState>()
@@ -139,16 +147,18 @@ async function runTask(
 
   const baseDir = getModelsBaseDir()
 
-  // Pre-flight disk guard against the coarse estimate (× headroom). Skip the
-  // whole task rather than fail N writes when there's clearly no room.
+  // Pre-flight disk guard against the coarse estimate (× headroom). Surface a
+  // hard error rather than fail N writes — or silently skip — when there's
+  // clearly no room. Catches the disk filling between the pick-time pre-check
+  // and download-start.
   if (state.estimatedTotalBytes > 0) {
     try {
       const { free } = await getDiskSpace(baseDir)
       if (free < state.estimatedTotalBytes * DISK_HEADROOM) {
         state.status = 'error'
-        state.error = 'insufficient-disk'
+        state.error = DISK_SPACE_ERROR
         sendOutput(
-          `[templates] Not enough disk space for template models (~${gbStr(state.estimatedTotalBytes)} GB needed). Skipping.\n`,
+          `[templates] Not enough disk space for template models: ~${gbStr(state.estimatedTotalBytes)} GB needed, ${gbStr(free)} GB free. Download cancelled — free up space and grab them in-app.\n`,
         )
         return
       }
@@ -166,7 +176,17 @@ async function runTask(
       if (signal.aborted) return
       const model = models[i]!
       const destDir = path.join(baseDir, f.directory)
-      const destPath = path.join(destDir, f.name)
+
+      // Defensively fit the on-disk name within Windows MAX_PATH before any
+      // write (no-op elsewhere / on short paths). A too-long name that can't be
+      // shortened is a per-file failure, not a task failure.
+      const safeName = truncateForMaxPath(destDir, f.name)
+      if (safeName === null) {
+        f.failed = true
+        sendOutput(`[templates] Skipping ${f.name}: path too long for this filesystem.\n`)
+        return
+      }
+      const destPath = path.join(destDir, safeName)
 
       // Already present (prior install) — count it as done at its on-disk size.
       try {
@@ -181,34 +201,51 @@ async function runTask(
       }
 
       sendOutput(`[templates] Downloading ${f.name} (${i + 1}/${state.files.length})…\n`)
-      let lastLoggedPct = 0
       try {
         await fs.promises.mkdir(destDir, { recursive: true })
-        await download(
-          model.url,
-          destPath,
-          (p) => {
-            // HOT PATH: O(1) counter writes only.
-            f.received = p.receivedBytes
-            if (f.total === 0 && p.totalMB !== '?') {
-              f.total = Math.round(parseFloat(p.totalMB) * 1048576)
-            }
-            state.speedMBs = p.speedMBs
-            state.etaSecs = p.etaSecs
-            // Throttled log: only when the integer 10% bucket advances.
-            if (p.percent >= lastLoggedPct + 10) {
-              lastLoggedPct = p.percent - (p.percent % 10)
-              sendOutput(
-                `[templates]   ${f.name} — ${p.receivedMB}/${p.totalMB} MB at ${p.speedMBs.toFixed(1)} MB/s\n`,
-              )
-            }
+        await withRetry(
+          () => {
+            // download() resumes its own `.dl-meta` partial, so a retry
+            // continues from where the dropped attempt left off rather than
+            // restarting the file.
+            let lastLoggedPct = 0
+            return download(
+              model.url,
+              destPath,
+              (p) => {
+                // HOT PATH: O(1) counter writes only.
+                f.received = p.receivedBytes
+                if (f.total === 0 && p.totalMB !== '?') {
+                  f.total = Math.round(parseFloat(p.totalMB) * 1048576)
+                }
+                state.speedMBs = p.speedMBs
+                state.etaSecs = p.etaSecs
+                // Throttled log: only when the integer 10% bucket advances.
+                if (p.percent >= lastLoggedPct + 10) {
+                  lastLoggedPct = p.percent - (p.percent % 10)
+                  sendOutput(
+                    `[templates]   ${f.name} — ${p.receivedMB}/${p.totalMB} MB at ${p.speedMBs.toFixed(1)} MB/s\n`,
+                  )
+                }
+              },
+              { signal },
+            )
           },
-          { signal },
+          MODEL_DOWNLOAD_RETRIES,
+          {
+            // A user cancel must not be retried — bail immediately.
+            isFatal: (err) =>
+              signal.aborted || (err as Error)?.message === 'Download cancelled',
+            onRetry: (attempt, err) =>
+              sendOutput(
+                `[templates] Retrying ${f.name} (attempt ${attempt}/${MODEL_DOWNLOAD_RETRIES + 1}): ${(err as Error).message}\n`,
+              ),
+          },
         )
         f.done = true
         try { f.total = (await fs.promises.stat(destPath)).size } catch {}
         f.received = f.total || f.received
-        sendOutput(`[templates] Saved ${f.directory}/${f.name}.\n`)
+        sendOutput(`[templates] Saved ${f.directory}/${safeName}.\n`)
       } catch (err) {
         const msg = (err as Error).message
         if (signal.aborted || msg === 'Download cancelled') return

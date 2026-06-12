@@ -147,16 +147,16 @@ First `pnpm dev` run showed the model step **starting at 0** and logs **stuck at
 
 **B. Resource gating**
 - [ ] Disk hard-block at **pick/pre-install** (install+model size vs free) + message
-- [ ] Upgrade in-task disk pre-check: silent-skip → **surfaced hard error**
+- [x] Upgrade in-task disk pre-check: silent-skip → **surfaced hard error** (distinct `insufficient-disk` code → `templateModelsNoSpace` substatus, rendered via the `is-error` style)
 - [ ] **VRAM detection**: `vramBytes` in `detectGPU()` (nvidia-smi memory.total; mps→os.totalmem; else undefined) + IPC
 - [ ] **VRAM warn-but-allow** in picker (warn when detected < template `vram`; never block; silent when unknown)
 
 **C. Download behavior**
 - [x] Background download at install-begin; non-fatal; trailing step
 - [x] Stepper no-jump fix
-- [ ] Per-file **2× auto-retry** wrapper
-- [ ] Error substatus **red + bold + X icon**
-- [ ] Windows MAX_PATH guard before write
+- [x] Per-file **2× auto-retry** wrapper (`withRetry` in core; cancel is fatal/no-retry; `.dl-meta` resume means a retry continues, not restarts)
+- [x] Error substatus **red + bold + X icon** (`ProgressData.error` → `phaseErrors` map → `ProgressStepVM.isError` → `BrandProgressView` `.bpv__detail.is-error`)
+- [x] Windows MAX_PATH guard before write (`truncateForMaxPath` in core; too-long-to-fit → per-file skip)
 
 **D. Skip → tray hand-off**
 - [ ] "Skip model download" button (footer center; gated active=template-models && others done)

@@ -24,6 +24,8 @@ vi.mock('../../lib/i18n', () => ({
 
 import {
   runPool,
+  withRetry,
+  truncateForMaxPath,
   summarizeTemplateState,
   formatTemplateSubStatus,
   type TemplateDownloadState,
@@ -140,6 +142,80 @@ describe('runPool', () => {
   })
 })
 
+describe('withRetry', () => {
+  it('returns the first success without re-running', async () => {
+    let calls = 0
+    const out = await withRetry(async () => { calls++; return 'ok' }, 2)
+    expect(out).toBe('ok')
+    expect(calls).toBe(1)
+  })
+
+  it('retries up to the budget then succeeds', async () => {
+    let calls = 0
+    const out = await withRetry(async () => {
+      calls++
+      if (calls < 3) throw new Error('flaky')
+      return 'ok'
+    }, 2)
+    expect(out).toBe('ok')
+    expect(calls).toBe(3) // 1 initial + 2 retries
+  })
+
+  it('rethrows the last error once the budget is exhausted', async () => {
+    let calls = 0
+    await expect(
+      withRetry(async () => { calls++; throw new Error(`fail ${calls}`) }, 2),
+    ).rejects.toThrow('fail 3')
+    expect(calls).toBe(3)
+  })
+
+  it('stops immediately on a fatal error (no retry)', async () => {
+    let calls = 0
+    await expect(
+      withRetry(
+        async () => { calls++; throw new Error('Download cancelled') },
+        2,
+        { isFatal: (e) => (e as Error).message === 'Download cancelled' },
+      ),
+    ).rejects.toThrow('Download cancelled')
+    expect(calls).toBe(1)
+  })
+
+  it('reports each re-attempt number to onRetry', async () => {
+    const attempts: number[] = []
+    await expect(
+      withRetry(async () => { throw new Error('x') }, 2, {
+        onRetry: (n) => attempts.push(n),
+      }),
+    ).rejects.toThrow()
+    expect(attempts).toEqual([2, 3]) // before the 2nd and 3rd tries
+  })
+})
+
+describe('truncateForMaxPath', () => {
+  it('is a no-op off Windows', () => {
+    const long = 'a'.repeat(400) + '.safetensors'
+    expect(truncateForMaxPath('/models/checkpoints', long, 'darwin')).toBe(long)
+  })
+
+  it('leaves short Windows paths untouched', () => {
+    expect(truncateForMaxPath('C:\\models', 'model.safetensors', 'win32')).toBe('model.safetensors')
+  })
+
+  it('truncates the stem (keeping the extension) when the full path is too long', () => {
+    const dir = 'C:\\models\\checkpoints'
+    const name = 'x'.repeat(300) + '.safetensors'
+    const out = truncateForMaxPath(dir, name, 'win32')!
+    expect(out.endsWith('.safetensors')).toBe(true)
+    expect((dir + '\\' + out).length).toBeLessThanOrEqual(259)
+  })
+
+  it('returns null when even an empty stem cannot fit', () => {
+    const dir = 'C:\\' + 'd'.repeat(260)
+    expect(truncateForMaxPath(dir, 'model.safetensors', 'win32')).toBeNull()
+  })
+})
+
 describe('formatTemplateSubStatus', () => {
   it('formats the downloading line with file/index/size/speed/eta', () => {
     const s = summarizeTemplateState(state({
@@ -160,5 +236,16 @@ describe('formatTemplateSubStatus', () => {
     expect(formatTemplateSubStatus(summarizeTemplateState(state({ status: 'resolving' })))).toMatch(/resolv/i)
     expect(formatTemplateSubStatus(summarizeTemplateState(state({ status: 'done', files: [] })))).toMatch(/ready/i)
     expect(formatTemplateSubStatus(summarizeTemplateState(state({ status: 'cancelled' })))).toMatch(/cancel/i)
+  })
+
+  it('shows a disk-specific message for an insufficient-disk error', () => {
+    const noSpace = formatTemplateSubStatus(
+      summarizeTemplateState(state({ status: 'error', error: 'insufficient-disk' })),
+    )
+    const generic = formatTemplateSubStatus(
+      summarizeTemplateState(state({ status: 'error', error: 'something-else' })),
+    )
+    expect(noSpace).toMatch(/disk space/i)
+    expect(noSpace).not.toBe(generic)
   })
 })
