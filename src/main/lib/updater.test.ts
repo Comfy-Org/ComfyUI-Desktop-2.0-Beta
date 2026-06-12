@@ -431,7 +431,7 @@ describe('startup update install + session-end guard (issue #1065)', () => {
     expect(fakeUpdater.restartAndInstall).toHaveBeenCalledWith({ isSilent: true })
   })
 
-  it('installUpdate() shows the NSIS installer UI when showInstallerUI is on (Option B)', async () => {
+  it('installUpdate() shows the NSIS installer UI when showInstallerUI is on', async () => {
     settingsStore['showInstallerUI'] = true
     const updater = await import('./updater')
     updater.register()
