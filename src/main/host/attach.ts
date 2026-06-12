@@ -10,7 +10,8 @@ import * as mainTelemetry from '../lib/telemetry'
 import { refreshCloudUserTier } from '../lib/userTier'
 import { forwardDatadogError } from '../lib/processErrorHandlers'
 import { recordInstanceSurface } from '../lib/lastSession'
-import { installationEvents, type InstallationRecord } from '../installations'
+import { clearPendingTemplateOpen, installationEvents, type InstallationRecord } from '../installations'
+import { abortTemplateDownload } from '../sources/standalone/templateDownloadTask'
 import {
   dropInstallationIndex,
   indexInstallationId,
@@ -565,7 +566,31 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
   // handler, not in `_installCleanup`).
   attachSessionDownloadHandler(comfyContents.session)
 
-  comfyContents.loadURL(comfyUrl)
+  // POC starter template: on the FIRST local launch after install, decorate the
+  // comfy URL with `?template=<id>&source=default`. The ComfyUI frontend's
+  // existing deeplink loader (`useTemplateUrlLoader`) opens it on the canvas and
+  // strips the query — no frontend change needed. The one-shot flag is cleared
+  // (fire-and-forget) so relaunches start blank. Remote/cloud installs are
+  // skipped: they don't load the local frontend that reads this param.
+  let urlToLoad = comfyUrl
+  const pendingTemplate =
+    typeof installation.pendingTemplateOpen === 'string'
+      ? installation.pendingTemplateOpen
+      : null
+  if (isLocal && pendingTemplate) {
+    try {
+      const u = new URL(comfyUrl)
+      u.searchParams.set('template', pendingTemplate)
+      u.searchParams.set('source', 'default')
+      urlToLoad = u.toString()
+    } catch {
+      // Malformed comfyUrl — fall back to the undecorated URL; the install
+      // still launches, just without the auto-opened template.
+    }
+    void clearPendingTemplateOpen(installationId)
+  }
+
+  comfyContents.loadURL(urlToLoad)
 
   // Symmetric undo. Called by the close handler (always) and by
   // `detachInstall()` when the host flips back to chooser mode in
@@ -600,6 +625,10 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
         inFlight.abort()
         _operationAborts.delete(id)
       }
+      // Tear down a still-running background template-model download — it's
+      // keyed separately from _operationAborts, so it would otherwise outlive
+      // the window it was started for.
+      abortTemplateDownload(id)
       // Detach the relaunch will-navigate blocker before clearing the
       // map slot — without `comfyContents.off(...)`, a re-attach would
       // inherit a still-active blocker that preventDefaults every

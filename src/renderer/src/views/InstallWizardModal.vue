@@ -90,6 +90,35 @@ const estimatedInstallSize = computed(() => {
 const advancedOpen = ref(false)
 const advancedRef = ref<HTMLElement | null>(null)
 
+// Starter-template consent: when a non-"None" template is selected, the user
+// can opt out of pre-downloading its models. Default on. Synced into
+// `selections.downloadTemplateModels` at save time so `buildInstallation` sees
+// it (main treats absence/anything-but-'false' as opted-in).
+const downloadTemplateModels = ref(true)
+
+const NO_TEMPLATE_VALUE = 'none'
+
+/** The selected starter template option (excludes the "None" sentinel). */
+const selectedTemplate = computed<FieldOption | null>(() => {
+  const sel = selections.value.bundledTemplate
+  return sel && sel.value !== NO_TEMPLATE_VALUE ? sel : null
+})
+
+/** True when the selected template carries a non-zero model download. */
+const templateHasModels = computed(() => {
+  const size = selectedTemplate.value?.data?.sizeBytes as number | undefined
+  return typeof size === 'number' && size > 0
+})
+
+/** "~1.6 GB" / "~400 MB" label for the selected template's coarse size. */
+const templateSizeLabel = computed(() => {
+  const size = (selectedTemplate.value?.data?.sizeBytes as number | undefined) ?? 0
+  if (size <= 0) return ''
+  const gb = size / (1024 * 1024 * 1024)
+  if (gb >= 1) return `~${gb.toFixed(gb >= 10 ? 0 : 1)} GB`
+  return `~${Math.round(size / (1024 * 1024))} MB`
+})
+
 // Scroll Advanced into view on open. `block: 'nearest'` no-ops when already visible so the view doesn't yank on tall screens.
 watch(advancedOpen, async (open) => {
   if (!open) return
@@ -490,6 +519,14 @@ async function handleSave(): Promise<void> {
     }
   }
 
+  // Sync the starter-template model-download consent as a synthetic selection.
+  if (selectedTemplate.value) {
+    const consent = downloadTemplateModels.value ? 'true' : 'false'
+    selections.value.downloadTemplateModels = { value: consent, label: consent }
+  } else {
+    delete selections.value.downloadTemplateModels
+  }
+
   const instData = await window.api.buildInstallation(source.id, rawSelections())
   const baseName =
     instName.value.trim() || (source.id === 'standalone' ? 'ComfyUI' : `ComfyUI (${source.label})`)
@@ -841,6 +878,11 @@ defineExpose({ open })
                     </template>
                   </div>
                 </div>
+
+                <label v-if="selectedTemplate && templateHasModels" class="template-consent">
+                  <input v-model="downloadTemplateModels" type="checkbox" />
+                  <span>{{ $t('standalone.downloadTemplateModels', { size: templateSizeLabel }) }}</span>
+                </label>
               </div>
             </div>
           </div>
@@ -1121,5 +1163,19 @@ defineExpose({ open })
 
 .config-continue {
   min-width: 120px;
+}
+
+.template-consent {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--neutral-200);
+  cursor: pointer;
+}
+.template-consent input {
+  accent-color: var(--accent);
+  cursor: pointer;
 }
 </style>
