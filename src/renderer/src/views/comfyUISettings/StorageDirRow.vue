@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
 import { Folder, FolderOpen, RotateCcw } from 'lucide-vue-next'
+import StorageItemIcon from '../../components/StorageItemIcon.vue'
 
 /** Readonly directory row: an icon, a clickable path that opens the folder, an
  *  optional tag, and Browse / Reset actions. Shared by the per-instance and
@@ -14,12 +15,15 @@ interface Props {
   tag?: string
   /** Show a reset-to-default action. */
   resettable?: boolean
+  /** Globally-shared dir → shows the shared badge on its icon. */
+  shared?: boolean
 }
 
 withDefaults(defineProps<Props>(), {
   label: '',
   tag: '',
   resettable: false,
+  shared: false,
 })
 
 const emit = defineEmits<{
@@ -35,7 +39,7 @@ const { t } = useI18n()
   <div class="storage-dir-field">
     <label v-if="label" class="storage-dir-label">{{ label }}</label>
     <div class="storage-dir-row">
-      <Folder :size="14" class="storage-dir-icon" aria-hidden="true" />
+      <StorageItemIcon :icon="Folder" :shared="shared" />
       <div class="storage-dir-main">
         <button
           type="button"
@@ -91,11 +95,6 @@ const { t } = useI18n()
   border: 1px solid var(--chooser-surface-border);
   border-radius: 8px;
   background: var(--brand-surface-bg);
-}
-
-.storage-dir-icon {
-  flex-shrink: 0;
-  color: var(--text-muted);
 }
 
 /* Flex spacer so the actions stay right-aligned while the clickable path stays

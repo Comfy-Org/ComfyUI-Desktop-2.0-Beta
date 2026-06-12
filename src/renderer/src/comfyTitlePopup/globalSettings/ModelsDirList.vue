@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ChevronRight, Folder, FolderLock, FolderOpen, Layers, MoreHorizontal, Plus } from 'lucide-vue-next'
 import InfoTooltip from '../../components/InfoTooltip.vue'
+import StorageItemIcon from '../../components/StorageItemIcon.vue'
 
 interface ModelsDir {
   path: string
@@ -17,6 +18,8 @@ interface ModelsDir {
   /** Read-only row for the install's `extra_model_paths.yaml` file: opens a
    *  detail modal (via `details`), no browse/promote/remove. */
   kind?: 'extra'
+  /** Globally-shared dir → shows the shared badge on its icon. */
+  shared?: boolean
 }
 
 interface Props {
@@ -153,10 +156,9 @@ const rows = computed(() =>
       class="models-dir-row"
       :class="{ 'is-just-promoted': row.path === justPromotedPath }"
     >
-      <component
-        :is="row.isExtra ? Layers : row.locked ? FolderLock : Folder"
-        :size="14"
-        class="models-dir-icon"
+      <StorageItemIcon
+        :icon="row.isExtra ? Layers : row.locked ? FolderLock : Folder"
+        :shared="row.shared"
         :title="row.locked ? t('models.lockedDir', 'This directory is always used and cannot be removed.') : undefined"
       />
       <div class="models-dir-main">
@@ -288,11 +290,6 @@ const rows = computed(() =>
   100% {
     background: transparent;
   }
-}
-
-.models-dir-icon {
-  flex-shrink: 0;
-  color: var(--text-muted);
 }
 
 .models-dir-main {

@@ -1093,6 +1093,7 @@
     "sharedModels": "Folders shared across all instances so models aren't downloaded twice. Newly downloaded models go to the primary folder. The system default folder is always kept and can't be removed, and the primary folder can't be removed while it's in use — pick a different primary first.",
     "modelsPrimary": "The primary directory is where ComfyUI saves newly downloaded models by default.",
     "instanceOwnModelsDir": "This instance's own models folder. It's always used and is never shared with other instances.",
+    "sharedDir": "Shared across all your ComfyUI instances.",
     "extraModelPathsInstance": "A custom model path from this instance's extra_model_paths.yaml. ComfyUI searches it; the launcher shows it read-only. Click for details.",
     "extraModelPathsDefault": "This base path is marked is_default in extra_model_paths.yaml, so ComfyUI prefers it for those model types. For shared model types the launcher's Primary directory is loaded later and takes precedence.",
     "modelsDefault": "The system default directory. This path is created automatically and cannot be removed.",

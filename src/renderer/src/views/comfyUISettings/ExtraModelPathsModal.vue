@@ -152,12 +152,20 @@ const { t } = useI18n()
 }
 
 .empm-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
   flex: 0 0 auto;
-  font-size: 11px;
   padding: 1px 6px;
   border-radius: 999px;
-  background: color-mix(in srgb, currentColor 12%, transparent);
-  opacity: 0.85;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+  border: 1px solid var(--chooser-surface-border);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
 }
 
 .empm-section-name {

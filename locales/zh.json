@@ -1093,6 +1093,7 @@
     "sharedModels": "所有实例共享的模型文件夹，避免重复下载模型。新下载的模型会保存到主目录。系统默认文件夹会始终保留且无法移除；主目录在使用中时也无法移除——请先选择其他主目录。",
     "modelsPrimary": "主目录是 ComfyUI 默认保存新下载模型的位置。",
     "instanceOwnModelsDir": "此实例自己的模型文件夹。它始终会被使用，且不会与其他实例共享。",
+    "sharedDir": "在你所有的 ComfyUI 实例之间共享。",
     "extraModelPathsInstance": "来自此实例 extra_model_paths.yaml 的自定义模型路径。ComfyUI 会搜索它；启动器以只读方式显示。点击查看详情。",
     "extraModelPathsDefault": "此基础路径在 extra_model_paths.yaml 中标记为 is_default，因此 ComfyUI 会优先用于这些模型类型。对于共享模型类型，启动器的主目录加载更晚，会优先生效。",
     "modelsDefault": "系统默认目录。此路径会自动创建，无法移除。",

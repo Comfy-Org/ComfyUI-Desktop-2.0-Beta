@@ -24,6 +24,8 @@ interface ModelsDir {
   promotable?: boolean
   /** Read-only row for the install's `extra_model_paths.yaml` file (opens a modal). */
   kind?: 'extra'
+  /** Globally-shared dir → shows the shared badge on its icon. */
+  shared?: boolean
 }
 
 export interface StorageSnapshot {
@@ -346,6 +348,7 @@ const sharedModelDirs = computed<ModelsDir[]>(() => {
     path: d.path,
     isPrimary: d.isPrimary,
     locked: false,
+    shared: true,
   }))
   const own = installOwnModelsDir.value
   if (own) rows.push({ path: own, isPrimary: false, locked: true, promotable: false })
@@ -525,6 +528,7 @@ function handleBrowseSharedOutput(): void {
           v-if="sharedInputField"
           :label="sharedInputField.label || t('common.perInstallInputDir', 'Input Directory')"
           :path="sharedFieldPath(sharedInputField)"
+          shared
           @open="handleOpenPath(sharedFieldPath(sharedInputField))"
           @browse="handleBrowseSharedInput"
         />
@@ -532,6 +536,7 @@ function handleBrowseSharedOutput(): void {
           v-if="sharedOutputField"
           :label="sharedOutputField.label || t('common.perInstallOutputDir', 'Output Directory')"
           :path="sharedFieldPath(sharedOutputField)"
+          shared
           @open="handleOpenPath(sharedFieldPath(sharedOutputField))"
           @browse="handleBrowseSharedOutput"
         />
