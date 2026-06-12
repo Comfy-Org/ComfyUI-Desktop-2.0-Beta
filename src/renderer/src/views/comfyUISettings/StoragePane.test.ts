@@ -353,8 +353,8 @@ describe('StoragePane', () => {
       expect(ownRow.find('.models-dir-menu-wrap').exists()).toBe(false)
       expect(wrapper.text()).toContain('Shared Models')
       // Shared dirs carry the shared badge; the per-instance install-own row doesn't.
-      expect(rows[0]!.find('.storage-item-icon-badge').exists()).toBe(true)
-      expect(ownRow.find('.storage-item-icon-badge').exists()).toBe(false)
+      expect(rows[0]!.find('.storage-item-icon.is-shared').exists()).toBe(true)
+      expect(ownRow.find('.storage-item-icon.is-shared').exists()).toBe(false)
     })
 
     it('shows no shared badge on per-instance dirs when shared models is off', async () => {
@@ -362,7 +362,7 @@ describe('StoragePane', () => {
       const wrapper = mountPaneWithSections(makeStorageSections(['/a/models', '/b/models']))
       await nextTick()
       const rows = wrapper.findAll('.models-dir-row')
-      expect(rows.every((r) => !r.find('.storage-item-icon-badge').exists())).toBe(true)
+      expect(rows.every((r) => !r.find('.storage-item-icon.is-shared').exists())).toBe(true)
     })
 
     it('make-primary on a shared dir reorders the global list past the locked row', async () => {
@@ -395,7 +395,7 @@ describe('StoragePane', () => {
       expect(rows[1]!.find('.storage-dir-name').text()).toBe('/own/output')
       expect(rows[0]!.find('.storage-dir-tag').exists()).toBe(true)
       // Per-instance dirs are private: no shared badge.
-      expect(rows[0]!.find('.storage-item-icon-badge').exists()).toBe(false)
+      expect(rows[0]!.find('.storage-item-icon.is-shared').exists()).toBe(false)
     })
 
     it('shows the stored override (no default tag) when set', async () => {
@@ -478,8 +478,8 @@ describe('StoragePane', () => {
       // Shared dirs are global, not per-instance overrides: no "default" tag.
       expect(rows[0]!.find('.storage-dir-tag').exists()).toBe(false)
       // Shared I/O dirs carry the shared badge for consistency with shared models.
-      expect(rows[0]!.find('.storage-item-icon-badge').exists()).toBe(true)
-      expect(rows[1]!.find('.storage-item-icon-badge').exists()).toBe(true)
+      expect(rows[0]!.find('.storage-item-icon.is-shared').exists()).toBe(true)
+      expect(rows[1]!.find('.storage-item-icon.is-shared').exists()).toBe(true)
     })
 
     it('opens a shared dir when its path is clicked', async () => {
@@ -556,7 +556,7 @@ describe('StoragePane', () => {
       // Read-only: no browse / make-primary affordance on extra rows.
       expect(extraRow.find('.tag-primary').exists()).toBe(false)
       // The yaml file is per-instance, not shared: no shared badge.
-      expect(extraRow.find('.storage-item-icon-badge').exists()).toBe(false)
+      expect(extraRow.find('.storage-item-icon.is-shared').exists()).toBe(false)
     })
 
     it('opens the detail modal listing per-type dirs when the row is clicked', async () => {
