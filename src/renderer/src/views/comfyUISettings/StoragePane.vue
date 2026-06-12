@@ -7,6 +7,7 @@ import GlobalSettingsMicroSection from '../../comfyTitlePopup/globalSettings/Glo
 import ModelsDirList from '../../comfyTitlePopup/globalSettings/ModelsDirList.vue'
 import StorageDirRow from './StorageDirRow.vue'
 import BooleanToggle from './BooleanToggle.vue'
+import ExtraModelPathsModal, { type ExtraModelPathSection } from './ExtraModelPathsModal.vue'
 import InfoTooltip from '../../components/InfoTooltip.vue'
 import type { DetailField, DetailSection, Installation } from '../../types/ipc'
 
@@ -21,6 +22,10 @@ interface ModelsDir {
   isPrimary: boolean
   locked?: boolean
   promotable?: boolean
+  /** Read-only row for the install's `extra_model_paths.yaml` file (opens a modal). */
+  kind?: 'extra'
+  /** Globally-shared dir → shows the shared badge on its icon. */
+  shared?: boolean
 }
 
 export interface StorageSnapshot {
@@ -36,6 +41,7 @@ interface GlobalSettingsBridge {
   ): Promise<{ ok: boolean; message?: string }>
   globalSettingsBrowseFolder(defaultPath?: string): Promise<string | null>
   globalSettingsOpenPath(path: string): void
+  globalSettingsRevealPath(path: string): void
   globalSettingsSetModelsDirs(dirs: string[]): Promise<{ ok: boolean }>
   platform?: string
 }
@@ -53,6 +59,9 @@ const props = defineProps<Props>()
 
 const emit = defineEmits<{
   'update-field': [field: DetailField, value: unknown]
+  /** Ask the parent to re-fetch detail sections (refreshes custom-paths on-disk
+   *  status, computed once per fetch in the main process). */
+  refresh: []
 }>()
 
 const { t } = useI18n()
@@ -121,6 +130,50 @@ function findField(id: string): DetailField | undefined {
   return perInstallFields.value.find((f) => f.id === id)
 }
 
+/** Read-only dirs from the install's `extra_model_paths.yaml`, resolved in the
+ *  main process and passed as a hidden field, grouped by section. */
+interface ExtraModelPathsView {
+  yamlPath: string
+  exists: boolean
+  sections: ExtraModelPathSection[]
+}
+const extraModelPaths = computed<ExtraModelPathsView>(() => {
+  const v = findField('extraModelPaths')?.value as ExtraModelPathsView | undefined
+  return v ?? { yamlPath: '', exists: false, sections: [] }
+})
+const extraSections = computed<ExtraModelPathSection[]>(() => extraModelPaths.value.sections)
+
+/** The install's `extra_model_paths.yaml` as a single read-only row (its
+ *  sections are shown in the detail modal). ComfyUI loads this file regardless
+ *  of the shared-models toggle, so the row appends to both lists. */
+const extraModelRows = computed<ModelsDir[]>(() =>
+  extraSections.value.length > 0
+    ? [{ path: extraModelPaths.value.yamlPath, isPrimary: false, kind: 'extra' }]
+    : []
+)
+
+// --- Custom model paths detail modal --------------------------------------
+
+// The modal reads `extraSections` live, so a refresh updates it in place.
+const extraModalOpen = ref(false)
+
+function openExtraDetails(row: ModelsDir | undefined): void {
+  if (row?.kind === 'extra') extraModalOpen.value = true
+}
+
+function handleSharedModelDetails(index: number): void {
+  openExtraDetails(sharedModelDirs.value[index])
+}
+function handleInstanceModelDetails(index: number): void {
+  openExtraDetails(instanceModelDirs.value[index])
+}
+function closeExtraModal(): void {
+  extraModalOpen.value = false
+}
+function handleRefreshExtraPaths(): void {
+  emit('refresh')
+}
+
 function persistField(id: string, value: unknown): void {
   const field = findField(id)
   if (field) emit('update-field', field, value)
@@ -180,8 +233,12 @@ const instanceModelDirs = computed<ModelsDir[]>(() => {
     isPrimary: primary !== null && samePath(p, primary),
     locked: false,
   }))
-  if (ownRow?.isPrimary) return [ownRow, ...extraRows]
-  return ownRow ? [...extraRows, ownRow] : extraRows
+  const base = ownRow?.isPrimary
+    ? [ownRow, ...extraRows]
+    : ownRow
+      ? [...extraRows, ownRow]
+      : extraRows
+  return [...base, ...extraModelRows.value]
 })
 
 async function handleAddInstanceModelDir(): Promise<void> {
@@ -219,7 +276,7 @@ async function handleRemoveInstanceModelDir(index: number): Promise<void> {
 
 function handleMakeInstancePrimary(index: number): void {
   const row = instanceModelDirs.value[index]
-  if (!row) return
+  if (!row || row.kind === 'extra') return
   // The locked install-own row becoming primary means "no external primary".
   persistField('modelDirsPrimary', row.locked ? null : row.path)
 }
@@ -276,6 +333,9 @@ function handleResetOutputDir(): void {
 function handleOpenPath(path: string): void {
   if (path) bridge?.globalSettingsOpenPath(path)
 }
+function handleRevealPath(path: string): void {
+  if (path) bridge?.globalSettingsRevealPath(path)
+}
 
 // --- Global shared models (shared models on) ------------------------------
 
@@ -288,10 +348,11 @@ const sharedModelDirs = computed<ModelsDir[]>(() => {
     path: d.path,
     isPrimary: d.isPrimary,
     locked: false,
+    shared: true,
   }))
   const own = installOwnModelsDir.value
   if (own) rows.push({ path: own, isPrimary: false, locked: true, promotable: false })
-  return rows
+  return [...rows, ...extraModelRows.value]
 })
 
 /** Index of a displayed row's path within the editable global shared dirs. */
@@ -430,27 +491,18 @@ function handleBrowseSharedOutput(): void {
         @remove="handleRemoveModelsDir"
         @make-primary="handleMakePrimary"
         @open="handleOpenModelsDir"
+        @details="handleSharedModelDetails"
         @add="handleAddModelsDir"
       />
 
-      <!-- Shared off: warning + per-instance list (locked install-own row). -->
+      <!-- Shared off: per-instance list (locked install-own row). -->
       <template v-else>
-        <div class="storage-pane-warning" role="alert">
-          <AlertTriangle :size="14" class="storage-pane-warning-icon" aria-hidden="true" />
-          <p class="storage-pane-warning-text">
-            {{
-              t(
-                'comfyUISettings.useSharedModelsOffWarning',
-                'Shared models is OFF for this instance. It can only see models in its own folder plus any custom directories you add below — your shared library stays hidden until you turn this back on.'
-              )
-            }}
-          </p>
-        </div>
         <ModelsDirList
           :dirs="instanceModelDirs"
           @open="handleOpenInstanceModelDir"
           @remove="handleRemoveInstanceModelDir"
           @make-primary="handleMakeInstancePrimary"
+          @details="handleInstanceModelDetails"
           @add="handleAddInstanceModelDir"
         />
       </template>
@@ -476,6 +528,7 @@ function handleBrowseSharedOutput(): void {
           v-if="sharedInputField"
           :label="sharedInputField.label || t('common.perInstallInputDir', 'Input Directory')"
           :path="sharedFieldPath(sharedInputField)"
+          shared
           @open="handleOpenPath(sharedFieldPath(sharedInputField))"
           @browse="handleBrowseSharedInput"
         />
@@ -483,6 +536,7 @@ function handleBrowseSharedOutput(): void {
           v-if="sharedOutputField"
           :label="sharedOutputField.label || t('common.perInstallOutputDir', 'Output Directory')"
           :path="sharedFieldPath(sharedOutputField)"
+          shared
           @open="handleOpenPath(sharedFieldPath(sharedOutputField))"
           @browse="handleBrowseSharedOutput"
         />
@@ -510,6 +564,18 @@ function handleBrowseSharedOutput(): void {
         />
       </template>
     </GlobalSettingsMicroSection>
+
+    <!-- Read-only details for the install's extra_model_paths.yaml file,
+         opened from its row in the models list above. -->
+    <ExtraModelPathsModal
+      :open="extraModalOpen"
+      :sections="extraSections"
+      :yaml-path="extraModelPaths.yamlPath"
+      @close="closeExtraModal"
+      @open-path="handleOpenPath"
+      @reveal-path="handleRevealPath"
+      @refresh="handleRefreshExtraPaths"
+    />
   </div>
 </template>
 
@@ -584,29 +650,4 @@ function handleBrowseSharedOutput(): void {
   white-space: nowrap;
 }
 
-/* Inline warning shown when `useSharedModels` is OFF. */
-.storage-pane-warning {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  margin: 0;
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--warning) 14%, transparent);
-  border: 1px solid var(--warning);
-  color: var(--warning);
-  font-weight: 500;
-}
-
-.storage-pane-warning-icon {
-  flex-shrink: 0;
-  margin-top: 2px;
-  color: var(--warning);
-}
-
-.storage-pane-warning-text {
-  margin: 0;
-  font-size: 12px;
-  line-height: 1.45;
-}
 </style>

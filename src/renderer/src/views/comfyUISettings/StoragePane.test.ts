@@ -10,6 +10,7 @@ interface BridgeState {
   updateFieldCalls: Array<{ id: string; value: unknown }>
   setModelsDirsCalls: string[][]
   openPathCalls: string[]
+  revealPathCalls: string[]
   browseFolderReturn: string | null
 }
 
@@ -18,6 +19,7 @@ function installMockBridge(): BridgeState {
     updateFieldCalls: [],
     setModelsDirsCalls: [],
     openPathCalls: [],
+    revealPathCalls: [],
     browseFolderReturn: null,
   }
   const bridge = {
@@ -28,6 +30,9 @@ function installMockBridge(): BridgeState {
     globalSettingsBrowseFolder: async () => state.browseFolderReturn,
     globalSettingsOpenPath: (path: string) => {
       state.openPathCalls.push(path)
+    },
+    globalSettingsRevealPath: (path: string) => {
+      state.revealPathCalls.push(path)
     },
     globalSettingsSetModelsDirs: async (dirs: string[]) => {
       state.setModelsDirsCalls.push([...dirs])
@@ -277,7 +282,7 @@ describe('StoragePane', () => {
         makeStorageSections(['/a/models'], { primary: '/a/models' })
       )
       await nextTick()
-      // Install-own row (locked, not primary) exposes only "Make Primary".
+      // Install-own row (locked, not the download target) exposes only "Use for Model Downloads".
       await wrapper.find('.models-dir-menu-wrap > button').trigger('click')
       await nextTick()
       await flushPromises()
@@ -297,7 +302,7 @@ describe('StoragePane', () => {
       await nextTick()
       const rows = wrapper.findAll('.models-dir-row')
       // The locked install-own row sits last (it's not primary); open its menu
-      // and assert it offers only "Make Primary" (no Remove).
+      // and assert it offers only "Use for Model Downloads" (no Remove).
       const ownRow = rows[rows.length - 1]!
       expect(ownRow.find('.models-dir-name').text()).toBe('/own/models')
       await ownRow.find('.models-dir-menu-wrap > button').trigger('click')
@@ -305,7 +310,7 @@ describe('StoragePane', () => {
       await flushPromises()
       const items = ownRow.findAll('.models-dir-menu button[role="menuitem"]')
       expect(items).toHaveLength(1)
-      expect(items[0]!.text()).toContain('Make Primary')
+      expect(items[0]!.text()).toContain('Use for Model Downloads')
     })
 
     it('emits update-field with the appended dir when adding', async () => {
@@ -347,6 +352,17 @@ describe('StoragePane', () => {
       expect(ownRow.find('.models-dir-action').exists()).toBe(false)
       expect(ownRow.find('.models-dir-menu-wrap').exists()).toBe(false)
       expect(wrapper.text()).toContain('Shared Models')
+      // Shared dirs carry the shared badge; the per-instance install-own row doesn't.
+      expect(rows[0]!.find('.storage-item-icon.is-shared').exists()).toBe(true)
+      expect(ownRow.find('.storage-item-icon.is-shared').exists()).toBe(false)
+    })
+
+    it('shows no shared badge on per-instance dirs when shared models is off', async () => {
+      installMockBridge()
+      const wrapper = mountPaneWithSections(makeStorageSections(['/a/models', '/b/models']))
+      await nextTick()
+      const rows = wrapper.findAll('.models-dir-row')
+      expect(rows.every((r) => !r.find('.storage-item-icon.is-shared').exists())).toBe(true)
     })
 
     it('make-primary on a shared dir reorders the global list past the locked row', async () => {
@@ -378,6 +394,8 @@ describe('StoragePane', () => {
       expect(rows[0]!.find('.storage-dir-name').text()).toBe('/own/input')
       expect(rows[1]!.find('.storage-dir-name').text()).toBe('/own/output')
       expect(rows[0]!.find('.storage-dir-tag').exists()).toBe(true)
+      // Per-instance dirs are private: no shared badge.
+      expect(rows[0]!.find('.storage-item-icon.is-shared').exists()).toBe(false)
     })
 
     it('shows the stored override (no default tag) when set', async () => {
@@ -459,6 +477,9 @@ describe('StoragePane', () => {
       expect(rows[1]!.find('.storage-dir-name').text()).toBe('/shared/out')
       // Shared dirs are global, not per-instance overrides: no "default" tag.
       expect(rows[0]!.find('.storage-dir-tag').exists()).toBe(false)
+      // Shared I/O dirs carry the shared badge for consistency with shared models.
+      expect(rows[0]!.find('.storage-item-icon.is-shared').exists()).toBe(true)
+      expect(rows[1]!.find('.storage-item-icon.is-shared').exists()).toBe(true)
     })
 
     it('opens a shared dir when its path is clicked', async () => {
@@ -477,6 +498,154 @@ describe('StoragePane', () => {
       await wrapper.findAll('.storage-dir-row')[0]!.find('.storage-dir-action').trigger('click')
       await flushPromises()
       expect(bridge.updateFieldCalls).toEqual([{ id: 'inputDir', value: '/picked/in' }])
+    })
+  })
+
+  // The install's extra_model_paths.yaml is one row in the models list (YAML
+  // pill), and clicking it opens a detail modal listing every section's
+  // per-type dirs plus a link to the .yaml file.
+  describe('custom model paths (extra_model_paths.yaml)', () => {
+    function makeExtraSection() {
+      return {
+        name: 'my_external',
+        basePath: '/ext/base',
+        basePathExists: true,
+        isDefault: false,
+        dirs: [
+          { type: 'checkpoints', rawType: 'checkpoints', dir: '/ext/base/checkpoints', dirExists: true },
+          { type: 'controlnet', rawType: 'controlnet', dir: '/ext/base/t2i_adapter', dirExists: false },
+        ],
+      }
+    }
+
+    function sectionsWithExtra(view: unknown) {
+      return [
+        {
+          fields: [
+            { id: 'useSharedModels', label: 'Use Shared Models', value: false, editable: true, editType: 'boolean' },
+            { id: 'modelDirs', label: 'Model Directories', value: [], editable: true, editType: 'model-dirs' },
+            { id: 'modelDirsPrimary', label: 'modelDirsPrimary', value: null, editable: true, editType: 'hidden' },
+            { id: 'installModelsDir', label: 'installModelsDir', value: '/own/models', editable: false, editType: 'hidden' },
+            { id: 'extraModelPaths', label: 'extraModelPaths', value: view, editable: false, editType: 'hidden' },
+          ],
+        },
+      ]
+    }
+
+    function extraView() {
+      return { yamlPath: '/own/extra_model_paths.yaml', exists: true, sections: [makeExtraSection()] }
+    }
+
+    function findExtraRow(wrapper: ReturnType<typeof mountPaneWithSections>) {
+      return wrapper
+        .findAll('.models-dir-row')
+        .find((r) => r.text().includes('/own/extra_model_paths.yaml'))!
+    }
+
+    it('renders the yaml file as a single read-only row with the YAML pill', async () => {
+      installMockBridge()
+      const wrapper = mountPaneWithSections(sectionsWithExtra(extraView()))
+      await nextTick()
+      const extraRow = findExtraRow(wrapper)
+      expect(extraRow).toBeTruthy()
+      const pill = extraRow.find('.tag-local')
+      expect(pill.exists()).toBe(true)
+      expect(pill.text()).toContain('YAML')
+      // The missing-dir count is intentionally not surfaced in the list.
+      expect(extraRow.find('.tag-missing').exists()).toBe(false)
+      // Read-only: no browse / make-primary affordance on extra rows.
+      expect(extraRow.find('.tag-primary').exists()).toBe(false)
+      // The yaml file is per-instance, not shared: no shared badge.
+      expect(extraRow.find('.storage-item-icon.is-shared').exists()).toBe(false)
+    })
+
+    it('opens the detail modal listing per-type dirs when the row is clicked', async () => {
+      installMockBridge()
+      const wrapper = mountPaneWithSections(sectionsWithExtra(extraView()))
+      await nextTick()
+      await findExtraRow(wrapper).find('.models-dir-name').trigger('click')
+      await nextTick()
+      expect(document.body.textContent).toContain('/ext/base/checkpoints')
+      expect(document.body.textContent).toContain('/ext/base/t2i_adapter')
+    })
+
+    it('collapses a multi-section yaml into one row, all sections in the modal', async () => {
+      installMockBridge()
+      const view = {
+        yamlPath: '/own/extra_model_paths.yaml',
+        exists: true,
+        sections: [
+          makeExtraSection(),
+          {
+            name: 'nas',
+            basePath: '/nas/models',
+            basePathExists: true,
+            isDefault: true,
+            dirs: [{ type: 'loras', rawType: 'loras', dir: '/nas/models/loras', dirExists: true }],
+          },
+        ],
+      }
+      const wrapper = mountPaneWithSections(sectionsWithExtra(view))
+      await nextTick()
+      // Two sections, but only one row in the list.
+      expect(
+        wrapper.findAll('.models-dir-row').filter((r) => r.text().includes('extra_model_paths.yaml'))
+      ).toHaveLength(1)
+      await findExtraRow(wrapper).find('.models-dir-name').trigger('click')
+      await nextTick()
+      // Both sections' dirs show in the modal.
+      expect(document.body.textContent).toContain('/ext/base/checkpoints')
+      expect(document.body.textContent).toContain('/nas/models/loras')
+      // The default tag appears for the section that declares it.
+      expect(document.querySelector('.empm-tag')).toBeTruthy()
+    })
+
+    it('reveals the yaml file in its folder from the modal footer', async () => {
+      const bridge = installMockBridge()
+      const wrapper = mountPaneWithSections(sectionsWithExtra(extraView()))
+      await nextTick()
+      await findExtraRow(wrapper).find('.models-dir-name').trigger('click')
+      await nextTick()
+      const actions = Array.from(document.querySelectorAll('.empm-action')) as HTMLButtonElement[]
+      const yamlBtn = actions.find((b) => b.textContent?.includes('.yaml'))!
+      yamlBtn.click()
+      // Reveal-in-folder, not open-in-default-app.
+      expect(bridge.revealPathCalls).toContain('/own/extra_model_paths.yaml')
+      expect(bridge.openPathCalls).not.toContain('/own/extra_model_paths.yaml')
+    })
+
+    it('opens a per-type dir from the modal when its path is clicked', async () => {
+      const bridge = installMockBridge()
+      const wrapper = mountPaneWithSections(sectionsWithExtra(extraView()))
+      await nextTick()
+      await findExtraRow(wrapper).find('.models-dir-name').trigger('click')
+      await nextTick()
+      const dirBtns = Array.from(document.querySelectorAll('.empm-dir-path')) as HTMLButtonElement[]
+      dirBtns.find((b) => b.textContent === '/ext/base/checkpoints')!.click()
+      expect(bridge.openPathCalls).toContain('/ext/base/checkpoints')
+    })
+
+    it('marks a missing per-type dir red (is-missing) instead of a badge', async () => {
+      installMockBridge()
+      const wrapper = mountPaneWithSections(sectionsWithExtra(extraView()))
+      await nextTick()
+      await findExtraRow(wrapper).find('.models-dir-name').trigger('click')
+      await nextTick()
+      const dirBtns = Array.from(document.querySelectorAll('.empm-dir-path')) as HTMLButtonElement[]
+      const present = dirBtns.find((b) => b.textContent === '/ext/base/checkpoints')!
+      const missing = dirBtns.find((b) => b.textContent === '/ext/base/t2i_adapter')!
+      expect(present.classList.contains('is-missing')).toBe(false)
+      expect(missing.classList.contains('is-missing')).toBe(true)
+    })
+
+    it('emits refresh when the modal refresh button is clicked', async () => {
+      installMockBridge()
+      const wrapper = mountPaneWithSections(sectionsWithExtra(extraView()))
+      await nextTick()
+      await findExtraRow(wrapper).find('.models-dir-name').trigger('click')
+      await nextTick()
+      ;(document.querySelector('.empm-refresh') as HTMLButtonElement).click()
+      expect(wrapper.emitted('refresh')).toHaveLength(1)
     })
   })
 })
