@@ -165,12 +165,15 @@ First `pnpm dev` run showed the model step **starting at 0** and logs **stuck at
 - [ ] Verify continue-from-where-left-off + ComfyUI reachable immediately *(needs live `pnpm dev` — group G)*
 
 **E. Picker step + entry points**
-- [ ] `step: 'configure' | 'template'` screen in `InstallWizardModal.vue`
-- [ ] CTAs "Skip & Install" / "Install" (copy TBD), template pre-selected
-- [ ] Dashboard "Add New Instance" inherits + verify
-- [ ] Gate Express Install path
-- [ ] `skipTemplatePickerStep` setting + "Don't show again" (only when ≥1 local install)
-- [ ] Auto-skip for opted-out returning users
+- [x] `step: 'configure' | 'template'` screen in `InstallWizardModal.vue` — new `TemplatePickerStep.vue` (modality-grid cards w/ thumbnail + size + modality chip + "None"). Configure's Continue → picker step (or installs directly when gated off); Back returns to Configure. `bundledTemplate` Advanced card hidden when the picker step is active.
+- [x] CTAs "Skip & Install" / "Install", template pre-selected (first real = Image, not None)
+- [x] Dashboard "Add New Instance" inherits — same `InstallWizardModal`, so it gets the step for free
+- [x] Gate Express Install path — Express picks the `recommended` option, which is the "None" sentinel, so it installs with no template + no picker by construction (intentional; no extra guard needed)
+- [x] `skipTemplatePickerStep` setting (`settings.ts`) + "Don't show again" checkbox shown only when `getInstallationsSummary().localCount > 0`; persisted via `setSetting` on Install/Skip
+- [x] Auto-skip for opted-out returning users — `pickerEnabled` reads `skipTemplatePickerStep` on open; `shouldShowPickerStep` false → Continue installs directly
+
+**B (picker-coupled)**
+- [x] **VRAM warn-but-allow** in the picker — `TemplatePickerStep` warns (never blocks) when `detectedVramBytes < recommendedVramBytes`; silent when VRAM unknown. VRAM fetched via `detectGPU()` on wizard open.
 
 **F. Failure UX**
 - [ ] Whole-task failure: message + proceed (substatus error is the surface)

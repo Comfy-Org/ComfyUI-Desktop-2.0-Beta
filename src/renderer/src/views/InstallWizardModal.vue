@@ -24,6 +24,7 @@ import {
 import TakeoverBack from '../components/TakeoverBack.vue'
 import BrandTakeoverLayout from '../components/BrandTakeoverLayout.vue'
 import BrandVariantList from '../components/BrandVariantList.vue'
+import TemplatePickerStep from '../components/TemplatePickerStep.vue'
 import PathDiskInfo from '../components/PathDiskInfo.vue'
 import TooltipWrap from '../components/TooltipWrap.vue'
 import { BaseSelect, type BaseSelectOption } from '../components/ui'
@@ -119,6 +120,76 @@ const templateSizeLabel = computed(() => {
   if (gb >= 1) return `~${gb.toFixed(gb >= 10 ? 0 : 1)} GB`
   return `~${Math.round(size / (1024 * 1024))} MB`
 })
+
+// --- Dedicated template-picker step ---
+// The configure screen and the picker are two steps of the SAME takeover. After
+// Configure, we show the picker (unless gated off) and only then install.
+const step = ref<'configure' | 'template'>('configure')
+const detectedVramBytes = ref<number | undefined>(undefined)
+const dontShowTemplatePicker = ref(false)
+/** Whether to even offer the picker step: skippable for returning opted-out
+ *  users. The "Don't show again" checkbox itself only appears once the user
+ *  already has ≥1 local install (a first-ever user always sees the step). */
+const pickerEnabled = ref(true)
+const hasLocalInstall = ref(false)
+
+const templateOptions = computed<FieldOption[]>(
+  () => fieldOptions.value.get('bundledTemplate') ?? [],
+)
+/** Show the picker step only for the standalone source when it's enabled and
+ *  the template field actually produced options. */
+const shouldShowPickerStep = computed(
+  () =>
+    currentSource.value?.id === 'standalone' &&
+    pickerEnabled.value &&
+    templateOptions.value.length > 0,
+)
+
+function selectTemplate(option: FieldOption): void {
+  selections.value.bundledTemplate = option
+  // Reset consent to on when switching to a model-bearing template.
+  downloadTemplateModels.value = true
+}
+
+/** Configure's primary button: advance to the picker step, or install directly
+ *  when the picker is gated off. */
+async function handleConfigureContinue(): Promise<void> {
+  if (shouldShowPickerStep.value) {
+    // Default the selection to the first real template (Image) rather than the
+    // "None" sentinel, so the showcase leads.
+    const firstReal = templateOptions.value.find((o) => o.value !== NO_TEMPLATE_VALUE)
+    if (firstReal && selections.value.bundledTemplate?.value === NO_TEMPLATE_VALUE) {
+      selections.value.bundledTemplate = firstReal
+    }
+    step.value = 'template'
+    return
+  }
+  await handleSave()
+}
+
+/** Picker's "Install": persist the opt-out (if ticked) then install. */
+async function handleTemplateInstall(): Promise<void> {
+  await persistDontShowAgain()
+  await handleSave()
+}
+
+/** Picker's "Skip & Install": no template, then install. */
+async function handleTemplateSkip(): Promise<void> {
+  const none = templateOptions.value.find((o) => o.value === NO_TEMPLATE_VALUE)
+  if (none) selections.value.bundledTemplate = none
+  await persistDontShowAgain()
+  await handleSave()
+}
+
+async function persistDontShowAgain(): Promise<void> {
+  if (dontShowTemplatePicker.value) {
+    try {
+      await window.api.setSetting('skipTemplatePickerStep', true)
+    } catch {
+      // Non-fatal — the step just shows again next time.
+    }
+  }
+}
 
 // Scroll Advanced into view on open. `block: 'nearest'` no-ops when already visible so the view doesn't yank on tall screens.
 watch(advancedOpen, async (open) => {
@@ -259,6 +330,21 @@ async function open(opts: OpenOpts = {}): Promise<void> {
   resetDiskSpace()
   sourceError.value = ''
   initializing.value = true
+  step.value = 'configure'
+  dontShowTemplatePicker.value = false
+
+  // Resolve picker gating + VRAM in the background — needed only by the time the
+  // user reaches the (later) template step, so they never block the Configure
+  // screen's first paint.
+  void window.api.getSetting('skipTemplatePickerStep').then((skip) => {
+    pickerEnabled.value = skip !== true
+  }).catch(() => {})
+  void window.api.getInstallationsSummary().then((summary) => {
+    hasLocalInstall.value = summary.localCount > 0
+  }).catch(() => {})
+  void window.api.detectGPU().then((gpu) => {
+    detectedVramBytes.value = gpu?.vramBytes
+  }).catch(() => {})
 
   try {
     const [, installDir] = await Promise.all([loadSources(), installDirPromise])
@@ -666,6 +752,10 @@ function onSelectFieldChange(field: SourceField, fieldIndex: number, value: stri
  *  channel) return an empty options array when not applicable. Hide them
  *  outright so the wizard doesn't render a "No options" dropdown. */
 function isHiddenWhenEmpty(field: SourceField): boolean {
+  // The starter-template field gets its own dedicated step when the picker is
+  // enabled — hide its Advanced-section card so it isn't shown twice. (When the
+  // picker is gated off, the Advanced card stays as the fallback.)
+  if (field.id === 'bundledTemplate' && shouldShowPickerStep.value) return true
   if (field.type === 'text' || field.renderAs === 'cards') return false
   const options = fieldOptions.value.get(field.id)
   if (options === undefined) return false
@@ -677,7 +767,7 @@ defineExpose({ open })
 
 <template>
   <BrandTakeoverLayout>
-    <div ref="brandShellRef" class="config-shell">
+    <div v-if="step === 'configure'" ref="brandShellRef" class="config-shell">
       <h1 class="brand-title">{{ $t('newInstall.configureTitle') }}</h1>
       <p class="brand-lead">{{ $t('newInstall.configureLead') }}</p>
       <div class="config-card">
@@ -921,16 +1011,47 @@ defineExpose({ open })
           <button
             class="brand-primary config-continue"
             :disabled="!canContinue"
-            @click="handleSave"
+            @click="handleConfigureContinue"
           >
             {{ $t('common.continue') }}
           </button>
         </div>
       </div>
     </div>
+
+    <!-- Dedicated starter-template picker step (after Configure, before install). -->
+    <div v-else-if="step === 'template'" class="template-shell">
+      <TemplatePickerStep
+        :options="templateOptions"
+        :none-value="NO_TEMPLATE_VALUE"
+        :selected-value="selections.bundledTemplate?.value ?? null"
+        :consent="downloadTemplateModels"
+        :detected-vram-bytes="detectedVramBytes"
+        :show-dont-show-again="hasLocalInstall"
+        :dont-show-again="dontShowTemplatePicker"
+        @select="selectTemplate"
+        @update:consent="downloadTemplateModels = $event"
+        @update:dont-show-again="dontShowTemplatePicker = $event"
+      />
+      <div class="template-actions">
+        <button type="button" class="brand-ghost" @click="handleTemplateSkip">
+          {{ $t('standalone.templateSkipAndInstall') }}
+        </button>
+        <button type="button" class="brand-primary" @click="handleTemplateInstall">
+          {{ $t('standalone.templateInstall') }}
+        </button>
+      </div>
+    </div>
+
     <template #footer-left>
       <TakeoverBack
-        v-if="!hideBackToDashboard"
+        v-if="step === 'template'"
+        class="config-back-to-dashboard"
+        :label="$t('common.back')"
+        @back="step = 'configure'"
+      />
+      <TakeoverBack
+        v-else-if="!hideBackToDashboard"
         class="config-back-to-dashboard"
         :label="$t('common.backToDashboard')"
         @back="emit('close')"
@@ -954,6 +1075,32 @@ defineExpose({ open })
   text-align: center;
   padding-block: clamp(1.5rem, 4vh, 3rem);
   min-height: 0;
+}
+
+.template-shell {
+  align-self: stretch;
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding-block: clamp(1.5rem, 4vh, 3rem);
+  min-height: 0;
+  overflow-y: auto;
+}
+.template-actions {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  width: 100%;
+  max-width: 720px;
+  margin-top: 20px;
+}
+.template-actions > button {
+  min-width: 150px;
 }
 
 .config-card {

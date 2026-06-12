@@ -773,6 +773,18 @@
     "starterTemplateNone": "无",
     "starterTemplateNoneDesc": "从空白画布开始",
     "downloadTemplateModels": "下载所需模型（{size}），让模板开箱即用",
+    "templatePickerTitle": "选择一个入门模板",
+    "templatePickerLead": "进入一个开箱即用的工作流 —— 其模型会在 ComfyUI 安装期间下载。",
+    "templateInstall": "安装",
+    "templateSkipAndInstall": "跳过并安装",
+    "templateDontShowAgain": "不再显示",
+    "templateVramWarning": "该模板建议约 {recommended} 显存；你的 GPU 约有 {detected}。可能运行较慢或转用系统内存。",
+    "modality": {
+      "image": "图像",
+      "video": "视频",
+      "audio": "音频",
+      "3d": "3D"
+    },
     "templateModelsResolving": "正在解析模板模型…",
     "templateModelsDownloading": "{file}（第 {index} / {count} 个）— {doneGb} / {totalGb} GB，{speed} MB/s · 剩余 {eta}",
     "templateModelsDone": "模板模型已就绪",

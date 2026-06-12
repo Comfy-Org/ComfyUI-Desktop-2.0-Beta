@@ -51,6 +51,10 @@ export interface KnownSettings {
   /** Directory the user last chose in the general "Save image/file" dialog.
    *  Used to seed the dialog's defaultPath so it matches browser behavior. */
   lastSaveDialogDir?: string
+  /** When true, the dedicated starter-template picker step is skipped during
+   *  install (the user ticked "Don't show this again"). Only ever set once the
+   *  user already has ≥1 local install. Default false — show the step. */
+  skipTemplatePickerStep?: boolean
 }
 
 export type Settings = KnownSettings & Record<string, unknown>
@@ -92,6 +96,7 @@ const SETTINGS_SCHEMA = {
   oemManagedModelDirs: { nullable: false },
   oemWorkflowImportVersion: { nullable: false },
   lastSaveDialogDir: { nullable: true },
+  skipTemplatePickerStep: { nullable: false },
 } as const satisfies Record<keyof KnownSettings, { nullable: boolean }>
 
 export type KnownSettingKey = keyof typeof SETTINGS_SCHEMA

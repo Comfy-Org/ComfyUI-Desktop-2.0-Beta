@@ -773,6 +773,18 @@
     "starterTemplateNone": "None",
     "starterTemplateNoneDesc": "Start with a blank canvas",
     "downloadTemplateModels": "Download required models ({size}) so the template runs right away",
+    "templatePickerTitle": "Pick a starter template",
+    "templatePickerLead": "Land on a ready-to-run workflow — its models download while ComfyUI installs.",
+    "templateInstall": "Install",
+    "templateSkipAndInstall": "Skip & Install",
+    "templateDontShowAgain": "Don't show this again",
+    "templateVramWarning": "This template recommends ~{recommended} of VRAM; your GPU has ~{detected}. It may run slowly or offload to system memory.",
+    "modality": {
+      "image": "Image",
+      "video": "Video",
+      "audio": "Audio",
+      "3d": "3D"
+    },
     "templateModelsResolving": "Resolving template models…",
     "templateModelsDownloading": "{file} ({index} of {count}) — {doneGb} / {totalGb} GB at {speed} MB/s · {eta} remaining",
     "templateModelsDone": "Template models ready",
