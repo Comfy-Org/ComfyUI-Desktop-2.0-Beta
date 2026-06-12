@@ -282,7 +282,7 @@ describe('StoragePane', () => {
         makeStorageSections(['/a/models'], { primary: '/a/models' })
       )
       await nextTick()
-      // Install-own row (locked, not primary) exposes only "Make Primary".
+      // Install-own row (locked, not the download target) exposes only "Use for Model Downloads".
       await wrapper.find('.models-dir-menu-wrap > button').trigger('click')
       await nextTick()
       await flushPromises()
@@ -302,7 +302,7 @@ describe('StoragePane', () => {
       await nextTick()
       const rows = wrapper.findAll('.models-dir-row')
       // The locked install-own row sits last (it's not primary); open its menu
-      // and assert it offers only "Make Primary" (no Remove).
+      // and assert it offers only "Use for Model Downloads" (no Remove).
       const ownRow = rows[rows.length - 1]!
       expect(ownRow.find('.models-dir-name').text()).toBe('/own/models')
       await ownRow.find('.models-dir-menu-wrap > button').trigger('click')
@@ -310,7 +310,7 @@ describe('StoragePane', () => {
       await flushPromises()
       const items = ownRow.findAll('.models-dir-menu button[role="menuitem"]')
       expect(items).toHaveLength(1)
-      expect(items[0]!.text()).toContain('Make Primary')
+      expect(items[0]!.text()).toContain('Use for Model Downloads')
     })
 
     it('emits update-field with the appended dir when adding', async () => {

@@ -170,7 +170,7 @@ const rows = computed(() =>
         >{{ row.path }}</button>
       </div>
       <span v-if="row.isPrimary" class="models-dir-tag tag-primary">
-        {{ t('models.primary', 'Primary') }}
+        {{ t('models.primary', 'Downloads') }}
         <InfoTooltip :text="t('tooltips.modelsPrimary')" />
       </span>
       <span v-if="row.locked || row.isExtra" class="models-dir-tag tag-local">
@@ -227,7 +227,7 @@ const rows = computed(() =>
               role="menuitem"
               @click="handleMakePrimary(row.index)"
             >
-              {{ t('models.makePrimary', 'Make primary') }}
+              {{ t('models.makePrimary', 'Use for Model Downloads') }}
             </button>
             <button
               v-if="row.canRemove"
