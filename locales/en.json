@@ -792,7 +792,6 @@
     "templateInstall": "Install",
     "templateSkipAndInstall": "Skip & Install",
     "templateSkipAndInstallAria": "Skip starter workflow and install ComfyUI",
-    "templateInstallBlockedHint": "Not enough disk space for this workflow.",
     "templateDontShowAgain": "Don't show this template step again",
     "templateVramWarning": "Recommends ~{recommended} VRAM; you have ~{detected}. May run slowly.",
     "modality": {

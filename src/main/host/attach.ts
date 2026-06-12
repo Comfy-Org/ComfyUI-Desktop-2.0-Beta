@@ -12,6 +12,7 @@ import { noteCloudEntered } from '../lib/cloudEntry'
 import { forwardDatadogError } from '../lib/processErrorHandlers'
 import { recordInstanceSurface } from '../lib/lastSession'
 import { clearPendingTemplateOpen, installationEvents, type InstallationRecord } from '../installations'
+import { buildTemplateDeeplink } from '../sources/standalone/bundledTemplates'
 import {
   abortTemplateDownload,
   stopTemplateTrayMirror,
@@ -573,28 +574,19 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
   // handler, not in `_installCleanup`).
   attachSessionDownloadHandler(comfyContents.session)
 
-  // POC starter template: on the FIRST local launch after install, decorate the
-  // comfy URL with `?template=<id>&source=default`. The ComfyUI frontend's
-  // existing deeplink loader (`useTemplateUrlLoader`) opens it on the canvas and
-  // strips the query — no frontend change needed. The one-shot flag is cleared
-  // (fire-and-forget) so relaunches start blank. Remote/cloud installs are
-  // skipped: they don't load the local frontend that reads this param.
+  // First local launch after install: auto-open the chosen starter template via a
+  // URL deeplink, then clear the one-shot so relaunches start blank. Remote/cloud
+  // installs don't load the local frontend that reads the param, so they're skipped.
   let urlToLoad = comfyUrl
   const pendingTemplate =
     typeof installation.pendingTemplateOpen === 'string'
       ? installation.pendingTemplateOpen
       : null
   if (isLocal && pendingTemplate) {
-    try {
-      const u = new URL(comfyUrl)
-      u.searchParams.set('template', pendingTemplate)
-      u.searchParams.set('source', 'default')
-      urlToLoad = u.toString()
-    } catch {
-      // Malformed comfyUrl — fall back to the undecorated URL; the install
-      // still launches, just without the auto-opened template.
-    }
-    void clearPendingTemplateOpen(installationId)
+    urlToLoad = buildTemplateDeeplink(comfyUrl, pendingTemplate)
+    void clearPendingTemplateOpen(installationId).catch((err) => {
+      console.warn(`[templates] Failed to clear pendingTemplateOpen for ${installationId}:`, err)
+    })
   }
 
   comfyContents.loadURL(urlToLoad)

@@ -67,6 +67,23 @@ export function shouldWarnVram(
   return detectedVramBytes < recommendedVramBytes
 }
 
+/**
+ * Decorate the ComfyUI URL so the frontend auto-opens `templateId` on first
+ * launch (`?template=<id>&source=default`, read by `useTemplateUrlLoader`).
+ * Returns the URL unchanged if it can't be parsed, so a malformed address still
+ * launches (just without the auto-open). Pure + exported for unit testing.
+ */
+export function buildTemplateDeeplink(comfyUrl: string, templateId: string): string {
+  try {
+    const url = new URL(comfyUrl)
+    url.searchParams.set('template', templateId)
+    url.searchParams.set('source', 'default')
+    return url.toString()
+  } catch {
+    return comfyUrl
+  }
+}
+
 /** Sentinel "skip" option value — keeps the wizard step optional. */
 export const NO_TEMPLATE_VALUE = 'none'
 

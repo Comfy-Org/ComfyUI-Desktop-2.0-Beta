@@ -71,6 +71,18 @@ describe('TemplatePickerStep', () => {
     expect(wrapper.emitted('select')?.[0]?.[0]).toMatchObject({ value: VIDEO.value })
   })
 
+  it('leaves Enter/Space to native button activation (does not preventDefault)', async () => {
+    // Rows are <button>s, so the browser fires `click` on Enter/Space natively.
+    // The keydown handler must NOT swallow them, or keyboard select would break.
+    const wrapper = mountPicker({ selectedValue: IMAGE.value })
+    const row = wrapper.findAll('button[role="radio"]')[0]!
+    for (const key of ['Enter', ' ']) {
+      const ev = new KeyboardEvent('keydown', { key, cancelable: true, bubbles: true })
+      row.element.dispatchEvent(ev)
+      expect(ev.defaultPrevented).toBe(false)
+    }
+  })
+
   it('ArrowDown moves selection to the next row', async () => {
     const wrapper = mountPicker({ selectedValue: IMAGE.value })
     await wrapper.findAll('button[role="radio"]')[0]!.trigger('keydown', { key: 'ArrowDown' })

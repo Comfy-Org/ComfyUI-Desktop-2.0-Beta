@@ -153,6 +153,10 @@ const templateTrayMirror = new Map<string, DownloadProgress>()
  * `createdAt` so the rows hold a stable slot, same as real downloads.
  */
 export function setTemplateTrayMirror(entries: DownloadProgress[]): void {
+  const nextUrls = new Set(entries.map((e) => e.url))
+  for (const url of templateTrayMirror.keys()) {
+    if (!nextUrls.has(url)) createdAtByUrl.delete(url)
+  }
   templateTrayMirror.clear()
   for (const entry of entries) {
     let createdAt = createdAtByUrl.get(entry.url)

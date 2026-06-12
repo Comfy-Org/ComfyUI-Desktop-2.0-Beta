@@ -792,7 +792,6 @@
     "templateInstall": "安装",
     "templateSkipAndInstall": "跳过并安装",
     "templateSkipAndInstallAria": "跳过入门工作流并安装 ComfyUI",
-    "templateInstallBlockedHint": "磁盘空间不足以安装此工作流。",
     "templateDontShowAgain": "不再显示此模板选择步骤",
     "templateVramWarning": "建议约 {recommended} 显存；你的 GPU 约有 {detected}。可能运行较慢。",
     "modality": {

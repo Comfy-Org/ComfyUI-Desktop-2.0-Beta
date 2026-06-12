@@ -210,16 +210,14 @@ export function startTemplateDownload(
   const abort = new AbortController()
   _templateAborts.set(installationId, abort)
 
-  // Mirror every log line to the main-process console too, so the lifecycle is
-  // visible in the `pnpm dev` terminal even if the renderer log panel hiccups.
+  /** Tees every task log line to the main-process console as well, so the
+   *  lifecycle shows in the `pnpm dev` terminal even if the renderer panel drops. */
   const log = (text: string): void => {
     console.log(`[templateDownload:${installationId}] ${text.trimEnd()}`)
     opts.sendOutput(text)
   }
   const taskOpts: StartOpts = { sendOutput: log }
 
-  // Emit a line the instant we start so "View logs" shows life immediately —
-  // before the (network) resolve step that precedes the first file.
   log(
     `[templates] Starting background download for "${installation.bundledTemplateId}" (est. ${gbStr(estimatedSizeBytes)} GB)…\n`,
   )
@@ -229,8 +227,6 @@ export function startTemplateDownload(
       state.status = 'error'
       state.error = (err as Error).message
     }
-    // Surface the failure in the log — without this, a resolve/setup throw left
-    // the panel silent and the step stuck.
     log(`[templates] Download task failed: ${(err as Error).message}\n`)
   })
 }
@@ -264,10 +260,8 @@ async function runTask(
 
   const baseDir = getModelsBaseDir()
 
-  // Pre-flight disk guard against the coarse estimate (× headroom). Surface a
-  // hard error rather than fail N writes — or silently skip — when there's
-  // clearly no room. Catches the disk filling between the pick-time pre-check
-  // and download-start.
+  // Pre-flight disk guard against the coarse estimate (× headroom): a hard error
+  // beats N failed writes when there's clearly no room.
   if (state.estimatedTotalBytes > 0) {
     try {
       const { free } = await getDiskSpace(baseDir)
@@ -280,7 +274,7 @@ async function runTask(
         return
       }
     } catch {
-      // Disk probe failed — proceed; per-file write errors are non-fatal.
+      sendOutput('[templates] Could not probe disk space; proceeding without a pre-check.\n')
     }
   }
 
@@ -377,8 +371,8 @@ async function runTask(
     state.status = 'cancelled'
     return
   }
-  // Partial success still counts as done — missing files fall back to ComfyUI's
-  // own missing-model prompt. Only an all-failed set is an error.
+  // Partial success counts as done (ComfyUI's missing-model prompt is the safety
+  // net); only an all-failed set is an error.
   const anyDone = state.files.some((f) => f.done)
   state.status = anyDone ? 'done' : 'error'
   sendOutput(

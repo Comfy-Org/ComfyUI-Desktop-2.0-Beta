@@ -359,33 +359,22 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
   const abort = new AbortController()
   _operationAborts.set(installationId, abort)
 
-  // `template-models` is the LAST launch step, but its 500 ms reader is alive
-  // from launch-start. The bar derives "prior steps done" from the active phase
-  // index (progressStore `globalProgressFor`), so emitting `template-models`
-  // while the real phases (gpu / startingServer) are still running would jump
-  // the active row to the last step and falsely mark everything before it done.
-  // Gate the reader on `serverUp`: it stays SILENT (but keeps polling) until the
-  // server is reachable — the main tracker owns the bar through every real phase
-  // — and only then does it drive the trailing download row. Flipped true by
-  // `waitForTemplateDownloadGate()`, which runs right after port-ready.
+  /** Gates the `template-models` reader: the bar derives "prior steps done" from
+   *  the active phase index, so the reader stays silent through the real phases
+   *  and only drives the trailing download row once the server is reachable.
+   *  Flipped true by `waitForTemplateDownloadGate()` at port-ready. */
   let serverUp = false
 
-  // Single 500 ms reader for the `template-models` launch phase. The bytes have
-  // been downloading in the background since install-begin; this only PACES the
-  // display — it reads the shared state, formats the rich substatus, and emits
-  // one `sendProgress` per tick. (Logs are emitted by the background task
-  // itself, not here.)
+  // Single 500 ms reader for the `template-models` phase — paces the display only
+  // (bytes flow in the background task; logs are emitted there, not here).
   if (showTemplatePhase) {
     void (async (): Promise<void> => {
-      // Track whether this phase was ALREADY complete on the first EMITTED tick
-      // (models pre-downloaded during install — the common case). If so we never
-      // drive a determinate percent: emitting 100 into its slot would fill it in
-      // one frame and make the bar leap. A still-running download instead fills
-      // the slot smoothly by real percent so the bar advances WITH the download.
+      // A pre-completed phase reports indeterminate (emitting 100 into its slot
+      // would fill it in one frame and leap the bar); a live download reports
+      // real percent so the bar advances with the bytes.
       let firstEmittedTick = true
       let preCompleted = false
       const tick = (): boolean => {
-        // Hold (no emit, no exit) until the server is up — see `serverUp` above.
         if (!serverUp) return false
         const state = getTemplateDownloadState(installationId)
         if (!state) return true
@@ -398,9 +387,6 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
           firstEmittedTick = false
           preCompleted = terminal
         }
-        // Pre-completed → indeterminate (no slot fill, no leap). Live download →
-        // real percent so the bar rides the download; clamp at 99 so only the
-        // tracker's real milestones own completion.
         const percent = preCompleted ? -1 : terminal ? -1 : Math.min(99, Math.max(0, summary.percent))
         sendProgress('template-models', {
           percent,
@@ -451,20 +437,25 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
    */
   async function waitForTemplateDownloadGate(): Promise<void> {
     if (!showTemplatePhase) return
-    // Server is reachable — release the reader so the trailing download row can
-    // now drive the bar (it held silent through the real phases). Set before the
-    // early-return so the pre-done case still lets the reader paint the final
-    // "models ready" state for the last step.
+    // Release the reader (it held silent through the real phases). Set before the
+    // early-returns so the pre-done case still paints the final "models ready" row.
     serverUp = true
 
     const state = getTemplateDownloadState(installationId)
-    if (!state || isTemplateDownloadTerminal(state.status)) return
+    if (!state) return
+    // Already failed by gate entry (e.g. resolve threw before the server was up,
+    // while the reader was muted): surface it now, then run the countdown — the
+    // reader's first post-`serverUp` tick could be up to 500 ms away.
+    const failedAlready = state.status === 'error'
+    if (isTemplateDownloadTerminal(state.status) && !failedAlready) return
 
-    const reason = await awaitTemplateDownloadSettled(installationId, abort.signal)
-    if (reason !== 'error' || abort.signal.aborted) return
+    if (!failedAlready) {
+      const reason = await awaitTemplateDownloadSettled(installationId, abort.signal)
+      if (reason !== 'error' || abort.signal.aborted) return
+    }
 
-    // Failed for real: surface it, then count down into ComfyUI so the user
-    // notices before the view swaps.
+    // Failed for real: count down into ComfyUI so the user notices the failure
+    // before the view swaps.
     for (let secs = 3; secs >= 1; secs--) {
       if (abort.signal.aborted) return
       sendProgress('template-models', {

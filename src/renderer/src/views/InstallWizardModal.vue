@@ -116,9 +116,8 @@ const templateInstallBlocked = computed(() => {
   return isTemplateDiskBlocked(diskSpace.value, modelBytes)
 })
 
-// --- Dedicated template-picker step ---
-// The configure screen and the picker are two steps of the SAME takeover. After
-// Configure, we show the picker (unless gated off) and only then install.
+/** Which step of the takeover is showing: Configure, then the (optional,
+ *  standalone-only) starter-template picker before install. */
 const step = ref<'configure' | 'template'>('configure')
 const detectedVramBytes = ref<number | undefined>(undefined)
 const dontShowTemplatePicker = ref(false)
@@ -392,6 +391,8 @@ async function selectSourceCard(source: Source): Promise<void> {
 async function selectSource(source: Source): Promise<void> {
   loadGeneration++
   currentSource.value = source
+  // A different source can't keep the (standalone-only) picker open.
+  step.value = 'configure'
   selections.value = {}
   fieldOptions.value.clear()
   fieldLoading.value.clear()
@@ -400,7 +401,6 @@ async function selectSource(source: Source): Promise<void> {
   saveDisabled.value = true
   sourceError.value = ''
 
-  // Initialize text fields with defaults
   for (const f of source.fields) {
     if (f.type === 'text') {
       const defaultVal = f.defaultValue ?? ''
@@ -1019,13 +1019,6 @@ defineExpose({ open })
           />
         </div>
         <div class="brand-card__footer template-card__footer">
-          <p
-            v-if="templateInstallBlocked"
-            class="template-install-hint"
-            role="status"
-          >
-            {{ $t('standalone.templateInstallBlockedHint') }}
-          </p>
           <div class="template-card__footer-actions">
             <button
               type="button"
@@ -1112,14 +1105,6 @@ defineExpose({ open })
 .template-card__footer {
   flex-direction: column;
   align-items: stretch;
-  gap: 10px;
-}
-.template-install-hint {
-  margin: 0;
-  font-size: var(--takeover-fs-caption);
-  line-height: 1.4;
-  color: var(--danger);
-  text-align: right;
 }
 .template-card__footer-actions {
   display: flex;
