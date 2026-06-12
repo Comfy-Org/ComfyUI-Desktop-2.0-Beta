@@ -14,6 +14,7 @@ import {
   withRetry,
   truncateForMaxPath,
   templateStateToTrayEntries,
+  describeDownloadFailure,
   gbStr,
   DISK_SPACE_ERROR,
   type TemplateDownloadState,
@@ -118,6 +119,65 @@ export function stopTemplateTrayMirror(installationId: string): void {
     _trayMirrors.delete(installationId)
   }
   clearTemplateTrayMirror()
+}
+
+// --- Launch-gate: hold the ComfyUI reveal until the download settles ---------
+// When all real launch phases are done but a template download is still running,
+// `handleLaunch` waits on `awaitTemplateDownloadSettled` before revealing ComfyUI
+// (so the model-download step is the active row + the footer "Skip" is live). The
+// user's Skip click resolves that wait via `requestSkipTemplateDownload`.
+
+/** Installs whose download the user chose to skip (open ComfyUI now, finish in
+ *  the tray). Checked by `awaitTemplateDownloadSettled`. */
+const _templateSkips = new Set<string>()
+
+/**
+ * User asked to stop waiting on the download and open ComfyUI now. Releases any
+ * pending launch gate and hands the still-running task off to the title-bar
+ * tray. Idempotent. The download itself keeps running (never aborted here).
+ */
+export function requestSkipTemplateDownload(installationId: string): void {
+  _templateSkips.add(installationId)
+  mirrorTemplateDownloadToTray(installationId)
+}
+
+const SETTLE_POLL_MS = 250
+
+/**
+ * Resolve once the launch gate should release: the download is terminal
+ * (done/error/cancelled), the user skipped, the abort fired, or there's no task
+ * to wait on. Polls the shared state (the task is its sole writer; there's no
+ * event bus) on a light interval. Pure of any UI — `handleLaunch` owns what to
+ * show while awaiting. Returns the reason so the caller can branch (e.g. show a
+ * failure countdown only on `'error'`).
+ */
+export function awaitTemplateDownloadSettled(
+  installationId: string,
+  signal: AbortSignal,
+): Promise<'done' | 'error' | 'cancelled' | 'skipped' | 'aborted' | 'absent'> {
+  return new Promise((resolve) => {
+    const settle = (reason: 'done' | 'error' | 'cancelled' | 'skipped' | 'aborted' | 'absent'): void => {
+      clearInterval(timer)
+      signal.removeEventListener('abort', onAbort)
+      _templateSkips.delete(installationId)
+      resolve(reason)
+    }
+    const onAbort = (): void => settle('aborted')
+
+    const check = (): void => {
+      if (signal.aborted) return settle('aborted')
+      if (_templateSkips.has(installationId)) return settle('skipped')
+      const state = _templateDownloads.get(installationId)
+      if (!state) return settle('absent')
+      if (isTerminal(state.status)) {
+        settle(state.status === 'done' ? 'done' : state.status === 'error' ? 'error' : 'cancelled')
+      }
+    }
+
+    signal.addEventListener('abort', onAbort, { once: true })
+    const timer = setInterval(check, SETTLE_POLL_MS)
+    check() // resolve synchronously if already settled (the common pre-done case)
+  })
 }
 
 interface StartOpts {
@@ -307,7 +367,7 @@ async function runTask(
         const msg = (err as Error).message
         if (signal.aborted || msg === 'Download cancelled') return
         f.failed = true
-        sendOutput(`[templates] Failed ${f.name}: ${msg} — will fall back to in-app download.\n`)
+        sendOutput(describeDownloadFailure(f.name, msg))
       }
     },
     signal,

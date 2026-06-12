@@ -758,7 +758,7 @@ defineExpose({ startOperation, showOperation })
             class="brand-ghost brand-progress__footer-btn brand-progress__footer-skip"
             @click="handleSkipTemplateDownload"
           >
-            {{ $t('standalone.skipTemplateDownload') }}
+            {{ $t('standalone.skipTemplateDownloadOpen') }}
           </button>
           <button
             v-if="currentOp.terminalOutput"

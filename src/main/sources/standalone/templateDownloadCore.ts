@@ -63,6 +63,20 @@ export function isTerminal(status: TemplateDownloadStatus): boolean {
   return status === 'done' || status === 'error' || status === 'cancelled'
 }
 
+/**
+ * Turn a per-file `download()` failure message into a human log line. A gated
+ * Hugging Face / Civitai repo answers 401/403 — surface a clearer "requires
+ * login or a license" hint instead of the raw `HTTP 401`, since the fix (sign
+ * in / accept the license in ComfyUI) is different from a transient failure.
+ * Pure → unit-testable. `filename` names the file the line is about.
+ */
+export function describeDownloadFailure(filename: string, message: string): string {
+  if (/\b(401|403)\b/.test(message)) {
+    return `[templates] Couldn't download ${filename}: the model repo requires a login or license. Open the template in ComfyUI to sign in / accept it, then it'll download in-app.\n`
+  }
+  return `[templates] Failed ${filename}: ${message} — will fall back to in-app download.\n`
+}
+
 /** One downloads-tray row mirrored from our task. Structurally a subset of
  *  `comfyDownloadManager`'s `DownloadProgress`, declared here so the mapper
  *  stays Electron-free and unit-testable. */

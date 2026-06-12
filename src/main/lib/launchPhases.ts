@@ -99,17 +99,23 @@ const PRE_LAUNCH_PHASES: Record<PreLaunchPhase, LaunchPhaseDef> = {
   torchRepair: { phase: 'torchRepair', match: NEVER, weight: 0.1, streaming: true },
 }
 
-/** Starter-template model download, shown AFTER `securityScan`. Synthetic +
+/** Starter-template model download, shown as the LAST launch step. Synthetic +
  *  streaming: its bytes downloaded in the background since install-begin, and a
  *  500 ms reader in `handleLaunch` feeds the rich substatus from the shared
  *  download state.
+ *
+ *  Placed at the very end (after `startingServer`) on purpose: every other
+ *  install+launch step finishes first, so a still-running download can't make
+ *  the earlier steps' bar jump, and the "Skip model download" footer button —
+ *  gated on `template-models` being the active row — only appears once nothing
+ *  else is left. (The store's monotonic `activePhase` guard keeps the early
+ *  reader ticks from pulling the active row here before its turn.)
  *
  *  Weight matches the other light launch phases so a STILL-RUNNING download
  *  fills its slot smoothly (the bar advances with the bytes). When the models
  *  were already fetched in the background by launch time (the common case), the
  *  reader in `handleLaunch` reports it INDETERMINATE so the slot isn't filled in
- *  one frame — which, via the monotonic floor and the heavy `gpu` baseline that
- *  follows, would otherwise make the bar leap. */
+ *  one frame. */
 const TEMPLATE_MODELS_PHASE: LaunchPhaseDef = {
   phase: 'template-models',
   match: NEVER,
@@ -121,7 +127,7 @@ export interface BuildLaunchPhasesOpts {
   /** Synthetic repair steps to prepend, in display order (e.g. a source
    *  rollback then a PyTorch restore). Omitted/empty for an unaffected launch. */
   preLaunchPhases?: PreLaunchPhase[]
-  /** When true, splice the `template-models` phase in after `securityScan`. */
+  /** When true, append the `template-models` phase as the final launch step. */
   templateModels?: boolean
 }
 
@@ -140,9 +146,9 @@ export function buildLaunchPhases(_inst: unknown, opts: BuildLaunchPhasesOpts = 
   const pre = (opts.preLaunchPhases ?? []).map((id) => ({ ...PRE_LAUNCH_PHASES[id] }))
   const phases = [...pre, ...DEFAULT_LAUNCH_PHASES.map((p) => ({ ...p }))]
   if (opts.templateModels) {
-    const after = phases.findIndex((p) => p.phase === 'securityScan')
-    const at = after >= 0 ? after + 1 : phases.length
-    phases.splice(at, 0, { ...TEMPLATE_MODELS_PHASE })
+    // Append as the final step so every other install+launch phase completes
+    // before the (background) model download becomes the active row.
+    phases.push({ ...TEMPLATE_MODELS_PHASE })
   }
   return phases
 }

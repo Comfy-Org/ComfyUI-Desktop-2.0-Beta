@@ -27,6 +27,7 @@ import {
   withRetry,
   truncateForMaxPath,
   templateStateToTrayEntries,
+  describeDownloadFailure,
   summarizeTemplateState,
   formatTemplateSubStatus,
   type TemplateDownloadState,
@@ -214,6 +215,29 @@ describe('truncateForMaxPath', () => {
   it('returns null when even an empty stem cannot fit', () => {
     const dir = 'C:\\' + 'd'.repeat(260)
     expect(truncateForMaxPath(dir, 'model.safetensors', 'win32')).toBeNull()
+  })
+})
+
+describe('describeDownloadFailure', () => {
+  it('gives a login/license hint for a gated repo (401/403)', () => {
+    const line = describeDownloadFailure('m.safetensors', 'Download failed: HTTP 401')
+    expect(line).toMatch(/login or license/i)
+    expect(line).toContain('m.safetensors')
+    expect(describeDownloadFailure('m.safetensors', 'HTTP 403')).toMatch(/login or license/i)
+  })
+
+  it('passes through a generic failure with the in-app fallback note', () => {
+    const line = describeDownloadFailure('m.safetensors', 'socket hang up')
+    expect(line).toContain('socket hang up')
+    expect(line).toMatch(/fall back to in-app/i)
+    expect(line).not.toMatch(/login or license/i)
+  })
+
+  it('does not false-match a 401 inside an unrelated number', () => {
+    // 4012 must not trip the gated-repo branch (word-boundary guard).
+    expect(describeDownloadFailure('m.safetensors', 'wrote 4012 bytes then reset')).toMatch(
+      /fall back to in-app/i,
+    )
   })
 })
 

@@ -32,7 +32,9 @@ import {
   getTemplateDownloadState,
   summarizeTemplateState,
   formatTemplateSubStatus,
+  awaitTemplateDownloadSettled,
 } from '../../../sources/standalone/templateDownloadTask'
+import { isTerminal as isTemplateDownloadTerminal } from '../../../sources/standalone/templateDownloadCore'
 import type { PreLaunchPhase } from '../../launchPhases'
 import { scanCustomNodes } from '../../nodes'
 import type { LaunchProgressTracker } from '../../launchProgress'
@@ -357,23 +359,34 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
   const abort = new AbortController()
   _operationAborts.set(installationId, abort)
 
+  // `template-models` is the LAST launch step, but its 500 ms reader is alive
+  // from launch-start. The bar derives "prior steps done" from the active phase
+  // index (progressStore `globalProgressFor`), so emitting `template-models`
+  // while the real phases (gpu / startingServer) are still running would jump
+  // the active row to the last step and falsely mark everything before it done.
+  // Gate the reader on `serverUp`: it stays SILENT (but keeps polling) until the
+  // server is reachable — the main tracker owns the bar through every real phase
+  // — and only then does it drive the trailing download row. Flipped true by
+  // `waitForTemplateDownloadGate()`, which runs right after port-ready.
+  let serverUp = false
+
   // Single 500 ms reader for the `template-models` launch phase. The bytes have
   // been downloading in the background since install-begin; this only PACES the
   // display — it reads the shared state, formats the rich substatus, and emits
-  // one `sendProgress` per tick until the download is terminal. Non-blocking:
-  // launch completes on port readiness regardless. (Logs are emitted by the
-  // background task itself, not here.)
+  // one `sendProgress` per tick. (Logs are emitted by the background task
+  // itself, not here.)
   if (showTemplatePhase) {
     void (async (): Promise<void> => {
-      // Track whether this phase was ALREADY complete on the very first tick
+      // Track whether this phase was ALREADY complete on the first EMITTED tick
       // (models pre-downloaded during install — the common case). If so we never
       // drive a determinate percent: emitting 100 into its slot would fill it in
-      // one frame and, via the monotonic floor + the heavy `gpu` baseline that
-      // follows, make the bar leap. A still-running download instead fills the
-      // slot smoothly by real percent so the bar advances WITH the download.
-      let firstTick = true
+      // one frame and make the bar leap. A still-running download instead fills
+      // the slot smoothly by real percent so the bar advances WITH the download.
+      let firstEmittedTick = true
       let preCompleted = false
       const tick = (): boolean => {
+        // Hold (no emit, no exit) until the server is up — see `serverUp` above.
+        if (!serverUp) return false
         const state = getTemplateDownloadState(installationId)
         if (!state) return true
         const summary = summarizeTemplateState(state)
@@ -381,8 +394,8 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
           summary.status === 'done' ||
           summary.status === 'error' ||
           summary.status === 'cancelled'
-        if (firstTick) {
-          firstTick = false
+        if (firstEmittedTick) {
+          firstEmittedTick = false
           preCompleted = terminal
         }
         // Pre-completed → indeterminate (no slot fill, no leap). Live download →
@@ -409,6 +422,58 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
         if (done) return
       }
     })()
+  }
+
+  /** Abortable sleep used by the failure countdown. Resolves early on abort. */
+  function delay(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        abort.signal.removeEventListener('abort', onAbort)
+        resolve()
+      }, ms)
+      const onAbort = (): void => { clearTimeout(timer); resolve() }
+      abort.signal.addEventListener('abort', onAbort, { once: true })
+    })
+  }
+
+  /**
+   * Hold the ComfyUI reveal until the template-model download settles, so the
+   * (last) download step is genuinely shown and its "Skip & open ComfyUI" footer
+   * button is actionable instead of flashing past on port-ready.
+   *
+   *   - still running → wait (the 500 ms reader keeps the substatus live; Skip
+   *     resolves the wait via `requestSkipTemplateDownload`)
+   *   - done / skipped / cancelled / aborted → proceed immediately
+   *   - error (after the task's 2× retries) → show a clear "failed, retry later"
+   *     line + a 3·2·1 countdown, then proceed
+   *
+   * No-op (returns at once) when there's no template phase or nothing is running.
+   */
+  async function waitForTemplateDownloadGate(): Promise<void> {
+    if (!showTemplatePhase) return
+    // Server is reachable — release the reader so the trailing download row can
+    // now drive the bar (it held silent through the real phases). Set before the
+    // early-return so the pre-done case still lets the reader paint the final
+    // "models ready" state for the last step.
+    serverUp = true
+
+    const state = getTemplateDownloadState(installationId)
+    if (!state || isTemplateDownloadTerminal(state.status)) return
+
+    const reason = await awaitTemplateDownloadSettled(installationId, abort.signal)
+    if (reason !== 'error' || abort.signal.aborted) return
+
+    // Failed for real: surface it, then count down into ComfyUI so the user
+    // notices before the view swaps.
+    for (let secs = 3; secs >= 1; secs--) {
+      if (abort.signal.aborted) return
+      sendProgress('template-models', {
+        percent: -1,
+        error: true,
+        status: i18n.t('standalone.templateModelsFailedCountdown', { secs }),
+      })
+      await delay(1000)
+    }
   }
 
   // Remote connection
@@ -886,6 +951,11 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     })
   }
   attachExitHandler(proc)
+
+  // Server is up. If a template-model download is still running, hold here (the
+  // download step is the active row + the footer Skip is live) until it settles
+  // or the user skips, instead of flashing past into ComfyUI.
+  await waitForTemplateDownloadGate()
 
   if (_onLaunch) {
     _onLaunch({ port: launchCmd.port!, process: proc, installation: inst, mode })

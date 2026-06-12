@@ -41,7 +41,7 @@ import { appendLog } from '../logsBroadcast'
 import {
   startTemplateDownload,
   abortTemplateDownload,
-  mirrorTemplateDownloadToTray,
+  requestSkipTemplateDownload,
 } from '../../sources/standalone/templateDownloadTask'
 import { BUNDLED_TEMPLATES } from '../../sources/standalone/bundledTemplates'
 import { recordIpcInvocation } from '../e2eOverrides'
@@ -414,11 +414,12 @@ export function registerInstallationHandlers(): void {
     return source.getListActions ? source.getListActions(inst) : []
   })
 
-  // User skipped waiting on the template-model download: hand the still-running
-  // (resume-capable) task off to the title-bar downloads tray. No restart.
+  // User skipped waiting on the template-model download: release the launch gate
+  // (open ComfyUI now) and hand the still-running, resume-capable task off to the
+  // title-bar downloads tray. No restart.
   ipcMain.handle('skip-template-download', (_event, installationId: string) => {
     if (typeof installationId === 'string' && installationId) {
-      mirrorTemplateDownloadToTray(installationId)
+      requestSkipTemplateDownload(installationId)
     }
   })
 
