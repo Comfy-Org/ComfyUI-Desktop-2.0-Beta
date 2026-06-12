@@ -146,7 +146,7 @@ First `pnpm dev` run showed the model step **starting at 0** and logs **stuck at
 - [ ] Per-modality picker metadata (title, thumbnail id, size, modality label)
 
 **B. Resource gating**
-- [ ] Disk hard-block at **pick/pre-install** (install+model size vs free) + message
+- [x] Disk hard-block at **pick/pre-install** (`checkTemplateDiskOrBlock` in `installHelpers.ts`, wired into `InstallWizardModal.handleSave`): free disk vs template-model size × 1.1 headroom; **no continue-anyway** (alert + block), only when a template-with-models is chosen and consented. Install-bundle disk stays the existing soft warn. Pure `templateDiskRequiredBytes` extracted + tested.
 - [x] Upgrade in-task disk pre-check: silent-skip → **surfaced hard error** (distinct `insufficient-disk` code → `templateModelsNoSpace` substatus, rendered via the `is-error` style)
 - [x] **VRAM detection**: `vramBytes` in `detectGPU()` — nvidia-smi `memory.total` (authoritative) → mps `os.totalmem()` → **cross-OS `systeminformation` `si.graphics()` fallback** (AMD/Intel/discrete, any OS); undefined only when no real number. Flows through the existing `detect-gpu` IPC + `GPUInfo.vramBytes`. Pure `shouldWarnVram(detected, recommended)` decision helper added + tested (silent on undefined / no-recommendation; never false-warns).
 - [ ] **VRAM warn-but-allow** in picker (warn via `shouldWarnVram`; never block; silent when unknown) — **coupled to the picker UI (item E)**; needs per-template `recommendedVramBytes` (item A)

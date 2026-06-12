@@ -285,6 +285,8 @@
     "warningTitle": "Low Disk Space",
     "warningMessage": "The target drive only has {free} free. This operation may require approximately {required}. You may run out of space during the process.",
     "warningMessageGeneric": "The target drive only has {free} free. You may run out of space during the process.",
+    "templateBlockTitle": "Not Enough Space for Template Models",
+    "templateBlockMessage": "The starter template needs about {required} for its models, but the target drive only has {free} free. Free up space or choose a lighter template (or skip the model download) to continue.",
     "continueAnyway": "Continue Anyway",
     "calculatingSize": "Calculating…",
     "sizeLabel": "Disk Usage",

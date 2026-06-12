@@ -285,6 +285,8 @@
     "warningTitle": "磁盘空间不足",
     "warningMessage": "目标磁盘仅剩 {free} 可用空间。此操作可能需要约 {required}。过程中可能会空间不足。",
     "warningMessageGeneric": "目标磁盘仅剩 {free} 可用空间。过程中可能会空间不足。",
+    "templateBlockTitle": "磁盘空间不足以下载模板模型",
+    "templateBlockMessage": "该入门模板的模型约需 {required}，但目标磁盘仅剩 {free} 可用空间。请释放空间、选择更轻量的模板，或跳过模型下载后再继续。",
     "continueAnyway": "仍然继续",
     "calculatingSize": "正在计算…",
     "sizeLabel": "磁盘占用",

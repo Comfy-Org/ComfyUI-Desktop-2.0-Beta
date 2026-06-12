@@ -18,7 +18,8 @@ import {
   createDiskSpaceChecker,
   showPathIssueAlerts,
   checkNvidiaDriverOrWarn,
-  checkDiskSpaceOrWarn
+  checkDiskSpaceOrWarn,
+  checkTemplateDiskOrBlock
 } from '../lib/installHelpers'
 import TakeoverBack from '../components/TakeoverBack.vue'
 import BrandTakeoverLayout from '../components/BrandTakeoverLayout.vue'
@@ -585,6 +586,25 @@ async function handleSave(): Promise<void> {
       }
     } catch {
       // If disk space check fails, proceed anyway
+    }
+  }
+
+  // Hard-block (no continue-anyway) when the volume can't also hold the
+  // selected template's models — avoids a half-downloaded model set + a
+  // confusing error row. Only fires when a template with models is chosen
+  // and its download is consented to.
+  if (instPath.value && downloadTemplateModels.value && templateHasModels.value) {
+    const modelBytes = (selectedTemplate.value?.data?.sizeBytes as number | undefined) ?? 0
+    if (
+      !(await checkTemplateDiskOrBlock({
+        path: instPath.value,
+        estimatedModelBytes: modelBytes,
+        flow: 'wizard',
+        alert: modal.alert,
+        t
+      }))
+    ) {
+      return
     }
   }
 
