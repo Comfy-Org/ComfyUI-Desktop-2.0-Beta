@@ -38,7 +38,11 @@ import { parseUrl } from '../util'
 import { restoreSnapshotIntoInstallation } from '../standaloneMigration'
 import * as mainTelemetry from '../telemetry'
 import { appendLog } from '../logsBroadcast'
-import { startTemplateDownload, abortTemplateDownload } from '../../sources/standalone/templateDownloadTask'
+import {
+  startTemplateDownload,
+  abortTemplateDownload,
+  mirrorTemplateDownloadToTray,
+} from '../../sources/standalone/templateDownloadTask'
 import { BUNDLED_TEMPLATES } from '../../sources/standalone/bundledTemplates'
 import { recordIpcInvocation } from '../e2eOverrides'
 
@@ -408,6 +412,14 @@ export function registerInstallationHandlers(): void {
     const source = sourceMap[inst.sourceId]
     if (!source) return []
     return source.getListActions ? source.getListActions(inst) : []
+  })
+
+  // User skipped waiting on the template-model download: hand the still-running
+  // (resume-capable) task off to the title-bar downloads tray. No restart.
+  ipcMain.handle('skip-template-download', (_event, installationId: string) => {
+    if (typeof installationId === 'string' && installationId) {
+      mirrorTemplateDownloadToTray(installationId)
+    }
   })
 
   // Detail — validate editable fields dynamically from source schema

@@ -63,6 +63,61 @@ export function isTerminal(status: TemplateDownloadStatus): boolean {
   return status === 'done' || status === 'error' || status === 'cancelled'
 }
 
+/** One downloads-tray row mirrored from our task. Structurally a subset of
+ *  `comfyDownloadManager`'s `DownloadProgress`, declared here so the mapper
+ *  stays Electron-free and unit-testable. */
+export interface TemplateTrayEntry {
+  url: string
+  filename: string
+  directory: string
+  progress: number
+  status: 'downloading' | 'completed' | 'error'
+  receivedBytes: number
+  totalBytes: number
+  speedBytesPerSec: number
+  etaSeconds: number
+}
+
+/**
+ * Map the task's per-file state into downloads-tray rows so the title-bar tray
+ * can continue showing the SAME download after the user skips ahead to ComfyUI
+ * — no restart (our resume-capable task keeps running; the tray only mirrors
+ * it). One row per file, keyed by a stable synthetic url so the tray dedupes /
+ * updates in place across ticks. Pure — no Electron, so the mapping is
+ * unit-testable. Speed/ETA come from the shared snapshot and ride on the first
+ * still-running row (the tray shows one active row at a time).
+ */
+export function templateStateToTrayEntries(
+  state: TemplateDownloadState,
+  urlPrefix = 'template-model://',
+): TemplateTrayEntry[] {
+  const speedBytesPerSec = state.speedMBs > 0 ? Math.round(state.speedMBs * 1048576) : 0
+  const etaSeconds = state.etaSecs >= 0 ? state.etaSecs : 0
+  let liveRowAssigned = false
+
+  return state.files.map((file) => {
+    const status: TemplateTrayEntry['status'] = file.failed
+      ? 'error'
+      : file.done
+        ? 'completed'
+        : 'downloading'
+    const progress = file.total > 0 ? Math.min(1, file.received / file.total) : 0
+    const isLiveRow = status === 'downloading' && !liveRowAssigned
+    if (isLiveRow) liveRowAssigned = true
+    return {
+      url: `${urlPrefix}${file.directory}/${file.name}`,
+      filename: file.name,
+      directory: file.directory,
+      progress,
+      status,
+      receivedBytes: file.received,
+      totalBytes: file.total,
+      speedBytesPerSec: isLiveRow ? speedBytesPerSec : 0,
+      etaSeconds: isLiveRow ? etaSeconds : 0,
+    }
+  })
+}
+
 /**
  * Run `attempt` up to `1 + retries` times, returning the first success. Rethrows
  * the last error once all tries are exhausted. Stops early (no retry) when

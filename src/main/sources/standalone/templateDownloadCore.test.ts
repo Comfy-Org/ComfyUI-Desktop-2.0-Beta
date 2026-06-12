@@ -26,6 +26,7 @@ import {
   runPool,
   withRetry,
   truncateForMaxPath,
+  templateStateToTrayEntries,
   summarizeTemplateState,
   formatTemplateSubStatus,
   type TemplateDownloadState,
@@ -213,6 +214,51 @@ describe('truncateForMaxPath', () => {
   it('returns null when even an empty stem cannot fit', () => {
     const dir = 'C:\\' + 'd'.repeat(260)
     expect(truncateForMaxPath(dir, 'model.safetensors', 'win32')).toBeNull()
+  })
+})
+
+describe('templateStateToTrayEntries', () => {
+  it('maps one row per file with the right status', () => {
+    const rows = templateStateToTrayEntries(state({
+      files: [
+        file({ name: 'a', received: 2 * GB, total: 2 * GB, done: true }),
+        file({ name: 'b', received: 1 * GB, total: 4 * GB }),
+        file({ name: 'c', failed: true }),
+      ],
+    }))
+    expect(rows.map((r) => r.status)).toEqual(['completed', 'downloading', 'error'])
+    expect(rows[1]!.progress).toBeCloseTo(0.25)
+  })
+
+  it('keys each row by a stable synthetic url so the tray updates in place', () => {
+    const [row] = templateStateToTrayEntries(state({
+      files: [file({ name: 'model.safetensors', directory: 'checkpoints' })],
+    }))
+    expect(row!.url).toBe('template-model://checkpoints/model.safetensors')
+  })
+
+  it('puts speed/ETA only on the first still-running row', () => {
+    const rows = templateStateToTrayEntries(state({
+      speedMBs: 8,
+      etaSecs: 30,
+      files: [
+        file({ name: 'a', received: 1 * GB, total: 2 * GB }),
+        file({ name: 'b', received: 0, total: 4 * GB }),
+      ],
+    }))
+    expect(rows[0]!.speedBytesPerSec).toBeGreaterThan(0)
+    expect(rows[0]!.etaSeconds).toBe(30)
+    expect(rows[1]!.speedBytesPerSec).toBe(0)
+    expect(rows[1]!.etaSeconds).toBe(0)
+  })
+
+  it('reports no live speed when nothing is downloading', () => {
+    const rows = templateStateToTrayEntries(state({
+      status: 'done',
+      speedMBs: 5,
+      files: [file({ name: 'a', received: 2 * GB, total: 2 * GB, done: true })],
+    }))
+    expect(rows[0]!.speedBytesPerSec).toBe(0)
   })
 })
 

@@ -127,6 +127,40 @@ function isTerminalStatus(status: DownloadProgress['status']): boolean {
   return status === 'completed' || status === 'error' || status === 'cancelled'
 }
 
+/**
+ * Template-model downloads mirrored into the tray after the user skips ahead to
+ * ComfyUI. The resume-capable background task stays the byte-owner; this is a
+ * read-only reflection merged into the tray view-state, NOT a real download — so
+ * it never touches `pendingDownloads`' DownloadItem lifecycle (cancel/retry/
+ * temp-rename stay untouched). Keyed by the entry's synthetic url. */
+const templateTrayMirror = new Map<string, DownloadProgress>()
+
+/**
+ * Replace the mirrored template rows and notify the tray. `entries` is the full
+ * current set (one per template file); passing `[]` clears the mirror. Stamps
+ * `createdAt` so the rows hold a stable slot, same as real downloads.
+ */
+export function setTemplateTrayMirror(entries: DownloadProgress[]): void {
+  templateTrayMirror.clear()
+  for (const entry of entries) {
+    let createdAt = createdAtByUrl.get(entry.url)
+    if (createdAt === undefined) {
+      createdAt = Date.now()
+      createdAtByUrl.set(entry.url, createdAt)
+    }
+    templateTrayMirror.set(entry.url, { ...entry, createdAt })
+  }
+  downloadEvents.emit('tray-state-changed')
+}
+
+/** Drop all mirrored template rows from the tray (e.g. window close). */
+export function clearTemplateTrayMirror(): void {
+  if (templateTrayMirror.size === 0) return
+  for (const url of templateTrayMirror.keys()) createdAtByUrl.delete(url)
+  templateTrayMirror.clear()
+  downloadEvents.emit('tray-state-changed')
+}
+
 function pushRecent(progress: DownloadProgress): void {
   // Replace any prior entry for the same URL so a re-attempted download
   // appears once.
@@ -146,13 +180,21 @@ function pushRecent(progress: DownloadProgress): void {
 
 export function getDownloadsTrayState(): DownloadsTrayState {
   const active: DownloadProgress[] = []
+  const recent: DownloadProgress[] = recentDownloads.slice()
   for (const pending of pendingDownloads.values()) {
     const s = pending.lastProgress.status
     if (s === 'pending' || s === 'downloading' || s === 'paused') {
       active.push(pending.lastProgress)
     }
   }
-  return { active, recent: recentDownloads.slice() }
+  // Merge mirrored template-model rows: in-flight ones join `active`, finished
+  // ones join `recent`, so the tray reflects the skipped-but-still-running
+  // download exactly like a native one.
+  for (const entry of templateTrayMirror.values()) {
+    if (isTerminalStatus(entry.status)) recent.push(entry)
+    else active.push(entry)
+  }
+  return { active, recent }
 }
 
 export function setMainWindow(win: BrowserWindow | null): void {

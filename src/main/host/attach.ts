@@ -11,7 +11,10 @@ import { refreshCloudUserTier } from '../lib/userTier'
 import { forwardDatadogError } from '../lib/processErrorHandlers'
 import { recordInstanceSurface } from '../lib/lastSession'
 import { clearPendingTemplateOpen, installationEvents, type InstallationRecord } from '../installations'
-import { abortTemplateDownload } from '../sources/standalone/templateDownloadTask'
+import {
+  abortTemplateDownload,
+  stopTemplateTrayMirror,
+} from '../sources/standalone/templateDownloadTask'
 import {
   dropInstallationIndex,
   indexInstallationId,
@@ -627,8 +630,10 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
       }
       // Tear down a still-running background template-model download — it's
       // keyed separately from _operationAborts, so it would otherwise outlive
-      // the window it was started for.
+      // the window it was started for. Also stop mirroring it into the tray and
+      // clear those rows (the user may have skipped it there).
       abortTemplateDownload(id)
+      stopTemplateTrayMirror(id)
       // Detach the relaunch will-navigate blocker before clearing the
       // map slot — without `comfyContents.off(...)`, a re-attach would
       // inherit a still-active blocker that preventDefaults every

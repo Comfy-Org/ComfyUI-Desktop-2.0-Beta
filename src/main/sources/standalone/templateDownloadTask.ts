@@ -1,7 +1,11 @@
 import fs from 'fs'
 import path from 'path'
 import { download } from '../../lib/download'
-import { getModelsBaseDir } from '../../lib/comfyDownloadManager'
+import {
+  getModelsBaseDir,
+  setTemplateTrayMirror,
+  clearTemplateTrayMirror,
+} from '../../lib/comfyDownloadManager'
 import { getDiskSpace } from '../../lib/disk'
 import { resolveTemplateModels } from './templateModels'
 import {
@@ -9,6 +13,7 @@ import {
   runPool,
   withRetry,
   truncateForMaxPath,
+  templateStateToTrayEntries,
   gbStr,
   DISK_SPACE_ERROR,
   type TemplateDownloadState,
@@ -61,6 +66,49 @@ export function abortTemplateDownload(installationId: string): void {
   if (state && !isTerminal(state.status)) {
     state.status = 'cancelled'
   }
+}
+
+const TRAY_MIRROR_INTERVAL_MS = 500
+const _trayMirrors = new Map<string, ReturnType<typeof setInterval>>()
+
+/**
+ * Hand the still-running download off to the title-bar downloads tray after the
+ * user skips ahead to ComfyUI. The resume-capable task keeps running untouched;
+ * this only REFLECTS its state into the tray on a 500 ms poll (mapped by the
+ * pure `templateStateToTrayEntries`) until the download is terminal, then leaves
+ * the final rows in place so they show as recent. Idempotent — a second call
+ * for the same install is a no-op. Never restarts the download (no
+ * `startModelDownload`).
+ */
+export function mirrorTemplateDownloadToTray(installationId: string): void {
+  if (_trayMirrors.has(installationId)) return
+
+  const publish = (): boolean => {
+    const state = _templateDownloads.get(installationId)
+    if (!state) return true
+    setTemplateTrayMirror(templateStateToTrayEntries(state))
+    return isTerminal(state.status)
+  }
+
+  if (publish()) return // already terminal — one snapshot is enough
+  const timer = setInterval(() => {
+    if (publish()) {
+      clearInterval(timer)
+      _trayMirrors.delete(installationId)
+    }
+  }, TRAY_MIRROR_INTERVAL_MS)
+  _trayMirrors.set(installationId, timer)
+}
+
+/** Stop mirroring this install's download into the tray and clear its rows
+ *  (e.g. on window close / install teardown). */
+export function stopTemplateTrayMirror(installationId: string): void {
+  const timer = _trayMirrors.get(installationId)
+  if (timer) {
+    clearInterval(timer)
+    _trayMirrors.delete(installationId)
+  }
+  clearTemplateTrayMirror()
 }
 
 interface StartOpts {

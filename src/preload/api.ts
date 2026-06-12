@@ -56,6 +56,8 @@ export function buildElectronApi(): ElectronApi {
     probeInstallation: (dirPath) => ipcRenderer.invoke('probe-installation', dirPath),
     trackInstallation: (data) => ipcRenderer.invoke('track-installation', data),
     installInstance: (installationId) => ipcRenderer.invoke('install-instance', installationId),
+    skipTemplateDownload: (installationId) =>
+      ipcRenderer.invoke('skip-template-download', installationId),
     updateInstallation: (installationId, data) =>
       ipcRenderer.invoke('update-installation', installationId, data),
 

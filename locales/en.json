@@ -779,6 +779,7 @@
     "templateModelsError": "Couldn't download some models — you can grab them in‑app",
     "templateModelsNoSpace": "Not enough disk space for the template models — free up space and grab them in‑app",
     "templateModelsCancelled": "Model download cancelled",
+    "skipTemplateDownload": "Skip model download",
     "python": "Python",
     "pytorch": "PyTorch",
     "pythonEnvs": "Python Environments",

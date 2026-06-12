@@ -53,6 +53,32 @@ const currentOp = computed(() => {
 
 const displayId = computed(() => currentId.value ?? props.installationId)
 
+// "Skip model download": shown only while the trailing `template-models` phase
+// is the active row (every earlier install+launch step is therefore done) and
+// the download is still in progress. Clicking hands the resume-capable task off
+// to the title-bar downloads tray and lets the user into ComfyUI immediately.
+const templateSkipped = ref(false)
+const canSkipTemplateDownload = computed<boolean>(() => {
+  if (templateSkipped.value) return false
+  const op = currentOp.value
+  if (!op || op.activePhase !== 'template-models') return false
+  // Only when it's genuinely still working — a finished/errored phase has
+  // nothing to skip (the error substatus is the surface there).
+  return !op.phaseErrors?.['template-models'] && globalProgress.value.percent < 100
+})
+
+async function handleSkipTemplateDownload(): Promise<void> {
+  const id = displayId.value
+  if (!id) return
+  templateSkipped.value = true
+  emitTelemetryAction('comfy.desktop.template.download.skipped', { flow: 'launch' })
+  try {
+    await window.api.skipTemplateDownload(id)
+  } catch {
+    // Best-effort hand-off; the download keeps running regardless.
+  }
+}
+
 // A finished, successful INSTALL leg of a chain is NOT the end — the launch
 // leg is about to take over. During this brief handoff we suppress the
 // success banner and keep the in-progress bar+stepper mounted, so install →
@@ -226,7 +252,7 @@ const progressSteps = computed<ProgressStepVM[]>(() => {
       detail: status === 'active' ? formattedSubStatus.value : null,
       subPercent:
         status === 'active' && !globalProgress.value.indeterminate ? op.activePercent : null,
-      isError: status === 'active' && op.phaseErrors[step.phase] === true
+      isError: status === 'active' && op.phaseErrors?.[step.phase] === true
     }
   })
 
@@ -727,6 +753,14 @@ defineExpose({ startOperation, showOperation })
             </template>
           </div>
           <button
+            v-if="canSkipTemplateDownload"
+            type="button"
+            class="brand-ghost brand-progress__footer-btn brand-progress__footer-skip"
+            @click="handleSkipTemplateDownload"
+          >
+            {{ $t('standalone.skipTemplateDownload') }}
+          </button>
+          <button
             v-if="currentOp.terminalOutput"
             type="button"
             class="brand-ghost brand-progress__footer-btn brand-progress__logs-toggle"
@@ -1150,6 +1184,10 @@ defineExpose({ startOperation, showOperation })
   display: inline-flex;
   align-items: center;
   gap: 10px;
+}
+/* Centered in the footer bar regardless of the left/right buttons' widths. */
+.brand-progress__footer-skip {
+  margin-inline: auto;
 }
 .brand-progress__footer-btn {
   min-width: auto;

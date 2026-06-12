@@ -779,6 +779,7 @@
     "templateModelsError": "部分模型下载失败 — 你可以在应用内获取",
     "templateModelsNoSpace": "磁盘空间不足，无法下载模板模型 — 请释放空间后在应用内获取",
     "templateModelsCancelled": "模型下载已取消",
+    "skipTemplateDownload": "跳过模型下载",
     "python": "Python",
     "pytorch": "PyTorch",
     "pythonEnvs": "Python 环境",

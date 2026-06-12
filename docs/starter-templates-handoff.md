@@ -159,9 +159,9 @@ First `pnpm dev` run showed the model step **starting at 0** and logs **stuck at
 - [x] Windows MAX_PATH guard before write (`truncateForMaxPath` in core; too-long-to-fit → per-file skip)
 
 **D. Skip → tray hand-off**
-- [ ] "Skip model download" button (footer center; gated active=template-models && others done)
-- [ ] Mirror `TemplateDownloadState` into title-bar tray (no restart)
-- [ ] Verify continue-from-where-left-off + ComfyUI reachable immediately
+- [x] "Skip model download" button (`ProgressModal` footer center via `margin-inline:auto`; gated on active=`template-models` && not-errored && <100%). `skip-template-download` IPC → `mirrorTemplateDownloadToTray`.
+- [x] Mirror `TemplateDownloadState` into title-bar tray (no restart): **separate mirror registry** in `comfyDownloadManager` (`setTemplateTrayMirror`/`clearTemplateTrayMirror`) merged into `getDownloadsTrayState()` active/recent — does NOT touch `pendingDownloads`' DownloadItem lifecycle, so cancel/retry/temp-rename stay intact. Task keeps running (resume-capable); a 500 ms poll reflects it via the pure `templateStateToTrayEntries`. Torn down in `attach.ts _installCleanup` (`stopTemplateTrayMirror`).
+- [ ] Verify continue-from-where-left-off + ComfyUI reachable immediately *(needs live `pnpm dev` — group G)*
 
 **E. Picker step + entry points**
 - [ ] `step: 'configure' | 'template'` screen in `InstallWizardModal.vue`
