@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { FileText, FolderOpen, RefreshCw } from 'lucide-vue-next'
+import { FileText, RefreshCw } from 'lucide-vue-next'
 import BaseModal from '../../components/ui/BaseModal.vue'
+import InfoTooltip from '../../components/InfoTooltip.vue'
 
 /** One resolved per-type directory inside a section (mirrors the main-process
  *  `ExtraModelPathDir`). */
@@ -25,12 +25,13 @@ export interface ExtraModelPathSection {
 
 interface Props {
   open: boolean
-  section: ExtraModelPathSection | null
+  /** Every section in the install's `extra_model_paths.yaml`. */
+  sections: ExtraModelPathSection[]
   /** Absolute path of the install's `extra_model_paths.yaml`. */
   yamlPath: string
 }
 
-const props = defineProps<Props>()
+defineProps<Props>()
 
 const emit = defineEmits<{
   close: []
@@ -43,10 +44,6 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
-
-const title = computed(() =>
-  props.section ? props.section.basePath || props.section.name : ''
-)
 </script>
 
 <template>
@@ -56,10 +53,11 @@ const title = computed(() =>
     :aria-label="t('comfyUISettings.extraModelPathsModalTitle', 'Custom model paths')"
     @close="emit('close')"
   >
-    <template v-if="section" #header>
+    <template #header>
       <div class="empm-header">
-        <h2 class="empm-title">{{ title }}</h2>
-        <span v-if="section.isDefault" class="empm-tag">{{ t('common.default', 'default') }}</span>
+        <h2 class="empm-title">
+          {{ t('comfyUISettings.extraModelPathsModalTitle', 'Custom model paths') }}
+        </h2>
         <button
           type="button"
           class="empm-refresh"
@@ -70,18 +68,38 @@ const title = computed(() =>
           <RefreshCw :size="14" aria-hidden="true" />
         </button>
       </div>
-      <p class="empm-section-name">{{ section.name }}</p>
+      <p v-if="yamlPath" class="empm-section-name">{{ yamlPath }}</p>
     </template>
 
-    <template v-if="section">
-      <p class="empm-note">
-        {{
-          t(
-            'comfyUISettings.extraModelPathsModalNote',
-            'Read-only — ComfyUI searches these directories, but the launcher does not manage them. Edit extra_model_paths.yaml to change them.'
-          )
-        }}
-      </p>
+    <p class="empm-note">
+      {{
+        t(
+          'comfyUISettings.extraModelPathsModalNote',
+          'Read-only — ComfyUI searches these directories, but the launcher does not manage them. Edit extra_model_paths.yaml to change them.'
+        )
+      }}
+    </p>
+
+    <section v-for="(section, si) in sections" :key="`${section.name}-${si}`" class="empm-section">
+      <div class="empm-section-head">
+        <span class="empm-section-title">{{ section.name }}</span>
+        <span v-if="section.isDefault" class="empm-tag">
+          {{ t('common.default', 'default') }}
+          <InfoTooltip :text="t('tooltips.extraModelPathsDefault')" />
+        </span>
+      </div>
+      <button
+        v-if="section.basePath"
+        type="button"
+        class="empm-base-path"
+        :class="{ 'is-missing': !section.basePathExists }"
+        :title="
+          section.basePathExists
+            ? t('comfyUISettings.openBaseFolder', 'Open base folder')
+            : t('comfyUISettings.dirMissingTitle', { dir: section.basePath })
+        "
+        @click="emit('open-path', section.basePath)"
+      >{{ section.basePath }}</button>
 
       <ul class="empm-dirs">
         <li v-for="(d, i) in section.dirs" :key="`${d.rawType}-${i}`" class="empm-dir">
@@ -99,18 +117,9 @@ const title = computed(() =>
           >{{ d.dir }}</button>
         </li>
       </ul>
-    </template>
+    </section>
 
-    <template v-if="section" #footer>
-      <button
-        v-if="section.basePath"
-        type="button"
-        class="empm-action"
-        @click="emit('open-path', section.basePath)"
-      >
-        <FolderOpen :size="14" aria-hidden="true" />
-        <span>{{ t('comfyUISettings.openBaseFolder', 'Open base folder') }}</span>
-      </button>
+    <template #footer>
       <button
         type="button"
         class="empm-action"
@@ -156,6 +165,9 @@ const title = computed(() =>
   font-size: 12px;
   color: var(--text-muted);
   font-family: var(--font-mono, monospace);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .empm-note {
@@ -163,6 +175,54 @@ const title = computed(() =>
   font-size: 12px;
   line-height: 1.45;
   opacity: 0.75;
+}
+
+.empm-section {
+  margin-bottom: 16px;
+}
+
+.empm-section:last-child {
+  margin-bottom: 0;
+}
+
+.empm-section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.empm-section-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.empm-base-path {
+  display: inline-block;
+  max-width: 100%;
+  margin-bottom: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-family: var(--font-mono, monospace);
+}
+
+.empm-base-path:hover,
+.empm-base-path:focus-visible {
+  color: var(--accent);
+  text-decoration: underline;
+  outline: none;
+}
+
+.empm-base-path.is-missing {
+  color: var(--danger);
 }
 
 .empm-dirs {

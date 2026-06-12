@@ -14,13 +14,9 @@ interface ModelsDir {
    *  install's own models dir while shared models is on — the primary is a
    *  global shared dir there). Defaults to true. */
   promotable?: boolean
-  /** Read-only row from `extra_model_paths.yaml`: opens a detail modal (via
-   *  `details`), no browse/promote/remove. */
+  /** Read-only row for the install's `extra_model_paths.yaml` file: opens a
+   *  detail modal (via `details`), no browse/promote/remove. */
   kind?: 'extra'
-  /** Index sent with the `details` event to find the YAML section (extra rows). */
-  detailIndex?: number
-  /** `is_default: true` on the YAML section → shows a `default` tag. */
-  isDefault?: boolean
 }
 
 interface Props {
@@ -171,10 +167,6 @@ const rows = computed(() =>
           @click.stop="row.isExtra ? emit('details', row.index) : emit('open', row.index)"
         >{{ row.path }}</button>
       </div>
-      <span v-if="row.isDefault" class="models-dir-tag tag-local">
-        {{ t('common.default', 'default') }}
-        <InfoTooltip :text="t('tooltips.extraModelPathsDefault')" />
-      </span>
       <span v-if="row.isPrimary" class="models-dir-tag tag-primary">
         {{ t('models.primary', 'Primary') }}
         <InfoTooltip :text="t('tooltips.modelsPrimary')" />

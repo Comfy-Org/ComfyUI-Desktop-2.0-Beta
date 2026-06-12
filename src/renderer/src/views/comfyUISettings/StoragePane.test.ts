@@ -485,9 +485,9 @@ describe('StoragePane', () => {
     })
   })
 
-  // Read-only rows contributed by the install's extra_model_paths.yaml. Each
-  // YAML section is one row in the models list (Instance pill), and clicking it
-  // opens a detail modal with the per-type dirs and a link to the .yaml file.
+  // The install's extra_model_paths.yaml is one row in the models list (YAML
+  // pill), and clicking it opens a detail modal listing every section's
+  // per-type dirs plus a link to the .yaml file.
   describe('custom model paths (extra_model_paths.yaml)', () => {
     function makeExtraSection() {
       return {
@@ -521,10 +521,12 @@ describe('StoragePane', () => {
     }
 
     function findExtraRow(wrapper: ReturnType<typeof mountPaneWithSections>) {
-      return wrapper.findAll('.models-dir-row').find((r) => r.text().includes('/ext/base'))!
+      return wrapper
+        .findAll('.models-dir-row')
+        .find((r) => r.text().includes('/own/extra_model_paths.yaml'))!
     }
 
-    it('renders each YAML section as a read-only row with the YAML pill', async () => {
+    it('renders the yaml file as a single read-only row with the YAML pill', async () => {
       installMockBridge()
       const wrapper = mountPaneWithSections(sectionsWithExtra(extraView()))
       await nextTick()
@@ -547,6 +549,37 @@ describe('StoragePane', () => {
       await nextTick()
       expect(document.body.textContent).toContain('/ext/base/checkpoints')
       expect(document.body.textContent).toContain('/ext/base/t2i_adapter')
+    })
+
+    it('collapses a multi-section yaml into one row, all sections in the modal', async () => {
+      installMockBridge()
+      const view = {
+        yamlPath: '/own/extra_model_paths.yaml',
+        exists: true,
+        sections: [
+          makeExtraSection(),
+          {
+            name: 'nas',
+            basePath: '/nas/models',
+            basePathExists: true,
+            isDefault: true,
+            dirs: [{ type: 'loras', rawType: 'loras', dir: '/nas/models/loras', dirExists: true }],
+          },
+        ],
+      }
+      const wrapper = mountPaneWithSections(sectionsWithExtra(view))
+      await nextTick()
+      // Two sections, but only one row in the list.
+      expect(
+        wrapper.findAll('.models-dir-row').filter((r) => r.text().includes('extra_model_paths.yaml'))
+      ).toHaveLength(1)
+      await findExtraRow(wrapper).find('.models-dir-name').trigger('click')
+      await nextTick()
+      // Both sections' dirs show in the modal.
+      expect(document.body.textContent).toContain('/ext/base/checkpoints')
+      expect(document.body.textContent).toContain('/nas/models/loras')
+      // The default tag appears for the section that declares it.
+      expect(document.querySelector('.empm-tag')).toBeTruthy()
     })
 
     it('reveals the yaml file in its folder from the modal footer', async () => {

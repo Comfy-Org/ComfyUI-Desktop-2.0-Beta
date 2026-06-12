@@ -22,11 +22,8 @@ interface ModelsDir {
   isPrimary: boolean
   locked?: boolean
   promotable?: boolean
-  /** Read-only row contributed by `extra_model_paths.yaml` (opens a modal). */
+  /** Read-only row for the install's `extra_model_paths.yaml` file (opens a modal). */
   kind?: 'extra'
-  /** Index into `extraSections` for the detail modal (extra rows only). */
-  detailIndex?: number
-  isDefault?: boolean
 }
 
 export interface StorageSnapshot {
@@ -144,33 +141,22 @@ const extraModelPaths = computed<ExtraModelPathsView>(() => {
 })
 const extraSections = computed<ExtraModelPathSection[]>(() => extraModelPaths.value.sections)
 
-/** `extra_model_paths.yaml` sections as read-only rows. ComfyUI loads this file
- *  regardless of the shared-models toggle, so they append to both lists. */
+/** The install's `extra_model_paths.yaml` as a single read-only row (its
+ *  sections are shown in the detail modal). ComfyUI loads this file regardless
+ *  of the shared-models toggle, so the row appends to both lists. */
 const extraModelRows = computed<ModelsDir[]>(() =>
-  extraSections.value.map((s, i) => ({
-    path: s.basePath || s.name,
-    isPrimary: false,
-    kind: 'extra',
-    detailIndex: i,
-    isDefault: s.isDefault,
-  }))
+  extraSections.value.length > 0
+    ? [{ path: extraModelPaths.value.yamlPath, isPrimary: false, kind: 'extra' }]
+    : []
 )
 
 // --- Custom model paths detail modal --------------------------------------
 
-// Track the open section by name (not object) so a refresh re-resolves to the
-// fresh section and the modal updates in place.
-const extraModalSectionName = ref<string | null>(null)
-const extraModalSection = computed<ExtraModelPathSection | null>(
-  () => extraSections.value.find((s) => s.name === extraModalSectionName.value) ?? null
-)
-const extraModalOpen = computed(() => extraModalSection.value !== null)
+// The modal reads `extraSections` live, so a refresh updates it in place.
+const extraModalOpen = ref(false)
 
 function openExtraDetails(row: ModelsDir | undefined): void {
-  if (!row || row.kind !== 'extra' || row.detailIndex == null) return
-  const section = extraSections.value[row.detailIndex]
-  if (!section) return
-  extraModalSectionName.value = section.name
+  if (row?.kind === 'extra') extraModalOpen.value = true
 }
 
 function handleSharedModelDetails(index: number): void {
@@ -180,7 +166,7 @@ function handleInstanceModelDetails(index: number): void {
   openExtraDetails(instanceModelDirs.value[index])
 }
 function closeExtraModal(): void {
-  extraModalSectionName.value = null
+  extraModalOpen.value = false
 }
 function handleRefreshExtraPaths(): void {
   emit('refresh')
@@ -574,11 +560,11 @@ function handleBrowseSharedOutput(): void {
       </template>
     </GlobalSettingsMicroSection>
 
-    <!-- Read-only details for a custom-model-paths (extra_model_paths.yaml)
-         section, opened from its row in the models list above. -->
+    <!-- Read-only details for the install's extra_model_paths.yaml file,
+         opened from its row in the models list above. -->
     <ExtraModelPathsModal
       :open="extraModalOpen"
-      :section="extraModalSection"
+      :sections="extraSections"
       :yaml-path="extraModelPaths.yamlPath"
       @close="closeExtraModal"
       @open-path="handleOpenPath"
