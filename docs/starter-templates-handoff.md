@@ -12,7 +12,7 @@
 
 ### A. Template auto-opens on first launch (the "deeplink half")
 
-> **⚠️ Live constants ≠ Phase-2 picks.** The ids currently in `bundledTemplates.ts` are the **Phase-1 test set** (3 zero-model + 3 small: `templates_purz_image_glitch`, `templates_purz_pixel_sort_image`, `utility_interpolation_image_upscale`, `default`, `utility_birefnet_remove_background`, `utility_image_segment_sam3`). The **per-modality picks** in the Phase-2 "Decisions locked" table (Z-Image / Stable Audio / TripoSplat / Wan, or lighter) are **decided but not yet wired in** — swapping the constant is Phase-2 checklist item **A**.
+> **✅ Constants now hold the real per-modality picks** (Phase-2 item A done). `bundledTemplates.ts` ships one verified showcase per modality: Image `flux_schnell`, Video `text_to_video_wan`, Audio `audio_stable_audio_example`, 3D `3d_hunyuan3d_image_to_model` — title/description/size/vram copied verbatim from the live index, each confirmed to embed a downloadable `models[]`. (Z-Image and the doc's Stable-Audio-3 / TripoSplat ids were dropped: Z-Image embeds no models; the other two don't exist in the current index.)
 
 - Wizard picker: a `bundledTemplate` card field on the standalone source renders in the install wizard's **Advanced** section. **(Phase-1 placement — the dedicated post-Configure step is Phase-2 item E.)**
 - Pick persisted on the install record as `bundledTemplateId` + one-shot `pendingTemplateOpen`; consumed on first launch in `[src/main/host/attach.ts](../src/main/host/attach.ts)` which appends `?template=<id>&source=default` to the comfy URL. ComfyUI frontend's existing `useTemplateUrlLoader` opens it — **zero frontend changes**.
@@ -141,9 +141,10 @@ First `pnpm dev` run showed the model step **starting at 0** and logs **stuck at
 > `[ ]` todo · `[~]` in progress · `[x]` done · `[-]` decided-not-doing
 
 **A. Templates & data**
-- [x] Confirm 4 modality ids resolve + carry model URLs
-- [ ] Set `bundledTemplates.ts` to chosen (lighter) per-modality picks + sizes
-- [ ] Per-modality picker metadata (title, thumbnail id, size, modality label)
+- [x] Confirm 4 modality ids resolve + carry model URLs — **verified against the live on-disk index**; two doc picks didn't exist / didn't embed models, so final set is: Image `flux_schnell` (Z-Image carried 0 embedded models), Video `text_to_video_wan`, Audio `audio_stable_audio_example`, 3D `3d_hunyuan3d_image_to_model`. All resolve real `models[]`.
+- [x] Set `bundledTemplates.ts` to the per-modality picks + sizes — title/description/size/vram **copied verbatim from the index** (the gallery's source of truth), keyed by curated `{id, modality}`.
+- [x] Per-modality picker metadata (title, thumbnail URL, size, modality) — `BundledTemplate` now carries `modality` + `thumbnailUrl` (`/templates/<id>-1.webp` public mirror, all 200) + `recommendedVramBytes`; passed through `getFieldOptions('bundledTemplate').data`.
+- [x] **Fix (found here):** the templates package was split into `…_media_<modality>` sub-packages — `templateModels.ts loadTemplateJson` now probes all of them, so local resolution stops always-missing → falling back to the slow remote path.
 
 **B. Resource gating**
 - [x] Disk hard-block at **pick/pre-install** (`checkTemplateDiskOrBlock` in `installHelpers.ts`, wired into `InstallWizardModal.handleSave`): free disk vs template-model size × 1.1 headroom; **no continue-anyway** (alert + block), only when a template-with-models is chosen and consented. Install-bundle disk stays the existing soft warn. Pure `templateDiskRequiredBytes` extracted + tested.

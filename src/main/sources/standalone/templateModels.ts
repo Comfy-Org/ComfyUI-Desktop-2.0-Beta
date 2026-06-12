@@ -39,24 +39,36 @@ const RAW_TEMPLATES_REMOTE_BASE =
  * the just-installed `comfyui_workflow_templates` package (no network), falling
  * back to the public repo when the package layout isn't found.
  */
+/**
+ * Packages that ship the per-template workflow JSONs. The templates were split
+ * out of the monolithic `comfyui_workflow_templates` into per-modality media
+ * packages (`…_media_image` / `_video` / `_other` / …), so we must probe all of
+ * them — checking only the legacy single package made local resolution always
+ * miss and fall back to the (slow, hang-prone) remote path.
+ */
+const TEMPLATE_PACKAGE_DIRS = [
+  'comfyui_workflow_templates',
+  'comfyui_workflow_templates_media_image',
+  'comfyui_workflow_templates_media_video',
+  'comfyui_workflow_templates_media_audio',
+  'comfyui_workflow_templates_media_other',
+  'comfyui_workflow_templates_media_api',
+]
+
 async function loadTemplateJson(
   installation: InstallationRecord,
   templateId: string,
 ): Promise<unknown | null> {
   const sitePackages = findSitePackages(getActiveVenvDir(installation))
   if (sitePackages) {
-    // Package layout: site-packages/comfyui_workflow_templates/templates/<id>.json
-    const local = path.join(
-      sitePackages,
-      'comfyui_workflow_templates',
-      'templates',
-      `${templateId}.json`,
-    )
-    try {
-      const raw = await fs.promises.readFile(local, 'utf-8')
-      return JSON.parse(raw)
-    } catch {
-      // fall through to remote
+    for (const pkg of TEMPLATE_PACKAGE_DIRS) {
+      const local = path.join(sitePackages, pkg, 'templates', `${templateId}.json`)
+      try {
+        const raw = await fs.promises.readFile(local, 'utf-8')
+        return JSON.parse(raw)
+      } catch {
+        // try the next package, then fall through to remote
+      }
     }
   }
   // Remote fallback uses the codebase's Electron `net.request` helper (NOT

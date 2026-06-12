@@ -510,7 +510,12 @@ export const standalone: SourcePlugin = {
           value: tpl.id,
           label: tpl.title,
           description: tpl.description,
-          data: { sizeBytes: tpl.sizeBytes },
+          data: {
+            modality: tpl.modality,
+            thumbnailUrl: tpl.thumbnailUrl,
+            sizeBytes: tpl.sizeBytes,
+            recommendedVramBytes: tpl.recommendedVramBytes ?? 0,
+          },
         })),
       ]
     }
