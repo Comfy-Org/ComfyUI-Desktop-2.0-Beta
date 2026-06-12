@@ -1244,18 +1244,25 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
   // the corruption mode behind the "reinstall on every shutdown" reports.
   // `session-end` is a BrowserWindow event, so attach it to every window as it
   // is created.
-  const onSessionEnding = (): void => {
-    setSessionEnding()
-    // Default mode keeps electron-updater's install-on-quit armed; flip it off
-    // now so the quit handler it registered after a download won't spawn the
-    // installer the OS is about to kill mid-write.
-    updater.suppressInstallOnQuit()
-  }
   app.on('browser-window-created', (_event, window) => {
-    // `query-session-end` fires earlier than `session-end` on Windows, widening
-    // the margin to suppress install-on-quit before the OS tears things down.
-    window.on('query-session-end', onSessionEnding)
-    window.on('session-end', onSessionEnding)
+    // `query-session-end` (WM_QUERYENDSESSION) fires earlier than `session-end`,
+    // but the shutdown it announces can still be canceled (by us or another app)
+    // — so only suppress install-on-quit here (reversible / re-armed next
+    // launch). Flipping it off now widens the margin to keep the quit handler
+    // electron-updater registered after a download from spawning the installer
+    // the OS is about to kill mid-write.
+    window.on('query-session-end', () => {
+      updater.suppressInstallOnQuit()
+    })
+    // `session-end` (WM_ENDSESSION) means the session ending is finalized and
+    // can't be prevented — only now is it safe to latch `setSessionEnding()`,
+    // which permanently bails the install paths. Latching on the cancellable
+    // query event would brick installs (incl. the "Restart to update" pill) for
+    // the rest of the session if the shutdown were canceled.
+    window.on('session-end', () => {
+      setSessionEnding()
+      updater.suppressInstallOnQuit()
+    })
   })
 
   app.whenReady().then(async () => {

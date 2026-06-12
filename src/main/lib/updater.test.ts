@@ -364,6 +364,11 @@ describe('startup update install + session-end guard (issue #1065)', () => {
     Object.defineProperty(process, 'platform', originalPlat)
   })
 
+  /** All `emit()` telemetry calls recorded for a given event name. Shared so the
+   *  assertions can't drift apart on the filter predicate. */
+  const findEmitCalls = (event: string): unknown[][] =>
+    emitMock.mock.calls.filter((c) => c[0] === event)
+
   it('register() leaves install-on-quit enabled by default (Option B)', async () => {
     delete settingsStore['installUpdatesOnStartup']
     const updater = await import('./updater')
@@ -519,8 +524,9 @@ describe('startup update install + session-end guard (issue #1065)', () => {
       updater.register()
       const pending = updater.applyPendingUpdateOnStartup()
       // No 'ready' transition arrives, so the bounded wait falls through on its
-      // timeout rather than hanging boot forever.
-      await vi.advanceTimersByTimeAsync(5000)
+      // timeout rather than hanging boot forever. Advance just past the 5000ms
+      // timeout so the check settles regardless of event-loop boundary timing.
+      await vi.advanceTimersByTimeAsync(5100)
       expect(await pending).toBe(false)
       expect(fakeUpdater.restartAndInstall).not.toHaveBeenCalled()
     } finally {
@@ -545,9 +551,7 @@ describe('startup update install + session-end guard (issue #1065)', () => {
     const updater = await import('./updater')
     updater.register()
     await updater.applyPendingUpdateOnStartup()
-    const skipped = emitMock.mock.calls.filter(
-      (c) => c[0] === 'comfy.desktop.app_update.startup_install_skipped'
-    )
+    const skipped = findEmitCalls('comfy.desktop.app_update.startup_install_skipped')
     expect(skipped).toHaveLength(1)
     expect(skipped[0]?.[1]).toMatchObject({ reason: 'loop_breaker', version: '1.0.1' })
   })
@@ -560,11 +564,10 @@ describe('startup update install + session-end guard (issue #1065)', () => {
       const updater = await import('./updater')
       updater.register()
       const pending = updater.applyPendingUpdateOnStartup()
-      await vi.advanceTimersByTimeAsync(5000)
+      // Past the 5000ms bounded-check timeout (buffer avoids boundary races).
+      await vi.advanceTimersByTimeAsync(5100)
       await pending
-      const skipped = emitMock.mock.calls.filter(
-        (c) => c[0] === 'comfy.desktop.app_update.startup_install_skipped'
-      )
+      const skipped = findEmitCalls('comfy.desktop.app_update.startup_install_skipped')
       expect(skipped).toHaveLength(1)
       expect(skipped[0]?.[1]).toMatchObject({ reason: 'not_ready', version: '1.0.1' })
     } finally {
