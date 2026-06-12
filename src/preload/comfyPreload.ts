@@ -70,7 +70,7 @@ export interface LogsOutputMsg {
   text: string
 }
 
-type TelemetryPrimitive = string | number | boolean | null | undefined
+type TelemetryPrimitive = string | number | boolean | null
 type TelemetryProperties = Record<string, TelemetryPrimitive | TelemetryPrimitive[]>
 
 /**
