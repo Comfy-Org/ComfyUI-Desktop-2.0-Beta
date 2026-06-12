@@ -153,6 +153,26 @@ function isStartupInstallEnabled(): boolean {
 }
 
 /**
+ * Local, static gate for showing the NSIS installer's own progress window during
+ * an update (`isSilent: false`) instead of installing fully silently.
+ *
+ * Windows-only — `isSilent` is an NSIS flag with no effect on the macOS
+ * (Squirrel) / Linux update paths. On an update the assisted installer skips the
+ * welcome/license/directory pages (electron-builder's `skipPageIfUpdated`) and
+ * our `customFinishPage` auto-launches the app + aborts the finish page, so the
+ * user sees only a progress window with no clicks required. This gives
+ * continuous visual feedback during the actual file copy — which our Electron
+ * "Updating…" splash can't, since the copy runs after the app has quit.
+ *
+ * Default OFF. Not remote yet — flip the hidden `showInstallerUI` setting by
+ * hand in settings.json to canary it.
+ */
+function isInstallerUIEnabled(): boolean {
+  if (process.platform !== 'win32') return false
+  return settings.get('showInstallerUI') === true
+}
+
+/**
  * Disable electron-updater's install-on-quit. Called when the OS signals the
  * session is ending (Windows shutdown / restart / logoff) so the quit handler
  * electron-updater registers after a download won't spawn the installer while
@@ -509,7 +529,10 @@ export function installUpdate(): void {
     if (process.platform === 'darwin') {
       app.releaseSingleInstanceLock()
     }
-    updater.restartAndInstall({ isSilent: true })
+    // `isSilent: false` shows the NSIS progress window during the install (see
+    // `isInstallerUIEnabled` — Windows-only, gated, default off). Off everywhere
+    // else, so the macOS/Linux paths and the default Windows path stay silent.
+    updater.restartAndInstall({ isSilent: !isInstallerUIEnabled() })
   } catch (err) {
     clearQuitReason()
     _broadcastToRenderer('app-update:user-action-failed', {

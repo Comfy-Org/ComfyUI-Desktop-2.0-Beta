@@ -69,6 +69,16 @@ export interface KnownSettings {
    *  disabled and the update applies at startup. Not remote yet — flipped by hand
    *  in settings.json to canary the startup-install path. */
   installUpdatesOnStartup?: boolean
+  /** Hidden, local-only gate (default false / off) for showing the NSIS
+   *  installer's own progress window while an update installs, instead of
+   *  installing fully silently. Windows-only — `isSilent` is an NSIS concept and
+   *  is ignored on macOS/Linux. On update the assisted installer skips the
+   *  welcome/license/directory pages and our `customFinishPage` auto-launches +
+   *  skips the finish page, so the user only sees a progress window (no clicks).
+   *  Gives continuous visual feedback during the real file copy, which our
+   *  Electron "Updating…" splash can't cover (the copy happens after we quit).
+   *  Not remote yet — flipped by hand in settings.json to canary it. */
+  showInstallerUI?: boolean
 }
 
 export type Settings = KnownSettings & Record<string, unknown>
@@ -113,6 +123,7 @@ const SETTINGS_SCHEMA = {
   pendingDownloadedUpdateVersion: { nullable: true },
   lastStartupUpdateAttemptVersion: { nullable: true },
   installUpdatesOnStartup: { nullable: false },
+  showInstallerUI: { nullable: false },
 } as const satisfies Record<keyof KnownSettings, { nullable: boolean }>
 
 export type KnownSettingKey = keyof typeof SETTINGS_SCHEMA

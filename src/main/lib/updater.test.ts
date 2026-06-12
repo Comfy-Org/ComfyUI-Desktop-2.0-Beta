@@ -423,6 +423,31 @@ describe('startup update install + session-end guard (issue #1065)', () => {
     expect(fakeUpdater.restartAndInstall).not.toHaveBeenCalled()
   })
 
+  it('installUpdate() installs silently by default (showInstallerUI off)', async () => {
+    delete settingsStore['showInstallerUI']
+    const updater = await import('./updater')
+    updater.register()
+    updater.installUpdate()
+    expect(fakeUpdater.restartAndInstall).toHaveBeenCalledWith({ isSilent: true })
+  })
+
+  it('installUpdate() shows the NSIS installer UI when showInstallerUI is on (Option B)', async () => {
+    settingsStore['showInstallerUI'] = true
+    const updater = await import('./updater')
+    updater.register()
+    updater.installUpdate()
+    expect(fakeUpdater.restartAndInstall).toHaveBeenCalledWith({ isSilent: false })
+  })
+
+  it('installUpdate() ignores showInstallerUI off Windows (isSilent stays true)', async () => {
+    Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true })
+    settingsStore['showInstallerUI'] = true
+    const updater = await import('./updater')
+    updater.register()
+    updater.installUpdate()
+    expect(fakeUpdater.restartAndInstall).toHaveBeenCalledWith({ isSilent: true })
+  })
+
   it('hasPendingStartupUpdate() reflects the staged-update markers', async () => {
     const updater = await import('./updater')
 
