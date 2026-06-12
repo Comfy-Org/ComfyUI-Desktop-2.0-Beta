@@ -457,7 +457,7 @@ async function routePostStart(): Promise<void> {
     // does on chain-local: with both ticked, the host runs the
     // migration straight through (preview + auto-pick + run) without
     // surfacing the confirm step.
-    emitTelemetryAction('desktop2.first_use.local_branch_chosen', { choice: 'migrate' })
+    emitTelemetryAction('comfy.desktop.first_use.local_branch_chosen', { choice: 'migrate' })
     emitCompleted('local-migrate')
     emit('chain-migrate', { express: expressInstall.value })
   } else if (hasLegacyDesktop.value && !expressInstall.value) {
