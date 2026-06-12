@@ -379,6 +379,22 @@ describe('startup update install + session-end guard (issue #1065)', () => {
     expect(electronUpdaterMock.autoInstallOnAppQuit).toBe(false)
   })
 
+  it('startup install is inert on non-Windows even when the flag is on', async () => {
+    // macOS (Squirrel.Mac / ShipIt) and Linux don't have the NSIS shutdown
+    // corruption, so Option C must stay off there regardless of the setting.
+    Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true })
+    settingsStore['installUpdatesOnStartup'] = true
+    settingsStore['pendingDownloadedUpdateVersion'] = '1.0.1'
+    readyVersion = '1.0.1'
+    const updater = await import('./updater')
+    updater.register()
+    // register() must NOT disable install-on-quit on macOS.
+    expect(electronUpdaterMock.autoInstallOnAppQuit).toBe(true)
+    expect(updater.hasPendingStartupUpdate()).toBe(false)
+    expect(await updater.applyPendingUpdateOnStartup()).toBe(false)
+    expect(fakeUpdater.restartAndInstall).not.toHaveBeenCalled()
+  })
+
   it('suppressInstallOnQuit() disables install-on-quit (Option B session-end guard)', async () => {
     delete settingsStore['installUpdatesOnStartup']
     const updater = await import('./updater')

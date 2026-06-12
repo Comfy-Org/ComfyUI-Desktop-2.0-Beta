@@ -130,18 +130,25 @@ function isSystemPackageInstall(): boolean {
  * (the "startup install" path) instead of letting electron-updater install it
  * on quit.
  *
- * Default OFF. With it off, the app keeps the normal install-on-quit behavior;
- * the `session-end` guard (`suppressInstallOnQuit`) only suppresses that install
- * while the OS is shutting down, so a Windows shutdown/restart/logoff can no
- * longer kill an installer mid-write (the "reinstall on every shutdown"
- * corruption loop). With it on, install-on-quit is disabled entirely and the
- * staged update applies on the next boot.
+ * Windows-only. The install corruption this guards against is specific to
+ * electron-updater's NSIS install-on-quit, which spawns a detached installer the
+ * OS can kill mid-write during a shutdown. macOS (Squirrel.Mac / ShipIt — a
+ * launchd-supervised, resumable helper) and Linux don't have that failure mode,
+ * so applying updates at startup there would only add risk to a working update
+ * channel. On those platforms this always returns false.
+ *
+ * Default OFF even on Windows. With it off, the app keeps the normal
+ * install-on-quit behavior; the `session-end` guard (`suppressInstallOnQuit`)
+ * only suppresses that install while the OS is shutting down. With it on,
+ * install-on-quit is disabled entirely and the staged update applies on the next
+ * boot.
  *
  * Not a remote flag yet — flip it via the hidden `installUpdatesOnStartup`
  * setting (edited by hand in settings.json), so the startup-install path can be
  * canaried before any wider rollout.
  */
 function isStartupInstallEnabled(): boolean {
+  if (process.platform !== 'win32') return false
   return settings.get('installUpdatesOnStartup') === true
 }
 
