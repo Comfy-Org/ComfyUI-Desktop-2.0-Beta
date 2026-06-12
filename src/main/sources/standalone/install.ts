@@ -203,6 +203,10 @@ export async function postInstall(installation: InstallationRecord, { sendProgre
       sendProgress('update', { percent: 100, status: 'Skipped' })
     }
   }
+  // NOTE: starter-template model downloads no longer run here. They start in the
+  // BACKGROUND when install begins (see `startTemplateDownload` wired in
+  // registerInstallationHandlers) and are displayed as a launch-span stepper
+  // phase, so the bytes overlap env setup instead of blocking the install.
 }
 
 export async function probeInstallation(dirPath: string): Promise<Record<string, unknown> | null> {

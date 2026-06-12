@@ -159,7 +159,10 @@ export function setMainWindow(win: BrowserWindow | null): void {
   mainWindow = win
 }
 
-function getModelsBaseDir(): string {
+/** Primary shared models directory — `<dir>/<category>/<file>` is where both the
+ *  in-window model downloader and the install-time template pre-download land
+ *  files, so they must agree. Exported for the latter (see `templateModels.ts`). */
+export function getModelsBaseDir(): string {
   const modelsDirs = settings.get('modelsDirs') as string[] | undefined
   return modelsDirs?.[0] || settings.defaults.modelsDirs[0]!
 }
