@@ -4,7 +4,7 @@
 
 **Original design/plan:** the full step-by-step plan lived at `~/.claude/plans/so-i-want-you-jiggly-toucan.md` on the author's machine (Claude Code plan file — not in the repo). **This doc is the durable, in-repo record** and supersedes it.
 
-**Status:** Phase 1 (deeplink) + Phase 1.5 (background model download with rich progress + logs) **implemented & statically verified**. Not committed; not yet runtime-tested via `pnpm dev`. Phase 2 (UX, gating, all entry points) **not started**.
+**Status:** Phase 1 (deeplink) + Phase 1.5 (background model download with rich progress + logs) **+ Phase 2 (groups A–F: real per-modality picks, resource gating, retry/MAX_PATH/error UX, skip→tray hand-off, dedicated picker step + gating, quit warning) implemented & statically verified** — full suite (2138 tests) + all typechecks + eslint green. The one open item is **live `pnpm dev` runtime testing** (G), which is interactive and left for the engineer.
 
 ---
 
@@ -180,9 +180,9 @@ First `pnpm dev` run showed the model step **starting at 0** and logs **stuck at
 - [x] App-quit-mid-download → confirm dialog on `before-quit` (`hasActiveTemplateDownloads()` + synchronous `showMessageBoxSync`; "Quit Anyway" / "Keep Downloading", default = keep). No resume.
 
 **G. Verification / tests**
-- [ ] Unit tests: retry wrapper, tray-mirror mapping, disk-block + VRAM-warn decisions (pure fns)
-- [ ] Live `pnpm dev`: each modality, slow-download skip→tray, disk-block, VRAM-warn, returning-user skip
-- [ ] typecheck (node+web) · localeCoverage · progressStore/launch · eslint green
+- [x] Unit tests: `withRetry`, `truncateForMaxPath`, disk-error formatter branch, `templateStateToTrayEntries`, `shouldWarnVram`, `templateDiskRequiredBytes` (all pure)
+- [ ] Live `pnpm dev`: each modality, slow-download skip→tray, disk-block, VRAM-warn, returning-user skip *(interactive — needs a real install run; left for the engineer)*
+- [x] typecheck (node+web+e2e+integration) · localeCoverage · progressStore/launch/ProgressModal/comfyDownloadManager/gpu · eslint — **full suite 2138 tests green**
 
 ---
 
