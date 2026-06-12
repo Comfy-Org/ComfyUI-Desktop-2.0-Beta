@@ -29,6 +29,26 @@ export interface BundledTemplate {
    *  for model-free templates. Used only for the consent label; the actual
    *  download set is resolved from the workflow JSON at install time. */
   sizeBytes: number
+  /** Recommended VRAM (bytes) to run this template comfortably, or 0/undefined
+   *  when it has no meaningful GPU requirement (e.g. zero-model utilities). The
+   *  picker warns — never blocks — when detected VRAM is below this. */
+  recommendedVramBytes?: number
+}
+
+/**
+ * Decide whether to show the "may run slowly" VRAM warning for a template.
+ * Warn ONLY when we have a real detected figure that's below the template's
+ * recommendation — undefined detected VRAM (AMD/Intel/unknown) or a template
+ * with no recommendation stays silent, so we never false-warn. Pure +
+ * exported so the decision is unit-testable without a GPU.
+ */
+export function shouldWarnVram(
+  detectedVramBytes: number | undefined,
+  recommendedVramBytes: number | undefined,
+): boolean {
+  if (!recommendedVramBytes) return false
+  if (detectedVramBytes === undefined) return false
+  return detectedVramBytes < recommendedVramBytes
 }
 
 /** Sentinel "skip" option value — keeps the wizard step optional. */

@@ -97,7 +97,7 @@ First `pnpm dev` run showed the model step **starting at 0** and logs **stuck at
 
 > Product decisions are **made**. This is the running source of truth — **update the checklist at the bottom every chat** so no edge case is lost. Only minor visual copy (exact CTA text, gallery layout) is still open.
 
-**Codebase facts:** `getModelsBaseDir()` = `settings.modelsDirs[0]` (default `~/ComfyUI-Shared/models`), all `path.join`. `getDiskSpace()` = `fs.promises.statfs` (cross-platform). `detectGPU()` returns **vendor only — no VRAM yet** (we'll add it via `nvidia-smi --query-gpu=memory.total`; `mps`→`os.totalmem()`). Template index carries a per-template `vram` estimate. The in-window **downloads tray** (`startModelDownload`→`tray-state-changed`→title bar) is tied to the **running comfy window** and **does NOT resume `.dl-meta` partials** (it only skips if the final file exists) — so a naive hand-off would restart; our `download()` *does* resume. No download-lock contention with the installer.
+**Codebase facts:** `getModelsBaseDir()` = `settings.modelsDirs[0]` (default `~/ComfyUI-Shared/models`), all `path.join`. `getDiskSpace()` = `fs.promises.statfs` (cross-platform). `detectGPU()` now also returns **`vramBytes`** cross-OS (nvidia-smi → `os.totalmem()` for mps → `systeminformation` fallback for AMD/Intel/discrete; undefined only when truly unknown). Pure `shouldWarnVram()` lives in `bundledTemplates.ts`. Per-template recommended VRAM is `BundledTemplate.recommendedVramBytes` (to be filled in item A). The in-window **downloads tray** (`startModelDownload`→`tray-state-changed`→title bar) is tied to the **running comfy window** and **does NOT resume `.dl-meta` partials** (it only skips if the final file exists) — so a naive hand-off would restart; our `download()` *does* resume. No download-lock contention with the installer.
 
 #### Decisions locked
 | Topic | Decision |
@@ -148,8 +148,8 @@ First `pnpm dev` run showed the model step **starting at 0** and logs **stuck at
 **B. Resource gating**
 - [ ] Disk hard-block at **pick/pre-install** (install+model size vs free) + message
 - [x] Upgrade in-task disk pre-check: silent-skip → **surfaced hard error** (distinct `insufficient-disk` code → `templateModelsNoSpace` substatus, rendered via the `is-error` style)
-- [ ] **VRAM detection**: `vramBytes` in `detectGPU()` (nvidia-smi memory.total; mps→os.totalmem; else undefined) + IPC
-- [ ] **VRAM warn-but-allow** in picker (warn when detected < template `vram`; never block; silent when unknown)
+- [x] **VRAM detection**: `vramBytes` in `detectGPU()` — nvidia-smi `memory.total` (authoritative) → mps `os.totalmem()` → **cross-OS `systeminformation` `si.graphics()` fallback** (AMD/Intel/discrete, any OS); undefined only when no real number. Flows through the existing `detect-gpu` IPC + `GPUInfo.vramBytes`. Pure `shouldWarnVram(detected, recommended)` decision helper added + tested (silent on undefined / no-recommendation; never false-warns).
+- [ ] **VRAM warn-but-allow** in picker (warn via `shouldWarnVram`; never block; silent when unknown) — **coupled to the picker UI (item E)**; needs per-template `recommendedVramBytes` (item A)
 
 **C. Download behavior**
 - [x] Background download at install-begin; non-fatal; trailing step

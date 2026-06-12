@@ -482,6 +482,10 @@ export interface GPUInfo {
   id?: string
   label: string
   model?: string | null
+  /** Total VRAM in bytes when known (NVIDIA / Apple Silicon); undefined for
+   *  AMD/Intel/unknown. The template picker warns only when this is present
+   *  and below the template's recommended VRAM — never on undefined. */
+  vramBytes?: number
 }
 
 export interface HardwareValidation {
