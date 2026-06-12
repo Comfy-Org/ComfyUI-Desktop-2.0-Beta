@@ -19,7 +19,8 @@ import {
   showPathIssueAlerts,
   checkNvidiaDriverOrWarn,
   checkDiskSpaceOrWarn,
-  checkTemplateDiskOrBlock
+  checkTemplateDiskOrBlock,
+  isTemplateDiskBlocked
 } from '../lib/installHelpers'
 import TakeoverBack from '../components/TakeoverBack.vue'
 import BrandTakeoverLayout from '../components/BrandTakeoverLayout.vue'
@@ -92,12 +93,6 @@ const estimatedInstallSize = computed(() => {
 const advancedOpen = ref(false)
 const advancedRef = ref<HTMLElement | null>(null)
 
-// Starter-template consent: when a non-"None" template is selected, the user
-// can opt out of pre-downloading its models. Default on. Synced into
-// `selections.downloadTemplateModels` at save time so `buildInstallation` sees
-// it (main treats absence/anything-but-'false' as opted-in).
-const downloadTemplateModels = ref(true)
-
 const NO_TEMPLATE_VALUE = 'none'
 
 /** The selected starter template option (excludes the "None" sentinel). */
@@ -112,13 +107,13 @@ const templateHasModels = computed(() => {
   return typeof size === 'number' && size > 0
 })
 
-/** "~1.6 GB" / "~400 MB" label for the selected template's coarse size. */
-const templateSizeLabel = computed(() => {
-  const size = (selectedTemplate.value?.data?.sizeBytes as number | undefined) ?? 0
-  if (size <= 0) return ''
-  const gb = size / (1024 * 1024 * 1024)
-  if (gb >= 1) return `~${gb.toFixed(gb >= 10 ? 0 : 1)} GB`
-  return `~${Math.round(size / (1024 * 1024))} MB`
+/** Proactive disk guard — shares `isTemplateDiskBlocked` with TemplatePickerStep
+ *  so the alert, the disabled Install button, and the save-time hard block can't
+ *  drift. */
+const templateInstallBlocked = computed(() => {
+  if (diskSpaceLoading.value) return false
+  const modelBytes = (selectedTemplate.value?.data?.sizeBytes as number | undefined) ?? 0
+  return isTemplateDiskBlocked(diskSpace.value, modelBytes)
 })
 
 // --- Dedicated template-picker step ---
@@ -147,8 +142,6 @@ const shouldShowPickerStep = computed(
 
 function selectTemplate(option: FieldOption): void {
   selections.value.bundledTemplate = option
-  // Reset consent to on when switching to a model-bearing template.
-  downloadTemplateModels.value = true
 }
 
 /** Configure's primary button: advance to the picker step, or install directly
@@ -161,6 +154,7 @@ async function handleConfigureContinue(): Promise<void> {
     if (firstReal && selections.value.bundledTemplate?.value === NO_TEMPLATE_VALUE) {
       selections.value.bundledTemplate = firstReal
     }
+    if (instPath.value) fetchDiskSpace(instPath.value)
     step.value = 'template'
     return
   }
@@ -606,13 +600,10 @@ async function handleSave(): Promise<void> {
     }
   }
 
-  // Sync the starter-template model-download consent as a synthetic selection.
-  if (selectedTemplate.value) {
-    const consent = downloadTemplateModels.value ? 'true' : 'false'
-    selections.value.downloadTemplateModels = { value: consent, label: consent }
-  } else {
-    delete selections.value.downloadTemplateModels
-  }
+  // Note: the starter-template model download is gated entirely by the chosen
+  // `bundledTemplate` — `buildInstallation` sets `downloadTemplateModels` from
+  // the template id, so "Skip & Install" (template = None) means no download.
+  // The renderer doesn't sync a separate consent field.
 
   const instData = await window.api.buildInstallation(source.id, rawSelections())
   const baseName =
@@ -675,11 +666,8 @@ async function handleSave(): Promise<void> {
     }
   }
 
-  // Hard-block (no continue-anyway) when the volume can't also hold the
-  // selected template's models — avoids a half-downloaded model set + a
-  // confusing error row. Only fires when a template with models is chosen
-  // and its download is consented to.
-  if (instPath.value && downloadTemplateModels.value && templateHasModels.value) {
+  // Hard-block when the volume can't hold the selected template's models.
+  if (instPath.value && templateHasModels.value) {
     const modelBytes = (selectedTemplate.value?.data?.sizeBytes as number | undefined) ?? 0
     if (
       !(await checkTemplateDiskOrBlock({
@@ -988,11 +976,6 @@ defineExpose({ open })
                     </template>
                   </div>
                 </div>
-
-                <label v-if="selectedTemplate && templateHasModels" class="template-consent">
-                  <input v-model="downloadTemplateModels" type="checkbox" />
-                  <span>{{ $t('standalone.downloadTemplateModels', { size: templateSizeLabel }) }}</span>
-                </label>
               </div>
             </div>
           </div>
@@ -1021,26 +1004,56 @@ defineExpose({ open })
 
     <!-- Dedicated starter-template picker step (after Configure, before install). -->
     <div v-else-if="step === 'template'" class="template-shell">
-      <TemplatePickerStep
-        :options="templateOptions"
-        :none-value="NO_TEMPLATE_VALUE"
-        :selected-value="selections.bundledTemplate?.value ?? null"
-        :consent="downloadTemplateModels"
-        :detected-vram-bytes="detectedVramBytes"
-        :show-dont-show-again="hasLocalInstall"
-        :dont-show-again="dontShowTemplatePicker"
-        @select="selectTemplate"
-        @update:consent="downloadTemplateModels = $event"
-        @update:dont-show-again="dontShowTemplatePicker = $event"
-      />
-      <div class="template-actions">
-        <button type="button" class="brand-ghost" @click="handleTemplateSkip">
-          {{ $t('standalone.templateSkipAndInstall') }}
-        </button>
-        <button type="button" class="brand-primary" @click="handleTemplateInstall">
-          {{ $t('standalone.templateInstall') }}
-        </button>
+      <h1 class="brand-title">{{ $t('standalone.templatePickerTitle') }}</h1>
+      <p class="brand-lead">{{ $t('standalone.templatePickerLead') }}</p>
+      <div class="brand-card template-card">
+        <div class="brand-card__body template-card__body">
+          <TemplatePickerStep
+            :options="templateOptions"
+            :none-value="NO_TEMPLATE_VALUE"
+            :selected-value="selections.bundledTemplate?.value ?? null"
+            :detected-vram-bytes="detectedVramBytes"
+            :disk-space="diskSpace"
+            :disk-space-loading="diskSpaceLoading"
+            @select="selectTemplate"
+          />
+        </div>
+        <div class="brand-card__footer template-card__footer">
+          <p
+            v-if="templateInstallBlocked"
+            class="template-install-hint"
+            role="status"
+          >
+            {{ $t('standalone.templateInstallBlockedHint') }}
+          </p>
+          <div class="template-card__footer-actions">
+            <button
+              type="button"
+              class="brand-ghost template-skip"
+              :aria-label="$t('standalone.templateSkipAndInstallAria')"
+              @click="handleTemplateSkip"
+            >
+              {{ $t('standalone.templateSkipAndInstall') }}
+            </button>
+            <button
+              type="button"
+              class="brand-primary template-install"
+              :disabled="templateInstallBlocked"
+              :aria-describedby="templateInstallBlocked ? 'tps-alerts' : undefined"
+              @click="handleTemplateInstall"
+            >
+              {{ $t('standalone.templateInstall') }}
+            </button>
+          </div>
+        </div>
       </div>
+      <label
+        v-if="hasLocalInstall"
+        class="brand-checkbox template-shell__opt-out"
+      >
+        <input v-model="dontShowTemplatePicker" type="checkbox" />
+        <span class="brand-checkbox__text">{{ $t('standalone.templateDontShowAgain') }}</span>
+      </label>
     </div>
 
     <template #footer-left>
@@ -1079,8 +1092,10 @@ defineExpose({ open })
 
 .template-shell {
   align-self: stretch;
+  height: 100%;
+  max-height: 100%;
   width: 100%;
-  max-width: 760px;
+  max-width: 640px;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
@@ -1089,18 +1104,57 @@ defineExpose({ open })
   text-align: center;
   padding-block: clamp(1.5rem, 4vh, 3rem);
   min-height: 0;
-  overflow-y: auto;
 }
-.template-actions {
+.template-card {
+  width: 100%;
+  max-height: 100%;
+}
+.template-card__footer {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+.template-install-hint {
+  margin: 0;
+  font-size: var(--takeover-fs-caption);
+  line-height: 1.4;
+  color: var(--danger);
+  text-align: right;
+}
+.template-card__footer-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+}
+.template-shell__opt-out {
   display: flex;
   justify-content: center;
-  gap: 12px;
+  align-items: center;
   width: 100%;
-  max-width: 720px;
-  margin-top: 20px;
+  margin-top: 14px;
+  font-size: var(--takeover-fs-caption);
+  line-height: 1.4;
+  color: var(--neutral-400);
 }
-.template-actions > button {
-  min-width: 150px;
+.template-shell__opt-out input[type='checkbox'] {
+  margin: 0;
+}
+.template-shell__opt-out .brand-checkbox__text {
+  line-height: 1.4;
+}
+.template-skip {
+  margin-right: auto;
+  border: 1px solid var(--brand-surface-border);
+  color: var(--neutral-200);
+}
+.template-skip:hover:not([disabled]) {
+  border-color: var(--brand-surface-border-hover);
+  color: var(--neutral-100);
+  background: var(--brand-surface-bg);
+}
+.template-install {
+  min-width: 120px;
 }
 
 .config-card {
@@ -1330,19 +1384,5 @@ defineExpose({ open })
 
 .config-continue {
   min-width: 120px;
-}
-
-.template-consent {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 12px;
-  font-size: 13px;
-  color: var(--neutral-200);
-  cursor: pointer;
-}
-.template-consent input {
-  accent-color: var(--accent);
-  cursor: pointer;
 }
 </style>

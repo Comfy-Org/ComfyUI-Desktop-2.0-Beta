@@ -189,12 +189,6 @@ export const standalone: SourcePlugin = {
     const tplValue = selections.bundledTemplate?.value
     const bundledTemplateId =
       tplValue && tplValue !== NO_TEMPLATE_VALUE ? tplValue : undefined
-    // Consent to pre-downloading the template's models. The wizard ships this as
-    // a synthetic selection ('true'/'false'); default to true when a template is
-    // chosen but no explicit value came through.
-    const downloadTemplateModels =
-      bundledTemplateId !== undefined &&
-      selections.downloadTemplateModels?.value !== 'false'
     return {
       version: r2Release?.comfyui_version || manifest?.comfyui_ref || releaseTag,
       releaseTag,
@@ -221,7 +215,7 @@ export const standalone: SourcePlugin = {
       // consumes (appends `?template=` to the comfy URL, then clears) so the
       // template only auto-opens once — not on every relaunch.
       ...(bundledTemplateId
-        ? { bundledTemplateId, pendingTemplateOpen: bundledTemplateId, downloadTemplateModels }
+        ? { bundledTemplateId, pendingTemplateOpen: bundledTemplateId, downloadTemplateModels: true }
         : {}),
     }
   },

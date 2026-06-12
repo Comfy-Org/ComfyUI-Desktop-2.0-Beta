@@ -180,6 +180,22 @@ export function templateDiskRequiredBytes(estimatedModelBytes: number): number {
   return Math.ceil(estimatedModelBytes * TEMPLATE_DISK_HEADROOM)
 }
 
+/**
+ * Single source of truth for "is the volume too small for this template's
+ * models?" — used by the picker (to show the alert + disable Install) and by the
+ * wizard (the same decision). Pure: `false` when there's nothing to check
+ * (no models, disk space not yet known, or it fits). Keeps the three callers
+ * from each re-deriving the rule and drifting.
+ */
+export function isTemplateDiskBlocked(
+  diskSpace: DiskSpaceInfo | null,
+  estimatedModelBytes: number,
+): boolean {
+  const required = templateDiskRequiredBytes(estimatedModelBytes)
+  if (required === 0 || !diskSpace) return false
+  return diskSpace.free < required
+}
+
 export async function checkTemplateDiskOrBlock(opts: {
   path: string
   estimatedModelBytes: number
@@ -187,24 +203,23 @@ export async function checkTemplateDiskOrBlock(opts: {
   alert: (opts: { title: string; message: string }) => Promise<void>
   t: (key: string, params?: Record<string, string>) => string
 }): Promise<boolean> {
-  const required = templateDiskRequiredBytes(opts.estimatedModelBytes)
-  if (required === 0) return true
+  if (templateDiskRequiredBytes(opts.estimatedModelBytes) === 0) return true
 
-  let free: number
+  let diskSpace: DiskSpaceInfo
   try {
-    free = (await window.api.getDiskSpace(opts.path)).free
+    diskSpace = await window.api.getDiskSpace(opts.path)
   } catch {
     // Can't probe — don't block on a failed read; the in-task guard is the net.
     return true
   }
-  if (free >= required) return true
+  if (!isTemplateDiskBlocked(diskSpace, opts.estimatedModelBytes)) return true
 
   trackGuardrailBlocked('template_models_disk', opts.flow, 'save')
   await opts.alert({
     title: opts.t('diskSpace.templateBlockTitle'),
     message: opts.t('diskSpace.templateBlockMessage', {
-      required: formatBytes(required),
-      free: formatBytes(free)
+      required: formatBytes(templateDiskRequiredBytes(opts.estimatedModelBytes)),
+      free: formatBytes(diskSpace.free)
     })
   })
   return false

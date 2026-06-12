@@ -70,12 +70,12 @@ export function shouldWarnVram(
 /** Sentinel "skip" option value — keeps the wizard step optional. */
 export const NO_TEMPLATE_VALUE = 'none'
 
-/** Public mirror the frontend's `/templates/<name>-1.<sub>` thumbnails resolve
- *  to; the desktop picker uses it so cards render before ComfyUI is up. The
- *  thumbnail file is always a `.webp` image regardless of the template's output
- *  `mediaSubtype`. */
-const THUMB_BASE = 'https://raw.githubusercontent.com/Comfy-Org/workflow_templates/main/templates'
-const thumb = (id: string): string => `${THUMB_BASE}/${id}-1.webp`
+/** Bundled card thumbnail for a template — a downscaled `.webp` preview committed
+ *  under `src/renderer/public/images/templates/`, served by Vite at `./images/…`
+ *  (a `'self'` asset the renderer CSP allows). Bundling (vs fetching the remote
+ *  `raw.githubusercontent.com` preview) keeps it CSP-safe and working offline /
+ *  for first-ever users who have no template package on disk yet. */
+const thumb = (id: string): string => `./images/templates/${id}.webp`
 
 /**
  * One showcase template per modality. Ids + title/description/size/vram are
@@ -94,8 +94,7 @@ export const BUNDLED_TEMPLATES: readonly BundledTemplate[] = [
     id: 'flux_schnell',
     modality: 'image',
     title: 'Flux.1 Schnell FP8',
-    description:
-      'Quickly generate images with Flux.1 Schnell fp8 quantized version. Ideal for low-end hardware, requires only 4 steps to generate images.',
+    description: 'Fast Flux.1 images in 4 steps. Runs well on modest hardware.',
     thumbnailUrl: thumb('flux_schnell'),
     sizeBytes: 17233556275,
     recommendedVramBytes: 18253611008,
@@ -104,7 +103,7 @@ export const BUNDLED_TEMPLATES: readonly BundledTemplate[] = [
     id: 'text_to_video_wan',
     modality: 'video',
     title: 'Wan 2.1 Text to Video',
-    description: 'Generate videos from text prompts using Wan 2.1.',
+    description: 'Text-to-video with Wan 2.1.',
     thumbnailUrl: thumb('text_to_video_wan'),
     sizeBytes: 9824737690,
     recommendedVramBytes: 9824737690,
@@ -113,7 +112,7 @@ export const BUNDLED_TEMPLATES: readonly BundledTemplate[] = [
     id: 'audio_stable_audio_example',
     modality: 'audio',
     title: 'Stable Audio 1.0: Text to Audio',
-    description: 'Generate audio from text prompts using Stable Audio.',
+    description: 'Text-to-audio with Stable Audio 1.0.',
     thumbnailUrl: thumb('audio_stable_audio_example'),
     sizeBytes: 5690831667,
     recommendedVramBytes: 5690831667,
@@ -122,7 +121,7 @@ export const BUNDLED_TEMPLATES: readonly BundledTemplate[] = [
     id: '3d_hunyuan3d_image_to_model',
     modality: '3d',
     title: 'HY 3D 2.0',
-    description: 'Generate 3D models from single images using Hunyuan3D 2.0.',
+    description: 'Image-to-3D with Hunyuan3D 2.0.',
     thumbnailUrl: thumb('3d_hunyuan3d_image_to_model'),
     sizeBytes: 4928474972,
     recommendedVramBytes: 4928474972,

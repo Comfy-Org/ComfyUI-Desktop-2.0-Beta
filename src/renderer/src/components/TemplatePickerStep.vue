@@ -1,48 +1,56 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, nextTick, reactive, ref, watch, type Component } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Check, TriangleAlert, ImageOff } from 'lucide-vue-next'
-import type { FieldOption } from '../types/ipc'
-import { formatBytes } from '../lib/formatting'
+import {
+  Check,
+  CircleAlert,
+  TriangleAlert,
+  Image as ImageIcon,
+  Video,
+  AudioLines,
+  Box
+} from 'lucide-vue-next'
+import type { DiskSpaceInfo, FieldOption } from '../types/ipc'
+import { formatBytesCoarse } from '../lib/formatting'
+import { templateDiskRequiredBytes, isTemplateDiskBlocked } from '../lib/installHelpers'
 
 /**
- * Dedicated starter-template picker — a modality grid of showcase templates plus
- * a "blank canvas" option. Renders the same `bundledTemplate` FieldOptions the
- * wizard already loads (so selecting here drives `selections.bundledTemplate`).
- * Warns — never blocks — when the detected GPU has less VRAM than the selected
- * template recommends. Purely presentational: all decisions (gating, save) live
- * in the host wizard.
+ * Starter-template picker — compact rows; description expands inside the
+ * selected row. Alerts below; footer actions live in the host wizard.
  */
 const props = defineProps<{
-  /** `bundledTemplate` options incl. the "None" sentinel (value === noneValue). */
   options: FieldOption[]
   noneValue: string
   selectedValue: string | null
-  /** Whether to pre-download the selected template's models. */
-  consent: boolean
-  /** Detected GPU VRAM in bytes, or undefined when unknown (never warns then). */
   detectedVramBytes?: number
-  /** Show the "Don't show this again" checkbox (only when ≥1 local install). */
-  showDontShowAgain: boolean
-  dontShowAgain: boolean
+  diskSpace: DiskSpaceInfo | null
+  diskSpaceLoading: boolean
 }>()
 
 const emit = defineEmits<{
   select: [option: FieldOption]
-  'update:consent': [value: boolean]
-  'update:dontShowAgain': [value: boolean]
 }>()
 
 const { t } = useI18n()
 
-/** Real template cards (everything but the "None" sentinel), in index order. */
-const templateCards = computed(() => props.options.filter((o) => o.value !== props.noneValue))
-const noneOption = computed(() => props.options.find((o) => o.value === props.noneValue) ?? null)
+const listRef = ref<HTMLElement | null>(null)
+const alertsRef = ref<HTMLElement | null>(null)
 
-const selectedOption = computed(() =>
-  props.options.find((o) => o.value === props.selectedValue) ?? null,
+const templateCards = computed(() => props.options.filter((o) => o.value !== props.noneValue))
+
+const selectedOption = computed(
+  () => props.options.find((o) => o.value === props.selectedValue) ?? null,
 )
-const selectedHasModels = computed(() => sizeBytesOf(selectedOption.value) > 0)
+const recommendedValue = computed(() => templateCards.value[0]?.value ?? null)
+
+const thumbFailed = reactive<Record<string, boolean>>({})
+
+const MODALITY_GLYPH: Record<string, Component> = {
+  image: ImageIcon,
+  video: Video,
+  audio: AudioLines,
+  '3d': Box
+}
 
 function sizeBytesOf(option: FieldOption | null): number {
   const size = option?.data?.sizeBytes
@@ -52,9 +60,16 @@ function vramOf(option: FieldOption | null): number {
   const vram = option?.data?.recommendedVramBytes
   return typeof vram === 'number' ? vram : 0
 }
-function modalityOf(option: FieldOption): string {
+function modalityKey(option: FieldOption): string {
   const modality = option.data?.modality
-  return typeof modality === 'string' ? t(`standalone.modality.${modality}`) : ''
+  return typeof modality === 'string' ? modality : ''
+}
+function modalityLabel(option: FieldOption): string {
+  const key = modalityKey(option)
+  return key ? t(`standalone.modality.${key}`) : ''
+}
+function modalityGlyph(option: FieldOption): Component | null {
+  return MODALITY_GLYPH[modalityKey(option)] ?? null
 }
 function thumbnailOf(option: FieldOption): string | null {
   const url = option.data?.thumbnailUrl
@@ -62,273 +77,333 @@ function thumbnailOf(option: FieldOption): string | null {
 }
 function sizeLabelOf(option: FieldOption): string {
   const bytes = sizeBytesOf(option)
-  return bytes > 0 ? `~${formatBytes(bytes)}` : ''
+  return bytes > 0 ? `~${formatBytesCoarse(bytes)}` : ''
+}
+function metaLabelOf(option: FieldOption): string {
+  const parts: string[] = [modalityLabel(option), sizeLabelOf(option)].filter(Boolean)
+  const vram = vramOf(option)
+  if (vram > 0) {
+    parts.push(t('standalone.templatePickerSpecVram', { size: formatBytesCoarse(vram) }))
+  }
+  return parts.join(' · ')
 }
 
-/** Warn only when we have a real VRAM figure below the selected template's
- *  recommendation (mirrors main's `shouldWarnVram`). */
 const vramWarning = computed<string | null>(() => {
   const recommended = vramOf(selectedOption.value)
   if (!recommended || props.detectedVramBytes === undefined) return null
   if (props.detectedVramBytes >= recommended) return null
   return t('standalone.templateVramWarning', {
-    recommended: formatBytes(recommended),
-    detected: formatBytes(props.detectedVramBytes),
+    recommended: formatBytesCoarse(recommended),
+    detected: formatBytesCoarse(props.detectedVramBytes)
+  })
+})
+
+const diskBlocked = computed(() =>
+  !props.diskSpaceLoading &&
+  isTemplateDiskBlocked(props.diskSpace, sizeBytesOf(selectedOption.value)),
+)
+
+const diskErrorMessage = computed<string | null>(() => {
+  if (!diskBlocked.value || !props.diskSpace) return null
+  const required = templateDiskRequiredBytes(sizeBytesOf(selectedOption.value))
+  return t('diskSpace.templateBlockMessage', {
+    required: formatBytesCoarse(required),
+    free: formatBytesCoarse(props.diskSpace.free)
+  })
+})
+
+const hasAlerts = computed(() => !!(diskErrorMessage.value || vramWarning.value))
+
+function focusRow(index: number): void {
+  nextTick(() => {
+    listRef.value?.querySelectorAll<HTMLButtonElement>('button[role="radio"]')[index]?.focus()
+  })
+}
+
+function onRowKeydown(e: KeyboardEvent, index: number): void {
+  const last = templateCards.value.length - 1
+  let nextIndex: number
+  if (e.key === 'ArrowDown') nextIndex = Math.min(index + 1, last)
+  else if (e.key === 'ArrowUp') nextIndex = Math.max(index - 1, 0)
+  else if (e.key === 'Home') nextIndex = 0
+  else if (e.key === 'End') nextIndex = last
+  else return
+
+  e.preventDefault()
+  if (nextIndex === index) return
+  const next = templateCards.value[nextIndex]
+  if (!next) return
+  emit('select', next)
+  focusRow(nextIndex)
+}
+
+watch(diskBlocked, (blocked) => {
+  if (!blocked) return
+  nextTick(() => {
+    const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    alertsRef.value?.scrollIntoView({ behavior: reduced ? 'auto' : 'smooth', block: 'nearest' })
   })
 })
 </script>
 
 <template>
   <div class="tps">
-    <h1 class="brand-title">{{ t('standalone.templatePickerTitle') }}</h1>
-    <p class="brand-lead">{{ t('standalone.templatePickerLead') }}</p>
-
-    <div class="tps__grid" role="radiogroup" :aria-label="t('standalone.templatePickerTitle')">
+    <div
+      ref="listRef"
+      class="brand-variant-list"
+      role="radiogroup"
+      :aria-label="t('standalone.templatePickerTitle')"
+    >
       <button
-        v-for="opt in templateCards"
+        v-for="(opt, index) in templateCards"
         :key="opt.value"
         type="button"
         role="radio"
         :aria-checked="selectedValue === opt.value"
-        :class="['tps__card', { 'tps__card--selected': selectedValue === opt.value }]"
+        :class="[
+          'brand-variant-row',
+          { 'brand-variant-row--selected': selectedValue === opt.value },
+        ]"
         @click="emit('select', opt)"
+        @keydown="onRowKeydown($event, index)"
       >
-        <span class="tps__thumb" aria-hidden="true">
+        <span class="brand-variant-row__icon" aria-hidden="true">
           <img
-            v-if="thumbnailOf(opt)"
+            v-if="thumbnailOf(opt) && !thumbFailed[opt.value]"
             :src="thumbnailOf(opt)!"
             :alt="opt.label"
-            loading="lazy"
             draggable="false"
+            @error="thumbFailed[opt.value] = true"
           />
-          <ImageOff v-else :size="20" class="tps__thumb-fallback" />
-          <span v-if="modalityOf(opt)" class="tps__modality">{{ modalityOf(opt) }}</span>
-          <Check v-if="selectedValue === opt.value" class="tps__check" :size="14" :stroke-width="2.5" />
+          <component :is="modalityGlyph(opt)" v-else-if="modalityGlyph(opt)" :size="20" />
         </span>
-        <span class="tps__body">
-          <span class="tps__name">{{ opt.label }}</span>
-          <span v-if="opt.description" class="tps__desc">{{ opt.description }}</span>
-          <span v-if="sizeLabelOf(opt)" class="tps__size">{{ sizeLabelOf(opt) }}</span>
+        <span class="brand-variant-row__body">
+          <span class="brand-variant-row__head">
+            <span class="brand-variant-row__text">
+              <span class="brand-variant-row__label">
+                {{ opt.label }}
+                <span v-if="opt.value === recommendedValue" class="tps__recommended">
+                  {{ t('newInstall.recommended') }}
+                </span>
+              </span>
+              <span v-if="metaLabelOf(opt)" class="brand-variant-row__meta">
+                {{ metaLabelOf(opt) }}
+              </span>
+            </span>
+            <Check
+              v-if="selectedValue === opt.value"
+              class="brand-variant-row__check"
+              :size="16"
+              :stroke-width="2"
+              aria-hidden="true"
+            />
+          </span>
+          <span
+            v-if="opt.description"
+            class="tps__row-detail"
+            :class="{ 'tps__row-detail--open': selectedValue === opt.value }"
+          >
+            <span class="tps__row-detail-inner">{{ opt.description }}</span>
+          </span>
         </span>
       </button>
     </div>
 
-    <button
-      v-if="noneOption"
-      type="button"
-      role="radio"
-      :aria-checked="selectedValue === noneValue"
-      :class="['tps__none', { 'tps__none--selected': selectedValue === noneValue }]"
-      @click="emit('select', noneOption!)"
+    <div
+      v-if="hasAlerts"
+      id="tps-alerts"
+      ref="alertsRef"
+      class="tps__alerts"
     >
-      <span class="tps__none-text">
-        <span class="tps__name">{{ noneOption.label }}</span>
-        <span v-if="noneOption.description" class="tps__desc">{{ noneOption.description }}</span>
-      </span>
-      <Check v-if="selectedValue === noneValue" :size="16" :stroke-width="2" aria-hidden="true" />
-    </button>
-
-    <div v-if="vramWarning" class="tps__warning" role="status">
-      <TriangleAlert :size="15" aria-hidden="true" />
-      <span>{{ vramWarning }}</span>
+      <div v-if="diskErrorMessage" class="tps__alert tps__alert--error" role="alert">
+        <CircleAlert :size="15" aria-hidden="true" />
+        <span>{{ diskErrorMessage }}</span>
+      </div>
+      <div v-if="vramWarning" class="tps__alert tps__alert--warn" role="status">
+        <TriangleAlert :size="15" aria-hidden="true" />
+        <span>{{ vramWarning }}</span>
+      </div>
     </div>
-
-    <label v-if="selectedHasModels" class="tps__consent">
-      <input
-        type="checkbox"
-        :checked="consent"
-        @change="emit('update:consent', ($event.target as HTMLInputElement).checked)"
-      />
-      <span>{{ t('standalone.downloadTemplateModels', { size: sizeLabelOf(selectedOption!) }) }}</span>
-    </label>
-
-    <label v-if="showDontShowAgain" class="tps__dont-show">
-      <input
-        type="checkbox"
-        :checked="dontShowAgain"
-        @change="emit('update:dontShowAgain', ($event.target as HTMLInputElement).checked)"
-      />
-      <span>{{ t('standalone.templateDontShowAgain') }}</span>
-    </label>
   </div>
 </template>
 
 <style scoped>
 .tps {
+  width: 100%;
+  text-align: left;
+}
+
+.brand-variant-list {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  width: 100%;
-  max-width: 720px;
-  margin-inline: auto;
+  gap: 6px;
 }
-.tps__grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+
+.brand-variant-row {
+  display: flex;
+  align-items: flex-start;
   gap: 12px;
   width: 100%;
-  margin-top: 8px;
-}
-.tps__card {
-  display: flex;
-  flex-direction: column;
-  text-align: left;
-  padding: 0;
-  border: 1px solid var(--brand-surface-border);
-  border-radius: 10px;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: 6px;
   background: var(--brand-surface-bg);
   color: var(--neutral-200);
   font: inherit;
+  text-align: left;
   cursor: pointer;
-  overflow: hidden;
   transition:
-    border-color 120ms ease,
     background 120ms ease,
-    box-shadow 120ms ease;
+    border-color 120ms ease,
+    color 120ms ease;
 }
-.tps__card:hover {
+.brand-variant-row:hover {
   background: var(--brand-surface-bg-hover);
-  border-color: var(--brand-surface-border-hover);
+  border-color: var(--brand-surface-border);
+  color: var(--neutral-100);
 }
-.tps__card:focus-visible {
+.brand-variant-row:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
-.tps__card--selected {
-  border-color: var(--comfy-yellow);
-  box-shadow: 0 0 0 1px var(--comfy-yellow) inset;
+.brand-variant-row--selected {
+  background: var(--brand-surface-bg-hover);
+  border-color: var(--brand-surface-border-hover);
+  box-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.08) inset;
+  color: var(--neutral-100);
 }
-.tps__thumb {
-  position: relative;
-  display: flex;
+.brand-variant-row__icon {
+  flex: 0 0 auto;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  aspect-ratio: 16 / 10;
+  width: 40px;
+  height: 40px;
+  margin-top: 1px;
+  border-radius: 6px;
   background: var(--chooser-surface-bg);
   overflow: hidden;
+  color: var(--neutral-500);
 }
-.tps__thumb img {
+.brand-variant-row__icon img {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
-.tps__thumb-fallback {
-  color: var(--neutral-500);
-}
-.tps__modality {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  padding: 2px 7px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  color: var(--neutral-100);
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(4px);
-}
-.tps__check {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  padding: 3px;
-  border-radius: 999px;
-  color: var(--neutral-950, #000);
-  background: var(--comfy-yellow);
-}
-.tps__body {
+.brand-variant-row__body {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  padding: 10px 12px 12px;
+  gap: 0;
+  min-width: 0;
+  flex: 1 1 auto;
 }
-.tps__name {
-  font-size: var(--takeover-fs-body);
-  font-weight: 600;
-  color: var(--neutral-100);
-}
-.tps__desc {
-  font-size: var(--takeover-fs-caption);
-  line-height: 1.35;
-  color: var(--neutral-300);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.tps__size {
-  font-size: var(--takeover-fs-caption);
-  color: var(--neutral-400);
-  font-variant-numeric: tabular-nums;
-}
-.tps__none {
+.brand-variant-row__head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
   width: 100%;
-  margin-top: 12px;
-  padding: 12px 14px;
-  border: 1px solid var(--brand-surface-border);
-  border-radius: 8px;
-  background: var(--brand-surface-bg);
-  color: var(--neutral-200);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: border-color 120ms ease, background 120ms ease;
 }
-.tps__none:hover {
-  background: var(--brand-surface-bg-hover);
-  border-color: var(--brand-surface-border-hover);
-}
-.tps__none:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
-}
-.tps__none--selected {
-  border-color: var(--comfy-yellow);
-  box-shadow: 0 0 0 1px var(--comfy-yellow) inset;
-}
-.tps__none-text {
+.brand-variant-row__text {
   display: flex;
   flex-direction: column;
   gap: 2px;
   min-width: 0;
+  flex: 1 1 auto;
 }
-.tps__warning {
+.brand-variant-row__label {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--takeover-fs-body);
+  font-weight: 600;
+  color: var(--neutral-100);
+}
+.brand-variant-row__meta {
+  font-size: var(--takeover-fs-caption);
+  color: var(--neutral-300);
+}
+.brand-variant-row__check {
+  flex: 0 0 auto;
+  color: var(--neutral-100);
+}
+
+.tps__recommended {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--neutral-100);
+  background: color-mix(in oklab, var(--neutral-100) 14%, transparent);
+  border: 1px solid color-mix(in oklab, var(--neutral-100) 22%, transparent);
+  box-shadow:
+    0 1px 0 color-mix(in oklab, var(--neutral-100) 12%, transparent) inset,
+    0 1px 8px color-mix(in oklab, var(--neutral-900) 25%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+.tps__row-detail {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 220ms ease;
+}
+.tps__row-detail--open {
+  grid-template-rows: 1fr;
+}
+.tps__row-detail-inner {
+  overflow: hidden;
+  padding-top: 0;
+  font-size: var(--takeover-fs-caption);
+  line-height: 1.45;
+  color: var(--neutral-300);
+  transition:
+    padding-top 220ms ease,
+    color 220ms ease;
+}
+.tps__row-detail--open .tps__row-detail-inner {
+  padding-top: 6px;
+  color: var(--neutral-200);
+}
+
+.tps__alerts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--brand-surface-border);
+}
+.tps__alert {
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  width: 100%;
-  margin-top: 12px;
-  padding: 10px 12px;
-  border-radius: 8px;
   font-size: var(--takeover-fs-caption);
   line-height: 1.4;
-  color: var(--warning, #e0a458);
-  background: color-mix(in srgb, var(--warning, #e0a458) 12%, transparent);
+  text-align: left;
 }
-.tps__warning svg {
+.tps__alert svg {
   flex: 0 0 auto;
   margin-top: 1px;
 }
-.tps__consent,
-.tps__dont-show {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  margin-top: 12px;
-  font-size: var(--takeover-fs-caption);
-  color: var(--neutral-300);
-  cursor: pointer;
+.tps__alert--error {
+  color: var(--danger);
 }
-.tps__consent input,
-.tps__dont-show input {
-  flex: 0 0 auto;
-  accent-color: var(--comfy-yellow);
+.tps__alert--warn {
+  color: var(--warning);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .brand-variant-row,
+  .tps__row-detail,
+  .tps__row-detail-inner {
+    transition: none;
+  }
+  .tps__row-detail:not(.tps__row-detail--open) {
+    display: none;
+  }
 }
 </style>
