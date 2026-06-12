@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ChevronRight, Folder, FolderLock, FolderOpen, Layers, MoreHorizontal, Plus } from 'lucide-vue-next'
+import { ChevronRight, FileSymlink, Folder, FolderLock, FolderOpen, MoreHorizontal, Plus } from 'lucide-vue-next'
 import InfoTooltip from '../../components/InfoTooltip.vue'
 import StorageItemIcon from '../../components/StorageItemIcon.vue'
 
@@ -157,7 +157,7 @@ const rows = computed(() =>
       :class="{ 'is-just-promoted': row.path === justPromotedPath }"
     >
       <StorageItemIcon
-        :icon="row.isExtra ? Layers : row.locked ? FolderLock : Folder"
+        :icon="row.isExtra ? FileSymlink : row.locked ? FolderLock : Folder"
         :shared="row.shared"
         :title="row.locked ? t('models.lockedDir', 'This directory is always used and cannot be removed.') : undefined"
       />
