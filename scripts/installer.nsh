@@ -100,19 +100,6 @@
 ; This keeps us on a single ToDesktop Windows build while still allowing
 ; OEM / IT provisioning flows to request machine installs explicitly.
 ;
-; Copy ${src} into register ${dstReg}, stripping one trailing backslash. Used to
-; compare the updater's /D= path (which may carry a trailing slash) against the
-; stored InstallLocation values (which don't). NSIS LogicLib `==` is already
-; case-insensitive (StrCmp), which is the right behavior for Windows paths, so
-; only the trailing slash needs normalizing. Scratches $R7.
-!macro StripTrailingSlash src dstReg
-  StrCpy ${dstReg} ${src}
-  StrCpy $R7 ${dstReg} "" -1
-  ${If} $R7 == "\"
-    StrCpy ${dstReg} ${dstReg} -1
-  ${EndIf}
-!macroend
-
 ; customInstallMode runs inside the install-mode page's PRE callback. Setting
 ; $isForceMachineInstall / $isForceCurrentInstall makes that PRE re-apply the
 ; mode and Abort (skip) the page.
@@ -129,33 +116,19 @@
     ${IfNot} ${Errors}
       StrCpy $isForceCurrentInstall 1
     ${Else}
-      ; A non-silent update (electron-updater passes --updated and /D=<dir> but
-      ; no /allusers|/currentuser) would otherwise stop on the install-mode page
-      ; — the one pre-progress page electron-builder does NOT auto-skip on update
-      ; — making the user confirm before the progress bar. Force-skip it on
-      ; update, preserving the scope of the install actually being updated:
-      ;   1. Match electron-updater's /D= dir against the per-machine / per-user
-      ;      InstallLocation that .onInit detected. This is authoritative even
-      ;      when BOTH scopes exist, since /D= points at the running install.
-      ;   2. Otherwise fall back to $installMode — the scope initMultiUser
-      ;      already committed (the lone detected install, or the per-user
-      ;      default for this perMachine:false app when none is detectable).
-      ; The fallback never switches a cleanly-detected install's scope.
+      ; A non-silent update (electron-updater passes --updated but no install-
+      ; mode flag) would otherwise stop on the install-mode page — the one
+      ; pre-progress page electron-builder does NOT auto-skip on update — making
+      ; the user confirm before the progress bar. .onInit's initMultiUser has
+      ; already committed a scope into $installMode (matching the lone detected
+      ; install, or the per-user default for this perMachine:false app when none
+      ; is detected), so on update we force-skip the page using that same scope.
+      ; This never switches a cleanly-detected install's scope. (We intentionally
+      ; key off $installMode rather than the updater's /D= path: reading /D=
+      ; needs electron-builder's GetDParameter macro, which doesn't exist in the
+      ; app-builder-lib version ToDesktop builds with.)
       ${If} ${isUpdated}
-        !insertmacro GetDParameter $R2
-        ; Normalize trailing slashes on both sides before comparing paths.
-        !insertmacro StripTrailingSlash $R2 $R2
-        !insertmacro StripTrailingSlash $perMachineInstallationFolder $R3
-        !insertmacro StripTrailingSlash $perUserInstallationFolder $R4
-        ${If} $R2 != ""
-        ${AndIf} $hasPerMachineInstallation == "1"
-        ${AndIf} $R3 == $R2
-          StrCpy $isForceMachineInstall 1
-        ${ElseIf} $R2 != ""
-        ${AndIf} $hasPerUserInstallation == "1"
-        ${AndIf} $R4 == $R2
-          StrCpy $isForceCurrentInstall 1
-        ${ElseIf} $installMode == "all"
+        ${If} $installMode == "all"
           StrCpy $isForceMachineInstall 1
         ${Else}
           StrCpy $isForceCurrentInstall 1
