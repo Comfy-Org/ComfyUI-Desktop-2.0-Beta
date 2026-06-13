@@ -23,12 +23,32 @@ function escapeHtml(s: string): string {
 export async function showSplashPage(
   webContents: WebContents,
   theme: SplashTheme = SPLASH_DARK,
-  copy?: { title: string; desc: string },
+  copy?: { title: string; desc: string; countdownSeconds?: number },
 ): Promise<void> {
   const title = escapeHtml(copy?.title ?? i18n.t('launch.modelFolderRelaunchTitle'))
   const desc = escapeHtml(copy?.desc ?? i18n.t('launch.modelFolderRelaunchDesc'))
   const { bg, fg } = theme
   const mutedFg = theme.isDark ? '#888' : '#666'
+  // Optional countdown (used by the update splash so the user can read what's
+  // about to happen before the app quits to install). The template is fetched
+  // with the `{seconds}` placeholder UNresolved so the inline script can tick it
+  // down in the renderer; the "starting now" line shows when it reaches zero.
+  const countdown = copy?.countdownSeconds
+  const countdownBlock =
+    countdown && countdown > 0
+      ? `<p class="countdown" id="cd"></p>
+<script>
+(function(){
+  var n=${Math.floor(countdown)};
+  var tmpl=${JSON.stringify(escapeHtml(i18n.t('launch.updateInstallCountdown')))};
+  var done=${JSON.stringify(escapeHtml(i18n.t('launch.updateInstallStartingNow')))};
+  var el=document.getElementById('cd');
+  function render(){el.innerHTML=tmpl.replace('{seconds}','<b>'+n+'</b>');}
+  render();
+  var id=setInterval(function(){n--;if(n<1){clearInterval(id);el.innerHTML=done;return;}render();},1000);
+})();
+</script>`
+      : ''
   const html = `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>
 *{margin:0;padding:0;box-sizing:border-box}
@@ -43,6 +63,8 @@ h2{margin-top:32px;font-size:18px;font-weight:600}
 p{margin-top:10px;font-size:14px;color:${mutedFg};line-height:1.5;text-align:center;max-width:400px}
 .dots::after{content:'';display:inline-block;width:1.5em;text-align:left;animation:dots 1.5s steps(4,end) infinite}
 @keyframes dots{0%{content:''}25%{content:'.'}50%{content:'..'}75%{content:'...'}}
+.countdown{margin-top:20px;font-size:15px;color:${mutedFg}}
+.countdown b{color:${fg};font-weight:700;font-variant-numeric:tabular-nums}
 </style></head><body>
 <svg viewBox="0 0 879 284" fill="none" xmlns="http://www.w3.org/2000/svg">
 <defs><mask id="m"><path d="${COMFY_LOGO_PATH}" fill="white"/></mask></defs>
@@ -51,6 +73,7 @@ p{margin-top:10px;font-size:14px;color:${mutedFg};line-height:1.5;text-align:cen
 </svg>
 <h2>${title}<span class="dots"></span></h2>
 <p>${desc}</p>
+${countdownBlock}
 </body></html>`
   // Caller attaches a will-navigate blocker beforehand, so we just stop + load the data URL.
   webContents.stop()

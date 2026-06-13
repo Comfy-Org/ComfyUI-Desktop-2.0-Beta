@@ -1023,8 +1023,10 @@
     "instanceRunningReplace": "Close & Launch",
     "modelFolderRelaunchTitle": "Restarting ComfyUI",
     "modelFolderRelaunchDesc": "New model folders were detected from custom nodes. Restarting so ComfyUI can use them right away.",
-    "updateInstallTitle": "Installing update",
-    "updateInstallDesc": "Applying the latest ComfyUI Desktop update. The app will restart automatically.",
+    "updateInstallTitle": "Updating ComfyUI Desktop",
+    "updateInstallDesc": "A new version was downloaded and is about to install. The app will close briefly and reopen automatically.",
+    "updateInstallCountdown": "Restarting in {seconds}s…",
+    "updateInstallStartingNow": "Restarting now…",
     "launchSplashTitle": "Starting ComfyUI",
     "launchSplashDesc": "Launching your ComfyUI instance…",
     "activity": {
