@@ -289,7 +289,7 @@ describe('app-update telemetry dedup (volume regression)', () => {
 })
 
 /**
- * Issue #1065 — install staged Desktop updates at startup (Option C) instead of
+ * Issue #1065 — install staged Desktop updates at startup instead of
  * silently on quit, and never spawn the installer while the OS session is
  * ending. Installing on quit is what a Windows shutdown interrupts mid-write,
  * corrupting the install and forcing endless reinstalls.
@@ -312,7 +312,7 @@ describe('startup update install + session-end guard (issue #1065)', () => {
   beforeEach(() => {
     vi.resetModules()
     settingsStore = {}
-    // Startup install (Option C) and the NSIS installer UI default ON on Windows.
+    // Startup install and the NSIS installer UI default on (enabled) on Windows.
     // Tests that exercise the opt-out path set these to false explicitly.
     listeners = {}
     sessionEnding = false
@@ -368,7 +368,7 @@ describe('startup update install + session-end guard (issue #1065)', () => {
   const findEmitCalls = (event: string): unknown[][] =>
     emitMock.mock.calls.filter((c) => c[0] === event)
 
-  it('register() disables install-on-quit by default on Windows (Option C)', async () => {
+  it('register() disables install-on-quit by default on Windows when startup install is enabled', async () => {
     const updater = await import('./updater')
     updater.register()
     // Startup install is the default on Windows, so install-on-quit is disabled
@@ -376,7 +376,7 @@ describe('startup update install + session-end guard (issue #1065)', () => {
     expect(electronUpdaterMock.autoInstallOnAppQuit).toBe(false)
   })
 
-  it('register() keeps install-on-quit when startup install is opted out (Option B)', async () => {
+  it('register() keeps install-on-quit when startup install is explicitly opted out', async () => {
     settingsStore['installUpdatesOnStartup'] = false
     const updater = await import('./updater')
     updater.register()
@@ -387,7 +387,7 @@ describe('startup update install + session-end guard (issue #1065)', () => {
 
   it('startup install is inert on non-Windows even when the flag is on', async () => {
     // macOS (Squirrel.Mac / ShipIt) and Linux don't have the NSIS shutdown
-    // corruption, so Option C must stay off there regardless of the setting.
+    // corruption, so startup install must stay off there regardless of the setting.
     Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true })
     settingsStore['installUpdatesOnStartup'] = true
     settingsStore['pendingDownloadedUpdateVersion'] = '1.0.1'
@@ -401,7 +401,7 @@ describe('startup update install + session-end guard (issue #1065)', () => {
     expect(fakeUpdater.restartAndInstall).not.toHaveBeenCalled()
   })
 
-  it('suppressInstallOnQuit() disables install-on-quit (Option B session-end guard)', async () => {
+  it('suppressInstallOnQuit() disables install-on-quit for the session-end guard', async () => {
     settingsStore['installUpdatesOnStartup'] = false
     const updater = await import('./updater')
     updater.register()

@@ -126,6 +126,16 @@ function isSystemPackageInstall(): boolean {
 }
 
 /**
+ * Windows-only feature gate that defaults on: enabled unless the setting is
+ * explicitly `false`. The startup-install and installer-UI gates share this so
+ * their platform check and opt-out semantics can't drift apart.
+ */
+function isWindowsOptOutGate(key: 'installUpdatesOnStartup' | 'showInstallerUI'): boolean {
+  if (process.platform !== 'win32') return false
+  return settings.get(key) !== false
+}
+
+/**
  * Local, static feature gate for applying a staged update at the next launch
  * (the "startup install" path) instead of letting electron-updater install it
  * on quit.
@@ -145,8 +155,7 @@ function isSystemPackageInstall(): boolean {
  * down).
  */
 function isStartupInstallEnabled(): boolean {
-  if (process.platform !== 'win32') return false
-  return settings.get('installUpdatesOnStartup') !== false
+  return isWindowsOptOutGate('installUpdatesOnStartup')
 }
 
 /**
@@ -165,8 +174,7 @@ function isStartupInstallEnabled(): boolean {
  * back out to a fully silent install.
  */
 function isInstallerUIEnabled(): boolean {
-  if (process.platform !== 'win32') return false
-  return settings.get('showInstallerUI') !== false
+  return isWindowsOptOutGate('showInstallerUI')
 }
 
 /**
