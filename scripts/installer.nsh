@@ -119,15 +119,17 @@
       ; A non-silent update (electron-updater passes --updated but no install-
       ; mode flag) would otherwise stop on the install-mode page — the one
       ; pre-progress page electron-builder does NOT auto-skip on update — making
-      ; the user confirm before the progress bar. Re-use the mode initMultiUser
-      ; already detected in .onInit (so we never switch an install's scope) to
-      ; force-skip the page. Ambiguous (both/neither detected): let it show.
+      ; the user confirm before the progress bar. .onInit's initMultiUser has
+      ; already committed a scope into $installMode (matching the existing
+      ; install, or the per-user default when none is detected), so on update we
+      ; force-skip the page using that same scope. Keying off $installMode rather
+      ; than the raw hasPer*Installation flags means we still skip when registry
+      ; detection comes back ambiguous/empty — the case that left the page
+      ; showing before.
       ${If} ${isUpdated}
-        ${If} $hasPerMachineInstallation == "1"
-        ${AndIf} $hasPerUserInstallation == "0"
+        ${If} $installMode == "all"
           StrCpy $isForceMachineInstall 1
-        ${ElseIf} $hasPerUserInstallation == "1"
-        ${AndIf} $hasPerMachineInstallation == "0"
+        ${Else}
           StrCpy $isForceCurrentInstall 1
         ${EndIf}
       ${EndIf}
