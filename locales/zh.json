@@ -7,7 +7,7 @@
     "telemetrySettings": "在设置中管理",
     "migrateBannerTitle": "迁移到独立版",
     "migrateBannerDesc": "检测到你的旧版桌面端实例。迁移到独立版实例可获得更好的性能、更简单的更新，以及完整的 Comfy Desktop 管理能力。",
-    "migrateBannerAction": "迁移 否w",
+    "migrateBannerAction": "立即迁移",
     "migrateBannerSkip": "不迁移，创建新实例",
     "confirmStopLocal": {
       "title": "返回仪表板？",
