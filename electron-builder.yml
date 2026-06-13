@@ -26,6 +26,10 @@ publish:
   owner: Comfy-Org
   repo: Comfy-Desktop
 artifactName: Comfy-Desktop-${version}-${os}-${arch}.${ext}
+protocols:
+  - name: Comfy Desktop
+    schemes:
+      - comfy
 win:
   target: nsis
   icon: assets/Comfy_Logo_x256.png
