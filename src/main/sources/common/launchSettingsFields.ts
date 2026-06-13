@@ -1,6 +1,81 @@
+import fs from 'fs'
+import path from 'path'
 import { t } from '../../lib/i18n'
-import { installModelsDir, installInputDir, installOutputDir } from '../../lib/models'
+import {
+  installModelsDir,
+  installInputDir,
+  installOutputDir,
+  resolveComfyDir,
+  resolveExtraModelPaths,
+} from '../../lib/models'
 import type { InstallationRecord } from '../../installations'
+
+/** One resolved per-type dir in an `extra_model_paths.yaml` section.
+ *  `dirExists` lets the UI flag missing folders. */
+export interface ExtraModelPathDir {
+  type: string
+  rawType: string
+  dir: string
+  dirExists: boolean
+}
+
+/** An `extra_model_paths.yaml` section for read-only display: one models-dir row
+ *  (keyed by `base_path`, or `name` if none) with per-type `dirs` in a modal. */
+export interface ExtraModelPathSection {
+  /** Section key from the YAML (e.g. `comfyui_desktop`, `my_external`). */
+  name: string
+  /** Resolved absolute `base_path`, or null when the section declares none. */
+  basePath: string | null
+  /** Whether `basePath` currently exists on disk (false when null). */
+  basePathExists: boolean
+  /** `is_default: true` on the section. */
+  isDefault: boolean
+  /** Per-type directories the section contributes. */
+  dirs: ExtraModelPathDir[]
+}
+
+export interface ExtraModelPathsView {
+  /** Absolute path of the resolved `extra_model_paths.yaml`. */
+  yamlPath: string
+  /** Whether that file currently exists on disk. */
+  exists: boolean
+  /** One entry per YAML section, in declaration order. */
+  sections: ExtraModelPathSection[]
+}
+
+/** Resolve an install's `extra_model_paths.yaml` (as ComfyUI does), grouped by
+ *  section for read-only display. Empty view when the install has no path yet. */
+export function buildExtraModelPathsView(installation: InstallationRecord): ExtraModelPathsView {
+  const installPath = installation.installPath as string | undefined
+  if (!installPath) return { yamlPath: '', exists: false, sections: [] }
+  const yamlPath = path.join(resolveComfyDir(installPath), 'extra_model_paths.yaml')
+
+  // Group resolved per-type dirs by section, preserving declaration order.
+  const sections: ExtraModelPathSection[] = []
+  const byName = new Map<string, ExtraModelPathSection>()
+  for (const r of resolveExtraModelPaths(yamlPath)) {
+    let section = byName.get(r.section)
+    if (!section) {
+      section = {
+        name: r.section,
+        basePath: r.basePath,
+        basePathExists: r.basePath != null && fs.existsSync(r.basePath),
+        isDefault: r.isDefault,
+        dirs: [],
+      }
+      byName.set(r.section, section)
+      sections.push(section)
+    }
+    section.dirs.push({
+      type: r.type,
+      rawType: r.rawType,
+      dir: r.dir,
+      dirExists: fs.existsSync(r.dir),
+    })
+  }
+
+  return { yamlPath, exists: fs.existsSync(yamlPath), sections }
+}
 
 export interface LaunchSettingsOptions {
   defaultLaunchArgs: string
@@ -87,6 +162,13 @@ export function buildStorageFields(installation: InstallationRecord): Record<str
     {
       id: 'outputDirDefault', label: t('common.perInstallOutputDir'),
       value: ownOutputDir, editable: false, editType: 'hidden',
+    },
+    // Read-only view of the install's extra_model_paths.yaml, rendered manually
+    // by StoragePane.vue (the generic renderer ignores `hidden` fields).
+    {
+      id: 'extraModelPaths', label: 'extraModelPaths',
+      value: buildExtraModelPathsView(installation),
+      editable: false, editType: 'hidden',
     },
   ]
 }

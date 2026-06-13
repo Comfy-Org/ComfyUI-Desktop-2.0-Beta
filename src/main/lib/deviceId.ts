@@ -63,6 +63,34 @@ function migrationGuardPath(): string {
   return path.join(configDir(), 'identity-migration-completed')
 }
 
+function firstLaunchGuardPath(): string {
+  return path.join(configDir(), 'first-launch-completed')
+}
+
+/**
+ * One-shot first-launch marker. Returns `true` exactly once per installation
+ * (the first boot where the guard file does not yet exist) and writes the
+ * guard so every later boot returns `false`. Best-effort: a failed write
+ * leaves the marker absent, so a later boot would re-fire — over-counting
+ * rather than losing the first-launch anchor of the acquisition funnel.
+ */
+export function consumeFirstLaunch(): boolean {
+  let isFirst: boolean
+  try {
+    isFirst = !fs.existsSync(firstLaunchGuardPath())
+  } catch {
+    isFirst = false
+  }
+  if (!isFirst) return false
+  try {
+    fs.mkdirSync(path.dirname(firstLaunchGuardPath()), { recursive: true })
+    fs.writeFileSync(firstLaunchGuardPath(), new Date().toISOString())
+  } catch {
+    // best-effort persist
+  }
+  return true
+}
+
 /**
  * Persisted legacy-id awaiting a successful alias to the new
  * `installation_id`. Written when we first detect a legacy random UUID

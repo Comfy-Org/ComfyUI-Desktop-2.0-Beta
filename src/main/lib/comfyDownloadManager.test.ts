@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeAll } from 'vitest'
 import os from 'os'
 import path from 'path'
+import type { buildExistenceCandidates as BuildExistenceCandidates } from './comfyDownloadManager'
 
 vi.mock('electron', () => ({
   app: {
@@ -21,6 +22,7 @@ let isPathContained: (filePath: string, baseDir: string) => boolean
 let sanitizeAssetFilename: (filename: string, outputDir: string) => string | null
 let parseContentDispositionFilename: (header: string | null) => string | null
 let buildSaveDialogFilters: (suggestedName: string) => Electron.FileFilter[]
+let buildExistenceCandidates: typeof BuildExistenceCandidates
 
 beforeAll(async () => {
   const mod = await import('./comfyDownloadManager')
@@ -30,6 +32,79 @@ beforeAll(async () => {
   sanitizeAssetFilename = mod.sanitizeAssetFilename
   parseContentDispositionFilename = mod.parseContentDispositionFilename
   buildSaveDialogFilters = mod.buildSaveDialogFilters
+  buildExistenceCandidates = mod.buildExistenceCandidates
+})
+
+describe('buildExistenceCandidates', () => {
+  it('uses only the destination when there is no install context', () => {
+    const candidates = buildExistenceCandidates(null, '/shared', 'loras', 'x.safetensors')
+    expect(candidates).toEqual([path.join('/shared', 'loras', 'x.safetensors')])
+  })
+
+  it('probes every model root for the folder type', () => {
+    const ctx = {
+      downloadBaseDir: '/install/models',
+      modelRoots: ['/install/models', '/external'],
+      extraPaths: [],
+    }
+    const candidates = buildExistenceCandidates(ctx, '/install/models', 'loras', 'x.safetensors')
+    expect(candidates).toContain(path.join('/install/models', 'loras', 'x.safetensors'))
+    expect(candidates).toContain(path.join('/external', 'loras', 'x.safetensors'))
+    // The global shared dir is NOT a root here, so it must not be probed.
+    expect(candidates).not.toContain(path.join('/shared', 'loras', 'x.safetensors'))
+  })
+
+  it('probes arbitrarily-mapped extra_model_paths dirs for the type', () => {
+    const ctx = {
+      downloadBaseDir: '/install/models',
+      modelRoots: ['/install/models'],
+      extraPaths: [
+        { section: 's', basePath: null, type: 'loras', rawType: 'loras', dir: '/custom/somedir/myname', isDefault: false },
+        { section: 's', basePath: null, type: 'checkpoints', rawType: 'checkpoints', dir: '/custom/cp', isDefault: false },
+      ],
+    }
+    const candidates = buildExistenceCandidates(ctx, '/install/models', 'loras', 'x.safetensors')
+    expect(candidates).toContain(path.join('/custom/somedir/myname', 'x.safetensors'))
+    // checkpoints mapping must not be probed for a loras download.
+    expect(candidates).not.toContain(path.join('/custom/cp', 'x.safetensors'))
+  })
+
+  it('probes a model root for both controlnet/ and its t2i_adapter/ alternate', () => {
+    const ctx = {
+      downloadBaseDir: '/install/models',
+      modelRoots: ['/install/models'],
+      extraPaths: [],
+    }
+    const candidates = buildExistenceCandidates(ctx, '/install/models', 'controlnet', 'x.safetensors')
+    // ComfyUI's controlnet defaults also search <root>/t2i_adapter, and the
+    // launcher YAML registers it under controlnet, so both must be probed.
+    expect(candidates).toContain(path.join('/install/models', 'controlnet', 'x.safetensors'))
+    expect(candidates).toContain(path.join('/install/models', 't2i_adapter', 'x.safetensors'))
+  })
+
+  it('matches legacy folder aliases (clip → text_encoders)', () => {
+    const ctx = {
+      downloadBaseDir: '/install/models',
+      modelRoots: ['/install/models'],
+      extraPaths: [
+        { section: 's', basePath: null, type: 'text_encoders', rawType: 'clip', dir: '/custom/clip', isDefault: false },
+      ],
+    }
+    const candidates = buildExistenceCandidates(ctx, '/install/models', 'clip', 'x.safetensors')
+    expect(candidates).toContain(path.join('/custom/clip', 'x.safetensors'))
+  })
+
+  it('appends a nested directory remainder when probing extra dirs', () => {
+    const ctx = {
+      downloadBaseDir: '/install/models',
+      modelRoots: ['/install/models'],
+      extraPaths: [
+        { section: 's', basePath: null, type: 'loras', rawType: 'loras', dir: '/custom/loras', isDefault: false },
+      ],
+    }
+    const candidates = buildExistenceCandidates(ctx, '/install/models', 'loras/sub', 'x.safetensors')
+    expect(candidates).toContain(path.join('/custom/loras', 'sub', 'x.safetensors'))
+  })
 })
 
 describe('ALLOWED_EXTENSIONS', () => {

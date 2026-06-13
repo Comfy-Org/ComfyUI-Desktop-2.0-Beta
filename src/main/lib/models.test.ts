@@ -17,9 +17,16 @@ vi.mock('./paths', () => ({
 const sharedTmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'models-yaml-'))
 holder.dataDir = sharedTmpRoot
 
-const { instanceModelPathsYaml, ensureModelPathsConfig, syncCustomModelFolders } = await import(
-  './models'
-)
+const {
+  instanceModelPathsYaml,
+  ensureModelPathsConfig,
+  syncCustomModelFolders,
+  resolveExtraModelPaths,
+  resolveInstallModelSearchPaths,
+  mapLegacyFolderType,
+} = await import('./models')
+
+import type { InstallationRecord } from '../installations'
 
 /**
  * Locks the YAML shape that `ensureModelPathsConfig` emits, with focus on the
@@ -47,12 +54,23 @@ describe('ensureModelPathsConfig — YAML emission', () => {
     expect(yaml).toMatch(/'loras': 'loras\/'/)
     expect(yaml).toMatch(/'text_encoders': 'text_encoders\/'/)
     expect(yaml).toMatch(/'diffusion_models': 'diffusion_models\/'/)
-    expect(yaml).toMatch(/'controlnet': 'controlnet\/'/)
 
     // Legacy alias entries — the actual bug fix.
     expect(yaml).toMatch(/'clip': 'clip\/'/)
     expect(yaml).toMatch(/'unet': 'unet\/'/)
-    expect(yaml).toMatch(/'t2i_adapter': 't2i_adapter\/'/)
+
+    // `t2i_adapter` is NOT legacy-mapped, so it must ride under the `controlnet`
+    // key as a block scalar — a standalone `t2i_adapter:` key would create its
+    // own folder type that ControlNet loaders never read. Parse to verify both
+    // dirs resolve under `controlnet`.
+    const resolved = resolveExtraModelPaths(result!.yamlPath)
+    const controlnetDirs = resolved
+      .filter((r) => r.type === 'controlnet')
+      .map((r) => path.basename(r.dir))
+    expect(controlnetDirs).toContain('controlnet')
+    expect(controlnetDirs).toContain('t2i_adapter')
+    // No standalone t2i_adapter folder type.
+    expect(resolved.some((r) => r.type === 't2i_adapter')).toBe(false)
   })
 
   it('emits the alias entries for each shared dir (not just the first)', () => {
@@ -185,5 +203,149 @@ describe('models per-install YAML', () => {
     expect(config).not.toBeNull()
     expect(config!.yamlPath).toBe(yamlPath)
     expect(fs.existsSync(yamlPath)).toBe(true)
+  })
+})
+
+describe('resolveExtraModelPaths — mirrors ComfyUI extra_config.py', () => {
+  let tmp: string
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'extra-yaml-'))
+  })
+  afterEach(() => {
+    fs.rmSync(tmp, { recursive: true, force: true })
+  })
+
+  function writeYaml(content: string): string {
+    const p = path.join(tmp, 'extra_model_paths.yaml')
+    fs.writeFileSync(p, content)
+    return p
+  }
+
+  it('returns [] when the file is missing', () => {
+    expect(resolveExtraModelPaths(path.join(tmp, 'nope.yaml'))).toEqual([])
+  })
+
+  it('returns [] for malformed YAML', () => {
+    expect(resolveExtraModelPaths(writeYaml(': : : not yaml'))).toEqual([])
+  })
+
+  it('joins arbitrary per-type subpaths onto an absolute base_path', () => {
+    const base = path.join(tmp, 'root')
+    const yaml = writeYaml(`my_section:\n  base_path: ${base}\n  loras: somedir/myname\n  checkpoints: cp/\n`)
+    const resolved = resolveExtraModelPaths(yaml)
+    const byType = Object.fromEntries(resolved.map((r) => [r.type, r.dir]))
+    expect(byType['loras']).toBe(path.normalize(path.join(base, 'somedir/myname')))
+    expect(byType['checkpoints']).toBe(path.normalize(path.join(base, 'cp')))
+  })
+
+  it('resolves a relative base_path against the YAML directory', () => {
+    const yaml = writeYaml(`s:\n  base_path: ../sibling\n  loras: loras\n`)
+    const resolved = resolveExtraModelPaths(yaml)
+    expect(resolved[0]!.dir).toBe(path.normalize(path.resolve(tmp, '../sibling', 'loras')))
+  })
+
+  it('treats an absolute subpath as-is even when base_path is set', () => {
+    const abs = path.join(tmp, 'abs-loras')
+    const yaml = writeYaml(`s:\n  base_path: ${path.join(tmp, 'root')}\n  loras: ${abs}\n`)
+    const resolved = resolveExtraModelPaths(yaml)
+    expect(resolved.find((r) => r.type === 'loras')!.dir).toBe(path.normalize(abs))
+  })
+
+  it('expands multiple newline-delimited dirs for one type', () => {
+    const base = path.join(tmp, 'root')
+    const yaml = writeYaml(`s:\n  base_path: ${base}\n  text_encoders: |\n    text_encoders/\n    clip/\n`)
+    const dirs = resolveExtraModelPaths(yaml)
+      .filter((r) => r.type === 'text_encoders')
+      .map((r) => r.dir)
+    expect(dirs).toContain(path.normalize(path.join(base, 'text_encoders')))
+    expect(dirs).toContain(path.normalize(path.join(base, 'clip')))
+  })
+
+  it('maps legacy folder names (clip → text_encoders, unet → diffusion_models)', () => {
+    const base = path.join(tmp, 'root')
+    const yaml = writeYaml(`s:\n  base_path: ${base}\n  clip: myclip/\n  unet: myunet/\n`)
+    const resolved = resolveExtraModelPaths(yaml)
+    expect(resolved.find((r) => r.rawType === 'clip')!.type).toBe('text_encoders')
+    expect(resolved.find((r) => r.rawType === 'unet')!.type).toBe('diffusion_models')
+  })
+
+  it('captures is_default per section', () => {
+    const base = path.join(tmp, 'root')
+    const yaml = writeYaml(`s:\n  base_path: ${base}\n  is_default: true\n  checkpoints: cp/\n`)
+    expect(resolveExtraModelPaths(yaml)[0]!.isDefault).toBe(true)
+  })
+
+  it('does not register custom_nodes as a model dir', () => {
+    const base = path.join(tmp, 'root')
+    const yaml = writeYaml(`s:\n  base_path: ${base}\n  custom_nodes: custom_nodes/\n  loras: loras/\n`)
+    const resolved = resolveExtraModelPaths(yaml)
+    expect(resolved.map((r) => r.type)).toEqual(['loras'])
+  })
+})
+
+describe('resolveInstallModelSearchPaths', () => {
+  let tmp: string
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'install-search-'))
+  })
+  afterEach(() => {
+    fs.rmSync(tmp, { recursive: true, force: true })
+  })
+
+  function makeInstall(over: Partial<InstallationRecord>): InstallationRecord {
+    const installPath = path.join(tmp, 'install')
+    fs.mkdirSync(path.join(installPath, 'ComfyUI', 'models'), { recursive: true })
+    return {
+      id: 'inst-1',
+      name: 'Test',
+      createdAt: '',
+      installPath,
+      sourceId: 's',
+      ...over,
+    } as InstallationRecord
+  }
+
+  it('uses the first shared dir as primary when shared models are on', () => {
+    const shared = [path.join(tmp, 'shared-a'), path.join(tmp, 'shared-b')]
+    const res = resolveInstallModelSearchPaths(makeInstall({ useSharedModels: true }), shared)
+    expect(res.downloadBaseDir).toBe(path.resolve(shared[0]!))
+    expect(res.modelRoots).toContain(path.resolve(shared[0]!))
+    expect(res.modelRoots).toContain(path.resolve(shared[1]!))
+  })
+
+  it('uses the install-own models dir as primary when shared off with no promoted primary', () => {
+    const inst = makeInstall({ useSharedModels: false, modelDirs: [path.join(tmp, 'ext')] })
+    const res = resolveInstallModelSearchPaths(inst, [path.join(tmp, 'shared')])
+    expect(res.downloadBaseDir).toBe(path.resolve(path.join(inst.installPath, 'ComfyUI', 'models')))
+    // The global shared dir must NOT appear in a shared-off install's roots.
+    expect(res.modelRoots).not.toContain(path.resolve(path.join(tmp, 'shared')))
+  })
+
+  it('honors a promoted external primary when shared off', () => {
+    const ext = path.join(tmp, 'ext')
+    const inst = makeInstall({ useSharedModels: false, modelDirs: [ext], modelDirsPrimary: ext })
+    const res = resolveInstallModelSearchPaths(inst, [])
+    expect(res.downloadBaseDir).toBe(path.resolve(ext))
+  })
+
+  it('includes the install own extra_model_paths.yaml dirs', () => {
+    const inst = makeInstall({ useSharedModels: false })
+    const base = path.join(tmp, 'extra-root')
+    fs.writeFileSync(
+      path.join(inst.installPath, 'ComfyUI', 'extra_model_paths.yaml'),
+      `s:\n  base_path: ${base}\n  loras: custom/loras\n`,
+    )
+    const res = resolveInstallModelSearchPaths(inst, [])
+    expect(res.extraPaths.find((e) => e.type === 'loras')!.dir).toBe(
+      path.normalize(path.join(base, 'custom/loras')),
+    )
+  })
+})
+
+describe('mapLegacyFolderType', () => {
+  it('maps known aliases and passes through canonical names', () => {
+    expect(mapLegacyFolderType('clip')).toBe('text_encoders')
+    expect(mapLegacyFolderType('unet')).toBe('diffusion_models')
+    expect(mapLegacyFolderType('loras')).toBe('loras')
   })
 })

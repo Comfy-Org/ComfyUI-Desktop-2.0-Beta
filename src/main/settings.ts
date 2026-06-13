@@ -51,6 +51,31 @@ export interface KnownSettings {
   /** Directory the user last chose in the general "Save image/file" dialog.
    *  Used to seed the dialog's defaultPath so it matches browser behavior. */
   lastSaveDialogDir?: string
+  /** Version of a Desktop update whose installer finished downloading in a
+   *  previous session and is staged on disk. Gates the bounded startup
+   *  install check so boots without a staged update aren't delayed. Cleared
+   *  once that version is actually running. */
+  pendingDownloadedUpdateVersion?: string
+  /** Version we last auto-attempted to install at startup. Loop-breaker: if an
+   *  attempt didn't take (still running the old version), we don't auto-retry
+   *  the same version on the next boot — the user can still install it manually
+   *  via the update pill. Cleared once that version is actually running. */
+  lastStartupUpdateAttemptVersion?: string
+  /** Windows-only gate (default on) for applying a staged Desktop update on the
+   *  next launch instead of letting electron-updater install it on quit. Ignored
+   *  on macOS/Linux, whose updaters don't have the shutdown install-corruption
+   *  this addresses. On (default): install-on-quit is disabled and the update
+   *  applies at startup. Set to `false` to opt back out — install-on-quit stays
+   *  armed and is only suppressed while the OS is shutting down. */
+  installUpdatesOnStartup?: boolean
+  /** Windows-only gate (default on) for showing the NSIS installer's own
+   *  progress window while an update installs, instead of installing fully
+   *  silently. Ignored on macOS/Linux — `isSilent` is an NSIS concept. On update
+   *  the assisted installer skips the welcome/license/directory pages and our
+   *  `customFinishPage` auto-launches + skips the finish page, so the user only
+   *  sees a progress window (no clicks). Set to `false` for a fully silent
+   *  install. */
+  showInstallerUI?: boolean
 }
 
 export type Settings = KnownSettings & Record<string, unknown>
@@ -92,6 +117,10 @@ const SETTINGS_SCHEMA = {
   oemManagedModelDirs: { nullable: false },
   oemWorkflowImportVersion: { nullable: false },
   lastSaveDialogDir: { nullable: true },
+  pendingDownloadedUpdateVersion: { nullable: true },
+  lastStartupUpdateAttemptVersion: { nullable: true },
+  installUpdatesOnStartup: { nullable: false },
+  showInstallerUI: { nullable: false },
 } as const satisfies Record<keyof KnownSettings, { nullable: boolean }>
 
 export type KnownSettingKey = keyof typeof SETTINGS_SCHEMA

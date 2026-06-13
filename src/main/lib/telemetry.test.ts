@@ -57,7 +57,7 @@ const aliases: AliasCall[] = []
 
 interface IdentifyCall {
   distinctId: string
-  properties?: { $set?: Record<string, unknown> }
+  properties?: { $set?: Record<string, unknown>; $set_once?: Record<string, unknown> }
 }
 const identifies: IdentifyCall[] = []
 
@@ -541,6 +541,122 @@ describe('telemetry.registerPersonProperties pre-consent merge', () => {
       locale: 'en',
       theme: 'dark'
     })
+  })
+})
+
+describe('telemetry.registerPersonPropertiesOnce ($set_once)', () => {
+  beforeEach(() => {
+    captured.length = 0
+    identifies.length = 0
+    process.env['POSTHOG_API_KEY'] = 'test-key'
+    process.env['POSTHOG_ENABLED'] = '1'
+    telemetry._resetForTest()
+    telemetry.initTelemetry({ appVersion: '0.0.0', appEnv: 'test', isPackaged: true })
+  })
+
+  afterEach(() => {
+    delete process.env['POSTHOG_API_KEY']
+    delete process.env['POSTHOG_ENABLED']
+    telemetry.setConsentState('granted')
+  })
+
+  it('ships the property under $set_once (not $set) when consent is already granted', () => {
+    telemetry.setConsentState('granted')
+    telemetry.identify('id')
+    identifies.length = 0
+
+    telemetry.registerPersonPropertiesOnce({ first_generation_at: '2026-06-12T00:00:00.000Z' })
+
+    expect(identifies).toHaveLength(1)
+    expect(identifies[0]?.properties?.$set_once).toMatchObject({
+      first_generation_at: '2026-06-12T00:00:00.000Z'
+    })
+    expect(identifies[0]?.properties?.$set).toBeUndefined()
+  })
+
+  it('defers the $set_once write until consent flips to granted', () => {
+    telemetry.setConsentState('undecided')
+    telemetry.identify('id')
+    identifies.length = 0
+
+    telemetry.registerPersonPropertiesOnce({ first_generation_at: 'first' })
+    // Nothing ships pre-consent.
+    expect(identifies).toHaveLength(0)
+
+    telemetry.setConsentState('granted')
+
+    const once = identifies.find((i) => i.properties?.$set_once)
+    expect(once?.properties?.$set_once).toMatchObject({ first_generation_at: 'first' })
+  })
+
+  it('carries $set and $set_once in the same identify when both are queued pre-consent', () => {
+    telemetry.setConsentState('undecided')
+    telemetry.identify('id')
+    identifies.length = 0
+
+    telemetry.registerPersonProperties({ gpu_tier: 'mid' })
+    telemetry.registerPersonPropertiesOnce({ first_generation_at: 'first' })
+
+    telemetry.setConsentState('granted')
+
+    const call = identifies.find((i) => i.properties?.$set_once)
+    expect(call?.properties?.$set).toMatchObject({ gpu_tier: 'mid' })
+    expect(call?.properties?.$set_once).toMatchObject({ first_generation_at: 'first' })
+  })
+})
+
+describe('telemetry.captureFirstLaunch (deferred once-ever event)', () => {
+  beforeEach(() => {
+    captured.length = 0
+    process.env['POSTHOG_API_KEY'] = 'test-key'
+    process.env['POSTHOG_ENABLED'] = '1'
+    telemetry._resetForTest()
+    telemetry.initTelemetry({ appVersion: '0.0.0', appEnv: 'test', isPackaged: true })
+  })
+
+  afterEach(() => {
+    delete process.env['POSTHOG_API_KEY']
+    delete process.env['POSTHOG_ENABLED']
+    telemetry.setConsentState('granted')
+  })
+
+  it('queues on a fresh install (undecided) and ships on the grant transition', () => {
+    // This is the real first-boot path: consent undecided, guard already
+    // consumed. A plain capture would be dropped here and never re-fire.
+    telemetry.setConsentState('undecided')
+    telemetry.identify('install-id')
+    captured.length = 0
+
+    telemetry.captureFirstLaunch({ id_class: 'machine_derived', locale: 'en' })
+    expect(captured).toHaveLength(0)
+
+    telemetry.setConsentState('granted')
+
+    const ev = captured.find((c) => c.event === 'comfy.desktop.app.first_launch')
+    expect(ev?.distinctId).toBe('install-id')
+    expect(ev?.properties).toMatchObject({ id_class: 'machine_derived', locale: 'en' })
+  })
+
+  it('never ships when the user declines (denied), no later flush', () => {
+    telemetry.setConsentState('undecided')
+    telemetry.identify('install-id')
+    captured.length = 0
+
+    telemetry.captureFirstLaunch({ id_class: 'machine_derived', locale: 'en' })
+    telemetry.setConsentState('denied')
+
+    expect(captured.find((c) => c.event === 'comfy.desktop.app.first_launch')).toBeUndefined()
+  })
+
+  it('captures immediately when consent is already granted', () => {
+    telemetry.setConsentState('granted')
+    telemetry.identify('install-id')
+    captured.length = 0
+
+    telemetry.captureFirstLaunch({ id_class: 'random_uuid', locale: 'fr' })
+
+    const ev = captured.find((c) => c.event === 'comfy.desktop.app.first_launch')
+    expect(ev?.properties).toMatchObject({ id_class: 'random_uuid', locale: 'fr' })
   })
 })
 
