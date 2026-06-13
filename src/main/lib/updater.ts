@@ -126,6 +126,16 @@ function isSystemPackageInstall(): boolean {
 }
 
 /**
+ * Windows-only feature gate that defaults on: enabled unless the setting is
+ * explicitly `false`. The startup-install and installer-UI gates share this so
+ * their platform check and opt-out semantics can't drift apart.
+ */
+function isWindowsOptOutGate(key: 'installUpdatesOnStartup' | 'showInstallerUI'): boolean {
+  if (process.platform !== 'win32') return false
+  return settings.get(key) !== false
+}
+
+/**
  * Local, static feature gate for applying a staged update at the next launch
  * (the "startup install" path) instead of letting electron-updater install it
  * on quit.
@@ -137,19 +147,15 @@ function isSystemPackageInstall(): boolean {
  * so applying updates at startup there would only add risk to a working update
  * channel. On those platforms this always returns false.
  *
- * Default OFF even on Windows. With it off, the app keeps the normal
- * install-on-quit behavior; the `session-end` guard (`suppressInstallOnQuit`)
- * only suppresses that install while the OS is shutting down. With it on,
- * install-on-quit is disabled entirely and the staged update applies on the next
- * boot.
- *
- * Not a remote flag yet — flip it via the hidden `installUpdatesOnStartup`
- * setting (edited by hand in settings.json), so the startup-install path can be
- * canaried before any wider rollout.
+ * Default ON on Windows. The staged update applies at startup and
+ * electron-updater's install-on-quit is disabled entirely. Set the
+ * `installUpdatesOnStartup` setting to `false` to opt back out to the old
+ * install-on-quit behavior (where the `session-end` guard,
+ * `suppressInstallOnQuit`, only suppresses the install while the OS is shutting
+ * down).
  */
 function isStartupInstallEnabled(): boolean {
-  if (process.platform !== 'win32') return false
-  return settings.get('installUpdatesOnStartup') === true
+  return isWindowsOptOutGate('installUpdatesOnStartup')
 }
 
 /**
@@ -164,12 +170,11 @@ function isStartupInstallEnabled(): boolean {
  * continuous visual feedback during the actual file copy — which our Electron
  * "Updating…" splash can't, since the copy runs after the app has quit.
  *
- * Default OFF. Not remote yet — flip the hidden `showInstallerUI` setting by
- * hand in settings.json to canary it.
+ * Default ON on Windows. Set the `showInstallerUI` setting to `false` to opt
+ * back out to a fully silent install.
  */
 function isInstallerUIEnabled(): boolean {
-  if (process.platform !== 'win32') return false
-  return settings.get('showInstallerUI') === true
+  return isWindowsOptOutGate('showInstallerUI')
 }
 
 /**
@@ -264,8 +269,8 @@ function bindUpdaterEvents(): void {
       emitTelemetry('comfy.desktop.app_update.download_complete', { version })
     }
     // Persist that an installer is staged on disk. electron-updater caches the
-    // download across restarts; this marker lets the startup-install path (when
-    // enabled) apply it on the next boot. Harmless in the default on-quit mode —
+    // download across restarts; this marker lets the startup-install path apply
+    // it on the next boot. Harmless when installing on quit instead —
     // it's just a record that a download finished and is cleared once the staged
     // version is the one running.
     try {
@@ -530,8 +535,8 @@ export function installUpdate(): void {
       app.releaseSingleInstanceLock()
     }
     // `isSilent: false` shows the NSIS progress window during the install (see
-    // `isInstallerUIEnabled` — Windows-only, gated, default off). Off everywhere
-    // else, so the macOS/Linux paths and the default Windows path stay silent.
+    // `isInstallerUIEnabled` — Windows-only, default on). Forced silent on
+    // macOS/Linux, where `isSilent` has no effect anyway.
     updater.restartAndInstall({ isSilent: !isInstallerUIEnabled() })
   } catch (err) {
     clearQuitReason()
@@ -586,8 +591,9 @@ type StartupInstallDecision =
  * Decide whether to install a staged Desktop update on this launch. Cheap and
  * synchronous (reads only persisted markers + environment).
  *
- * Returns a skip for: the startup-install gate being off (the default — installs
- * still happen on quit), E2E runs, system-package-managed installs (apt/dnf own
+ * Returns a skip for: the startup-install gate being off (non-Windows, or the
+ * `installUpdatesOnStartup` opt-out — installs still happen on quit), E2E runs,
+ * system-package-managed installs (apt/dnf own
  * the update), an OS session that's already ending, no staged download (or one
  * that's already the running version), and the loop-breaker case (we already
  * auto-attempted this exact version and are still on the old one).
@@ -730,16 +736,17 @@ export async function applyPendingUpdateOnStartup(splashShownAt?: number): Promi
 export function register(): void {
   bindUpdaterEvents()
 
-  // Default ("Option B"): keep electron-updater's install-on-quit. A normal
-  // quit still installs a staged update; the `session-end` guard
-  // (`suppressInstallOnQuit`) flips `autoInstallOnAppQuit` off only when the OS
-  // is shutting down, so a Windows shutdown/restart/logoff can't kill the
-  // installer mid-write (the "reinstall on every shutdown" corruption loop).
-  //
-  // Gated ("Option C"): when the startup-install path is enabled, disable
+  // Startup install (the Windows default): disable electron-updater's
   // install-on-quit entirely up front — the staged update applies on the next
-  // launch (`applyPendingUpdateOnStartup`) instead. `electronAutoUpdater` is the
-  // same singleton the ToDesktop runtime drives, so this affects the real updater.
+  // launch (`applyPendingUpdateOnStartup`) instead of on quit, which is what a
+  // Windows shutdown can kill mid-write (the "reinstall on every shutdown"
+  // corruption loop). `electronAutoUpdater` is the same singleton the ToDesktop
+  // runtime drives, so this affects the real updater.
+  //
+  // Opted out (non-Windows, or `installUpdatesOnStartup` set to false): keep
+  // install-on-quit armed. A normal quit still installs a staged update; the
+  // `session-end` guard (`suppressInstallOnQuit`) flips `autoInstallOnAppQuit`
+  // off only when the OS is shutting down.
   if (isStartupInstallEnabled()) {
     suppressInstallOnQuit()
   }
