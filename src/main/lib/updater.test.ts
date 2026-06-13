@@ -492,15 +492,15 @@ describe('startup update install + session-end guard (issue #1065)', () => {
       const updater = await import('./updater')
       updater.register()
 
-      // Splash just went up, so the full minimum (2000ms) must elapse first.
+      // Splash just went up, so the full minimum (5000ms) must elapse first.
       const pending = updater.applyPendingUpdateOnStartup(Date.now())
 
       // Let the (instant) ready check settle, but stay short of the floor.
-      await vi.advanceTimersByTimeAsync(1500)
+      await vi.advanceTimersByTimeAsync(4000)
       expect(fakeUpdater.restartAndInstall).not.toHaveBeenCalled()
 
       // Cross the floor — the install now fires.
-      await vi.advanceTimersByTimeAsync(600)
+      await vi.advanceTimersByTimeAsync(1200)
       expect(await pending).toBe(true)
       expect(fakeUpdater.restartAndInstall).toHaveBeenCalledTimes(1)
     } finally {

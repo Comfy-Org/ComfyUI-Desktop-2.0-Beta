@@ -99,6 +99,10 @@
 ;
 ; This keeps us on a single ToDesktop Windows build while still allowing
 ; OEM / IT provisioning flows to request machine installs explicitly.
+;
+; customInstallMode runs inside the install-mode page's PRE callback. Setting
+; $isForceMachineInstall / $isForceCurrentInstall makes that PRE re-apply the
+; mode and Abort (skip) the page.
 !macro customInstallMode
   ${GetParameters} $R0
 
@@ -111,6 +115,25 @@
     ${GetOptions} $R0 "/CURRENTUSER" $R1
     ${IfNot} ${Errors}
       StrCpy $isForceCurrentInstall 1
+    ${Else}
+      ; A non-silent update (electron-updater passes --updated but no install-
+      ; mode flag) would otherwise stop on the install-mode page — the one
+      ; pre-progress page electron-builder does NOT auto-skip on update — making
+      ; the user confirm before the progress bar. .onInit's initMultiUser has
+      ; already committed a scope into $installMode (matching the lone detected
+      ; install, or the per-user default for this perMachine:false app when none
+      ; is detected), so on update we force-skip the page using that same scope.
+      ; This never switches a cleanly-detected install's scope. (We intentionally
+      ; key off $installMode rather than the updater's /D= path: reading /D=
+      ; needs electron-builder's GetDParameter macro, which doesn't exist in the
+      ; app-builder-lib version ToDesktop builds with.)
+      ${If} ${isUpdated}
+        ${If} $installMode == "all"
+          StrCpy $isForceMachineInstall 1
+        ${Else}
+          StrCpy $isForceCurrentInstall 1
+        ${EndIf}
+      ${EndIf}
     ${EndIf}
   ${EndIf}
 !macroend

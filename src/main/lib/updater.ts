@@ -565,8 +565,11 @@ const STARTUP_UPDATE_CHECK_TIMEOUT_MS = 5000
  *  for a fraction of a second before the app quits — feeling like a glitch
  *  rather than an intentional update. This floor (measured from when the splash
  *  was shown, so the check's own elapsed time counts toward it) keeps the splash
- *  readable. Only applies when a splash is actually up (startup-install path). */
-const STARTUP_INSTALL_MIN_SPLASH_MS = 2000
+ *  up long enough for the user to read it and watch the countdown finish. Keep
+ *  in sync with `UPDATE_INSTALL_COUNTDOWN_SECONDS` (updateSplash.ts), the
+ *  countdown the splash shows over this window. Only applies when a splash is
+ *  actually up (startup-install path). */
+const STARTUP_INSTALL_MIN_SPLASH_MS = 5000
 
 /** Why a startup install was or wasn't attempted. The skip reasons that carry
  *  canary signal (`loop_breaker`, `session_ending`, `not_ready`) are reported via
