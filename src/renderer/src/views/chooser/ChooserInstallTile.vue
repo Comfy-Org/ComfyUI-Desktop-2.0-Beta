@@ -83,6 +83,13 @@ function handleClick(): void {
   if (isStopping.value) return
   emit('pick', inst.value)
 }
+
+/** Fire an action pill's emit, no-op while REQUIRES_STOPPED actions are gated.
+ *  Shared by the update + migrate pills' click / enter / space handlers. */
+function triggerInstallAction(action: 'update' | 'migrate'): void {
+  if (props.isStoppedActionGated) return
+  emit('trigger-action', action, inst.value)
+}
 </script>
 
 <template>
@@ -172,9 +179,9 @@ function handleClick(): void {
         tabindex="0"
         :aria-disabled="isStoppedActionGated || undefined"
         :title="inst.statusTag?.label"
-        @click.stop="isStoppedActionGated || emit('trigger-action', 'update', inst)"
-        @keydown.enter.stop="isStoppedActionGated || emit('trigger-action', 'update', inst)"
-        @keydown.space.prevent.stop="isStoppedActionGated || emit('trigger-action', 'update', inst)"
+        @click.stop="triggerInstallAction('update')"
+        @keydown.enter.stop="triggerInstallAction('update')"
+        @keydown.space.prevent.stop="triggerInstallAction('update')"
       >
         <ArrowDownToLine :size="11" />
         {{ updatePillLabel }}
@@ -187,9 +194,9 @@ function handleClick(): void {
         tabindex="0"
         :aria-disabled="isStoppedActionGated || undefined"
         :title="t('dashboard.migrateBannerTitle')"
-        @click.stop="isStoppedActionGated || emit('trigger-action', 'migrate', inst)"
-        @keydown.enter.stop="isStoppedActionGated || emit('trigger-action', 'migrate', inst)"
-        @keydown.space.prevent.stop="isStoppedActionGated || emit('trigger-action', 'migrate', inst)"
+        @click.stop="triggerInstallAction('migrate')"
+        @keydown.enter.stop="triggerInstallAction('migrate')"
+        @keydown.space.prevent.stop="triggerInstallAction('migrate')"
       >
         <ArrowRightLeft :size="11" />
         {{ t('chooser.migratePill') }}
