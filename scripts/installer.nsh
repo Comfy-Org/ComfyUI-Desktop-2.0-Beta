@@ -100,6 +100,19 @@
 ; This keeps us on a single ToDesktop Windows build while still allowing
 ; OEM / IT provisioning flows to request machine installs explicitly.
 ;
+; Copy ${src} into register ${dstReg}, stripping one trailing backslash. Used to
+; compare the updater's /D= path (which may carry a trailing slash) against the
+; stored InstallLocation values (which don't). NSIS LogicLib `==` is already
+; case-insensitive (StrCmp), which is the right behavior for Windows paths, so
+; only the trailing slash needs normalizing. Scratches $R7.
+!macro StripTrailingSlash src dstReg
+  StrCpy ${dstReg} ${src}
+  StrCpy $R7 ${dstReg} "" -1
+  ${If} $R7 == "\"
+    StrCpy ${dstReg} ${dstReg} -1
+  ${EndIf}
+!macroend
+
 ; customInstallMode runs inside the install-mode page's PRE callback. Setting
 ; $isForceMachineInstall / $isForceCurrentInstall makes that PRE re-apply the
 ; mode and Abort (skip) the page.
@@ -130,13 +143,17 @@
       ; The fallback never switches a cleanly-detected install's scope.
       ${If} ${isUpdated}
         !insertmacro GetDParameter $R2
+        ; Normalize trailing slashes on both sides before comparing paths.
+        !insertmacro StripTrailingSlash $R2 $R2
+        !insertmacro StripTrailingSlash $perMachineInstallationFolder $R3
+        !insertmacro StripTrailingSlash $perUserInstallationFolder $R4
         ${If} $R2 != ""
         ${AndIf} $hasPerMachineInstallation == "1"
-        ${AndIf} $perMachineInstallationFolder == $R2
+        ${AndIf} $R3 == $R2
           StrCpy $isForceMachineInstall 1
         ${ElseIf} $R2 != ""
         ${AndIf} $hasPerUserInstallation == "1"
-        ${AndIf} $perUserInstallationFolder == $R2
+        ${AndIf} $R4 == $R2
           StrCpy $isForceCurrentInstall 1
         ${ElseIf} $installMode == "all"
           StrCpy $isForceMachineInstall 1
