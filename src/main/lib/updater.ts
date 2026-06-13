@@ -137,19 +137,16 @@ function isSystemPackageInstall(): boolean {
  * so applying updates at startup there would only add risk to a working update
  * channel. On those platforms this always returns false.
  *
- * Default OFF even on Windows. With it off, the app keeps the normal
- * install-on-quit behavior; the `session-end` guard (`suppressInstallOnQuit`)
- * only suppresses that install while the OS is shutting down. With it on,
- * install-on-quit is disabled entirely and the staged update applies on the next
- * boot.
- *
- * Not a remote flag yet — flip it via the hidden `installUpdatesOnStartup`
- * setting (edited by hand in settings.json), so the startup-install path can be
- * canaried before any wider rollout.
+ * Default ON on Windows. The staged update applies at startup and
+ * electron-updater's install-on-quit is disabled entirely. Set the
+ * `installUpdatesOnStartup` setting to `false` to opt back out to the old
+ * install-on-quit behavior (where the `session-end` guard,
+ * `suppressInstallOnQuit`, only suppresses the install while the OS is shutting
+ * down).
  */
 function isStartupInstallEnabled(): boolean {
   if (process.platform !== 'win32') return false
-  return settings.get('installUpdatesOnStartup') === true
+  return settings.get('installUpdatesOnStartup') !== false
 }
 
 /**
@@ -164,12 +161,12 @@ function isStartupInstallEnabled(): boolean {
  * continuous visual feedback during the actual file copy — which our Electron
  * "Updating…" splash can't, since the copy runs after the app has quit.
  *
- * Default OFF. Not remote yet — flip the hidden `showInstallerUI` setting by
- * hand in settings.json to canary it.
+ * Default ON on Windows. Set the `showInstallerUI` setting to `false` to opt
+ * back out to a fully silent install.
  */
 function isInstallerUIEnabled(): boolean {
   if (process.platform !== 'win32') return false
-  return settings.get('showInstallerUI') === true
+  return settings.get('showInstallerUI') !== false
 }
 
 /**
@@ -530,8 +527,8 @@ export function installUpdate(): void {
       app.releaseSingleInstanceLock()
     }
     // `isSilent: false` shows the NSIS progress window during the install (see
-    // `isInstallerUIEnabled` — Windows-only, gated, default off). Off everywhere
-    // else, so the macOS/Linux paths and the default Windows path stay silent.
+    // `isInstallerUIEnabled` — Windows-only, default on). Forced silent on
+    // macOS/Linux, where `isSilent` has no effect anyway.
     updater.restartAndInstall({ isSilent: !isInstallerUIEnabled() })
   } catch (err) {
     clearQuitReason()
