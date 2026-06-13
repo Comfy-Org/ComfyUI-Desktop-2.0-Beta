@@ -289,7 +289,7 @@ describe('app-update telemetry dedup (volume regression)', () => {
 })
 
 /**
- * Issue #1065 — install staged Desktop updates at startup (Option C) instead of
+ * Issue #1065 — install staged Desktop updates at startup instead of
  * silently on quit, and never spawn the installer while the OS session is
  * ending. Installing on quit is what a Windows shutdown interrupts mid-write,
  * corrupting the install and forcing endless reinstalls.
@@ -312,9 +312,8 @@ describe('startup update install + session-end guard (issue #1065)', () => {
   beforeEach(() => {
     vi.resetModules()
     settingsStore = {}
-    // These tests exercise the gated "Option C" startup-install path, so enable
-    // the local flag. Individual default-mode tests delete it.
-    settingsStore['installUpdatesOnStartup'] = true
+    // Startup install and the NSIS installer UI default on (enabled) on Windows.
+    // Tests that exercise the opt-out path set these to false explicitly.
     listeners = {}
     sessionEnding = false
     readyVersion = null
@@ -369,24 +368,26 @@ describe('startup update install + session-end guard (issue #1065)', () => {
   const findEmitCalls = (event: string): unknown[][] =>
     emitMock.mock.calls.filter((c) => c[0] === event)
 
-  it('register() leaves install-on-quit enabled by default (Option B)', async () => {
-    delete settingsStore['installUpdatesOnStartup']
+  it('register() disables install-on-quit by default on Windows when startup install is enabled', async () => {
     const updater = await import('./updater')
     updater.register()
-    // Default mode keeps electron-updater's install-on-quit; it's only suppressed
-    // when the OS session ends (see suppressInstallOnQuit).
-    expect(electronUpdaterMock.autoInstallOnAppQuit).toBe(true)
+    // Startup install is the default on Windows, so install-on-quit is disabled
+    // entirely and the staged update applies at the next launch.
+    expect(electronUpdaterMock.autoInstallOnAppQuit).toBe(false)
   })
 
-  it('register() disables install-on-quit when the startup-install flag is on (Option C)', async () => {
+  it('register() keeps install-on-quit when startup install is explicitly opted out', async () => {
+    settingsStore['installUpdatesOnStartup'] = false
     const updater = await import('./updater')
     updater.register()
-    expect(electronUpdaterMock.autoInstallOnAppQuit).toBe(false)
+    // Opted out: electron-updater's install-on-quit stays armed; it's only
+    // suppressed when the OS session ends (see suppressInstallOnQuit).
+    expect(electronUpdaterMock.autoInstallOnAppQuit).toBe(true)
   })
 
   it('startup install is inert on non-Windows even when the flag is on', async () => {
     // macOS (Squirrel.Mac / ShipIt) and Linux don't have the NSIS shutdown
-    // corruption, so Option C must stay off there regardless of the setting.
+    // corruption, so startup install must stay off there regardless of the setting.
     Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true })
     settingsStore['installUpdatesOnStartup'] = true
     settingsStore['pendingDownloadedUpdateVersion'] = '1.0.1'
@@ -400,8 +401,8 @@ describe('startup update install + session-end guard (issue #1065)', () => {
     expect(fakeUpdater.restartAndInstall).not.toHaveBeenCalled()
   })
 
-  it('suppressInstallOnQuit() disables install-on-quit (Option B session-end guard)', async () => {
-    delete settingsStore['installUpdatesOnStartup']
+  it('suppressInstallOnQuit() disables install-on-quit for the session-end guard', async () => {
+    settingsStore['installUpdatesOnStartup'] = false
     const updater = await import('./updater')
     updater.register()
     expect(electronUpdaterMock.autoInstallOnAppQuit).toBe(true)
@@ -409,8 +410,8 @@ describe('startup update install + session-end guard (issue #1065)', () => {
     expect(electronUpdaterMock.autoInstallOnAppQuit).toBe(false)
   })
 
-  it('startup install is inert when the flag is off, even with a staged update', async () => {
-    delete settingsStore['installUpdatesOnStartup']
+  it('startup install is inert when opted out, even with a staged update', async () => {
+    settingsStore['installUpdatesOnStartup'] = false
     settingsStore['pendingDownloadedUpdateVersion'] = '1.0.1'
     readyVersion = '1.0.1'
     const updater = await import('./updater')
@@ -428,20 +429,19 @@ describe('startup update install + session-end guard (issue #1065)', () => {
     expect(fakeUpdater.restartAndInstall).not.toHaveBeenCalled()
   })
 
-  it('installUpdate() installs silently by default (showInstallerUI off)', async () => {
-    delete settingsStore['showInstallerUI']
-    const updater = await import('./updater')
-    updater.register()
-    updater.installUpdate()
-    expect(fakeUpdater.restartAndInstall).toHaveBeenCalledWith({ isSilent: true })
-  })
-
-  it('installUpdate() shows the NSIS installer UI when showInstallerUI is on', async () => {
-    settingsStore['showInstallerUI'] = true
+  it('installUpdate() shows the NSIS installer UI by default on Windows', async () => {
     const updater = await import('./updater')
     updater.register()
     updater.installUpdate()
     expect(fakeUpdater.restartAndInstall).toHaveBeenCalledWith({ isSilent: false })
+  })
+
+  it('installUpdate() installs silently when showInstallerUI is opted out', async () => {
+    settingsStore['showInstallerUI'] = false
+    const updater = await import('./updater')
+    updater.register()
+    updater.installUpdate()
+    expect(fakeUpdater.restartAndInstall).toHaveBeenCalledWith({ isSilent: true })
   })
 
   it('installUpdate() ignores showInstallerUI off Windows (isSilent stays true)', async () => {
