@@ -616,3 +616,41 @@ describe('installations.enforceCloudName', () => {
     await expect(installations.enforceCloudName()).resolves.toBeUndefined()
   })
 })
+
+describe('installations.clearPendingTemplateOpen', () => {
+  it('clears the one-shot flag once, then is a no-op on the cleared record', async () => {
+    const installations = await loadInstallations()
+    const entry = await installations.add({
+      name: 'With Template',
+      installPath: path.join(tmpRoot, 't'),
+      sourceId: 'standalone',
+      status: 'installed',
+      bundledTemplateId: 'flux_schnell',
+      pendingTemplateOpen: 'flux_schnell',
+      downloadTemplateModels: true,
+    })
+
+    expect(await installations.clearPendingTemplateOpen(entry.id)).toBe(true)
+    expect((await installations.get(entry.id))!.pendingTemplateOpen).toBeNull()
+    // Already clear → no second mutation.
+    expect(await installations.clearPendingTemplateOpen(entry.id)).toBe(false)
+  })
+
+  it('is a no-op for a legacy record with no template fields (migration-safe)', async () => {
+    const installations = await loadInstallations()
+    const entry = await installations.add({
+      name: 'Legacy',
+      installPath: path.join(tmpRoot, 'legacy'),
+      sourceId: 'standalone',
+      status: 'installed',
+    })
+    expect(entry.pendingTemplateOpen).toBeUndefined()
+    expect(entry.bundledTemplateId).toBeUndefined()
+    expect(await installations.clearPendingTemplateOpen(entry.id)).toBe(false)
+  })
+
+  it('returns false when the install is gone', async () => {
+    const installations = await loadInstallations()
+    expect(await installations.clearPendingTemplateOpen('does-not-exist')).toBe(false)
+  })
+})

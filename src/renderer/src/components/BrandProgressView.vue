@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Check, LoaderCircle } from 'lucide-vue-next'
+import { Check, LoaderCircle, X } from 'lucide-vue-next'
 import type { ProgressStepVM } from '../lib/progressViewModel'
 
 /**
@@ -63,9 +63,14 @@ function rowOpacity(index: number): number {
               </span>
               <span class="bpv__label">{{ step.label }}</span>
             </span>
-            <span v-if="i === activeIndex && step.detail" class="bpv__detail">{{
-              step.detail
-            }}</span>
+            <span
+              v-if="i === activeIndex && step.detail"
+              class="bpv__detail"
+              :class="{ 'is-error': step.isError }"
+            >
+              <X v-if="step.isError" :size="11" stroke-width="2.5" class="bpv__detail-icon" />
+              {{ step.detail }}
+            </span>
           </span>
         </span>
       </li>
@@ -173,6 +178,9 @@ function rowOpacity(index: number): number {
     0 0 24px rgba(25, 19, 29, 0.95);
 }
 .bpv__detail {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
   font-size: 0.6875rem;
   line-height: 1.3;
   color: var(--neutral-400);
@@ -185,6 +193,13 @@ function rowOpacity(index: number): number {
   text-shadow:
     0 1px 2px rgba(0, 0, 0, 0.65),
     0 0 16px rgba(25, 19, 29, 0.85);
+}
+.bpv__detail.is-error {
+  color: var(--danger);
+  font-weight: 600;
+}
+.bpv__detail-icon {
+  flex: 0 0 auto;
 }
 .bpv__spin {
   animation: bpv-spin 0.9s linear infinite;

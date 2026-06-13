@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeAll } from 'vitest'
 import os from 'os'
 import path from 'path'
 import type { buildExistenceCandidates as BuildExistenceCandidates } from './comfyDownloadManager'
+import type * as ComfyDownloadManager from './comfyDownloadManager'
 
 vi.mock('electron', () => ({
   app: {
@@ -10,7 +11,7 @@ vi.mock('electron', () => ({
       return path.join(os.tmpdir(), 'comfyui-desktop-2-test')
     },
   },
-  BrowserWindow: class {},
+  BrowserWindow: Object.assign(class {}, { getAllWindows: () => [] }),
   dialog: {},
   ipcMain: { handle: vi.fn(), on: vi.fn() },
   shell: {},
@@ -23,9 +24,10 @@ let sanitizeAssetFilename: (filename: string, outputDir: string) => string | nul
 let parseContentDispositionFilename: (header: string | null) => string | null
 let buildSaveDialogFilters: (suggestedName: string) => Electron.FileFilter[]
 let buildExistenceCandidates: typeof BuildExistenceCandidates
+let mod: typeof ComfyDownloadManager
 
 beforeAll(async () => {
-  const mod = await import('./comfyDownloadManager')
+  mod = await import('./comfyDownloadManager')
   ALLOWED_EXTENSIONS = mod.ALLOWED_EXTENSIONS
   hasValidExtension = mod.hasValidExtension
   isPathContained = mod.isPathContained
@@ -280,5 +282,71 @@ describe('buildSaveDialogFilters (#989 save-image extension filters)', () => {
     expect(buildSaveDialogFilters('justname')).toEqual([
       { name: 'All Files', extensions: ['*'] },
     ])
+  })
+})
+
+describe('template tray-mirror cleanup', () => {
+  const entry = (url: string, status: 'downloading' | 'completed') => ({
+    url,
+    filename: url.split('/').pop()!,
+    progress: status === 'completed' ? 100 : 40,
+    status,
+  })
+
+  it('dismissRecentDownload removes a finished mirrored template row', () => {
+    mod.setTemplateTrayMirror('inst-a', [entry('template-model://checkpoints/m.safetensors', 'completed')])
+    expect(mod.getDownloadsTrayState().recent.some((r) => r.url.includes('m.safetensors'))).toBe(true)
+
+    expect(mod.dismissRecentDownload('template-model://checkpoints/m.safetensors')).toBe(true)
+    expect(mod.getDownloadsTrayState().recent.some((r) => r.url.includes('m.safetensors'))).toBe(false)
+  })
+
+  it('clearFinishedDownloads purges terminal mirror rows but keeps in-flight ones', () => {
+    mod.setTemplateTrayMirror('inst-b', [
+      entry('template-model://vae/done.safetensors', 'completed'),
+      entry('template-model://vae/live.safetensors', 'downloading'),
+    ])
+    const removed = mod.clearFinishedDownloads()
+    expect(removed).toBeGreaterThanOrEqual(1)
+
+    const tray = mod.getDownloadsTrayState()
+    expect(tray.recent.some((r) => r.url.includes('done.safetensors'))).toBe(false)
+    // The still-downloading row survives in `active`.
+    expect(tray.active.some((r) => r.url.includes('live.safetensors'))).toBe(true)
+
+    mod.clearTemplateTrayMirror('inst-b') // cleanup so other tests start clean
+  })
+})
+
+describe('template mirror visibility in the All-Downloads modal', () => {
+  const entry = (url: string) => ({
+    url,
+    filename: url.split('/').pop()!,
+    progress: 40,
+    status: 'downloading' as const,
+  })
+
+  it('getAllDownloads() includes template-mirror rows (modal seed)', () => {
+    mod.setTemplateTrayMirror('inst-seed', [entry('template-model://loras/x.safetensors')])
+    expect(mod.getAllDownloads().some((d) => d.url.includes('x.safetensors'))).toBe(true)
+    mod.clearTemplateTrayMirror('inst-seed')
+  })
+
+  it('setTemplateTrayMirror fans each row out as model-download-progress (modal live)', async () => {
+    const { BrowserWindow } = (await import('electron')) as unknown as {
+      BrowserWindow: { getAllWindows: () => unknown[] }
+    }
+    const send = vi.fn()
+    const fakeWin = { isDestroyed: () => false, webContents: { isDestroyed: () => false, send } }
+    const spy = vi.spyOn(BrowserWindow, 'getAllWindows').mockReturnValue([fakeWin])
+    try {
+      mod.setTemplateTrayMirror('inst-live', [entry('template-model://vae/y.safetensors')])
+      const progressCalls = send.mock.calls.filter((c) => c[0] === 'model-download-progress')
+      expect(progressCalls.length).toBeGreaterThanOrEqual(1)
+      expect(progressCalls.some((c) => (c[1] as { url: string }).url.includes('y.safetensors'))).toBe(true)
+    } finally {
+      spy.mockRestore()
+      mod.clearTemplateTrayMirror('inst-live')
+    }
   })
 })

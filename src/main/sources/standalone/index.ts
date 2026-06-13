@@ -12,6 +12,10 @@ import {
   getVenvDir, recommendVariant, writeComfyEnvironment,
 } from './envPaths'
 import { install, postInstall, probeInstallation } from './install'
+import { BUNDLED_TEMPLATES, NO_TEMPLATE_VALUE } from './bundledTemplates'
+
+/** Known starter-template ids — gates what `buildInstallation` will persist. */
+const VALID_BUNDLED_TEMPLATE_IDS = new Set(BUNDLED_TEMPLATES.map((tpl) => tpl.id))
 import { getListPreview, getStatusTag, getDetailSections, R2_BASE_URL } from './updateSections'
 import { handleAction } from './actions'
 import type { InstallationRecord } from '../../installations'
@@ -127,6 +131,10 @@ export const standalone: SourcePlugin = {
       // wizard renders an empty/disabled select on 'latest' (zero options).
       { id: 'comfyVersion', label: t('standalone.comfyVersion'), type: 'select' as const },
       { id: 'variant', label: t('standalone.variant'), type: 'select' as const, renderAs: 'cards' as const },
+      // POC: optional starter template to auto-open on first launch. Rendered
+      // as cards after the variant; always returns options (incl. a "None"
+      // skip), so the wizard's field chain completes and Continue enables.
+      { id: 'bundledTemplate', label: t('standalone.starterTemplate'), type: 'select' as const, renderAs: 'cards' as const },
     ]
   },
 
@@ -176,9 +184,18 @@ export const standalone: SourcePlugin = {
     // a prior channel toggle is dropped here as a defence-in-depth.
     const pickedComfyTag = isStable
       ? (typeof selections.comfyVersion?.value === 'string' && /^v\d+\.\d+\.\d+$/.test(selections.comfyVersion.value)
-          ? selections.comfyVersion.value
-          : undefined)
+        ? selections.comfyVersion.value
+        : undefined)
       : undefined
+    // Starter template: the chosen template id, or undefined when the user left
+    // the (recommended) "None" option selected. Validated against the known set
+    // so a stale/forged selection can't persist an unknown id that later derails
+    // the open/download handling.
+    const tplValue = selections.bundledTemplate?.value
+    const bundledTemplateId =
+      tplValue && tplValue !== NO_TEMPLATE_VALUE && VALID_BUNDLED_TEMPLATE_IDS.has(tplValue)
+        ? tplValue
+        : undefined
     return {
       version: r2Release?.comfyui_version || manifest?.comfyui_ref || releaseTag,
       releaseTag,
@@ -200,6 +217,13 @@ export const standalone: SourcePlugin = {
       ...(isStable ? { updateChannel: 'stable' } : {}),
       ...(isLatest ? { updateChannel: 'latest' } : {}),
       ...(pickedComfyTag ? { comfyVersionTag: pickedComfyTag } : {}),
+      // POC starter template. `bundledTemplateId` is the durable record of the
+      // user's pick; `pendingTemplateOpen` is a one-shot flag the first launch
+      // consumes (appends `?template=` to the comfy URL, then clears) so the
+      // template only auto-opens once — not on every relaunch.
+      ...(bundledTemplateId
+        ? { bundledTemplateId, pendingTemplateOpen: bundledTemplateId, downloadTemplateModels: true }
+        : {}),
     }
   },
 
@@ -236,12 +260,12 @@ export const standalone: SourcePlugin = {
     )
     const adoptArgs = adoptedBaseDir
       ? [
-          '--base-directory', adoptedBaseDir,
-          '--user-directory', path.join(adoptedBaseDir, 'user'),
-          ...(userSetDatabaseUrl
-            ? []
-            : ['--database-url', `sqlite:///${path.join(adoptedBaseDir, 'user', 'comfyui.db')}`]),
-        ]
+        '--base-directory', adoptedBaseDir,
+        '--user-directory', path.join(adoptedBaseDir, 'user'),
+        ...(userSetDatabaseUrl
+          ? []
+          : ['--database-url', `sqlite:///${path.join(adoptedBaseDir, 'user', 'comfyui.db')}`]),
+      ]
       : []
     // Desktop-managed feature flags (e.g. show_signin_button) are injected in
     // handleLaunch after we discover the running ComfyUI's feature-flag registry,
@@ -302,7 +326,7 @@ export const standalone: SourcePlugin = {
         // `custom_nodes/` checked in). Remove the empty placeholder
         // first so the merge isn't ambiguous.
         if (fs.existsSync(dst)) {
-          try { await fs.promises.rm(dst, { recursive: true, force: true }) } catch {}
+          try { await fs.promises.rm(dst, { recursive: true, force: true }) } catch { }
         }
         sendProgress('copy', { percent: 0, status: `Copying legacy ${entry}…` })
         await copyDirWithProgress(src, dst, (copied, total, elapsedSecs, etaSecs) => {
@@ -350,7 +374,7 @@ export const standalone: SourcePlugin = {
               content = content.replaceAll(srcRewriteFrom, srcRewriteTo)
               await fs.promises.writeFile(filePath, content, 'utf-8')
             }
-          } catch {}
+          } catch { }
         }
       }
     }
@@ -471,6 +495,30 @@ export const standalone: SourcePlugin = {
           return buildVariantOption(vendorId, release, displayStableTag, gpu)
         })
         .filter((item): item is FieldOption => item != null)
+    }
+
+    if (fieldId === 'bundledTemplate') {
+      // "None" is recommended → the wizard auto-selects it, keeping the step
+      // skippable while still completing the field chain.
+      return [
+        {
+          value: NO_TEMPLATE_VALUE,
+          label: t('standalone.starterTemplateNone'),
+          description: t('standalone.starterTemplateNoneDesc'),
+          recommended: true,
+        },
+        ...BUNDLED_TEMPLATES.map((tpl): FieldOption => ({
+          value: tpl.id,
+          label: tpl.title,
+          description: tpl.description,
+          data: {
+            modality: tpl.modality,
+            thumbnailUrl: tpl.thumbnailUrl,
+            sizeBytes: tpl.sizeBytes,
+            recommendedVramBytes: tpl.recommendedVramBytes ?? 0,
+          },
+        })),
+      ]
     }
 
     return []

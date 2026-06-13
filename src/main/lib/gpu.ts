@@ -1,5 +1,7 @@
 import { execFile } from 'child_process'
 import fs from 'fs'
+import os from 'os'
+import si from 'systeminformation'
 import type { HardwareValidation, NvidiaDriverCheck } from '../../types/ipc'
 
 type GpuId = 'nvidia' | 'amd' | 'intel' | 'mps'
@@ -8,6 +10,11 @@ export interface GpuInfo {
   id: GpuId
   label: string
   model: string | null
+  /** Total VRAM in bytes when we can read a real figure on any OS — NVIDIA via
+   *  nvidia-smi, Apple Silicon ≈ unified memory, otherwise the cross-platform
+   *  `systeminformation` graphics probe (AMD/Intel/discrete). Undefined only
+   *  when no real number is available, so the picker never false-warns. */
+  vramBytes?: number
 }
 
 const GPU_LABELS: Record<GpuId, string> = {
@@ -44,7 +51,72 @@ async function detectGPU(): Promise<GpuInfo | null> {
     id = await detectLinuxGPU()
   }
   if (!id) return null
-  return { id, label: GPU_LABELS[id], model: null }
+  return { id, label: GPU_LABELS[id], model: null, vramBytes: await detectVramBytes(id) }
+}
+
+const MIB = 1024 * 1024
+
+/**
+ * Total VRAM in bytes, or undefined when no real figure can be read — works on
+ * any OS by reusing the `systeminformation` graphics probe the app already runs
+ * for telemetry. Resolution order, most-accurate first:
+ *   NVIDIA → nvidia-smi `memory.total` (authoritative; already in our stack).
+ *   Apple Silicon (mps) → unified memory (`os.totalmem()`).
+ *   anything else (AMD / Intel / discrete, on Windows / Linux / macOS) →
+ *     `si.graphics()` largest controller's `vram` (MB).
+ * Undefined stays the floor when even `si` can't read a number, so the picker
+ * never false-warns.
+ */
+async function detectVramBytes(id: GpuId): Promise<number | undefined> {
+  if (id === "nvidia") {
+    const nvidia = await getNvidiaVramBytes()
+    if (nvidia !== undefined) return nvidia
+  }
+  if (id === "mps") return os.totalmem()
+  return getSystemInfoVramBytes()
+}
+
+/** Query nvidia-smi for total VRAM (reported in MiB) and convert to bytes. */
+function getNvidiaVramBytes(): Promise<number | undefined> {
+  return new Promise((resolve) => {
+    execFile(
+      "nvidia-smi",
+      ["--query-gpu=memory.total", "--format=csv,noheader,nounits"],
+      { timeout: 5000, windowsHide: true },
+      (err: Error | null, stdout: string) => {
+        if (err) return resolve(undefined)
+        // Multi-GPU: take the largest card — that's the one a heavy template runs on.
+        const mibs = stdout
+          .split(/\r?\n/)
+          .map((line) => parseInt(line.trim(), 10))
+          .filter((n) => Number.isFinite(n) && n > 0)
+        if (mibs.length === 0) return resolve(undefined)
+        resolve(Math.max(...mibs) * MIB)
+      },
+    )
+  })
+}
+
+/**
+ * Cross-platform VRAM via `systeminformation` (`si.graphics()`), which reports
+ * each controller's `vram` in MB on Windows/Linux/macOS for NVIDIA/AMD/Intel.
+ * Take the largest controller (the one a heavy template would run on); skip
+ * shared-memory (`vramDynamic`) figures since they reflect system RAM, not a
+ * real dedicated budget. Best-effort — undefined on any failure / no number.
+ */
+async function getSystemInfoVramBytes(): Promise<number | undefined> {
+  try {
+    const { controllers } = await si.graphics()
+    let bestMb = 0
+    for (const ctrl of controllers) {
+      if (ctrl.vramDynamic) continue
+      const mb = ctrl.vram
+      if (typeof mb === "number" && mb > bestMb) bestMb = mb
+    }
+    return bestMb > 0 ? bestMb * MIB : undefined
+  } catch {
+    return undefined
+  }
 }
 
 async function detectWindowsGPU(): Promise<GpuId | null> {

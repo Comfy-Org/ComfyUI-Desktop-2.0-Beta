@@ -51,6 +51,10 @@ export interface KnownSettings {
   /** Directory the user last chose in the general "Save image/file" dialog.
    *  Used to seed the dialog's defaultPath so it matches browser behavior. */
   lastSaveDialogDir?: string
+  /** When true, the dedicated starter-template picker step is skipped during
+   *  install (the user ticked "Don't show this again"). Only ever set once the
+   *  user already has ≥1 local install. Default false — show the step. */
+  skipTemplatePickerStep?: boolean
   /** Version of a Desktop update whose installer finished downloading in a
    *  previous session and is staged on disk. Gates the bounded startup
    *  install check so boots without a staged update aren't delayed. Cleared
@@ -117,6 +121,7 @@ const SETTINGS_SCHEMA = {
   oemManagedModelDirs: { nullable: false },
   oemWorkflowImportVersion: { nullable: false },
   lastSaveDialogDir: { nullable: true },
+  skipTemplatePickerStep: { nullable: false },
   pendingDownloadedUpdateVersion: { nullable: true },
   lastStartupUpdateAttemptVersion: { nullable: true },
   installUpdatesOnStartup: { nullable: false },
@@ -362,7 +367,7 @@ function load(): Settings {
       for (const folder of MODEL_FOLDER_TYPES) {
         fs.mkdirSync(path.join(systemDefault, folder), { recursive: true })
       }
-    } catch {}
+    } catch { }
   }
 
   // inputDir/outputDir must always point at a folder that exists. If the
@@ -382,7 +387,7 @@ function load(): Settings {
     }
     try {
       fs.mkdirSync(defaults[key], { recursive: true })
-    } catch {}
+    } catch { }
   }
   if (changed) save(result)
   return result

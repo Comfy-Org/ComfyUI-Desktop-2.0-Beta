@@ -38,19 +38,19 @@ export function buildSaveDialogFilters(suggestedName: string): Electron.FileFilt
   // to the single one we infer. Comfy outputs png/webp/jpg images, mp4/webm
   // video, and wav/mp3/flac/ogg audio depending on the node graph.
   const FAMILIES: Record<string, { name: string; extensions: string[] }> = {
-    png:  { name: 'PNG Image',  extensions: ['png'] },
-    jpg:  { name: 'JPEG Image', extensions: ['jpg', 'jpeg'] },
+    png: { name: 'PNG Image', extensions: ['png'] },
+    jpg: { name: 'JPEG Image', extensions: ['jpg', 'jpeg'] },
     jpeg: { name: 'JPEG Image', extensions: ['jpg', 'jpeg'] },
     webp: { name: 'WebP Image', extensions: ['webp'] },
-    gif:  { name: 'GIF Image',  extensions: ['gif'] },
-    bmp:  { name: 'Bitmap Image', extensions: ['bmp'] },
-    mp4:  { name: 'MP4 Video',  extensions: ['mp4'] },
+    gif: { name: 'GIF Image', extensions: ['gif'] },
+    bmp: { name: 'Bitmap Image', extensions: ['bmp'] },
+    mp4: { name: 'MP4 Video', extensions: ['mp4'] },
     webm: { name: 'WebM Video', extensions: ['webm'] },
-    mov:  { name: 'QuickTime Video', extensions: ['mov'] },
-    wav:  { name: 'WAV Audio',  extensions: ['wav'] },
-    mp3:  { name: 'MP3 Audio',  extensions: ['mp3'] },
+    mov: { name: 'QuickTime Video', extensions: ['mov'] },
+    wav: { name: 'WAV Audio', extensions: ['wav'] },
+    mp3: { name: 'MP3 Audio', extensions: ['mp3'] },
     flac: { name: 'FLAC Audio', extensions: ['flac'] },
-    ogg:  { name: 'OGG Audio',  extensions: ['ogg'] },
+    ogg: { name: 'OGG Audio', extensions: ['ogg'] },
   }
 
   const primary = FAMILIES[ext]
@@ -139,6 +139,56 @@ function isTerminalStatus(status: DownloadProgress['status']): boolean {
   return status === 'completed' || status === 'error' || status === 'cancelled'
 }
 
+/**
+ * Template-model downloads mirrored into the tray after the user skips ahead to
+ * ComfyUI. The resume-capable background task stays the byte-owner; this is a
+ * read-only reflection merged into the tray view-state, NOT a real download — so
+ * it never touches `pendingDownloads`' DownloadItem lifecycle (cancel/retry/
+ * temp-rename stay untouched). Scoped per install so concurrent installs can each
+ * mirror their own rows without clobbering one another. */
+const templateTrayMirrorByInstall = new Map<string, Map<string, DownloadProgress>>()
+
+/**
+ * Replace `installationId`'s mirrored template rows and notify the tray.
+ * `entries` is that install's full current set (one per template file); passing
+ * `[]` clears its rows. Stamps `createdAt` so rows hold a stable slot.
+ */
+export function setTemplateTrayMirror(installationId: string, entries: DownloadProgress[]): void {
+  const prev = templateTrayMirrorByInstall.get(installationId)
+  const nextUrls = new Set(entries.map((e) => e.url))
+  if (prev) {
+    for (const url of prev.keys()) {
+      if (!nextUrls.has(url)) createdAtByUrl.delete(url)
+    }
+  }
+  const bucket = new Map<string, DownloadProgress>()
+  for (const entry of entries) {
+    let createdAt = createdAtByUrl.get(entry.url)
+    if (createdAt === undefined) {
+      createdAt = Date.now()
+      createdAtByUrl.set(entry.url, createdAt)
+    }
+    bucket.set(entry.url, { ...entry, createdAt })
+  }
+  templateTrayMirrorByInstall.set(installationId, bucket)
+  // Fan out as `model-download-progress` so the renderer download store (the
+  // All-Downloads modal + Settings tab) tracks these like any real download.
+  // The tray popup reads the merged `getDownloadsTrayState()` snapshot instead.
+  for (const entry of bucket.values()) {
+    _broadcastToRenderer('model-download-progress', entry)
+  }
+  downloadEvents.emit('tray-state-changed')
+}
+
+/** Drop `installationId`'s mirrored template rows from the tray (e.g. window close). */
+export function clearTemplateTrayMirror(installationId: string): void {
+  const bucket = templateTrayMirrorByInstall.get(installationId)
+  if (!bucket) return
+  for (const url of bucket.keys()) createdAtByUrl.delete(url)
+  templateTrayMirrorByInstall.delete(installationId)
+  downloadEvents.emit('tray-state-changed')
+}
+
 function pushRecent(progress: DownloadProgress): void {
   // Replace any prior entry for the same URL so a re-attempted download
   // appears once.
@@ -158,20 +208,33 @@ function pushRecent(progress: DownloadProgress): void {
 
 export function getDownloadsTrayState(): DownloadsTrayState {
   const active: DownloadProgress[] = []
+  const recent: DownloadProgress[] = recentDownloads.slice()
   for (const pending of pendingDownloads.values()) {
     const s = pending.lastProgress.status
     if (s === 'pending' || s === 'downloading' || s === 'paused') {
       active.push(pending.lastProgress)
     }
   }
-  return { active, recent: recentDownloads.slice() }
+  // Merge every install's mirrored template-model rows: in-flight ones join
+  // `active`, finished ones join `recent`, so the tray reflects each
+  // skipped-but-still-running download exactly like a native one.
+  for (const bucket of templateTrayMirrorByInstall.values()) {
+    for (const entry of bucket.values()) {
+      if (isTerminalStatus(entry.status)) recent.push(entry)
+      else active.push(entry)
+    }
+  }
+  return { active, recent }
 }
 
 export function setMainWindow(win: BrowserWindow | null): void {
   mainWindow = win
 }
 
-function getModelsBaseDir(): string {
+/** Primary shared models directory — `<dir>/<category>/<file>` is where both the
+ *  in-window model downloader and the install-time template pre-download land
+ *  files, so they must agree. Exported for the latter (see `templateModels.ts`). */
+export function getModelsBaseDir(): string {
   const modelsDirs = settings.get('modelsDirs') as string[] | undefined
   return modelsDirs?.[0] || settings.defaults.modelsDirs[0]!
 }
@@ -431,7 +494,7 @@ export function parseContentDispositionFilename(header: string | null): string |
   // Try filename*= (RFC 5987 encoded)
   const starMatch = header.match(/filename\*\s*=\s*(?:UTF-8''|utf-8'')([^;\s]+)/i)
   if (starMatch?.[1]) {
-    try { return decodeURIComponent(starMatch[1]) } catch {}
+    try { return decodeURIComponent(starMatch[1]) } catch { }
   }
   // Try filename="..." or filename=...
   const match = header.match(/filename\s*=\s*"([^"]+)"/i) || header.match(/filename\s*=\s*([^;\s]+)/i)
@@ -450,7 +513,7 @@ function resolveServerFilename(item: Electron.DownloadItem): string | null {
       const rcd = new URL(u).searchParams.get('response-content-disposition')
       const rcdName = parseContentDispositionFilename(rcd)
       if (rcdName) return rcdName
-    } catch {}
+    } catch { }
   }
 
   return null
@@ -715,7 +778,7 @@ function attachDownloadListeners(item: Electron.DownloadItem, pending: PendingDo
         try {
           fs.renameSync(pending.tempPath, pending.savePath)
         } catch {
-          try { fs.unlinkSync(pending.tempPath) } catch {}
+          try { fs.unlinkSync(pending.tempPath) } catch { }
           if (!fs.existsSync(pending.savePath)) {
             reportProgress({
               url: pending.url,
@@ -730,7 +793,7 @@ function attachDownloadListeners(item: Electron.DownloadItem, pending: PendingDo
           }
         }
         // Try to remove the temp directory if it's now empty (safe — fails silently if not empty)
-        try { fs.rmdirSync(path.dirname(pending.tempPath)) } catch {}
+        try { fs.rmdirSync(path.dirname(pending.tempPath)) } catch { }
       }
       reportProgress({
         url: pending.url,
@@ -743,8 +806,8 @@ function attachDownloadListeners(item: Electron.DownloadItem, pending: PendingDo
       })
     } else if (state === 'cancelled') {
       if (pending.tempPath) {
-        try { fs.unlinkSync(pending.tempPath) } catch {}
-        try { fs.rmdirSync(path.dirname(pending.tempPath)) } catch {}
+        try { fs.unlinkSync(pending.tempPath) } catch { }
+        try { fs.rmdirSync(path.dirname(pending.tempPath)) } catch { }
       }
       reportProgress({
         url: pending.url,
@@ -755,8 +818,8 @@ function attachDownloadListeners(item: Electron.DownloadItem, pending: PendingDo
       })
     } else {
       if (pending.tempPath) {
-        try { fs.unlinkSync(pending.tempPath) } catch {}
-        try { fs.rmdirSync(path.dirname(pending.tempPath)) } catch {}
+        try { fs.unlinkSync(pending.tempPath) } catch { }
+        try { fs.rmdirSync(path.dirname(pending.tempPath)) } catch { }
       }
       reportProgress({
         url: pending.url,
@@ -1035,15 +1098,35 @@ export function getAllDownloads(): DownloadProgress[] {
   for (const recent of recentDownloads) {
     result.push(recent)
   }
+  // Seed the All-Downloads modal with template-mirror rows too, matching what
+  // `getDownloadsTrayState()` shows in the tray popup.
+  for (const bucket of templateTrayMirrorByInstall.values()) {
+    for (const entry of bucket.values()) result.push(entry)
+  }
   return result
+}
+
+/** Remove `url` from any per-install template mirror bucket, pruning emptied
+ *  buckets. Mirrored rows live outside `recentDownloads`, so the recent-buffer
+ *  cleanup paths must drop them here too or finished ones linger forever. */
+function removeMirroredTemplateRow(url: string): boolean {
+  for (const [installationId, bucket] of templateTrayMirrorByInstall) {
+    if (bucket.delete(url)) {
+      createdAtByUrl.delete(url)
+      if (bucket.size === 0) templateTrayMirrorByInstall.delete(installationId)
+      return true
+    }
+  }
+  return false
 }
 
 /** Dismiss a single terminal entry from the recent buffer (cancel in-flight
  *  ones first). Broadcasts `model-download-removed` so every renderer drops it. */
 export function dismissRecentDownload(url: string): boolean {
   const idx = recentDownloads.findIndex((d) => d.url === url)
-  if (idx < 0) return false
-  recentDownloads.splice(idx, 1)
+  const removedMirror = removeMirroredTemplateRow(url)
+  if (idx < 0 && !removedMirror) return false
+  if (idx >= 0) recentDownloads.splice(idx, 1)
   createdAtByUrl.delete(url)
   retryParamsByUrl.delete(url)
   _broadcastToRenderer('model-download-removed', { url })
@@ -1051,19 +1134,31 @@ export function dismissRecentDownload(url: string): boolean {
   return true
 }
 
-/** Bulk-dismiss every terminal entry from the recent buffer. */
+/** Bulk-dismiss every terminal entry from the recent buffer and the finished
+ *  template-mirror rows. */
 export function clearFinishedDownloads(): number {
-  if (recentDownloads.length === 0) return 0
+  const removedUrls: string[] = []
   const removed = recentDownloads.splice(0, recentDownloads.length)
   for (const r of removed) {
     createdAtByUrl.delete(r.url)
     retryParamsByUrl.delete(r.url)
+    removedUrls.push(r.url)
   }
-  _broadcastToRenderer('model-downloads-cleared-finished', {
-    urls: removed.map((r) => r.url),
-  })
+  // Purge terminal template-mirror rows too; drop buckets left empty.
+  for (const [installationId, bucket] of templateTrayMirrorByInstall) {
+    for (const [url, entry] of bucket) {
+      if (isTerminalStatus(entry.status)) {
+        bucket.delete(url)
+        createdAtByUrl.delete(url)
+        removedUrls.push(url)
+      }
+    }
+    if (bucket.size === 0) templateTrayMirrorByInstall.delete(installationId)
+  }
+  if (removedUrls.length === 0) return 0
+  _broadcastToRenderer('model-downloads-cleared-finished', { urls: removedUrls })
   downloadEvents.emit('tray-state-changed')
-  return removed.length
+  return removedUrls.length
 }
 
 /** Detach a closing window's downloads; they continue in the background via
@@ -1080,10 +1175,10 @@ export function detachWindowDownloads(win: BrowserWindow): void {
 export async function cleanupTempDownloads(): Promise<void> {
   try {
     await fs.promises.rm(getTempDir(), { recursive: true, force: true })
-  } catch {}
+  } catch { }
   try {
     await fs.promises.rm(getAssetTempDir(), { recursive: true, force: true })
-  } catch {}
+  } catch { }
 }
 
 /** Test-only: replace the in-memory buffers with `snapshot` and emit

@@ -47,6 +47,17 @@ export interface InstallationRecord {
   inputDir?: string
   /** Per-install output dir, used only when `useSharedInputOutput === false`. */
   outputDir?: string
+  /** POC: starter template id the user picked in the install wizard. Durable
+   *  record of intent; survives relaunches. */
+  bundledTemplateId?: string
+  /** One-shot flag consumed by the first launch — when set, the comfy URL is
+   *  decorated with `?template=<id>` so the frontend auto-opens it, then this is
+   *  cleared so subsequent relaunches start blank. */
+  pendingTemplateOpen?: string | null
+  /** When true, the install's `template-models` phase pre-downloads the chosen
+   *  template's required models into the shared models dir. Set from the wizard
+   *  consent checkbox; only meaningful alongside `bundledTemplateId`. */
+  downloadTemplateModels?: boolean
   [key: string]: unknown
 }
 
@@ -267,6 +278,26 @@ export async function markLaunched(
     installationEvents.emit('changed')
   }
   return updated
+}
+
+/**
+ * POC: consume the one-shot starter-template flag. Clears `pendingTemplateOpen`
+ * so the template only auto-opens on the first launch, not on relaunches.
+ * No-op (returns false) when the install is gone or the flag was already clear,
+ * so the caller can fire-and-forget. Skips the `'updated'` event to avoid a
+ * title-bar refresh churn on every first launch — nothing observes this field.
+ */
+export async function clearPendingTemplateOpen(installationId: string): Promise<boolean> {
+  return enqueue(async () => {
+    const list = await load()
+    const index = list.findIndex((i) => i.id === installationId)
+    if (index === -1) return false
+    const existing = list[index]!
+    if (existing.pendingTemplateOpen == null) return false
+    list[index] = { ...existing, pendingTemplateOpen: null } as InstallationRecord
+    await save(list)
+    return true
+  })
 }
 
 /** Most-recently-launched install (by global `lastLaunchedAt`), or null

@@ -11,7 +11,12 @@ import { refreshCloudUserTier } from '../lib/userTier'
 import { noteCloudEntered } from '../lib/cloudEntry'
 import { forwardDatadogError } from '../lib/processErrorHandlers'
 import { recordInstanceSurface } from '../lib/lastSession'
-import { installationEvents, type InstallationRecord } from '../installations'
+import { clearPendingTemplateOpen, installationEvents, type InstallationRecord } from '../installations'
+import { buildTemplateDeeplink } from '../sources/standalone/bundledTemplates'
+import {
+  abortTemplateDownload,
+  stopTemplateTrayMirror,
+} from '../sources/standalone/templateDownloadTask'
 import {
   dropInstallationIndex,
   indexInstallationId,
@@ -569,7 +574,22 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
   // handler, not in `_installCleanup`).
   attachSessionDownloadHandler(comfyContents.session)
 
-  comfyContents.loadURL(comfyUrl)
+  // First local launch after install: auto-open the chosen starter template via a
+  // URL deeplink, then clear the one-shot so relaunches start blank. Remote/cloud
+  // installs don't load the local frontend that reads the param, so they're skipped.
+  let urlToLoad = comfyUrl
+  const pendingTemplate =
+    typeof installation.pendingTemplateOpen === 'string'
+      ? installation.pendingTemplateOpen
+      : null
+  if (isLocal && pendingTemplate) {
+    urlToLoad = buildTemplateDeeplink(comfyUrl, pendingTemplate)
+    void clearPendingTemplateOpen(installationId).catch((err) => {
+      console.warn(`[templates] Failed to clear pendingTemplateOpen for ${installationId}:`, err)
+    })
+  }
+
+  comfyContents.loadURL(urlToLoad)
 
   // Symmetric undo. Called by the close handler (always) and by
   // `detachInstall()` when the host flips back to chooser mode in
@@ -604,6 +624,12 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
         inFlight.abort()
         _operationAborts.delete(id)
       }
+      // Tear down a still-running background template-model download — it's
+      // keyed separately from _operationAborts, so it would otherwise outlive
+      // the window it was started for. Also stop mirroring it into the tray and
+      // clear those rows (the user may have skipped it there).
+      abortTemplateDownload(id)
+      stopTemplateTrayMirror(id)
       // Detach the relaunch will-navigate blocker before clearing the
       // map slot — without `comfyContents.off(...)`, a re-attach would
       // inherit a still-active blocker that preventDefaults every

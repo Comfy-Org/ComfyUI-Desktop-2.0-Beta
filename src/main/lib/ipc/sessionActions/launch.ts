@@ -28,6 +28,13 @@ import { rotateLogFiles, getLogDir } from '../../logRotation'
 import { createExecutionTap } from '../../executionTap'
 import { createLaunchProgressTracker } from '../../launchProgress'
 import { buildLaunchPhases } from '../../launchPhases'
+import {
+  getTemplateDownloadState,
+  summarizeTemplateState,
+  formatTemplateSubStatus,
+  awaitTemplateDownloadSettled,
+} from '../../../sources/standalone/templateDownloadTask'
+import { isTerminal as isTemplateDownloadTerminal } from '../../../sources/standalone/templateDownloadCore'
 import type { PreLaunchPhase } from '../../launchPhases'
 import { scanCustomNodes } from '../../nodes'
 import type { LaunchProgressTracker } from '../../launchProgress'
@@ -86,6 +93,17 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
   const sender = event.sender
   const sendProgress = makeSendProgress(sender, installationId)
 
+  // Show the starter-template model-download phase in THIS launch only on the
+  // first launch after install (one-shot `pendingTemplateOpen`), and only when a
+  // background download task actually exists for it. Covers the skip cases
+  // (no template / consent off / zero-model / relaunch).
+  const showTemplatePhase =
+    inst.sourceId === 'standalone' &&
+    !!inst.bundledTemplateId &&
+    inst.downloadTemplateModels === true &&
+    !!inst.pendingTemplateOpen &&
+    getTemplateDownloadState(installationId) !== undefined
+
   /** Enabled custom-node count for the "X of Y" launch detail. Best-effort
    *  one-shot scan; 0 (scan failed/none) → the tracker shows a streaming line
    *  instead. */
@@ -108,7 +126,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     if (launchTracker) return launchTracker
     await scanLaunchNodeCount()
     launchTracker = createLaunchProgressTracker({
-      phases: buildLaunchPhases(inst, { preLaunchPhases }),
+      phases: buildLaunchPhases(inst, { preLaunchPhases, templateModels: showTemplatePhase }),
       nodeCount: launchNodeCount,
       sendProgress,
     })
@@ -341,6 +359,114 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
   const abort = new AbortController()
   _operationAborts.set(installationId, abort)
 
+  /** Gates the `template-models` reader: the bar derives "prior steps done" from
+   *  the active phase index, so the reader stays silent through the real phases
+   *  and only drives the trailing download row once the server is reachable.
+   *  Flipped true by `waitForTemplateDownloadGate()` at port-ready. */
+  let serverUp = false
+
+  // Single 500 ms reader for the `template-models` phase — paces the display only
+  // (bytes flow in the background task; logs are emitted there, not here).
+  if (showTemplatePhase) {
+    void (async (): Promise<void> => {
+      // A pre-completed phase reports indeterminate (emitting 100 into its slot
+      // would fill it in one frame and leap the bar); a live download reports
+      // real percent so the bar advances with the bytes.
+      let firstEmittedTick = true
+      let preCompleted = false
+      const tick = (): boolean => {
+        if (!serverUp) return false
+        const state = getTemplateDownloadState(installationId)
+        if (!state) return true
+        const summary = summarizeTemplateState(state)
+        const terminal =
+          summary.status === 'done' ||
+          summary.status === 'error' ||
+          summary.status === 'cancelled'
+        if (firstEmittedTick) {
+          firstEmittedTick = false
+          preCompleted = terminal
+        }
+        const percent = preCompleted ? -1 : terminal ? -1 : Math.min(99, Math.max(0, summary.percent))
+        sendProgress('template-models', {
+          percent,
+          status: formatTemplateSubStatus(summary),
+          error: summary.status === 'error',
+        })
+        return terminal
+      }
+      while (!abort.signal.aborted) {
+        if (tick()) return
+        const done = await new Promise<boolean>((resolve) => {
+          const timer = setTimeout(() => {
+            abort.signal.removeEventListener('abort', onAbort)
+            resolve(false)
+          }, 500)
+          const onAbort = (): void => { clearTimeout(timer); resolve(true) }
+          abort.signal.addEventListener('abort', onAbort, { once: true })
+        })
+        if (done) return
+      }
+    })()
+  }
+
+  /** Abortable sleep used by the failure countdown. Resolves early on abort. */
+  function delay(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        abort.signal.removeEventListener('abort', onAbort)
+        resolve()
+      }, ms)
+      const onAbort = (): void => { clearTimeout(timer); resolve() }
+      abort.signal.addEventListener('abort', onAbort, { once: true })
+    })
+  }
+
+  /**
+   * Hold the ComfyUI reveal until the template-model download settles, so the
+   * (last) download step is genuinely shown and its "Skip & open ComfyUI" footer
+   * button is actionable instead of flashing past on port-ready.
+   *
+   *   - still running → wait (the 500 ms reader keeps the substatus live; Skip
+   *     resolves the wait via `requestSkipTemplateDownload`)
+   *   - done / skipped / cancelled / aborted → proceed immediately
+   *   - error (after the task's 2× retries) → show a clear "failed, retry later"
+   *     line + a 3·2·1 countdown, then proceed
+   *
+   * No-op (returns at once) when there's no template phase or nothing is running.
+   */
+  async function waitForTemplateDownloadGate(): Promise<void> {
+    if (!showTemplatePhase) return
+    // Release the reader (it held silent through the real phases). Set before the
+    // early-returns so the pre-done case still paints the final "models ready" row.
+    serverUp = true
+
+    const state = getTemplateDownloadState(installationId)
+    if (!state) return
+    // Already failed by gate entry (e.g. resolve threw before the server was up,
+    // while the reader was muted): surface it now, then run the countdown — the
+    // reader's first post-`serverUp` tick could be up to 500 ms away.
+    const failedAlready = state.status === 'error'
+    if (isTemplateDownloadTerminal(state.status) && !failedAlready) return
+
+    if (!failedAlready) {
+      const reason = await awaitTemplateDownloadSettled(installationId, abort.signal)
+      if (reason !== 'error' || abort.signal.aborted) return
+    }
+
+    // Failed for real: count down into ComfyUI so the user notices the failure
+    // before the view swaps.
+    for (let secs = 3; secs >= 1; secs--) {
+      if (abort.signal.aborted) return
+      sendProgress('template-models', {
+        percent: -1,
+        error: true,
+        status: i18n.t('standalone.templateModelsFailedCountdown', { secs }),
+      })
+      await delay(1000)
+    }
+  }
+
   // Remote connection
   if (launchCmd.remote) {
     sendProgress('launch', { percent: -1, status: i18n.t('launch.connecting', { url: launchCmd.url || '' }) })
@@ -453,7 +579,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     let nextPort: number | null = null
     try {
       nextPort = await findAvailablePort('127.0.0.1', launchCmd.port! + 1, launchCmd.port! + 1000, reservedPorts)
-    } catch {}
+    } catch { }
 
     if (portConflictMode === 'auto' && nextPort && !portIsExplicit) {
       sendProgress('launch', { percent: -1, status: i18n.t('launch.portBusyUsing', { old: launchCmd.port!, new: nextPort }) })
@@ -499,7 +625,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     let nextPort: number | null = null
     try {
       nextPort = await findAvailablePort('127.0.0.1', launchCmd.port! + 1, launchCmd.port! + 1000, reservedPorts)
-    } catch {}
+    } catch { }
 
     if (portConflictMode === 'auto' && nextPort && !portIsExplicit) {
       sendProgress('launch', { percent: -1, status: i18n.t('launch.portBusyUsing', { old: launchCmd.port!, new: nextPort }) })
@@ -620,7 +746,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
           setPortArg(launchCmd as LaunchCmd, retryPort)
           _reservePort(launchCmd.port!, inst.name)
           return tryLaunch()
-        } catch {}
+        } catch { }
       }
       if (abort.signal.aborted) return { ok: false, message: (err as Error).message, cancelled: true }
       return { ok: false, message: (err as Error).message }
@@ -632,6 +758,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     logStream.end()
     _releasePort(launchCmd.port!)
     _operationAborts.delete(installationId)
+    abort.abort() // stop the template-models reader timer on launch failure
     _clearLaunchingFailed(installationId)
     if (launchResult.cancelled) return { ok: false, cancelled: true }
     return { ok: false, message: launchResult.message }
@@ -669,7 +796,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     if (newFolders.length > 0) {
       sendOutput(`\n--- Restarting: new model folders detected (${newFolders.join(', ')}) ---\n\n`)
       if (_onModelFolderRelaunch) {
-        await Promise.resolve(_onModelFolderRelaunch({ installationId })).catch(() => {})
+        await Promise.resolve(_onModelFolderRelaunch({ installationId })).catch(() => { })
       }
       await killProcessTree(proc)
       const respawned = spawnComfy()
@@ -764,12 +891,12 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
                 sendOutput(`\n--- Restarting: new model folders detected (${newFolders.join(', ')}) ---\n\n`)
                 pendingModelFolderRelaunch = true
                 if (_onModelFolderRelaunch) {
-                  await Promise.resolve(_onModelFolderRelaunch({ installationId })).catch(() => {})
+                  await Promise.resolve(_onModelFolderRelaunch({ installationId })).catch(() => { })
                 }
                 killProcessTree(proc)
               }
             })
-            .catch(() => {})
+            .catch(() => { })
         }
         // Capture snapshot after Manager-triggered restart
         if (inst.sourceId === 'standalone') {
@@ -816,6 +943,15 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     })
   }
   attachExitHandler(proc)
+
+  // Server is up. If a template-model download is still running, hold here (the
+  // download step is the active row + the footer Skip is live) until it settles
+  // or the user skips, instead of flashing past into ComfyUI.
+  await waitForTemplateDownloadGate()
+
+  // Stop the `template-models` reader's 500 ms timer: on a skip the download
+  // stays non-terminal, so its loop would otherwise spin for the app's lifetime.
+  abort.abort()
 
   if (_onLaunch) {
     _onLaunch({ port: launchCmd.port!, process: proc, installation: inst, mode })

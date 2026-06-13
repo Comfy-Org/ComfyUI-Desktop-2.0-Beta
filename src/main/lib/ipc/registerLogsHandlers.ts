@@ -1,7 +1,7 @@
 import { ipcMain } from 'electron'
 import type { IpcMainInvokeEvent } from 'electron'
 import { findInstallationIdByComfySender } from '../../host/registry'
-import { subscribeLogs, unsubscribeLogs, type LogsRestore } from '../logsBroadcast'
+import { subscribeLogs, unsubscribeLogs, getLogsBuffer, type LogsRestore } from '../logsBroadcast'
 import { openLogsPopout } from '../logsPopoutWindow'
 
 /**
@@ -42,6 +42,16 @@ export function registerLogsHandlers(): void {
   ipcMain.handle('logs-unsubscribe', (event, installationId?: string | null) => {
     const id = resolveInstallationId(event, installationId)
     if (id) unsubscribeLogs(id, event.sender)
+  })
+
+  // Read-only snapshot of the durable log ring buffer — used to SEED a new
+  // operation's terminal (e.g. the launch leg of a chain) with lines that were
+  // emitted during the previous (install) leg, without registering a
+  // subscriber. Returns '' when nothing has been logged yet.
+  ipcMain.handle('logs-snapshot', (event, installationId?: string | null): string => {
+    const id = resolveInstallationId(event, installationId)
+    if (!id) return ''
+    return getLogsBuffer(id).join('')
   })
 
   // Pop the inline logs out into a standalone Electron window. Same

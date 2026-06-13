@@ -6,8 +6,9 @@ import type { ProgressStepVM } from '../lib/progressViewModel'
 const step = (
   phase: string,
   status: ProgressStepVM['status'],
-  detail: string | null = null
-): ProgressStepVM => ({ phase, label: phase, status, detail, subPercent: null })
+  detail: string | null = null,
+  isError = false
+): ProgressStepVM => ({ phase, label: phase, status, detail, subPercent: null, isError })
 
 const ROW_H = 46
 const CENTER_SLOT = 1 // Math.floor(VISIBLE_ROWS / 2) with VISIBLE_ROWS = 3
@@ -70,5 +71,24 @@ describe('BrandProgressView', () => {
   it('renders nothing when there are no steps', () => {
     const wrapper = mount(BrandProgressView, { props: { steps: [] } })
     expect(wrapper.find('.bpv').exists()).toBe(false)
+  })
+
+  it('renders the error detail styling + icon when isError is true', () => {
+    const wrapper = mount(BrandProgressView, {
+      props: { steps: [step('a', 'active', 'download failed', true)] }
+    })
+    const detail = wrapper.get('.bpv__detail')
+    expect(detail.classes()).toContain('is-error')
+    expect(detail.find('.bpv__detail-icon').exists()).toBe(true)
+    expect(detail.text()).toContain('download failed')
+  })
+
+  it('omits the error icon on a non-error detail', () => {
+    const wrapper = mount(BrandProgressView, {
+      props: { steps: [step('a', 'active', '3 / 7 · node')] }
+    })
+    const detail = wrapper.get('.bpv__detail')
+    expect(detail.classes()).not.toContain('is-error')
+    expect(detail.find('.bpv__detail-icon').exists()).toBe(false)
   })
 })

@@ -12,17 +12,21 @@ import type {
   ShowProgressOpts
 } from '../types/ipc'
 import { stripVariantPrefix, sortedCardOptions } from '../lib/variants'
-import { emitTelemetryAction, toVariantBucket } from '../lib/telemetry'
+import { emitTelemetryAction, toSizeBucket, toVariantBucket } from '../lib/telemetry'
 import {
   trackGuardrailBlocked,
   createDiskSpaceChecker,
   showPathIssueAlerts,
   checkNvidiaDriverOrWarn,
-  checkDiskSpaceOrWarn
+  checkDiskSpaceOrWarn,
+  checkTemplateDiskOrBlock,
+  isTemplateDiskBlocked,
+  minTemplateModelBytes
 } from '../lib/installHelpers'
 import TakeoverBack from '../components/TakeoverBack.vue'
 import BrandTakeoverLayout from '../components/BrandTakeoverLayout.vue'
 import BrandVariantList from '../components/BrandVariantList.vue'
+import TemplatePickerStep from '../components/TemplatePickerStep.vue'
 import PathDiskInfo from '../components/PathDiskInfo.vue'
 import TooltipWrap from '../components/TooltipWrap.vue'
 import { BaseSelect, type BaseSelectOption } from '../components/ui'
@@ -42,6 +46,17 @@ const props = withDefaults(
   }>(),
   { hideBackToDashboard: false }
 )
+
+/**
+ * A/B experiment: do we show the starter-template picker step at install time?
+ * `treatment` → picker step is offered (subject to the user's opt-out + the
+ * standalone-source gating); `control` → picker is suppressed regardless and
+ * the legacy single-screen Configure flow ships. Variant is locked for the
+ * lifetime of the modal open (re-read on each open, so the next install can
+ * pick up a fresh assignment).
+ */
+const STARTER_TEMPLATES_EXPERIMENT_KEY = 'desktop-starter-templates-picker'
+type StarterTemplatesVariant = 'control' | 'treatment'
 
 const { t } = useI18n()
 const modal = useModal()
@@ -89,6 +104,160 @@ const estimatedInstallSize = computed(() => {
 
 const advancedOpen = ref(false)
 const advancedRef = ref<HTMLElement | null>(null)
+
+const NO_TEMPLATE_VALUE = 'none'
+
+/** The selected starter template option (excludes the "None" sentinel). */
+const selectedTemplate = computed<FieldOption | null>(() => {
+  const sel = selections.value.bundledTemplate
+  return sel && sel.value !== NO_TEMPLATE_VALUE ? sel : null
+})
+
+/** True when the selected template carries a non-zero model download. */
+const templateHasModels = computed(() => {
+  const size = selectedTemplate.value?.data?.sizeBytes as number | undefined
+  return typeof size === 'number' && size > 0
+})
+
+/** Proactive disk guard — shares `isTemplateDiskBlocked` with TemplatePickerStep
+ *  so the alert, the disabled Install button, and the save-time hard block can't
+ *  drift. */
+const templateInstallBlocked = computed(() => {
+  if (diskSpaceLoading.value) return false
+  const modelBytes = (selectedTemplate.value?.data?.sizeBytes as number | undefined) ?? 0
+  return isTemplateDiskBlocked(diskSpace.value, modelBytes)
+})
+
+const pickerRef = ref<InstanceType<typeof TemplatePickerStep> | null>(null)
+
+/** Which step of the takeover is showing: Configure, then the (optional,
+ *  standalone-only) starter-template picker before install. */
+const step = ref<'configure' | 'template'>('configure')
+const detectedVramBytes = ref<number | undefined>(undefined)
+const dontShowTemplatePicker = ref(false)
+/** Whether to even offer the picker step: skippable for returning opted-out
+ *  users. The "Don't show again" checkbox itself only appears once the user
+ *  already has ≥1 local install (a first-ever user always sees the step). */
+const pickerEnabled = ref(true)
+const hasLocalInstall = ref(false)
+/** Experiment variant locked on modal open. Defaults to `control` until the
+ *  cache-first flag fetch resolves (boot fetch typically lands long before
+ *  the user reaches the picker), so a slow / failed fetch defaults to the
+ *  legacy flow. */
+const starterTemplatesVariant = ref<StarterTemplatesVariant>('control')
+
+const templateOptions = computed<FieldOption[]>(
+  () => fieldOptions.value.get('bundledTemplate') ?? []
+)
+
+/** Volume can't fit even the smallest model-bearing template (incl. headroom).
+ *  When known and true, there's nothing the picker could install, so we skip the
+ *  step outright rather than show it with every option blocked. Stays `false`
+ *  while disk space is unknown/loading — we only skip on a confirmed shortfall. */
+const diskTooSmallForAnyTemplate = computed(() => {
+  if (diskSpaceLoading.value || !diskSpace.value) return false
+  const cheapest = minTemplateModelBytes(
+    templateOptions.value.map((o) => (o.data?.sizeBytes as number | undefined) ?? 0)
+  )
+  return isTemplateDiskBlocked(diskSpace.value, cheapest)
+})
+
+/** Show the picker step only for the standalone source when it's enabled,
+ *  the user is in the `treatment` arm of the picker experiment, the template
+ *  field produced options, and the volume can fit at least one template's
+ *  models. `control` users never see the step regardless of the
+ *  `skipTemplatePickerStep` setting. */
+const shouldShowPickerStep = computed(
+  () =>
+    currentSource.value?.id === 'standalone' &&
+    pickerEnabled.value &&
+    starterTemplatesVariant.value === 'treatment' &&
+    templateOptions.value.length > 0 &&
+    !diskTooSmallForAnyTemplate.value
+)
+
+function selectTemplate(option: FieldOption): void {
+  const prev = selections.value.bundledTemplate?.value
+  selections.value.bundledTemplate = option
+  // Emit only on real (non-`None`) picks, and only on a value change so
+  // re-clicking the already-selected row doesn't inflate the event count.
+  if (option.value !== NO_TEMPLATE_VALUE && option.value !== prev) {
+    const sizeBytes = (option.data?.sizeBytes as number | undefined) ?? 0
+    emitTelemetryAction('comfy.desktop.template.selected', {
+      template_id: option.value,
+      size_bucket: toSizeBucket(sizeBytes),
+      variant: starterTemplatesVariant.value
+    })
+  }
+}
+
+/** Configure's primary button: advance to the picker step, or install directly
+ *  when the picker is gated off. */
+async function handleConfigureContinue(): Promise<void> {
+  if (shouldShowPickerStep.value) {
+    // Default the selection to the first real template (Image) rather than the
+    // "None" sentinel, so the showcase leads.
+    const firstReal = templateOptions.value.find((o) => o.value !== NO_TEMPLATE_VALUE)
+    if (firstReal && selections.value.bundledTemplate?.value === NO_TEMPLATE_VALUE) {
+      selections.value.bundledTemplate = firstReal
+    }
+    if (instPath.value) fetchDiskSpace(instPath.value)
+    step.value = 'template'
+    emitTelemetryAction('comfy.desktop.template.picker_shown', {
+      template_count: templateOptions.value.length,
+      has_local_install: hasLocalInstall.value,
+      default_template_id: selections.value.bundledTemplate?.value ?? null,
+      variant: starterTemplatesVariant.value
+    })
+    return
+  }
+  await handleSave()
+}
+
+/** Picker's "Install": persist the opt-out (if ticked) then install. When the
+ *  volume can't fit the selected template, shake the disk-error alert instead of
+ *  installing (the button stays clickable so the nudge can fire, mirroring the
+ *  first-use consent gate). */
+async function handleTemplateInstall(): Promise<void> {
+  if (templateInstallBlocked.value) {
+    pickerRef.value?.nudgeDiskError()
+    return
+  }
+  const tpl = selectedTemplate.value
+  emitTelemetryAction('comfy.desktop.template.install_confirmed', {
+    template_id: tpl?.value ?? NO_TEMPLATE_VALUE,
+    size_bucket: toSizeBucket((tpl?.data?.sizeBytes as number | undefined) ?? 0),
+    has_models: templateHasModels.value,
+    dont_show_again: dontShowTemplatePicker.value,
+    variant: starterTemplatesVariant.value
+  })
+  await persistDontShowAgain()
+  await handleSave()
+}
+
+/** Picker's "Skip & Install": no template, then install. */
+async function handleTemplateSkip(): Promise<void> {
+  emitTelemetryAction('comfy.desktop.template.skipped', {
+    had_template_selected: !!selectedTemplate.value,
+    candidate_template_id: selectedTemplate.value?.value ?? null,
+    dont_show_again: dontShowTemplatePicker.value,
+    variant: starterTemplatesVariant.value
+  })
+  const none = templateOptions.value.find((o) => o.value === NO_TEMPLATE_VALUE)
+  if (none) selections.value.bundledTemplate = none
+  await persistDontShowAgain()
+  await handleSave()
+}
+
+async function persistDontShowAgain(): Promise<void> {
+  if (dontShowTemplatePicker.value) {
+    try {
+      await window.api.setSetting('skipTemplatePickerStep', true)
+    } catch {
+      // Non-fatal — the step just shows again next time.
+    }
+  }
+}
 
 // Scroll Advanced into view on open. `block: 'nearest'` no-ops when already visible so the view doesn't yank on tall screens.
 watch(advancedOpen, async (open) => {
@@ -207,6 +376,7 @@ const cameFromLocalBranch = ref(false)
 
 async function open(opts: OpenOpts = {}): Promise<void> {
   loadGeneration++
+  const gen = loadGeneration
   instName.value = ''
   cameFromLocalBranch.value = opts.cameFromLocalBranch === true
   suggestedName.value = ''
@@ -229,6 +399,64 @@ async function open(opts: OpenOpts = {}): Promise<void> {
   resetDiskSpace()
   sourceError.value = ''
   initializing.value = true
+  step.value = 'configure'
+  dontShowTemplatePicker.value = false
+  // Reset to defaults synchronously so a slow prior-open response can't leave
+  // stale gating/VRAM on this open; the guarded callbacks below then refill them.
+  pickerEnabled.value = true
+  hasLocalInstall.value = false
+  detectedVramBytes.value = undefined
+
+  // Resolve picker gating + VRAM in the background — needed only by the time the
+  // user reaches the (later) template step, so they never block the Configure
+  // screen's first paint. Generation-guarded so a reopen discards stale results.
+  void window.api
+    .getSetting('skipTemplatePickerStep')
+    .then((skip) => {
+      if (gen !== loadGeneration) return
+      pickerEnabled.value = skip !== true
+    })
+    .catch(() => {})
+  // A/B: cache-first flag lookup. `null` (no cache, no remote) defaults to
+  // `control` so a first-ever boot with no network keeps the legacy flow.
+  // The exposure event is recorded once per session main-side regardless of
+  // how many times the modal opens.
+  void window.api
+    .telemetryGetExperimentFlag(STARTER_TEMPLATES_EXPERIMENT_KEY)
+    .then((value) => {
+      if (gen !== loadGeneration) return
+      const variant: StarterTemplatesVariant =
+        value === 'treatment' ? 'treatment' : 'control'
+      starterTemplatesVariant.value = variant
+      window.api.telemetryRecordExposure({
+        experimentKey: STARTER_TEMPLATES_EXPERIMENT_KEY,
+        variant,
+        source: value == null ? 'fallback' : 'cache'
+      })
+      // Pin the variant as a person property so any downstream activation
+      // event (workflow_executed, comfyui.boot_success) can be sliced by arm
+      // without joining back through `experiment.exposed`.
+      window.api.registerTelemetryProperties({
+        [`experiment_${STARTER_TEMPLATES_EXPERIMENT_KEY}`]: variant
+      })
+    })
+    .catch(() => {
+      /* fail closed to `control`, already the default. */
+    })
+  void window.api
+    .getInstallationsSummary()
+    .then((summary) => {
+      if (gen !== loadGeneration) return
+      hasLocalInstall.value = summary.localCount > 0
+    })
+    .catch(() => {})
+  void window.api
+    .detectGPU()
+    .then((gpu) => {
+      if (gen !== loadGeneration) return
+      detectedVramBytes.value = gpu?.vramBytes
+    })
+    .catch(() => {})
 
   try {
     const [, installDir] = await Promise.all([loadSources(), installDirPromise])
@@ -282,6 +510,8 @@ async function selectSourceCard(source: Source): Promise<void> {
 async function selectSource(source: Source): Promise<void> {
   loadGeneration++
   currentSource.value = source
+  // A different source can't keep the (standalone-only) picker open.
+  step.value = 'configure'
   selections.value = {}
   fieldOptions.value.clear()
   fieldLoading.value.clear()
@@ -290,7 +520,6 @@ async function selectSource(source: Source): Promise<void> {
   saveDisabled.value = true
   sourceError.value = ''
 
-  // Initialize text fields with defaults
   for (const f of source.fields) {
     if (f.type === 'text') {
       const defaultVal = f.defaultValue ?? ''
@@ -490,6 +719,11 @@ async function handleSave(): Promise<void> {
     }
   }
 
+  // Note: the starter-template model download is gated entirely by the chosen
+  // `bundledTemplate` — `buildInstallation` sets `downloadTemplateModels` from
+  // the template id, so "Skip & Install" (template = None) means no download.
+  // The renderer doesn't sync a separate consent field.
+
   const instData = await window.api.buildInstallation(source.id, rawSelections())
   const baseName =
     instName.value.trim() || (source.id === 'standalone' ? 'ComfyUI' : `ComfyUI (${source.label})`)
@@ -551,6 +785,22 @@ async function handleSave(): Promise<void> {
     }
   }
 
+  // Hard-block when the volume can't hold the selected template's models.
+  if (instPath.value && templateHasModels.value) {
+    const modelBytes = (selectedTemplate.value?.data?.sizeBytes as number | undefined) ?? 0
+    if (
+      !(await checkTemplateDiskOrBlock({
+        path: instPath.value,
+        estimatedModelBytes: modelBytes,
+        flow: 'wizard',
+        alert: modal.alert,
+        t
+      }))
+    ) {
+      return
+    }
+  }
+
   const result = await window.api.addInstallation({
     name,
     installPath: instPath.value,
@@ -609,6 +859,10 @@ function onSelectFieldChange(field: SourceField, fieldIndex: number, value: stri
  *  channel) return an empty options array when not applicable. Hide them
  *  outright so the wizard doesn't render a "No options" dropdown. */
 function isHiddenWhenEmpty(field: SourceField): boolean {
+  // The starter-template field gets its own dedicated step when the picker is
+  // enabled — hide its Advanced-section card so it isn't shown twice. (When the
+  // picker is gated off, the Advanced card stays as the fallback.)
+  if (field.id === 'bundledTemplate' && shouldShowPickerStep.value) return true
   if (field.type === 'text' || field.renderAs === 'cards') return false
   const options = fieldOptions.value.get(field.id)
   if (options === undefined) return false
@@ -620,7 +874,7 @@ defineExpose({ open })
 
 <template>
   <BrandTakeoverLayout>
-    <div ref="brandShellRef" class="config-shell">
+    <div v-if="step === 'configure'" ref="brandShellRef" class="config-shell">
       <h1 class="brand-title">{{ $t('newInstall.configureTitle') }}</h1>
       <p class="brand-lead">{{ $t('newInstall.configureLead') }}</p>
       <div class="config-card">
@@ -859,16 +1113,69 @@ defineExpose({ open })
           <button
             class="brand-primary config-continue"
             :disabled="!canContinue"
-            @click="handleSave"
+            @click="handleConfigureContinue"
           >
             {{ $t('common.continue') }}
           </button>
         </div>
       </div>
     </div>
+
+    <!-- Dedicated starter-template picker step (after Configure, before install). -->
+    <div v-else-if="step === 'template'" class="template-shell">
+      <h1 class="brand-title">{{ $t('standalone.templatePickerTitle') }}</h1>
+      <p class="brand-lead">{{ $t('standalone.templatePickerLead') }}</p>
+      <div class="brand-card template-card">
+        <div class="brand-card__body template-card__body">
+          <TemplatePickerStep
+            ref="pickerRef"
+            :options="templateOptions"
+            :none-value="NO_TEMPLATE_VALUE"
+            :selected-value="selections.bundledTemplate?.value ?? null"
+            :detected-vram-bytes="detectedVramBytes"
+            :disk-space="diskSpace"
+            :disk-space-loading="diskSpaceLoading"
+            @select="selectTemplate"
+          />
+        </div>
+        <div class="brand-card__footer template-card__footer">
+          <div class="template-card__footer-actions">
+            <button
+              type="button"
+              class="brand-ghost template-skip"
+              :aria-label="$t('standalone.templateSkipAndInstallAria')"
+              @click="handleTemplateSkip"
+            >
+              {{ $t('standalone.templateSkipAndInstall') }}
+            </button>
+            <button
+              type="button"
+              class="brand-primary template-install"
+              :class="{ 'template-install--blocked': templateInstallBlocked }"
+              :aria-disabled="templateInstallBlocked"
+              :aria-describedby="templateInstallBlocked ? 'tps-alerts' : undefined"
+              @click="handleTemplateInstall"
+            >
+              {{ $t('standalone.templateInstall') }}
+            </button>
+          </div>
+        </div>
+      </div>
+      <label v-if="hasLocalInstall" class="brand-checkbox template-shell__opt-out">
+        <input v-model="dontShowTemplatePicker" type="checkbox" />
+        <span class="brand-checkbox__text">{{ $t('standalone.templateDontShowAgain') }}</span>
+      </label>
+    </div>
+
     <template #footer-left>
       <TakeoverBack
-        v-if="!hideBackToDashboard"
+        v-if="step === 'template'"
+        class="config-back-to-dashboard"
+        :label="$t('common.back')"
+        @back="step = 'configure'"
+      />
+      <TakeoverBack
+        v-else-if="!hideBackToDashboard"
         class="config-back-to-dashboard"
         :label="$t('common.backToDashboard')"
         @back="emit('close')"
@@ -892,6 +1199,75 @@ defineExpose({ open })
   text-align: center;
   padding-block: clamp(1.5rem, 4vh, 3rem);
   min-height: 0;
+}
+
+.template-shell {
+  align-self: stretch;
+  height: 100%;
+  max-height: 100%;
+  width: 100%;
+  max-width: 640px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding-block: clamp(1.5rem, 4vh, 3rem);
+  min-height: 0;
+}
+.template-card {
+  width: 100%;
+  max-height: 100%;
+}
+.template-card__footer {
+  flex-direction: column;
+  align-items: stretch;
+}
+.template-card__footer-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+}
+.template-shell__opt-out {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  margin-top: 14px;
+  font-size: var(--takeover-fs-caption);
+  line-height: 1.4;
+  color: var(--neutral-400);
+}
+.template-shell__opt-out input[type='checkbox'] {
+  margin: 0;
+}
+.template-shell__opt-out .brand-checkbox__text {
+  line-height: 1.4;
+}
+.template-skip {
+  margin-right: auto;
+  border: 1px solid var(--brand-surface-border);
+  color: var(--neutral-200);
+}
+.template-skip:hover:not([disabled]) {
+  border-color: var(--brand-surface-border-hover);
+  color: var(--neutral-100);
+  background: var(--brand-surface-bg);
+}
+.template-install {
+  min-width: 120px;
+}
+/* Reads as disabled but stays clickable so the click can shake the disk-error
+ *  alert (mirrors the first-use consent gate). */
+.template-install--blocked {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.template-install--blocked:hover {
+  background: var(--comfy-yellow);
+  border-color: var(--comfy-yellow);
 }
 
 .config-card {

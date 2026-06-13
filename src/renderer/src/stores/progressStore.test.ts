@@ -32,6 +32,7 @@ vi.stubGlobal('window', {
     onInstallationsVersionsUpdated: vi.fn(),
     onInstallProgress: vi.fn(() => vi.fn()),
     onComfyOutput: vi.fn(() => vi.fn()),
+    logsSnapshot: vi.fn().mockResolvedValue(''),
     cancelOperation: vi.fn(),
     stopComfyUI: vi.fn(),
     getRunningInstances: vi.fn().mockResolvedValue([]),
@@ -74,7 +75,7 @@ describe('useProgressStore', () => {
     })
 
     it('returns flat status and percent when no steps defined', () => {
-      const apiCall = () => new Promise<ActionResult>(() => {}) // never resolves
+      const apiCall = () => new Promise<ActionResult>(() => { }) // never resolves
       store.startOperation({
         installationId: 'inst-1',
         title: 'Install',
@@ -90,7 +91,7 @@ describe('useProgressStore', () => {
     })
 
     it('returns step-based status when steps and activePhase are set', () => {
-      const apiCall = () => new Promise<ActionResult>(() => {})
+      const apiCall = () => new Promise<ActionResult>(() => { })
       store.startOperation({
         installationId: 'inst-1',
         title: 'Install',
@@ -111,7 +112,7 @@ describe('useProgressStore', () => {
     })
 
     it('falls back to step label, not the raw phase id, when lastStatus has no entry', () => {
-      const apiCall = () => new Promise<ActionResult>(() => {})
+      const apiCall = () => new Promise<ActionResult>(() => { })
       store.startOperation({
         installationId: 'inst-1',
         title: 'Install',
@@ -131,7 +132,7 @@ describe('useProgressStore', () => {
     })
 
     it('falls back to title when flatStatus is empty', () => {
-      const apiCall = () => new Promise<ActionResult>(() => {})
+      const apiCall = () => new Promise<ActionResult>(() => { })
       store.startOperation({
         installationId: 'inst-1',
         title: 'Install',
@@ -157,14 +158,14 @@ describe('useProgressStore', () => {
       store.startOperation({
         installationId: 'inst-1',
         title: 'Delete',
-        apiCall: () => new Promise<ActionResult>(() => {})
+        apiCall: () => new Promise<ActionResult>(() => { })
       })
 
       expect(sessionStore.errorInstances.has('inst-1')).toBe(false)
     })
 
     it('creates an operation and sets up session', () => {
-      const apiCall = () => new Promise<ActionResult>(() => {})
+      const apiCall = () => new Promise<ActionResult>(() => { })
       store.startOperation({
         installationId: 'inst-1',
         title: 'Install ComfyUI',
@@ -179,7 +180,7 @@ describe('useProgressStore', () => {
     })
 
     it('subscribes to progress and output IPC', () => {
-      const apiCall = () => new Promise<ActionResult>(() => {})
+      const apiCall = () => new Promise<ActionResult>(() => { })
       store.startOperation({
         installationId: 'inst-1',
         title: 'Install',
@@ -282,13 +283,13 @@ describe('useProgressStore', () => {
       store.startOperation({
         installationId: 'inst-1',
         title: 'First',
-        apiCall: () => new Promise<ActionResult>(() => {})
+        apiCall: () => new Promise<ActionResult>(() => { })
       })
 
       store.startOperation({
         installationId: 'inst-1',
         title: 'Second',
-        apiCall: () => new Promise<ActionResult>(() => {})
+        apiCall: () => new Promise<ActionResult>(() => { })
       })
 
       expect(store.operations.get('inst-1')?.title).toBe('Second')
@@ -336,7 +337,7 @@ describe('useProgressStore', () => {
       store.startOperation({
         installationId: 'inst-1',
         title: 'Install',
-        apiCall: () => new Promise<ActionResult>(() => {})
+        apiCall: () => new Promise<ActionResult>(() => { })
       })
 
       store.cancelOperation('inst-1')
@@ -409,7 +410,7 @@ describe('useProgressStore', () => {
       store.startOperation({
         installationId: 'inst-1',
         title: 'Install',
-        apiCall: () => new Promise<ActionResult>(() => {})
+        apiCall: () => new Promise<ActionResult>(() => { })
       })
 
       store.cleanupOperation('inst-1')
@@ -428,7 +429,7 @@ describe('useProgressStore', () => {
       store.startOperation({
         installationId: 'inst-1',
         title: 'Installing — DevFixture',
-        apiCall: () => new Promise<ActionResult>(() => {}),
+        apiCall: () => new Promise<ActionResult>(() => { }),
         chainSpan: 'install'
       })
       expect(store.operations.get('inst-1')?.chainSpan).toBe('install')
@@ -438,7 +439,7 @@ describe('useProgressStore', () => {
       store.startOperation({
         installationId: 'inst-2',
         title: 'Launching — DevFixture',
-        apiCall: () => new Promise<ActionResult>(() => {}),
+        apiCall: () => new Promise<ActionResult>(() => { }),
         chainSpan: 'launch'
       })
       expect(store.operations.get('inst-2')?.chainSpan).toBe('launch')
@@ -448,10 +449,35 @@ describe('useProgressStore', () => {
       store.startOperation({
         installationId: 'inst-3',
         title: 'Standalone op',
-        apiCall: () => new Promise<ActionResult>(() => {})
+        apiCall: () => new Promise<ActionResult>(() => { })
       })
       // null (not undefined) so the Operation literal stays well-typed.
       expect(store.operations.get('inst-3')?.chainSpan).toBeNull()
+    })
+
+    it('seeds the launch leg terminalOutput from logsSnapshot (log continuity)', async () => {
+      vi.mocked(window.api.logsSnapshot).mockResolvedValueOnce('install-leg lines\n')
+      store.startOperation({
+        installationId: 'inst-snap',
+        title: 'Launching',
+        apiCall: () => new Promise<ActionResult>(() => { }),
+        chainSpan: 'launch'
+      })
+      expect(window.api.logsSnapshot).toHaveBeenCalledWith('inst-snap')
+      await Promise.resolve() // let the snapshot promise + its .then settle
+      await Promise.resolve()
+      expect(store.operations.get('inst-snap')?.terminalOutput).toBe('install-leg lines\n')
+    })
+
+    it('does not seed from logsSnapshot for a non-launch op', () => {
+      vi.mocked(window.api.logsSnapshot).mockClear()
+      store.startOperation({
+        installationId: 'inst-nosnap',
+        title: 'Install',
+        apiCall: () => new Promise<ActionResult>(() => { }),
+        chainSpan: 'install'
+      })
+      expect(window.api.logsSnapshot).not.toHaveBeenCalled()
     })
 
     it('caps the install leg of a chain at 0–70% of the continuous bar', () => {
@@ -461,7 +487,7 @@ describe('useProgressStore', () => {
       store.startOperation({
         installationId: 'inst-4',
         title: 'Installing',
-        apiCall: () => new Promise<ActionResult>(() => {}),
+        apiCall: () => new Promise<ActionResult>(() => { }),
         chainSpan: 'install'
       })
       const op = store.operations.get('inst-4')!
@@ -485,7 +511,7 @@ describe('useProgressStore', () => {
       store.startOperation({
         installationId: 'inst-5',
         title: 'Installing',
-        apiCall: () => new Promise<ActionResult>(() => {}),
+        apiCall: () => new Promise<ActionResult>(() => { }),
         chainSpan: 'install'
       })
       const op = store.operations.get('inst-5')!
@@ -500,7 +526,7 @@ describe('useProgressStore', () => {
       store.startOperation({
         installationId: 'inst-6',
         title: 'Updating',
-        apiCall: () => new Promise<ActionResult>(() => {})
+        apiCall: () => new Promise<ActionResult>(() => { })
       })
       const op = store.operations.get('inst-6')!
       op.finished = true
