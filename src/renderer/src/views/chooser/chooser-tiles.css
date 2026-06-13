@@ -115,8 +115,19 @@
 }
 .chooser-tile-pill-version {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  /* Action/version pills hold their content width so the source pill
-   * is the one that truncates when the row is tight. */
+  /* Secondary shrink target: with source + version + a (possibly
+   * versioned) action pill in one no-wrap row, the source pill
+   * ellipsizes first, then the version. The action pill holds its
+   * width (see `.chooser-tile-pill-action`). */
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+/* Action pill (update / migrate) — right-aligned so it sits apart from the
+ * source + version metadata cluster (App-Store-style action), and holds its
+ * width so the interactive label never truncates. */
+.chooser-tile-pill-action {
+  margin-left: auto;
   flex-shrink: 0;
 }
 

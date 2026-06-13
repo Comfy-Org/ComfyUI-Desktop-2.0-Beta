@@ -54,6 +54,15 @@ const statusPill = computed<{ label: string; dotClass: string } | null>(() => {
 })
 
 const hasUpdate = computed(() => inst.value.statusTag?.style === 'update')
+/** "Update v0.25.0" when the backend tags the target version, else the bare
+ *  "Update" — the action stays self-describing without hiding the current
+ *  version pill beside it. */
+const updatePillLabel = computed(() => {
+  const version = inst.value.statusTag?.version
+  return version
+    ? t('chooser.updatePillVersion', { version })
+    : t('chooser.updatePill')
+})
 // The backend tags every migratable install (Legacy Desktop, portable, git)
 // with a `migrate` status tag — mirror `hasUpdate` rather than special-casing
 // a single source.
@@ -142,9 +151,22 @@ function handleClick(): void {
       >
         {{ sourcePillLabel }}
       </span>
+      <!-- Current version: always shown as quiet metadata, independent of any
+           available action so an update never hides it. Secondary shrink
+           target after the source pill. -->
+      <span
+        v-if="inst.version"
+        class="chooser-tile-pill chooser-tile-pill-version"
+        :title="inst.version"
+      >
+        {{ inst.version }}
+      </span>
+      <!-- Action pill (update / migrate): right-aligned and width-holding so
+           it reads as the affordance, separate from the metadata cluster. The
+           update label carries the target version when known. -->
       <span
         v-if="hasUpdate"
-        class="chooser-tile-pill chooser-tile-pill-update"
+        class="chooser-tile-pill chooser-tile-pill-update chooser-tile-pill-action"
         :class="{ 'chooser-tile-pill-disabled': isStoppedActionGated }"
         role="button"
         tabindex="0"
@@ -155,11 +177,11 @@ function handleClick(): void {
         @keydown.space.prevent.stop="isStoppedActionGated || emit('trigger-action', 'update', inst)"
       >
         <ArrowDownToLine :size="11" />
-        {{ t('chooser.updatePill') }}
+        {{ updatePillLabel }}
       </span>
       <span
         v-else-if="hasMigratePrompt"
-        class="chooser-tile-pill chooser-tile-pill-migrate"
+        class="chooser-tile-pill chooser-tile-pill-migrate chooser-tile-pill-action"
         :class="{ 'chooser-tile-pill-disabled': isStoppedActionGated }"
         role="button"
         tabindex="0"
@@ -171,13 +193,6 @@ function handleClick(): void {
       >
         <ArrowRightLeft :size="11" />
         {{ t('chooser.migratePill') }}
-      </span>
-      <span
-        v-else-if="inst.version"
-        class="chooser-tile-pill chooser-tile-pill-version"
-        :title="inst.version"
-      >
-        {{ inst.version }}
       </span>
       <!-- Launched pill disabled per redesign; kept for later restore.
       <span
