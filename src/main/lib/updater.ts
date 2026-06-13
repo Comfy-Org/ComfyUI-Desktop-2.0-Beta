@@ -261,8 +261,8 @@ function bindUpdaterEvents(): void {
       emitTelemetry('comfy.desktop.app_update.download_complete', { version })
     }
     // Persist that an installer is staged on disk. electron-updater caches the
-    // download across restarts; this marker lets the startup-install path (when
-    // enabled) apply it on the next boot. Harmless in the default on-quit mode —
+    // download across restarts; this marker lets the startup-install path apply
+    // it on the next boot. Harmless when installing on quit instead —
     // it's just a record that a download finished and is cleared once the staged
     // version is the one running.
     try {
@@ -583,8 +583,9 @@ type StartupInstallDecision =
  * Decide whether to install a staged Desktop update on this launch. Cheap and
  * synchronous (reads only persisted markers + environment).
  *
- * Returns a skip for: the startup-install gate being off (the default — installs
- * still happen on quit), E2E runs, system-package-managed installs (apt/dnf own
+ * Returns a skip for: the startup-install gate being off (non-Windows, or the
+ * `installUpdatesOnStartup` opt-out — installs still happen on quit), E2E runs,
+ * system-package-managed installs (apt/dnf own
  * the update), an OS session that's already ending, no staged download (or one
  * that's already the running version), and the loop-breaker case (we already
  * auto-attempted this exact version and are still on the old one).
@@ -727,16 +728,17 @@ export async function applyPendingUpdateOnStartup(splashShownAt?: number): Promi
 export function register(): void {
   bindUpdaterEvents()
 
-  // Default ("Option B"): keep electron-updater's install-on-quit. A normal
-  // quit still installs a staged update; the `session-end` guard
-  // (`suppressInstallOnQuit`) flips `autoInstallOnAppQuit` off only when the OS
-  // is shutting down, so a Windows shutdown/restart/logoff can't kill the
-  // installer mid-write (the "reinstall on every shutdown" corruption loop).
-  //
-  // Gated ("Option C"): when the startup-install path is enabled, disable
+  // Startup install (the Windows default): disable electron-updater's
   // install-on-quit entirely up front — the staged update applies on the next
-  // launch (`applyPendingUpdateOnStartup`) instead. `electronAutoUpdater` is the
-  // same singleton the ToDesktop runtime drives, so this affects the real updater.
+  // launch (`applyPendingUpdateOnStartup`) instead of on quit, which is what a
+  // Windows shutdown can kill mid-write (the "reinstall on every shutdown"
+  // corruption loop). `electronAutoUpdater` is the same singleton the ToDesktop
+  // runtime drives, so this affects the real updater.
+  //
+  // Opted out (non-Windows, or `installUpdatesOnStartup` set to false): keep
+  // install-on-quit armed. A normal quit still installs a staged update; the
+  // `session-end` guard (`suppressInstallOnQuit`) flips `autoInstallOnAppQuit`
+  // off only when the OS is shutting down.
   if (isStartupInstallEnabled()) {
     suppressInstallOnQuit()
   }
