@@ -131,6 +131,26 @@ describe('TemplatePickerStep', () => {
       })
       expect(wrapper.find('.tps__alert--error').exists()).toBe(false)
     })
+
+    it('nudgeDiskError() shakes the block alert when blocked', async () => {
+      const wrapper = mountPicker({
+        selectedValue: VIDEO.value,
+        diskSpace: { free: 1 * GB, total: 500 * GB },
+      })
+      ;(wrapper.vm as unknown as { nudgeDiskError: () => void }).nudgeDiskError()
+      await wrapper.vm.$nextTick()
+      expect(wrapper.find('.tps__alert--error').classes()).toContain('tps__alert--nudge')
+    })
+
+    it('nudgeDiskError() is a no-op when not blocked', async () => {
+      const wrapper = mountPicker({
+        selectedValue: VIDEO.value,
+        diskSpace: { free: 100 * GB, total: 500 * GB },
+      })
+      ;(wrapper.vm as unknown as { nudgeDiskError: () => void }).nudgeDiskError()
+      await wrapper.vm.$nextTick()
+      expect(wrapper.find('.tps__alert--nudge').exists()).toBe(false)
+    })
   })
 
   describe('VRAM warning', () => {

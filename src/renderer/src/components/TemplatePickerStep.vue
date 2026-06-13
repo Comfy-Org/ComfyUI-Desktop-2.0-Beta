@@ -144,6 +144,22 @@ watch(diskBlocked, (blocked) => {
     alertsRef.value?.scrollIntoView({ behavior: reduced ? 'auto' : 'smooth', block: 'nearest' })
   })
 })
+
+/** Shake the disk-error alert so a blocked Install click is impossible to miss
+ *  (mirrors the consent-row nudge on the first-use screen). No-op when not
+ *  blocked. Exposed so the host wizard — which owns the Install button — can
+ *  trigger it. Auto-resets so it can replay on the next click. */
+const diskErrorNudge = ref(false)
+let diskNudgeTimer: ReturnType<typeof setTimeout> | undefined
+function nudgeDiskError(): void {
+  if (!diskBlocked.value) return
+  diskErrorNudge.value = true
+  clearTimeout(diskNudgeTimer)
+  diskNudgeTimer = setTimeout(() => {
+    diskErrorNudge.value = false
+  }, 600)
+}
+defineExpose({ nudgeDiskError })
 </script>
 
 <template>
@@ -215,7 +231,12 @@ watch(diskBlocked, (blocked) => {
       ref="alertsRef"
       class="tps__alerts"
     >
-      <div v-if="diskErrorMessage" class="tps__alert tps__alert--error" role="alert">
+      <div
+        v-if="diskErrorMessage"
+        class="tps__alert tps__alert--error"
+        :class="{ 'tps__alert--nudge': diskErrorNudge }"
+        role="alert"
+      >
         <CircleAlert :size="15" aria-hidden="true" />
         <span>{{ diskErrorMessage }}</span>
       </div>
@@ -396,6 +417,30 @@ watch(diskBlocked, (blocked) => {
   color: var(--warning);
 }
 
+/* Shake when a blocked Install is clicked (mirrors the consent-row nudge). */
+.tps__alert--nudge {
+  animation: tps-alert-shake 400ms cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+@keyframes tps-alert-shake {
+  10%,
+  90% {
+    transform: translateX(-1px);
+  }
+  20%,
+  80% {
+    transform: translateX(2px);
+  }
+  30%,
+  50%,
+  70% {
+    transform: translateX(-3px);
+  }
+  40%,
+  60% {
+    transform: translateX(3px);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .brand-variant-row,
   .tps__row-detail,
@@ -404,6 +449,9 @@ watch(diskBlocked, (blocked) => {
   }
   .tps__row-detail:not(.tps__row-detail--open) {
     display: none;
+  }
+  .tps__alert--nudge {
+    animation: none;
   }
 }
 </style>

@@ -196,6 +196,17 @@ export function isTemplateDiskBlocked(
   return diskSpace.free < required
 }
 
+/**
+ * Smallest model footprint among the model-bearing templates, or 0 when none
+ * carry models. Drives the "skip the picker entirely when even the cheapest
+ * template won't fit" gate — there's no point offering a showcase nothing on it
+ * can install. Zero-model templates are ignored (they need no disk).
+ */
+export function minTemplateModelBytes(modelByteSizes: number[]): number {
+  const withModels = modelByteSizes.filter((b) => b > 0)
+  return withModels.length ? Math.min(...withModels) : 0
+}
+
 export async function checkTemplateDiskOrBlock(opts: {
   path: string
   estimatedModelBytes: number

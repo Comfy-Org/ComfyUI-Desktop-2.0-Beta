@@ -20,7 +20,8 @@ import {
   checkNvidiaDriverOrWarn,
   checkDiskSpaceOrWarn,
   checkTemplateDiskOrBlock,
-  isTemplateDiskBlocked
+  isTemplateDiskBlocked,
+  minTemplateModelBytes
 } from '../lib/installHelpers'
 import TakeoverBack from '../components/TakeoverBack.vue'
 import BrandTakeoverLayout from '../components/BrandTakeoverLayout.vue'
@@ -127,6 +128,8 @@ const templateInstallBlocked = computed(() => {
   return isTemplateDiskBlocked(diskSpace.value, modelBytes)
 })
 
+const pickerRef = ref<InstanceType<typeof TemplatePickerStep> | null>(null)
+
 /** Which step of the takeover is showing: Configure, then the (optional,
  *  standalone-only) starter-template picker before install. */
 const step = ref<'configure' | 'template'>('configure')
@@ -146,16 +149,31 @@ const starterTemplatesVariant = ref<StarterTemplatesVariant>('control')
 const templateOptions = computed<FieldOption[]>(
   () => fieldOptions.value.get('bundledTemplate') ?? []
 )
+
+/** Volume can't fit even the smallest model-bearing template (incl. headroom).
+ *  When known and true, there's nothing the picker could install, so we skip the
+ *  step outright rather than show it with every option blocked. Stays `false`
+ *  while disk space is unknown/loading — we only skip on a confirmed shortfall. */
+const diskTooSmallForAnyTemplate = computed(() => {
+  if (diskSpaceLoading.value || !diskSpace.value) return false
+  const cheapest = minTemplateModelBytes(
+    templateOptions.value.map((o) => (o.data?.sizeBytes as number | undefined) ?? 0)
+  )
+  return isTemplateDiskBlocked(diskSpace.value, cheapest)
+})
+
 /** Show the picker step only for the standalone source when it's enabled,
- *  the user is in the `treatment` arm of the picker experiment, and the
- *  template field actually produced options. `control` users never see the
- *  step regardless of the `skipTemplatePickerStep` setting. */
+ *  the user is in the `treatment` arm of the picker experiment, the template
+ *  field produced options, and the volume can fit at least one template's
+ *  models. `control` users never see the step regardless of the
+ *  `skipTemplatePickerStep` setting. */
 const shouldShowPickerStep = computed(
   () =>
     currentSource.value?.id === 'standalone' &&
     pickerEnabled.value &&
     starterTemplatesVariant.value === 'treatment' &&
-    templateOptions.value.length > 0
+    templateOptions.value.length > 0 &&
+    !diskTooSmallForAnyTemplate.value
 )
 
 function selectTemplate(option: FieldOption): void {
@@ -196,8 +214,15 @@ async function handleConfigureContinue(): Promise<void> {
   await handleSave()
 }
 
-/** Picker's "Install": persist the opt-out (if ticked) then install. */
+/** Picker's "Install": persist the opt-out (if ticked) then install. When the
+ *  volume can't fit the selected template, shake the disk-error alert instead of
+ *  installing (the button stays clickable so the nudge can fire, mirroring the
+ *  first-use consent gate). */
 async function handleTemplateInstall(): Promise<void> {
+  if (templateInstallBlocked.value) {
+    pickerRef.value?.nudgeDiskError()
+    return
+  }
   const tpl = selectedTemplate.value
   emitTelemetryAction('comfy.desktop.template.install_confirmed', {
     template_id: tpl?.value ?? NO_TEMPLATE_VALUE,
@@ -1103,6 +1128,7 @@ defineExpose({ open })
       <div class="brand-card template-card">
         <div class="brand-card__body template-card__body">
           <TemplatePickerStep
+            ref="pickerRef"
             :options="templateOptions"
             :none-value="NO_TEMPLATE_VALUE"
             :selected-value="selections.bundledTemplate?.value ?? null"
@@ -1125,7 +1151,8 @@ defineExpose({ open })
             <button
               type="button"
               class="brand-primary template-install"
-              :disabled="templateInstallBlocked"
+              :class="{ 'template-install--blocked': templateInstallBlocked }"
+              :aria-disabled="templateInstallBlocked"
               :aria-describedby="templateInstallBlocked ? 'tps-alerts' : undefined"
               @click="handleTemplateInstall"
             >
@@ -1231,6 +1258,16 @@ defineExpose({ open })
 }
 .template-install {
   min-width: 120px;
+}
+/* Reads as disabled but stays clickable so the click can shake the disk-error
+ *  alert (mirrors the first-use consent gate). */
+.template-install--blocked {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.template-install--blocked:hover {
+  background: var(--comfy-yellow);
+  border-color: var(--comfy-yellow);
 }
 
 .config-card {
