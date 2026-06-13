@@ -728,11 +728,17 @@ function scrubProperties(properties: TelemetryContext): TelemetryContext {
   let mutated: TelemetryContext | null = null
   for (const key of Object.keys(properties)) {
     const value = properties[key]
-    if (typeof value !== 'string') continue
-    const cleaned = scrubAll(value)
-    if (cleaned === value) continue
-    if (!mutated) mutated = { ...properties }
-    mutated[key] = cleaned
+    if (typeof value === 'string') {
+      const cleaned = scrubAll(value)
+      if (cleaned === value) continue
+      if (!mutated) mutated = { ...properties }
+      mutated[key] = cleaned
+    } else if (Array.isArray(value)) {
+      const cleaned = value.map((entry) => (typeof entry === 'string' ? scrubAll(entry) : entry))
+      if (cleaned.every((entry, index) => entry === value[index])) continue
+      if (!mutated) mutated = { ...properties }
+      mutated[key] = cleaned
+    }
   }
   return mutated ?? properties
 }
