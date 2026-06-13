@@ -171,6 +171,12 @@ export function setTemplateTrayMirror(installationId: string, entries: DownloadP
     bucket.set(entry.url, { ...entry, createdAt })
   }
   templateTrayMirrorByInstall.set(installationId, bucket)
+  // Fan out as `model-download-progress` so the renderer download store (the
+  // All-Downloads modal + Settings tab) tracks these like any real download.
+  // The tray popup reads the merged `getDownloadsTrayState()` snapshot instead.
+  for (const entry of bucket.values()) {
+    _broadcastToRenderer('model-download-progress', entry)
+  }
   downloadEvents.emit('tray-state-changed')
 }
 
@@ -1091,6 +1097,11 @@ export function getAllDownloads(): DownloadProgress[] {
   }
   for (const recent of recentDownloads) {
     result.push(recent)
+  }
+  // Seed the All-Downloads modal with template-mirror rows too, matching what
+  // `getDownloadsTrayState()` shows in the tray popup.
+  for (const bucket of templateTrayMirrorByInstall.values()) {
+    for (const entry of bucket.values()) result.push(entry)
   }
   return result
 }

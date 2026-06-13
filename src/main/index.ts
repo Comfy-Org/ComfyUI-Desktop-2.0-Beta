@@ -29,6 +29,7 @@ import { openSystemModal, openSystemModalAsync, registerSystemModalIpc } from '.
 import {
   registerTitlePopupIpc,
   triggerPickerSnapshotBroadcast,
+  openDownloadsTrayForInstall,
   type InstancePickerInstall
 } from './popups/titlePopup'
 import { registerPickerSettingsIpc } from './popups/pickerSettingsHandlers'
@@ -46,7 +47,8 @@ import {
   downloadEvents,
   getDownloadsTrayState
 } from './lib/comfyDownloadManager'
-import { hasActiveTemplateDownloads } from './sources/standalone/templateDownloadTask'
+import { hasActiveTemplateDownloads, getTemplateDownloadState } from './sources/standalone/templateDownloadTask'
+import { isTerminal as isTemplateDownloadTerminal } from './sources/standalone/templateDownloadCore'
 import { registerAssetDownloadHandlers } from './lib/ipc/registerAssetDownloadHandlers'
 import { registerDownloadHandlers } from './lib/ipc/registerDownloadHandlers'
 import {
@@ -587,6 +589,7 @@ function onLaunch({
         // Session registry handles state cleanup
       })
     }
+    scheduleTemplateTrayAutoOpen(installationId)
     return
   }
 
@@ -621,6 +624,7 @@ function onLaunch({
             // Session registry handles state cleanup
           })
         }
+        scheduleTemplateTrayAutoOpen(installationId)
         return
       }
       // Attach failed (telemetry-only — every current call site
@@ -692,6 +696,28 @@ function onLaunch({
       // Session registry handles state cleanup
     })
   }
+
+  scheduleTemplateTrayAutoOpen(installationId)
+}
+
+const TEMPLATE_TRAY_AUTO_OPEN_MS = 2500
+
+/**
+ * First launch after picking a starter template: if its models are still
+ * downloading as ComfyUI appears, surface the downloads tray a couple seconds in
+ * so the user notices it. Called on every `onLaunch` reveal path (reuse / chooser
+ * in-place attach / fresh window). Re-checks the download state at fire time (it
+ * may finish in the delay) and the window at open time (it may close).
+ */
+function scheduleTemplateTrayAutoOpen(installationId: string): void {
+  const state = getTemplateDownloadState(installationId)
+  if (!state || isTemplateDownloadTerminal(state.status)) return
+  setTimeout(() => {
+    const cur = getTemplateDownloadState(installationId)
+    if (cur && !isTemplateDownloadTerminal(cur.status)) {
+      openDownloadsTrayForInstall(installationId)
+    }
+  }, TEMPLATE_TRAY_AUTO_OPEN_MS)
 }
 
 ipcMain.handle('quit-app', () => quitApp())

@@ -317,3 +317,36 @@ describe('template tray-mirror cleanup', () => {
     mod.clearTemplateTrayMirror('inst-b') // cleanup so other tests start clean
   })
 })
+
+describe('template mirror visibility in the All-Downloads modal', () => {
+  const entry = (url: string) => ({
+    url,
+    filename: url.split('/').pop()!,
+    progress: 40,
+    status: 'downloading' as const,
+  })
+
+  it('getAllDownloads() includes template-mirror rows (modal seed)', () => {
+    mod.setTemplateTrayMirror('inst-seed', [entry('template-model://loras/x.safetensors')])
+    expect(mod.getAllDownloads().some((d) => d.url.includes('x.safetensors'))).toBe(true)
+    mod.clearTemplateTrayMirror('inst-seed')
+  })
+
+  it('setTemplateTrayMirror fans each row out as model-download-progress (modal live)', async () => {
+    const { BrowserWindow } = (await import('electron')) as unknown as {
+      BrowserWindow: { getAllWindows: () => unknown[] }
+    }
+    const send = vi.fn()
+    const fakeWin = { isDestroyed: () => false, webContents: { isDestroyed: () => false, send } }
+    const spy = vi.spyOn(BrowserWindow, 'getAllWindows').mockReturnValue([fakeWin])
+    try {
+      mod.setTemplateTrayMirror('inst-live', [entry('template-model://vae/y.safetensors')])
+      const progressCalls = send.mock.calls.filter((c) => c[0] === 'model-download-progress')
+      expect(progressCalls.length).toBeGreaterThanOrEqual(1)
+      expect(progressCalls.some((c) => (c[1] as { url: string }).url.includes('y.safetensors'))).toBe(true)
+    } finally {
+      spy.mockRestore()
+      mod.clearTemplateTrayMirror('inst-live')
+    }
+  })
+})
