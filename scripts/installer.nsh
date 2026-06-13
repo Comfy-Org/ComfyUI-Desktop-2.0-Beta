@@ -116,18 +116,29 @@
     ${IfNot} ${Errors}
       StrCpy $isForceCurrentInstall 1
     ${Else}
-      ; A non-silent update (electron-updater passes --updated but no install-
-      ; mode flag) would otherwise stop on the install-mode page — the one
-      ; pre-progress page electron-builder does NOT auto-skip on update — making
-      ; the user confirm before the progress bar. .onInit's initMultiUser has
-      ; already committed a scope into $installMode (matching the existing
-      ; install, or the per-user default when none is detected), so on update we
-      ; force-skip the page using that same scope. Keying off $installMode rather
-      ; than the raw hasPer*Installation flags means we still skip when registry
-      ; detection comes back ambiguous/empty — the case that left the page
-      ; showing before.
+      ; A non-silent update (electron-updater passes --updated and /D=<dir> but
+      ; no /allusers|/currentuser) would otherwise stop on the install-mode page
+      ; — the one pre-progress page electron-builder does NOT auto-skip on update
+      ; — making the user confirm before the progress bar. Force-skip it on
+      ; update, preserving the scope of the install actually being updated:
+      ;   1. Match electron-updater's /D= dir against the per-machine / per-user
+      ;      InstallLocation that .onInit detected. This is authoritative even
+      ;      when BOTH scopes exist, since /D= points at the running install.
+      ;   2. Otherwise fall back to $installMode — the scope initMultiUser
+      ;      already committed (the lone detected install, or the per-user
+      ;      default for this perMachine:false app when none is detectable).
+      ; The fallback never switches a cleanly-detected install's scope.
       ${If} ${isUpdated}
-        ${If} $installMode == "all"
+        !insertmacro GetDParameter $R2
+        ${If} $R2 != ""
+        ${AndIf} $hasPerMachineInstallation == "1"
+        ${AndIf} $perMachineInstallationFolder == $R2
+          StrCpy $isForceMachineInstall 1
+        ${ElseIf} $R2 != ""
+        ${AndIf} $hasPerUserInstallation == "1"
+        ${AndIf} $perUserInstallationFolder == $R2
+          StrCpy $isForceCurrentInstall 1
+        ${ElseIf} $installMode == "all"
           StrCpy $isForceMachineInstall 1
         ${Else}
           StrCpy $isForceCurrentInstall 1
