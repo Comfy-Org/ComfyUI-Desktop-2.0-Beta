@@ -51,7 +51,8 @@ import { registerDownloadHandlers } from './lib/ipc/registerDownloadHandlers'
 import {
   get as getInstallation,
   installationEvents,
-  list as listInstallations
+  list as listInstallations,
+  CLOUD_SOURCE_ID
 } from './installations'
 import { startPeriodicReleaseChecks } from './lib/release-cache-startup'
 import { showSplashPage } from './lib/relaunchPage'
@@ -86,8 +87,10 @@ import {
 import { initExperiments } from './lib/experiments'
 import { initCloudCapacity } from './lib/cloudCapacity'
 import { initUserTier } from './lib/userTier'
+import { resolveDeepLink } from './lib/deepLink'
 
 import {
+  bringToFront,
   claimAttachHost,
   comfyWindows,
   computeBodyMode,
@@ -1227,14 +1230,110 @@ function findInstallationIdForWindow(win: BrowserWindow): string | undefined {
   return undefined
 }
 
+// ---------------------------------------------------------------------------
+// `comfy://` deep links
+//
+// An OS `comfy://open?path=/workflows/123` link opens (or focuses) the app and
+// loads `https://cloud.comfy.org/workflows/123` in the Comfy Cloud host window.
+// The raw string is untrusted: `resolveDeepLink` allowlists the resolved origin
+// to cloud.comfy.org and returns `null` for anything else (other scheme/origin,
+// `//evil.com` tricks, relative paths). We never navigate to a non-cloud URL.
+// ---------------------------------------------------------------------------
+
+/** A `comfy://` URL received before `app.whenReady()` resolved (macOS
+ *  `open-url` can fire at cold start). Replayed once the app is ready. */
+let pendingDeepLink: string | null = null
+/** Flipped true once `whenReady` has run so `handleDeepLink` knows whether to
+ *  act immediately or buffer. */
+let appIsReady = false
+
+/** Pull the first `comfy://` argument out of a process argv array (the shape
+ *  Windows/Linux deliver a deep link in — at cold start and on second-instance). */
+function findDeepLinkArg(argv: readonly string[]): string | null {
+  return argv.find((arg) => arg.startsWith('comfy://')) ?? null
+}
+
+/**
+ * Resolve, then route a raw `comfy://` deep link to the cloud host window.
+ * Invalid links (per `resolveDeepLink`) are ignored. Buffers until the app is
+ * ready so a cold-start link isn't dropped.
+ */
+function handleDeepLink(rawUrl: string): void {
+  const target = resolveDeepLink(rawUrl)
+  if (!target) {
+    console.warn('[deeplink] ignored untrusted or malformed link', { rawUrl })
+    return
+  }
+  if (!appIsReady) {
+    pendingDeepLink = target
+    return
+  }
+  void routeCloudDeepLink(target).catch((err) => {
+    console.warn('[deeplink] failed to route link', err)
+  })
+}
+
+/**
+ * Navigate the Comfy Cloud host to `targetUrl`.
+ *  - If a cloud host window already exists, focus it and point its comfyView at
+ *    the URL (covers the already-running case `handleLaunch` would refuse).
+ *  - Otherwise stamp the URL onto the cloud install and launch it through the
+ *    normal cloud source path, which opens the host window via `onLaunch`.
+ */
+async function routeCloudDeepLink(targetUrl: string): Promise<void> {
+  for (const entry of comfyWindows.values()) {
+    if (entry.window.isDestroyed()) continue
+    if (entry.sourceCategory !== 'cloud') continue
+    entry.comfyUrl = targetUrl
+    bringToFront(entry.window)
+    if (!entry.comfyView.webContents.isDestroyed()) {
+      void entry.comfyView.webContents.loadURL(targetUrl).catch(() => {})
+    }
+    return
+  }
+
+  // No live cloud host — launch the cloud install pointed at the target URL.
+  const all = await listInstallations()
+  const cloudInstall = all.find((i) => i.sourceId === CLOUD_SOURCE_ID)
+  if (!cloudInstall) {
+    console.warn('[deeplink] no cloud installation to launch')
+    return
+  }
+  const inst = (await updateInstallation(cloudInstall.id, { remoteUrl: targetUrl })) ?? cloudInstall
+  const stubSender = {
+    isDestroyed: () => false,
+    send: () => {}
+  } as unknown as Electron.WebContents
+  const stubEvent = { sender: stubSender } as unknown as Electron.IpcMainInvokeEvent
+  await handleLaunch({
+    event: stubEvent,
+    installationId: inst.id,
+    inst,
+    actionData: undefined
+  })
+}
+
+// macOS delivers `comfy://` links via `open-url`, which can fire BEFORE
+// `whenReady` at cold start — register it eagerly so the link is buffered.
+app.on('open-url', (event, url) => {
+  event.preventDefault()
+  handleDeepLink(url)
+})
+
 if (app.isPackaged && !app.requestSingleInstanceLock()) {
   app.quit()
 } else {
   if (app.isPackaged) {
-    app.on('second-instance', () => {
-      // OS-level "open another instance" attempt — focus an existing
-      // host window (chooser or install-backed) instead of stacking
-      // a duplicate.
+    app.on('second-instance', (_event, argv) => {
+      // OS-level "open another instance" attempt. On Windows/Linux a
+      // `comfy://` deep link is delivered as the second instance's argv —
+      // route it instead of merely focusing. Otherwise just focus an
+      // existing host window rather than stacking a duplicate.
+      const deepLink = findDeepLinkArg(argv)
+      if (deepLink) {
+        handleDeepLink(deepLink)
+        return
+      }
       openOrFocusAnyHostWindow()
     })
   }
@@ -1267,6 +1366,22 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
   })
 
   app.whenReady().then(async () => {
+    // Register the app as the OS handler for `comfy://` links. On an
+    // unpackaged dev build the executable is Electron itself, so the
+    // launcher path + the app entry argv must be forwarded explicitly
+    // (Windows especially); packaged builds resolve to the real app.
+    if (process.defaultApp && process.argv.length >= 2) {
+      app.setAsDefaultProtocolClient('comfy', process.execPath, [path.resolve(process.argv[1]!)])
+    } else {
+      app.setAsDefaultProtocolClient('comfy')
+    }
+
+    // Windows/Linux cold start: a `comfy://` link the OS used to launch us
+    // arrives in argv rather than via `open-url`. Buffer it now; it replays
+    // once the app finishes coming up (below, after host factories wire up).
+    const coldStartLink = findDeepLinkArg(process.argv)
+    if (coldStartLink) pendingDeepLink = resolveDeepLink(coldStartLink)
+
     // Test-only hooks for the E2E suite. Registered before any host
     // opens so seeded state (downloads, install-update overrides,
     // app-update state) is visible to the very first title-bar paint.
@@ -2119,6 +2234,17 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
         ? { intervalMs: _periodicIntervalMs }
         : {})
     })
+
+    // App is fully up: flush any `comfy://` link buffered during cold start
+    // (macOS `open-url` before `whenReady`, or Windows/Linux launch argv).
+    appIsReady = true
+    if (pendingDeepLink) {
+      const link = pendingDeepLink
+      pendingDeepLink = null
+      void routeCloudDeepLink(link).catch((err) => {
+        console.warn('[deeplink] failed to route buffered link', err)
+      })
+    }
   })
 
   app.on('activate', () => {
