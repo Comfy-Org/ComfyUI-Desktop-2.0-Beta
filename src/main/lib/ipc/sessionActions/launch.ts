@@ -579,7 +579,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     let nextPort: number | null = null
     try {
       nextPort = await findAvailablePort('127.0.0.1', launchCmd.port! + 1, launchCmd.port! + 1000, reservedPorts)
-    } catch {}
+    } catch { }
 
     if (portConflictMode === 'auto' && nextPort && !portIsExplicit) {
       sendProgress('launch', { percent: -1, status: i18n.t('launch.portBusyUsing', { old: launchCmd.port!, new: nextPort }) })
@@ -625,7 +625,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     let nextPort: number | null = null
     try {
       nextPort = await findAvailablePort('127.0.0.1', launchCmd.port! + 1, launchCmd.port! + 1000, reservedPorts)
-    } catch {}
+    } catch { }
 
     if (portConflictMode === 'auto' && nextPort && !portIsExplicit) {
       sendProgress('launch', { percent: -1, status: i18n.t('launch.portBusyUsing', { old: launchCmd.port!, new: nextPort }) })
@@ -746,7 +746,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
           setPortArg(launchCmd as LaunchCmd, retryPort)
           _reservePort(launchCmd.port!, inst.name)
           return tryLaunch()
-        } catch {}
+        } catch { }
       }
       if (abort.signal.aborted) return { ok: false, message: (err as Error).message, cancelled: true }
       return { ok: false, message: (err as Error).message }
@@ -758,6 +758,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     logStream.end()
     _releasePort(launchCmd.port!)
     _operationAborts.delete(installationId)
+    abort.abort() // stop the template-models reader timer on launch failure
     _clearLaunchingFailed(installationId)
     if (launchResult.cancelled) return { ok: false, cancelled: true }
     return { ok: false, message: launchResult.message }
@@ -795,7 +796,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     if (newFolders.length > 0) {
       sendOutput(`\n--- Restarting: new model folders detected (${newFolders.join(', ')}) ---\n\n`)
       if (_onModelFolderRelaunch) {
-        await Promise.resolve(_onModelFolderRelaunch({ installationId })).catch(() => {})
+        await Promise.resolve(_onModelFolderRelaunch({ installationId })).catch(() => { })
       }
       await killProcessTree(proc)
       const respawned = spawnComfy()
@@ -890,12 +891,12 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
                 sendOutput(`\n--- Restarting: new model folders detected (${newFolders.join(', ')}) ---\n\n`)
                 pendingModelFolderRelaunch = true
                 if (_onModelFolderRelaunch) {
-                  await Promise.resolve(_onModelFolderRelaunch({ installationId })).catch(() => {})
+                  await Promise.resolve(_onModelFolderRelaunch({ installationId })).catch(() => { })
                 }
                 killProcessTree(proc)
               }
             })
-            .catch(() => {})
+            .catch(() => { })
         }
         // Capture snapshot after Manager-triggered restart
         if (inst.sourceId === 'standalone') {
@@ -947,6 +948,10 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
   // download step is the active row + the footer Skip is live) until it settles
   // or the user skips, instead of flashing past into ComfyUI.
   await waitForTemplateDownloadGate()
+
+  // Stop the `template-models` reader's 500 ms timer: on a skip the download
+  // stays non-terminal, so its loop would otherwise spin for the app's lifetime.
+  abort.abort()
 
   if (_onLaunch) {
     _onLaunch({ port: launchCmd.port!, process: proc, installation: inst, mode })

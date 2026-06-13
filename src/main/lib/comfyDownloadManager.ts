@@ -38,19 +38,19 @@ export function buildSaveDialogFilters(suggestedName: string): Electron.FileFilt
   // to the single one we infer. Comfy outputs png/webp/jpg images, mp4/webm
   // video, and wav/mp3/flac/ogg audio depending on the node graph.
   const FAMILIES: Record<string, { name: string; extensions: string[] }> = {
-    png:  { name: 'PNG Image',  extensions: ['png'] },
-    jpg:  { name: 'JPEG Image', extensions: ['jpg', 'jpeg'] },
+    png: { name: 'PNG Image', extensions: ['png'] },
+    jpg: { name: 'JPEG Image', extensions: ['jpg', 'jpeg'] },
     jpeg: { name: 'JPEG Image', extensions: ['jpg', 'jpeg'] },
     webp: { name: 'WebP Image', extensions: ['webp'] },
-    gif:  { name: 'GIF Image',  extensions: ['gif'] },
-    bmp:  { name: 'Bitmap Image', extensions: ['bmp'] },
-    mp4:  { name: 'MP4 Video',  extensions: ['mp4'] },
+    gif: { name: 'GIF Image', extensions: ['gif'] },
+    bmp: { name: 'Bitmap Image', extensions: ['bmp'] },
+    mp4: { name: 'MP4 Video', extensions: ['mp4'] },
     webm: { name: 'WebM Video', extensions: ['webm'] },
-    mov:  { name: 'QuickTime Video', extensions: ['mov'] },
-    wav:  { name: 'WAV Audio',  extensions: ['wav'] },
-    mp3:  { name: 'MP3 Audio',  extensions: ['mp3'] },
+    mov: { name: 'QuickTime Video', extensions: ['mov'] },
+    wav: { name: 'WAV Audio', extensions: ['wav'] },
+    mp3: { name: 'MP3 Audio', extensions: ['mp3'] },
     flac: { name: 'FLAC Audio', extensions: ['flac'] },
-    ogg:  { name: 'OGG Audio',  extensions: ['ogg'] },
+    ogg: { name: 'OGG Audio', extensions: ['ogg'] },
   }
 
   const primary = FAMILIES[ext]
@@ -144,36 +144,42 @@ function isTerminalStatus(status: DownloadProgress['status']): boolean {
  * ComfyUI. The resume-capable background task stays the byte-owner; this is a
  * read-only reflection merged into the tray view-state, NOT a real download — so
  * it never touches `pendingDownloads`' DownloadItem lifecycle (cancel/retry/
- * temp-rename stay untouched). Keyed by the entry's synthetic url. */
-const templateTrayMirror = new Map<string, DownloadProgress>()
+ * temp-rename stay untouched). Scoped per install so concurrent installs can each
+ * mirror their own rows without clobbering one another. */
+const templateTrayMirrorByInstall = new Map<string, Map<string, DownloadProgress>>()
 
 /**
- * Replace the mirrored template rows and notify the tray. `entries` is the full
- * current set (one per template file); passing `[]` clears the mirror. Stamps
- * `createdAt` so the rows hold a stable slot, same as real downloads.
+ * Replace `installationId`'s mirrored template rows and notify the tray.
+ * `entries` is that install's full current set (one per template file); passing
+ * `[]` clears its rows. Stamps `createdAt` so rows hold a stable slot.
  */
-export function setTemplateTrayMirror(entries: DownloadProgress[]): void {
+export function setTemplateTrayMirror(installationId: string, entries: DownloadProgress[]): void {
+  const prev = templateTrayMirrorByInstall.get(installationId)
   const nextUrls = new Set(entries.map((e) => e.url))
-  for (const url of templateTrayMirror.keys()) {
-    if (!nextUrls.has(url)) createdAtByUrl.delete(url)
+  if (prev) {
+    for (const url of prev.keys()) {
+      if (!nextUrls.has(url)) createdAtByUrl.delete(url)
+    }
   }
-  templateTrayMirror.clear()
+  const bucket = new Map<string, DownloadProgress>()
   for (const entry of entries) {
     let createdAt = createdAtByUrl.get(entry.url)
     if (createdAt === undefined) {
       createdAt = Date.now()
       createdAtByUrl.set(entry.url, createdAt)
     }
-    templateTrayMirror.set(entry.url, { ...entry, createdAt })
+    bucket.set(entry.url, { ...entry, createdAt })
   }
+  templateTrayMirrorByInstall.set(installationId, bucket)
   downloadEvents.emit('tray-state-changed')
 }
 
-/** Drop all mirrored template rows from the tray (e.g. window close). */
-export function clearTemplateTrayMirror(): void {
-  if (templateTrayMirror.size === 0) return
-  for (const url of templateTrayMirror.keys()) createdAtByUrl.delete(url)
-  templateTrayMirror.clear()
+/** Drop `installationId`'s mirrored template rows from the tray (e.g. window close). */
+export function clearTemplateTrayMirror(installationId: string): void {
+  const bucket = templateTrayMirrorByInstall.get(installationId)
+  if (!bucket) return
+  for (const url of bucket.keys()) createdAtByUrl.delete(url)
+  templateTrayMirrorByInstall.delete(installationId)
   downloadEvents.emit('tray-state-changed')
 }
 
@@ -203,12 +209,14 @@ export function getDownloadsTrayState(): DownloadsTrayState {
       active.push(pending.lastProgress)
     }
   }
-  // Merge mirrored template-model rows: in-flight ones join `active`, finished
-  // ones join `recent`, so the tray reflects the skipped-but-still-running
-  // download exactly like a native one.
-  for (const entry of templateTrayMirror.values()) {
-    if (isTerminalStatus(entry.status)) recent.push(entry)
-    else active.push(entry)
+  // Merge every install's mirrored template-model rows: in-flight ones join
+  // `active`, finished ones join `recent`, so the tray reflects each
+  // skipped-but-still-running download exactly like a native one.
+  for (const bucket of templateTrayMirrorByInstall.values()) {
+    for (const entry of bucket.values()) {
+      if (isTerminalStatus(entry.status)) recent.push(entry)
+      else active.push(entry)
+    }
   }
   return { active, recent }
 }
@@ -480,7 +488,7 @@ export function parseContentDispositionFilename(header: string | null): string |
   // Try filename*= (RFC 5987 encoded)
   const starMatch = header.match(/filename\*\s*=\s*(?:UTF-8''|utf-8'')([^;\s]+)/i)
   if (starMatch?.[1]) {
-    try { return decodeURIComponent(starMatch[1]) } catch {}
+    try { return decodeURIComponent(starMatch[1]) } catch { }
   }
   // Try filename="..." or filename=...
   const match = header.match(/filename\s*=\s*"([^"]+)"/i) || header.match(/filename\s*=\s*([^;\s]+)/i)
@@ -499,7 +507,7 @@ function resolveServerFilename(item: Electron.DownloadItem): string | null {
       const rcd = new URL(u).searchParams.get('response-content-disposition')
       const rcdName = parseContentDispositionFilename(rcd)
       if (rcdName) return rcdName
-    } catch {}
+    } catch { }
   }
 
   return null
@@ -764,7 +772,7 @@ function attachDownloadListeners(item: Electron.DownloadItem, pending: PendingDo
         try {
           fs.renameSync(pending.tempPath, pending.savePath)
         } catch {
-          try { fs.unlinkSync(pending.tempPath) } catch {}
+          try { fs.unlinkSync(pending.tempPath) } catch { }
           if (!fs.existsSync(pending.savePath)) {
             reportProgress({
               url: pending.url,
@@ -779,7 +787,7 @@ function attachDownloadListeners(item: Electron.DownloadItem, pending: PendingDo
           }
         }
         // Try to remove the temp directory if it's now empty (safe — fails silently if not empty)
-        try { fs.rmdirSync(path.dirname(pending.tempPath)) } catch {}
+        try { fs.rmdirSync(path.dirname(pending.tempPath)) } catch { }
       }
       reportProgress({
         url: pending.url,
@@ -792,8 +800,8 @@ function attachDownloadListeners(item: Electron.DownloadItem, pending: PendingDo
       })
     } else if (state === 'cancelled') {
       if (pending.tempPath) {
-        try { fs.unlinkSync(pending.tempPath) } catch {}
-        try { fs.rmdirSync(path.dirname(pending.tempPath)) } catch {}
+        try { fs.unlinkSync(pending.tempPath) } catch { }
+        try { fs.rmdirSync(path.dirname(pending.tempPath)) } catch { }
       }
       reportProgress({
         url: pending.url,
@@ -804,8 +812,8 @@ function attachDownloadListeners(item: Electron.DownloadItem, pending: PendingDo
       })
     } else {
       if (pending.tempPath) {
-        try { fs.unlinkSync(pending.tempPath) } catch {}
-        try { fs.rmdirSync(path.dirname(pending.tempPath)) } catch {}
+        try { fs.unlinkSync(pending.tempPath) } catch { }
+        try { fs.rmdirSync(path.dirname(pending.tempPath)) } catch { }
       }
       reportProgress({
         url: pending.url,
@@ -1129,10 +1137,10 @@ export function detachWindowDownloads(win: BrowserWindow): void {
 export async function cleanupTempDownloads(): Promise<void> {
   try {
     await fs.promises.rm(getTempDir(), { recursive: true, force: true })
-  } catch {}
+  } catch { }
   try {
     await fs.promises.rm(getAssetTempDir(), { recursive: true, force: true })
-  } catch {}
+  } catch { }
 }
 
 /** Test-only: replace the in-memory buffers with `snapshot` and emit

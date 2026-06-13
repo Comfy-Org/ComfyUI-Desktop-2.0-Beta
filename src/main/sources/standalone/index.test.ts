@@ -16,6 +16,7 @@ vi.mock('../../lib/comfyui-releases', () => ({
 }))
 
 import { standalone, buildPinnedVariant } from './index'
+import { NO_TEMPLATE_VALUE } from './bundledTemplates'
 import { fetchJSON } from '../../lib/fetch'
 import { getLatestStableTag } from '../../lib/comfyui-releases'
 import { PLATFORM_PREFIX } from './envPaths'
@@ -127,7 +128,7 @@ describe('standalone.buildInstallation', () => {
     const template = (value: string): FieldOption => ({ value, label: value })
 
     it('"Skip & Install" (template = none) builds NO model download', () => {
-      const result = standalone.buildInstallation({ ...base, bundledTemplate: template('none') })
+      const result = standalone.buildInstallation({ ...base, bundledTemplate: template(NO_TEMPLATE_VALUE) })
       expect(result.bundledTemplateId).toBeUndefined()
       expect(result.pendingTemplateOpen).toBeUndefined()
       expect(result.downloadTemplateModels).toBeUndefined()

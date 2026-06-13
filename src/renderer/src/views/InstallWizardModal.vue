@@ -144,7 +144,7 @@ const hasLocalInstall = ref(false)
 const starterTemplatesVariant = ref<StarterTemplatesVariant>('control')
 
 const templateOptions = computed<FieldOption[]>(
-  () => fieldOptions.value.get('bundledTemplate') ?? [],
+  () => fieldOptions.value.get('bundledTemplate') ?? []
 )
 /** Show the picker step only for the standalone source when it's enabled,
  *  the user is in the `treatment` arm of the picker experiment, and the
@@ -155,7 +155,7 @@ const shouldShowPickerStep = computed(
     currentSource.value?.id === 'standalone' &&
     pickerEnabled.value &&
     starterTemplatesVariant.value === 'treatment' &&
-    templateOptions.value.length > 0,
+    templateOptions.value.length > 0
 )
 
 function selectTemplate(option: FieldOption): void {
@@ -351,6 +351,7 @@ const cameFromLocalBranch = ref(false)
 
 async function open(opts: OpenOpts = {}): Promise<void> {
   loadGeneration++
+  const gen = loadGeneration
   instName.value = ''
   cameFromLocalBranch.value = opts.cameFromLocalBranch === true
   suggestedName.value = ''
@@ -375,13 +376,22 @@ async function open(opts: OpenOpts = {}): Promise<void> {
   initializing.value = true
   step.value = 'configure'
   dontShowTemplatePicker.value = false
+  // Reset to defaults synchronously so a slow prior-open response can't leave
+  // stale gating/VRAM on this open; the guarded callbacks below then refill them.
+  pickerEnabled.value = true
+  hasLocalInstall.value = false
+  detectedVramBytes.value = undefined
 
   // Resolve picker gating + VRAM in the background — needed only by the time the
   // user reaches the (later) template step, so they never block the Configure
-  // screen's first paint.
-  void window.api.getSetting('skipTemplatePickerStep').then((skip) => {
-    pickerEnabled.value = skip !== true
-  }).catch(() => {})
+  // screen's first paint. Generation-guarded so a reopen discards stale results.
+  void window.api
+    .getSetting('skipTemplatePickerStep')
+    .then((skip) => {
+      if (gen !== loadGeneration) return
+      pickerEnabled.value = skip !== true
+    })
+    .catch(() => {})
   // A/B: cache-first flag lookup. `null` (no cache, no remote) defaults to
   // `control` so a first-ever boot with no network keeps the legacy flow.
   // The exposure event is recorded once per session main-side regardless of
@@ -389,6 +399,7 @@ async function open(opts: OpenOpts = {}): Promise<void> {
   void window.api
     .telemetryGetExperimentFlag(STARTER_TEMPLATES_EXPERIMENT_KEY)
     .then((value) => {
+      if (gen !== loadGeneration) return
       const variant: StarterTemplatesVariant =
         value === 'treatment' ? 'treatment' : 'control'
       starterTemplatesVariant.value = variant
@@ -407,12 +418,20 @@ async function open(opts: OpenOpts = {}): Promise<void> {
     .catch(() => {
       /* fail closed to `control`, already the default. */
     })
-  void window.api.getInstallationsSummary().then((summary) => {
-    hasLocalInstall.value = summary.localCount > 0
-  }).catch(() => {})
-  void window.api.detectGPU().then((gpu) => {
-    detectedVramBytes.value = gpu?.vramBytes
-  }).catch(() => {})
+  void window.api
+    .getInstallationsSummary()
+    .then((summary) => {
+      if (gen !== loadGeneration) return
+      hasLocalInstall.value = summary.localCount > 0
+    })
+    .catch(() => {})
+  void window.api
+    .detectGPU()
+    .then((gpu) => {
+      if (gen !== loadGeneration) return
+      detectedVramBytes.value = gpu?.vramBytes
+    })
+    .catch(() => {})
 
   try {
     const [, installDir] = await Promise.all([loadSources(), installDirPromise])
@@ -1115,10 +1134,7 @@ defineExpose({ open })
           </div>
         </div>
       </div>
-      <label
-        v-if="hasLocalInstall"
-        class="brand-checkbox template-shell__opt-out"
-      >
+      <label v-if="hasLocalInstall" class="brand-checkbox template-shell__opt-out">
         <input v-model="dontShowTemplatePicker" type="checkbox" />
         <span class="brand-checkbox__text">{{ $t('standalone.templateDontShowAgain') }}</span>
       </label>

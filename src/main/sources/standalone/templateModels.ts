@@ -82,8 +82,9 @@ async function loadTemplateJson(
   }
 }
 
-/** True when `url` is a syntactically valid http(s) URL on a whitelisted host
- *  whose path ends in an allowed model extension. */
+/** True when `url` is a syntactically valid HTTPS URL on a whitelisted host
+ *  whose path ends in an allowed model extension. Plain `http:` is rejected so a
+ *  template can't point a model download at a tamperable transport. */
 function isAcceptableModelUrl(url: string): boolean {
   let parsed: URL
   try {
@@ -91,11 +92,37 @@ function isAcceptableModelUrl(url: string): boolean {
   } catch {
     return false
   }
-  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return false
+  if (parsed.protocol !== 'https:') return false
   const host = parsed.hostname.toLowerCase()
   if (!ALLOWED_HOSTS.some((h) => host === h || host.endsWith(`.${h}`))) return false
   const lowerPath = parsed.pathname.toLowerCase()
   return ALLOWED_EXTENSIONS.some((ext) => lowerPath.endsWith(ext))
+}
+
+/**
+ * Reject template-provided path traversal: a model's `directory` must be a
+ * relative path with no `..` segment and its `name` a bare filename (no
+ * separator), so a crafted template can't escape the models dir. Returns the
+ * normalized `{ directory, filename }` or `null` to drop the entry.
+ */
+export function sanitizeModelPath(
+  directory: string,
+  name: string,
+): { directory: string; filename: string } | null {
+  const normalizedDir = path.posix.normalize(directory.replace(/\\/g, '/'))
+  if (
+    path.posix.isAbsolute(normalizedDir) ||
+    normalizedDir === '..' ||
+    normalizedDir.startsWith('../') ||
+    normalizedDir.includes('/../')
+  ) {
+    return null
+  }
+  const filename = stripQueryParams(name)
+  if (!filename || filename.includes('/') || filename.includes('\\') || filename.includes('..')) {
+    return null
+  }
+  return { directory: normalizedDir, filename }
 }
 
 /** Collect every `{name,url,directory}` from a raw `models[]` array. */
@@ -159,11 +186,12 @@ export async function resolveTemplateModels(
       continue
     }
     if (!isAcceptableModelUrl(m.url)) continue
-    const filename = stripQueryParams(m.name)
-    const key = `${m.directory}/${filename}`
+    const safe = sanitizeModelPath(m.directory, m.name)
+    if (!safe) continue
+    const key = `${safe.directory}/${safe.filename}`
     if (seen.has(key)) continue
     seen.add(key)
-    result.push({ filename, url: m.url, directory: m.directory })
+    result.push({ filename: safe.filename, url: m.url, directory: safe.directory })
   }
   return result
 }

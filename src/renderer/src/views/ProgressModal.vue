@@ -61,7 +61,7 @@ const templateSkipped = ref(false)
 const canSkipTemplateDownload = computed<boolean>(() => {
   if (templateSkipped.value) return false
   const op = currentOp.value
-  if (!op || op.activePhase !== 'template-models') return false
+  if (!op || op.finished || op.activePhase !== 'template-models') return false
   // Only when it's genuinely still working — a finished/errored phase has
   // nothing to skip (the error substatus is the surface there).
   return !op.phaseErrors?.['template-models'] && globalProgress.value.percent < 100
@@ -70,10 +70,11 @@ const canSkipTemplateDownload = computed<boolean>(() => {
 async function handleSkipTemplateDownload(): Promise<void> {
   const id = displayId.value
   if (!id) return
-  templateSkipped.value = true
   emitTelemetryAction('comfy.desktop.template.download.skipped', { flow: 'launch' })
   try {
     await window.api.skipTemplateDownload(id)
+    // Mark consumed only on success, so a failed hand-off leaves the button live.
+    templateSkipped.value = true
   } catch {
     // Best-effort hand-off; the download keeps running regardless.
   }
@@ -272,10 +273,11 @@ function toggleBrandLogs(): void {
   brandLogsExpanded.value = !brandLogsExpanded.value
 }
 
-// Each op starts with the logs accordion closed.
+// Each op starts with the logs accordion closed and a fresh skip state.
 watch(displayId, () => {
   brandLogsExpanded.value = false
   brandIsAtBottom.value = true
+  templateSkipped.value = false
 })
 
 // Render only a trailing window; the store keeps the full buffer for telemetry. Rendering megabytes into one text node re-layouts the whole takeover.

@@ -96,7 +96,7 @@ export function mirrorTemplateDownloadToTray(installationId: string): void {
   const publish = (): boolean => {
     const state = _templateDownloads.get(installationId)
     if (!state) return true
-    setTemplateTrayMirror(templateStateToTrayEntries(state))
+    setTemplateTrayMirror(installationId, templateStateToTrayEntries(state))
     return isTerminal(state.status)
   }
 
@@ -118,7 +118,7 @@ export function stopTemplateTrayMirror(installationId: string): void {
     clearInterval(timer)
     _trayMirrors.delete(installationId)
   }
-  clearTemplateTrayMirror()
+  clearTemplateTrayMirror(installationId)
 }
 
 // --- Launch-gate: hold the ComfyUI reveal until the download settles ---------
@@ -354,7 +354,7 @@ async function runTask(
           },
         )
         f.done = true
-        try { f.total = (await fs.promises.stat(destPath)).size } catch {}
+        try { f.total = (await fs.promises.stat(destPath)).size } catch { }
         f.received = f.total || f.received
         sendOutput(`[templates] Saved ${f.directory}/${safeName}.\n`)
       } catch (err) {

@@ -13,6 +13,9 @@ import {
 } from './envPaths'
 import { install, postInstall, probeInstallation } from './install'
 import { BUNDLED_TEMPLATES, NO_TEMPLATE_VALUE } from './bundledTemplates'
+
+/** Known starter-template ids — gates what `buildInstallation` will persist. */
+const VALID_BUNDLED_TEMPLATE_IDS = new Set(BUNDLED_TEMPLATES.map((tpl) => tpl.id))
 import { getListPreview, getStatusTag, getDetailSections, R2_BASE_URL } from './updateSections'
 import { handleAction } from './actions'
 import type { InstallationRecord } from '../../installations'
@@ -181,14 +184,18 @@ export const standalone: SourcePlugin = {
     // a prior channel toggle is dropped here as a defence-in-depth.
     const pickedComfyTag = isStable
       ? (typeof selections.comfyVersion?.value === 'string' && /^v\d+\.\d+\.\d+$/.test(selections.comfyVersion.value)
-          ? selections.comfyVersion.value
-          : undefined)
+        ? selections.comfyVersion.value
+        : undefined)
       : undefined
     // Starter template: the chosen template id, or undefined when the user left
-    // the (recommended) "None" option selected.
+    // the (recommended) "None" option selected. Validated against the known set
+    // so a stale/forged selection can't persist an unknown id that later derails
+    // the open/download handling.
     const tplValue = selections.bundledTemplate?.value
     const bundledTemplateId =
-      tplValue && tplValue !== NO_TEMPLATE_VALUE ? tplValue : undefined
+      tplValue && tplValue !== NO_TEMPLATE_VALUE && VALID_BUNDLED_TEMPLATE_IDS.has(tplValue)
+        ? tplValue
+        : undefined
     return {
       version: r2Release?.comfyui_version || manifest?.comfyui_ref || releaseTag,
       releaseTag,
@@ -253,12 +260,12 @@ export const standalone: SourcePlugin = {
     )
     const adoptArgs = adoptedBaseDir
       ? [
-          '--base-directory', adoptedBaseDir,
-          '--user-directory', path.join(adoptedBaseDir, 'user'),
-          ...(userSetDatabaseUrl
-            ? []
-            : ['--database-url', `sqlite:///${path.join(adoptedBaseDir, 'user', 'comfyui.db')}`]),
-        ]
+        '--base-directory', adoptedBaseDir,
+        '--user-directory', path.join(adoptedBaseDir, 'user'),
+        ...(userSetDatabaseUrl
+          ? []
+          : ['--database-url', `sqlite:///${path.join(adoptedBaseDir, 'user', 'comfyui.db')}`]),
+      ]
       : []
     // Desktop-managed feature flags (e.g. show_signin_button) are injected in
     // handleLaunch after we discover the running ComfyUI's feature-flag registry,
@@ -319,7 +326,7 @@ export const standalone: SourcePlugin = {
         // `custom_nodes/` checked in). Remove the empty placeholder
         // first so the merge isn't ambiguous.
         if (fs.existsSync(dst)) {
-          try { await fs.promises.rm(dst, { recursive: true, force: true }) } catch {}
+          try { await fs.promises.rm(dst, { recursive: true, force: true }) } catch { }
         }
         sendProgress('copy', { percent: 0, status: `Copying legacy ${entry}…` })
         await copyDirWithProgress(src, dst, (copied, total, elapsedSecs, etaSecs) => {
@@ -367,7 +374,7 @@ export const standalone: SourcePlugin = {
               content = content.replaceAll(srcRewriteFrom, srcRewriteTo)
               await fs.promises.writeFile(filePath, content, 'utf-8')
             }
-          } catch {}
+          } catch { }
         }
       }
     }

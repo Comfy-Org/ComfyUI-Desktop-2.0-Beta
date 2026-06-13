@@ -124,10 +124,10 @@ describe('TemplatePickerStep', () => {
       expect(wrapper.find('.tps__alert--error').exists()).toBe(false)
     })
 
-    it('never blocks the model-free none-equivalent (no recommended bytes)', () => {
+    it('never blocks the model-free none sentinel even on a full disk', () => {
       const wrapper = mountPicker({
-        selectedValue: IMAGE.value,
-        diskSpace: { free: 100 * GB, total: 500 * GB },
+        selectedValue: NONE.value,
+        diskSpace: { free: 0, total: 500 * GB },
       })
       expect(wrapper.find('.tps__alert--error').exists()).toBe(false)
     })

@@ -628,7 +628,7 @@ describe('installations.clearPendingTemplateOpen', () => {
       bundledTemplateId: 'flux_schnell',
       pendingTemplateOpen: 'flux_schnell',
       downloadTemplateModels: true,
-    } as Partial<InstallationRecord> as InstallationRecord)
+    })
 
     expect(await installations.clearPendingTemplateOpen(entry.id)).toBe(true)
     expect((await installations.get(entry.id))!.pendingTemplateOpen).toBeNull()
