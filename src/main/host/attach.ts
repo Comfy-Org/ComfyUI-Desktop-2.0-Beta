@@ -5,7 +5,7 @@ import { getModelDownloadContentScript } from '../lib/comfyContentScript'
 import { getComfyTerminalContentScript } from '../lib/comfyTerminalContentScript'
 import { closeInstallPopouts } from '../lib/popoutWindows'
 import { _operationAborts, sourceMap } from '../lib/ipc/shared'
-import { TITLEBAR_BG } from '../lib/theme'
+import { readableSymbolColor } from '../lib/theme'
 import * as mainTelemetry from '../lib/telemetry'
 import { refreshCloudUserTier } from '../lib/userTier'
 import { noteCloudEntered } from '../lib/cloudEntry'
@@ -213,17 +213,16 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
   }
   installationEvents.on('updated', onInstallationUpdated)
 
-  // Sync the title bar and overlay colors with the ComfyUI frontend's theme.
-  // Currently locked to the dark title-bar palette regardless of the
-  // reported bg/text — the app's title-bar surfaces (Vue pills,
-  // dropdown popups, tooltips, OS overlay) are dark-only today, and
-  // pushing a light bg into the OS overlay paints the min/max/close
-  // symbols light over the still-dark Vue header. The arguments are
-  // kept so the observer + ipc-message wiring stays intact for a
-  // future re-introduction of theme tracking.
-  const applyComfyTheme = (_bg: string, _text: string): void => {
+  /**
+   * Paint the Vue header and the OS window-controls overlay from ComfyUI's
+   * reported `bg` in one call, so the strip behind the min/max/close controls
+   * stays seamless with the bar (the #647 divergence). `symbolColor` is
+   * luminance-derived to keep the glyphs legible on any theme. Instance-only —
+   * the install-less chooser keeps `--titlebar-bg`.
+   */
+  const applyComfyTheme = (bg: string): void => {
     if (comfyWindow.isDestroyed()) return
-    const theme = { bg: TITLEBAR_BG, text: '#dddddd' }
+    const theme = { bg, text: readableSymbolColor(bg) }
     entry.lastTheme = theme
     if (!titleBarView.webContents.isDestroyed()) {
       titleBarView.webContents.send('comfy-titlebar:theme-changed', theme)
@@ -240,8 +239,8 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
     ...args: unknown[]
   ): void => {
     if (channel === 'desktop2-theme-report') {
-      const { bg, text } = (args[0] || {}) as { bg?: string; text?: string }
-      if (bg) applyComfyTheme(bg, text || '#ddd')
+      const { bg } = (args[0] || {}) as { bg?: string; text?: string }
+      if (bg) applyComfyTheme(bg)
     }
   }
   comfyContents.on('ipc-message', onIpcMessage)

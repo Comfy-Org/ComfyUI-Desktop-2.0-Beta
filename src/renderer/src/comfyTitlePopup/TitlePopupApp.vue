@@ -11,6 +11,7 @@ import { dismissPickerModals } from './dismissPickerModals'
 import { popupLocaleSource } from './pickerSettingsApiShim'
 import { useAppLocale } from '../lib/useAppLocale'
 import type { DetailSection, SnapshotListData } from '../types/ipc'
+import { perceivedLuminance, LUMINANCE_LIGHT_THRESHOLD } from '../../../shared/colorLuminance'
 
 // Title-bar dropdown popup shell. Hosts every title-bar dropdown in one
 // reused transparent WebContentsView attached to the host window. Each open
@@ -230,7 +231,7 @@ const isLight = computed(() => {
   const r = parseInt(hex.slice(1, 3), 16)
   const g = parseInt(hex.slice(3, 5), 16)
   const b = parseInt(hex.slice(5, 7), 16)
-  return (r * 299 + g * 587 + b * 114) / 1000 >= 128
+  return perceivedLuminance(r, g, b) >= LUMINANCE_LIGHT_THRESHOLD
 })
 
 function handleActivate(id: string): void {
