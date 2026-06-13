@@ -29,7 +29,7 @@ export interface Installation {
   sourceLabel: string
   sourceCategory: string
   version?: string
-  statusTag?: { style: string; label: string }
+  statusTag?: { style: string; label: string; version?: string }
   seen?: boolean
   listPreview?: string
   launchMode?: string

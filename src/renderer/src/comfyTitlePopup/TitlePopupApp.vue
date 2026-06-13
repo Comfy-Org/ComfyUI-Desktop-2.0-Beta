@@ -11,6 +11,7 @@ import { dismissPickerModals } from './dismissPickerModals'
 import { popupLocaleSource } from './pickerSettingsApiShim'
 import { useAppLocale } from '../lib/useAppLocale'
 import type { DetailSection, SnapshotListData } from '../types/ipc'
+import { isColorLight } from '../lib/colorScheme'
 
 // Title-bar dropdown popup shell. Hosts every title-bar dropdown in one
 // reused transparent WebContentsView attached to the host window. Each open
@@ -221,17 +222,7 @@ const globalSettingsSnapshot = ref<GlobalSettingsSnapshot>({
 const downloadsState = ref<DownloadsState>({ active: [], recent: [] })
 
 /** Body-luminance test driving is-light styling; matches TitleBarApp.vue. */
-const isLight = computed(() => {
-  const ctx = document.createElement('canvas').getContext('2d')
-  if (!ctx) return false
-  ctx.fillStyle = themeBg.value
-  const hex = ctx.fillStyle as string
-  if (!hex.startsWith('#') || hex.length < 7) return false
-  const r = parseInt(hex.slice(1, 3), 16)
-  const g = parseInt(hex.slice(3, 5), 16)
-  const b = parseInt(hex.slice(5, 7), 16)
-  return (r * 299 + g * 587 + b * 114) / 1000 >= 128
-})
+const isLight = computed(() => isColorLight(themeBg.value))
 
 function handleActivate(id: string): void {
   bridge?.activate(id)

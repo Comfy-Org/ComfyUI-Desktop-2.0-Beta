@@ -214,6 +214,7 @@ const isInstallLess = ref((bridge?.getInstallationId() ?? '') === '')
 const {
   installLabel,
   sourceCategory,
+  themeBg,
   themeText,
   isFullscreen,
   firstUseMode,
@@ -645,6 +646,8 @@ onUnmounted(() => {
     :data-collapse-mode="collapseMode"
     :style="{
       color: themeText ?? undefined,
+      '--titlebar-bg-active': themeBg ?? undefined,
+      '--titlebar-icon': themeText ?? undefined,
       '--title-trailing-width': `${trailingWidthPx}px`
     }"
   >
@@ -906,7 +909,10 @@ onUnmounted(() => {
      reserves 140px on the right for native min/max/close. */
   padding: 0 12px;
   box-sizing: border-box;
-  background: var(--titlebar-bg);
+  /* `--titlebar-bg-active` is set inline from the reported ComfyUI bg while
+     inside an instance; install-less / pre-report hosts fall back to the
+     static brand `--titlebar-bg`. */
+  background: var(--titlebar-bg-active, var(--titlebar-bg));
   color: var(--text-muted);
   border-bottom: 1px solid var(--border);
   font: 12px/1 var(--font-sans, 'Inter', system-ui, sans-serif);
@@ -1083,6 +1089,27 @@ onUnmounted(() => {
    * this lift automatically — one source of truth for the open tint. */
   border-color: var(--neutral-50);
   color: var(--neutral-50);
+}
+/* Light comfy theme: the resting surface (`rgba(255,255,255,.04)`) and text
+ * (`--neutral-100`, light grey) vanish on a white bar. Swap to a faint dark
+ * film + dark text so the pill — and its `currentColor` brand mark / caret —
+ * stay legible. Mirrors the `.is-light` treatment on the update chip. */
+.title-bar.is-light .title-install-pill {
+  background: rgba(0, 0, 0, 0.04);
+  color: var(--neutral-700);
+}
+.title-bar.is-light.is-hover-active .title-install-pill.is-interactive:hover:not(.is-open),
+.title-bar.is-light .title-install-pill.is-interactive:focus-visible:not(.is-open) {
+  background: rgba(0, 0, 0, 0.07);
+  border-color: color-mix(in srgb, var(--neutral-700) 35%, transparent);
+  color: var(--neutral-700);
+}
+/* Open state: the dark-theme yellow lift (`--neutral-50`) is near-invisible on
+ * a white bar, so commit border + text (and the `currentColor` mark / caret)
+ * to full-strength dark instead. */
+.title-bar.is-light .title-install-pill.is-interactive.is-open {
+  border-color: color-mix(in srgb, var(--neutral-700) 55%, transparent);
+  color: var(--neutral-700);
 }
 
 /* Inline instance-update CTA, sitting just after the install name inside
@@ -1325,8 +1352,11 @@ onUnmounted(() => {
 .title-bar.is-hover-active .title-downloads-tray:hover:not(:disabled) {
   color: var(--comfy-yellow);
 }
-.title-bar.is-light .title-downloads-tray {
-  color: var(--comfy-yellow);
+/* Light comfy theme: yellow hover/open lift is near-invisible on a white bar,
+ * so deepen the muted resting icon to full-strength dark text instead — the
+ * same active cue, kept in the light theme's color family. */
+.title-bar.is-light.is-hover-active .title-downloads-tray:hover:not(:disabled) {
+  color: var(--neutral-700);
 }
 
 .title-downloads-badge {
@@ -1347,7 +1377,7 @@ onUnmounted(() => {
   border-radius: 999px;
   /* Subtle ring against the title-bar background so the badge reads
    * as a separate token from the icon underneath at any zoom. */
-  box-shadow: 0 0 0 2px var(--titlebar-bg, var(--neutral-900));
+  box-shadow: 0 0 0 2px var(--titlebar-bg-active, var(--titlebar-bg, var(--neutral-900)));
   background: var(--accent, #60a5fa);
   color: #fff;
   font-size: 9px;
@@ -1372,6 +1402,10 @@ onUnmounted(() => {
 .title-downloads-tray.is-open,
 .title-bar.is-hover-active .title-downloads-tray.is-open:hover {
   color: var(--neutral-50);
+}
+.title-bar.is-light .title-downloads-tray.is-open,
+.title-bar.is-light.is-hover-active .title-downloads-tray.is-open:hover {
+  color: var(--neutral-700);
 }
 
 .title-downloads-tray.is-flashing .title-downloads-badge {
@@ -1422,7 +1456,7 @@ onUnmounted(() => {
   height: 8px;
   border-radius: 999px;
   background: var(--danger);
-  box-shadow: 0 0 0 2px var(--titlebar-bg, var(--neutral-900));
+  box-shadow: 0 0 0 2px var(--titlebar-bg-active, var(--titlebar-bg, var(--neutral-900)));
   pointer-events: none;
 }
 
