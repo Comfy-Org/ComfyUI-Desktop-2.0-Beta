@@ -1095,12 +1095,27 @@ export function getAllDownloads(): DownloadProgress[] {
   return result
 }
 
+/** Remove `url` from any per-install template mirror bucket, pruning emptied
+ *  buckets. Mirrored rows live outside `recentDownloads`, so the recent-buffer
+ *  cleanup paths must drop them here too or finished ones linger forever. */
+function removeMirroredTemplateRow(url: string): boolean {
+  for (const [installationId, bucket] of templateTrayMirrorByInstall) {
+    if (bucket.delete(url)) {
+      createdAtByUrl.delete(url)
+      if (bucket.size === 0) templateTrayMirrorByInstall.delete(installationId)
+      return true
+    }
+  }
+  return false
+}
+
 /** Dismiss a single terminal entry from the recent buffer (cancel in-flight
  *  ones first). Broadcasts `model-download-removed` so every renderer drops it. */
 export function dismissRecentDownload(url: string): boolean {
   const idx = recentDownloads.findIndex((d) => d.url === url)
-  if (idx < 0) return false
-  recentDownloads.splice(idx, 1)
+  const removedMirror = removeMirroredTemplateRow(url)
+  if (idx < 0 && !removedMirror) return false
+  if (idx >= 0) recentDownloads.splice(idx, 1)
   createdAtByUrl.delete(url)
   retryParamsByUrl.delete(url)
   _broadcastToRenderer('model-download-removed', { url })
@@ -1108,19 +1123,31 @@ export function dismissRecentDownload(url: string): boolean {
   return true
 }
 
-/** Bulk-dismiss every terminal entry from the recent buffer. */
+/** Bulk-dismiss every terminal entry from the recent buffer and the finished
+ *  template-mirror rows. */
 export function clearFinishedDownloads(): number {
-  if (recentDownloads.length === 0) return 0
+  const removedUrls: string[] = []
   const removed = recentDownloads.splice(0, recentDownloads.length)
   for (const r of removed) {
     createdAtByUrl.delete(r.url)
     retryParamsByUrl.delete(r.url)
+    removedUrls.push(r.url)
   }
-  _broadcastToRenderer('model-downloads-cleared-finished', {
-    urls: removed.map((r) => r.url),
-  })
+  // Purge terminal template-mirror rows too; drop buckets left empty.
+  for (const [installationId, bucket] of templateTrayMirrorByInstall) {
+    for (const [url, entry] of bucket) {
+      if (isTerminalStatus(entry.status)) {
+        bucket.delete(url)
+        createdAtByUrl.delete(url)
+        removedUrls.push(url)
+      }
+    }
+    if (bucket.size === 0) templateTrayMirrorByInstall.delete(installationId)
+  }
+  if (removedUrls.length === 0) return 0
+  _broadcastToRenderer('model-downloads-cleared-finished', { urls: removedUrls })
   downloadEvents.emit('tray-state-changed')
-  return removed.length
+  return removedUrls.length
 }
 
 /** Detach a closing window's downloads; they continue in the background via

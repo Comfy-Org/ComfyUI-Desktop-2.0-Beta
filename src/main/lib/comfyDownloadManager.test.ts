@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeAll } from 'vitest'
 import os from 'os'
 import path from 'path'
 import type { buildExistenceCandidates as BuildExistenceCandidates } from './comfyDownloadManager'
+import type * as ComfyDownloadManager from './comfyDownloadManager'
 
 vi.mock('electron', () => ({
   app: {
@@ -10,7 +11,7 @@ vi.mock('electron', () => ({
       return path.join(os.tmpdir(), 'comfyui-desktop-2-test')
     },
   },
-  BrowserWindow: class {},
+  BrowserWindow: Object.assign(class {}, { getAllWindows: () => [] }),
   dialog: {},
   ipcMain: { handle: vi.fn(), on: vi.fn() },
   shell: {},
@@ -23,9 +24,10 @@ let sanitizeAssetFilename: (filename: string, outputDir: string) => string | nul
 let parseContentDispositionFilename: (header: string | null) => string | null
 let buildSaveDialogFilters: (suggestedName: string) => Electron.FileFilter[]
 let buildExistenceCandidates: typeof BuildExistenceCandidates
+let mod: typeof ComfyDownloadManager
 
 beforeAll(async () => {
-  const mod = await import('./comfyDownloadManager')
+  mod = await import('./comfyDownloadManager')
   ALLOWED_EXTENSIONS = mod.ALLOWED_EXTENSIONS
   hasValidExtension = mod.hasValidExtension
   isPathContained = mod.isPathContained
@@ -280,5 +282,38 @@ describe('buildSaveDialogFilters (#989 save-image extension filters)', () => {
     expect(buildSaveDialogFilters('justname')).toEqual([
       { name: 'All Files', extensions: ['*'] },
     ])
+  })
+})
+
+describe('template tray-mirror cleanup', () => {
+  const entry = (url: string, status: 'downloading' | 'completed') => ({
+    url,
+    filename: url.split('/').pop()!,
+    progress: status === 'completed' ? 100 : 40,
+    status,
+  })
+
+  it('dismissRecentDownload removes a finished mirrored template row', () => {
+    mod.setTemplateTrayMirror('inst-a', [entry('template-model://checkpoints/m.safetensors', 'completed')])
+    expect(mod.getDownloadsTrayState().recent.some((r) => r.url.includes('m.safetensors'))).toBe(true)
+
+    expect(mod.dismissRecentDownload('template-model://checkpoints/m.safetensors')).toBe(true)
+    expect(mod.getDownloadsTrayState().recent.some((r) => r.url.includes('m.safetensors'))).toBe(false)
+  })
+
+  it('clearFinishedDownloads purges terminal mirror rows but keeps in-flight ones', () => {
+    mod.setTemplateTrayMirror('inst-b', [
+      entry('template-model://vae/done.safetensors', 'completed'),
+      entry('template-model://vae/live.safetensors', 'downloading'),
+    ])
+    const removed = mod.clearFinishedDownloads()
+    expect(removed).toBeGreaterThanOrEqual(1)
+
+    const tray = mod.getDownloadsTrayState()
+    expect(tray.recent.some((r) => r.url.includes('done.safetensors'))).toBe(false)
+    // The still-downloading row survives in `active`.
+    expect(tray.active.some((r) => r.url.includes('live.safetensors'))).toBe(true)
+
+    mod.clearTemplateTrayMirror('inst-b') // cleanup so other tests start clean
   })
 })
